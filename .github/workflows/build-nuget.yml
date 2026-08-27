@@ -60,9 +60,29 @@ jobs:
           name: native-${{ matrix.rid }}
           path: out/${{ matrix.lib_name }}
 
+      # This is the actual thing worth confirming: not just that the Rust core cross-target
+      # builds, but that .NET running on THIS platform can load libhyperuuid through
+      # [LibraryImport] and get correct results — the real P/Invoke marshalling/resolution
+      # path per OS, which cargo test above cannot exercise at all.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Place native lib for in-repo testing
+        shell: bash
+        run: |
+          mkdir -p "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native"
+          cp "out/${{ matrix.lib_name }}" "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native/"
+
+      - name: Test C# bindings against this platform's native lib
+        run: dotnet test csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
+
   pack-nuget:
     needs: build-native
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -95,13 +115,30 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      # CI-only prerelease version so repeated manual (workflow_dispatch) runs during testing
+      # don't collide with an already-pushed version on the GitHub Packages feed, which
+      # doesn't allow overwriting an existing version. Real releases (tag push) still need
+      # a deliberate version bump in the csproj before tagging.
       - name: Pack
-        run: dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o nupkg
+        run: >
+          dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o nupkg
+          -p:PackageVersion=0.1.0-ci.${{ github.run_number }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: nuget-package
           path: nupkg/*.nupkg
 
-      # Nothing pushes to nuget.org from here yet — that's a separate, explicit decision
-      # (needs a NUGET_API_KEY secret and someone deciding it's time to actually publish).
+      # Publishes to this repo's GitHub Packages NuGet feed (private by default, scoped to
+      # this repo/org — not nuget.org). Proves the whole pipeline for real: if a consumer can
+      # `dotnet add package HyperUuid --source https://nuget.pkg.github.com/SkunkWerkx/index.json`
+      # and it works, that's stronger evidence than just inspecting the .nupkg's file listing.
+      - name: Publish to GitHub Packages
+        run: |
+          dotnet nuget add source \
+            --username ${{ github.actor }} \
+            --password ${{ secrets.GITHUB_TOKEN }} \
+            --store-password-in-clear-text \
+            --name github \
+            "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          dotnet nuget push "nupkg/*.nupkg" --source github --skip-duplicate

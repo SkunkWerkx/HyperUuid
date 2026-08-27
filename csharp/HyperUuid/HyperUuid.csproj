@@ -17,14 +17,15 @@
 
   <ItemGroup>
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
-         .nupkg gets). Currently built for linux-arm64 only (this dev machine); shipping every
-         platform needs a per-RID build matrix. -->
+         .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time. -->
     <None Include="runtimes/**" Pack="true" PackagePath="runtimes" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Same file also copied straight to the output root: a plain in-repo ProjectReference
-         (as used by HyperUuid.Tests) doesn't get the deps.json-driven runtimes/{RID}/native
-         probing that only kicks in for an actual consumed NuGet package, but every native
-         library load DOES probe the assembly's own directory. -->
-    <None Include="runtimes/linux-arm64/native/libhyperuuid.so" Link="libhyperuuid.so" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Every native file also copied straight to the output root, flattened: a plain in-repo
+         ProjectReference (as used by HyperUuid.Tests) doesn't get the deps.json-driven
+         runtimes/{RID}/native probing that only kicks in for an actual consumed NuGet package,
+         but every native library load DOES probe the assembly's own directory. Platform-generic
+         on purpose — CI runs this same project on 5 different RIDs, each with only its own
+         single native file present, so this can't be hardcoded to one of them. -->
+    <None Include="runtimes/**/native/*" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
