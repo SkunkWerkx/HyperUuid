@@ -51,6 +51,18 @@ The honest trade-off: this is a native dependency (a platform-specific `libhyper
 
 Publishes cleanly under `PublishAot` — `LibraryImport` is source-generated with no runtime reflection anywhere in this assembly, and the project opts into (and fails the build on) the trim/Native-AOT analyzers via `IsAotCompatible`. See `HyperUuid.AotSmokeTest/` for a minimal AOT-published console app exercising it.
 
+## WebAssembly (Blazor)
+
+Proven working end-to-end — real headless-browser run, not just "it compiles" — but not yet a turnkey NuGet experience; see `HyperUuid.WasmSmokeTest/` for the exact working shape.
+
+**What works today:** the Rust core builds cleanly as a `wasm32-unknown-emscripten` static library (`cargo rustc --release --target wasm32-unknown-emscripten --crate-type staticlib` — the default `cdylib` crate type produces an already-linked module `<NativeFileReference>` can't pull symbols from; `staticlib` is required). Reference the resulting `.a` via `<NativeFileReference>` in a Blazor WebAssembly app, same as any native library. Verified with a real smoke test in a real headless Chromium session: v4 randomness, the RFC 9562 v5 vector, a fixed-timestamp v7, and a real-clock v7 (embedded timestamp matched the actual wall clock exactly, zero drift) all pass.
+
+**One code change needed on the C# side:** this assembly's own `UuidGenerator` uses `[LibraryImport("hyperuuid")]`, correct for every real dlopen-based platform — but a statically-linked WASM native has no separate `"hyperuuid"` module to open; its functions are already part of the same `dotnet.native.wasm` the app itself runs in. `[LibraryImport("*")]` resolves against the current module instead. `HyperUuid.WasmSmokeTest/NativeWasm.cs` declares its own minimal WASM-specific P/Invoke surface with `"*"` rather than reusing this project's `UuidGenerator` directly — there's currently no single build of this assembly that works correctly on both native and WASM targets at once (see "Not yet" below).
+
+**A real, currently-open upstream blocker:** `<NativeFileReference>`-ing a `wasm32-unknown-emscripten` staticlib built by rustc >= 1.87 fails .NET's native relink with `Unknown option '--enable-bulk-memory-opt'` — a genuine Emscripten/rustc version-skew bug in the `wasm-tools` workload, confirmed identically on `linux-arm64` and `linux-x64`, and independently in an unrelated project ([PyO3/maturin#2549](https://github.com/PyO3/maturin/issues/2549)). Filed upstream with a minimal repro and a verified workaround: [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858). Until that lands, building this yourself needs the same workaround — swap the SDK's bundled `wasm-opt` (`~/.dotnet/packs/Microsoft.NET.Runtime.Emscripten.<version>.Sdk.<rid>/<pack-version>/tools/bin/wasm-opt`) for a newer one (e.g. from a standalone `emsdk install latest`).
+
+**Not yet:** a turnkey NuGet experience — shipping the `.a` as a `runtimes/browser-wasm/nativeassets/{tfm}/` package asset and a second `LibraryImport("*")` build of this assembly under `runtimes/browser-wasm/lib/{tfm}/`, so a consumer's own Blazor project needs no `NativeFileReference`/P/Invoke work at all. That's real, additional engineering, deliberately not done yet — today, using this from WASM means bridging in your own Rust build the way `HyperUuid.WasmSmokeTest/` does.
+
 ## Install
 
 Published to this repo's GitHub Packages NuGet feed — add it as a package source, then:

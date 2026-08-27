@@ -17,9 +17,14 @@ namespace HyperUuid;
 /// project's own <c>SequentialGuid</c> library). AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
 /// is source-generated (no runtime reflection), so this type publishes cleanly under
 /// <c>PublishAot</c>. Needs a platform-specific native binary — this build ships
-/// <c>linux-arm64</c> only; every other platform (including <c>browser-wasm</c> for Blazor,
-/// which uses this exact same P/Invoke surface statically linked into <c>dotnet.wasm</c> via
-/// Emscripten) needs its own build.
+/// <c>linux-arm64</c> only; every other native platform needs its own build.
+/// <c>browser-wasm</c> (Blazor) is NOT one of those platforms this <c>[LibraryImport("hyperuuid")]</c>
+/// surface works for as-is: a statically-linked WASM native has no separate <c>"hyperuuid"</c>
+/// module to dlopen, so it needs <c>[LibraryImport("*")]</c> instead (resolve against the
+/// current module) — proven working via a hand-written WASM-specific P/Invoke surface in
+/// <c>HyperUuid.WasmSmokeTest/NativeWasm.cs</c>, not this type. See this package's own
+/// README's WebAssembly (Blazor) section for the full story, including a real,
+/// currently-open upstream blocker (dotnet/runtime#132858).
 /// </remarks>
 public static partial class UuidGenerator
 {
