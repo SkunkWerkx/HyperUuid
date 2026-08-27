@@ -88,6 +88,26 @@ PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 b
 
 **Proven, not yet published:** Go, Swift, Ruby, PHP, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, Packagist, PyPI) — see each language's own README for how to consume it directly (a git dependency, VCS repository, etc.) in the meantime.
 
+## WebAssembly
+
+**3 of 8 targets proven, live today:**
+
+- **Rust** — the core crate itself runs correctly under `wasm32-wasip1` via [`wasmtime`](https://wasmtime.dev/): real WASI randomness (`random_get`) and a real wall clock (`clock_time_get`), not just "compiles for the target."
+- **C#** — genuinely turnkey. `dotnet add package HyperUuid` into a Blazor WebAssembly project is enough; no `<NativeFileReference>`, no hand-written P/Invoke. See [`csharp/README.md`](csharp/README.md)'s WebAssembly (Blazor) section for exactly how (two builds of the same assembly, an auto-imported `.targets` file supplying the native reference) and the one real caveat that survives it — a `wasm-opt`/rustc version-skew bug in every current `wasm-tools` SDK band, filed upstream as [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858) with a verified workaround.
+- **Python** — proof-of-concept, verified in a real [Pyodide](https://pyodide.org/) (CPython-to-WASM) session: the Rust core built as a genuine Emscripten *side module* (`-sSIDE_MODULE=2`, a third distinct artifact shape from the other two), loaded at runtime via plain `ctypes.CDLL` — the exact same call `hyperuuid`'s own `_runtime.py` already makes natively, unchanged. See [`python/wasm-smoke-test/`](python/wasm-smoke-test/). Not yet packaged as something `pip install`-and-go picks up automatically.
+
+**5 of 8 investigated and currently blocked** — not from a lack of trying, from real gaps checked directly against each ecosystem's own tooling:
+
+| Binding | Blocker | Why |
+| --- | --- | --- |
+| Go | Structural | Neither of Go's two backends works: `cgo` is unavailable for any wasm target (architectural, not a flag), and `purego`'s own supported-platform list has no wasm entry — its whole model is runtime `dlopen`, which doesn't exist in WASM. `go:wasmexport`/`go:wasmimport` (Go 1.24+) let a Go wasm module talk to its host, not link a separately-compiled Rust wasm module. |
+| Swift | Structural | swift.org ships real, official WASM SDKs since Swift 6.2 — but its own docs state dynamic linking "is not formally specified for `wasip1` triples and tooling for it is not available yet," and there's no documented static-lib-linking path to a Rust `.a` either (nothing like C#'s `NativeFileReference`). |
+| Ruby | Structural | `ruby.wasm` is official (bundled with CRuby since 3.2) but ships as one statically-linked component with no runtime library search — confirmed Fiddle itself only resolves libraries known at build time, not arbitrary runtime paths. |
+| PHP | Structural | The actively maintained WASM build (WordPress Playground's `@php-wasm`, not the stale `oraoto/pib`) loads extensions build-time/startup-only; no indication the FFI extension this binding needs is available there at all. |
+| Java | Functional gap | No official OpenJDK path. The one Oracle-backed option, GraalVM Native Image's Web Image (`--tool:svm-wasm`), is explicitly labeled experimental and its feature list never mentions the Foreign Function & Memory API this binding is built on; neither third-party compiler (TeaVM, CheerpJ) supports FFM either. This one would mean rewriting the interop layer against experimental tooling with a real hole in it, not a packaging exercise. |
+
+Go/Swift/Ruby/PHP hit the same underlying wall from four different angles: this project's whole architecture — one native core, every binding `dlopen`s the same compiled artifact at runtime — assumes dynamic library loading exists. WASM sandboxes generally don't have one. C#'s working story isn't an exception to that; it's a different mechanism entirely (link-time static linking via `NativeFileReference`), which happens to have a genuine, well-supported analog in .NET's tooling that these four don't (yet) have in theirs. Java's gap is different in kind — not the loading mechanism, but a real missing capability (FFM support) in the compilers that exist at all.
+
 ## Why not your platform's built-in UUID call?
 
 Most languages *do* already have one — `Guid.NewGuid()`, `java.util.UUID.randomUUID()`, `uuid.uuid4()`, `SecureRandom.uuid`. HyperUuid isn't arguing you should never use those. It's for the specific, common situation where you need more than plain v4 randomness gives you:

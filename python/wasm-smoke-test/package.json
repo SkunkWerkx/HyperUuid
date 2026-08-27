@@ -1,0 +1,9 @@
+{
+  "name": "hyperuuid-python-wasm-smoke-test",
+  "private": true,
+  "type": "module",
+  "description": "Proves the Rust core, built as an Emscripten side module, loads and runs correctly inside a real Pyodide (CPython-to-WASM) session via plain ctypes.CDLL — the exact mechanism hyperuuid's own _runtime.py already uses natively. See README.md in this directory for how to build the artifact this test loads.",
+  "dependencies": {
+    "pyodide": "^314.0.6"
+  }
+}

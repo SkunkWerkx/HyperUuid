@@ -63,6 +63,10 @@ php/vendor/
 php/composer.lock
 php/.phpunit.result.cache
 
+# Node (python/wasm-smoke-test's own package.json — a real npm project, package-lock.json
+# stays committed for reproducibility)
+**/node_modules/
+
 # BenchmarkDotNet
 # Writes output relative to the process's working directory when invoked via `dotnet run`
 # rather than the project directory, so this can land almost anywhere in the tree — not just
