@@ -1,6 +1,6 @@
 module github.com/SkunkWerkx/HyperUuid/go
 
-go 1.21
+go 1.26
 
 require (
 	github.com/ebitengine/purego v0.10.2

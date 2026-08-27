@@ -69,7 +69,7 @@ func ensureLoaded() error {
 			return
 		}
 
-		handle, err := purego.Dlopen(tmp.Name(), purego.RTLD_NOW|purego.RTLD_GLOBAL)
+		handle, err := openLibrary(tmp.Name())
 		if err != nil {
 			initErr = fmt.Errorf("hyperuuid: loading native library: %w", err)
 			return
