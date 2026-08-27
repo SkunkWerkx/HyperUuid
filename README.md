@@ -32,6 +32,29 @@ id.timestamp
 
 Every binding follows the same shape — `new_v4`/`new_v5`/`new_v6`/`new_v7`, batch variants for v6/v7, timestamp extraction for v6/v7, and the RFC's `Nil`/`Max` constants. See each language's own README (linked in the table below) for its exact idiom and install instructions.
 
+## Who should use this
+
+Cutting to the chase, by language — real numbers, no adjustment for story, full receipts in each binding's own README.
+
+**Clear win — faster than your platform's own generator, and covers ground it structurally can't:**
+
+- **[C#](csharp/)** — 5.7-8.3x faster than `Guid.NewGuid()`, zero allocation on every call, and the only way to get a v7 with a real monotonic counter before .NET 9 — even on .NET 9+, `Guid.CreateVersion7()` still has no counter at all.
+- **[Java](java/)** — 5-9x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5, v6, or v7. Proven under GraalVM Native Image too, not just the JVM.
+- **[Rust](rust/)** — this *is* the engine. 13-16x faster than the `uuid` crate on v6/v7, allocation-free, asserted by a real counting-allocator test, not just claimed.
+- **[Swift](swift/)** — every call beats `Foundation.UUID()` outright, while also being the only way to get v5/v6/v7 in Swift at all — Foundation only ever does v4.
+
+**Real value, honest asterisk — the win is architectural, not a clean speed win:**
+
+- **[PHP](php/)** — timestamp extraction beats `ramsey/uuid` by 16-33x, and this is the only zero-Composer-dependency way to generate v4-v7 in PHP at all. Generation itself pays a real, if small, FFI-crossing cost a pure-PHP fallback wouldn't.
+- **[Go](go/)** — real wins on node-ID privacy, injectable/testable timestamps, and cross-language byte parity `google/uuid` structurally can't offer; a real cgo backend on macOS/Linux closes most of the per-call gap too (3-4x faster than the cross-platform purego fallback that Windows still uses). One honest exception: for pulling a timestamp back out of a UUID, `google/uuid`'s own `.Time()` wins outright even against the cgo backend — use that instead in Go.
+
+**Bottom of the list, still worth knowing about — perf loses to what's already there, but the capability doesn't otherwise exist:**
+
+- **[Ruby](ruby/)** — single-call generation is 1.3-2.7x slower than `SecureRandom.uuid`, full stop. But `SecureRandom.uuid` only ever gives you random v4 — if you need v5/v6/v7 in Ruby, or you're generating in bulk (11x faster batched), this is the only gem doing it with zero native-extension compile step.
+- **[Python](python/)** — a narrow win on v6/v7 generation against Python 3.14's new stdlib implementation, a real loss on v4/v5 and on timestamp extraction. The actual case for this package is Python 3.9-3.13, where stdlib has no v6/v7 at all; if you're already on 3.14+ in a Python-only codebase, stdlib's `uuid` module is genuinely the simpler choice.
+
+**Regardless of where your language lands above:** if SQL Server is your RDBMS, [SQL Server ordering](#sql-server-ordering) below might be reason enough to reach for this on its own — the only practical way to mint a client-side ID on a frontier device and have it arrive already sorted for clustering, something `NEWSEQUENTIALID()` structurally can't do (server-side only) and something `IDENTITY(1,1)` can't do at all for a value — a many-to-many bridge table's composite key, most concretely — that needs to exist before the row does.
+
 ## RFC 9562 coverage
 
 | Version | Purpose | RFC section |
