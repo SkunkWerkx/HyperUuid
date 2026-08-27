@@ -1,4 +1,4 @@
-name: Build native libraries and pack NuGet
+name: Build native libraries and pack NuGet + Maven
 
 on:
   workflow_dispatch:
@@ -85,6 +85,27 @@ jobs:
       - name: Test C# bindings against this platform's native lib
         run: dotnet test --project csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
 
+      # Same rationale as the C# step above: a jar has no per-platform package selection like
+      # NuGet's RID folders, so this exercises NativePlatform's runtime OS/arch detection and
+      # the actual FFM downcall path on this specific platform, not just that Rust builds.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "25"
+
+      - name: Place native lib for Kotlin in-repo testing
+        shell: bash
+        run: |
+          mkdir -p "kotlin/src/main/resources/native/${{ matrix.rid }}"
+          cp "out/${{ matrix.lib_name }}" "kotlin/src/main/resources/native/${{ matrix.rid }}/"
+
+      - name: Test Kotlin bindings against this platform's native lib
+        working-directory: kotlin
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew test --console=plain
+
   pack-nuget:
     needs: build-native
     runs-on: ubuntu-latest
@@ -151,3 +172,58 @@ jobs:
             --name github \
             "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
           dotnet nuget push "nupkg/*.nupkg" --source github --skip-duplicate
+
+  pack-maven:
+    needs: build-native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts
+
+      # Unlike NuGet's per-RID pack-nuget job, this jar bundles every platform's native lib —
+      # a .jar has no package-manager-level platform selection, so NativePlatform.kt picks the
+      # right one at runtime instead. All 6 go into the same jar.
+      - name: Arrange native/{rid}/ layout for the jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A LIB_NAMES=(
+            [linux-x64]=libhyperuuid.so
+            [linux-arm64]=libhyperuuid.so
+            [osx-x64]=libhyperuuid.dylib
+            [osx-arm64]=libhyperuuid.dylib
+            [win-x64]=hyperuuid.dll
+            [win-arm64]=hyperuuid.dll
+          )
+          for rid in "${!LIB_NAMES[@]}"; do
+            dest="kotlin/src/main/resources/native/$rid"
+            mkdir -p "$dest"
+            cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
+          done
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "25"
+
+      # Publishes to this repo's GitHub Packages Maven registry (private by default, repo-
+      # scoped — different URL shape than NuGet's org-scoped feed, confirmed against GitHub's
+      # docs before writing this rather than assumed to match). If a consumer can add this as
+      # a Maven/Gradle repository and pull io.github.buvinghausen:hyperuuid, that's the real
+      # proof, not just an artifact listing.
+      - name: Publish to GitHub Packages
+        working-directory: kotlin
+        env:
+          HYPERUUID_VERSION: 0.1.0-ci.${{ github.run_number }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x gradlew
+          ./gradlew publish --console=plain
