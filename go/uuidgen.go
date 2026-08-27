@@ -1,8 +1,10 @@
 // Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7
-// time-sortable) calling directly into the native libhyperuuid shared library via
-// github.com/ebitengine/purego — dlopen/dlsym plus per-arch call trampolines, no cgo and no C
-// compiler required to build or consume this module (the same "no runtime bridge" positioning
-// as the Python/ctypes and Java/FFM bindings).
+// time-sortable) calling directly into the native libhyperuuid shared library — real cgo on
+// darwin/linux (backend_cgo.go), github.com/ebitengine/purego everywhere else, including
+// Windows unconditionally (backend_purego.go) — dlopen/dlsym plus either a real C call or
+// purego's per-arch call trampolines, no C compiler required to build or consume this module
+// on the purego path (the same "no runtime bridge" positioning as the Python/ctypes and
+// Java/FFM bindings).
 //
 // This module bundles a native build for every supported platform (see currentTarget) and
 // loads the right one at runtime, the same trick the Java binding uses since neither a Go
@@ -11,12 +13,9 @@ package hyperuuid
 
 import (
 	"fmt"
-	"os"
-	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/ebitengine/purego"
 	"github.com/google/uuid"
 )
 
@@ -36,84 +35,6 @@ var (
 	Nil = uuid.Nil
 	Max = uuid.Max
 )
-
-var (
-	initOnce sync.Once
-	initErr  error
-
-	uuidNewV4        func(out unsafe.Pointer) int32
-	uuidNewV5        func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
-	uuidNewV6        func(unixMillis uint64, out unsafe.Pointer) int32
-	uuidV6UnixMillis func(uuid unsafe.Pointer) uint64
-	uuidNewV6Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
-	uuidNewV7        func(unixMillis uint64, out unsafe.Pointer) int32
-	uuidV7UnixMillis func(uuid unsafe.Pointer) uint64
-	uuidNewV7Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
-	uuidV7ToSqlOrder func(uuid unsafe.Pointer)
-	uuidV7ToRfcOrder func(uuid unsafe.Pointer)
-	uuidV6ToSqlOrder func(uuid unsafe.Pointer)
-	uuidV6ToRfcOrder func(uuid unsafe.Pointer)
-)
-
-// ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
-// it, exactly once. The temp file is deliberately never removed afterward — Go has no
-// reliable process-exit hook, the same best-effort tradeoff the Java binding makes with
-// File.deleteOnExit (itself not guaranteed, e.g. on kill -9).
-func ensureLoaded() error {
-	initOnce.Do(func() {
-		t, err := currentTarget()
-		if err != nil {
-			initErr = err
-			return
-		}
-
-		resourcePath := "native/" + t.rid + "/" + t.libName
-		data, err := nativeFS.ReadFile(resourcePath)
-		if err != nil {
-			initErr = fmt.Errorf("hyperuuid: %s not found in embedded native libs (unsupported platform, or this module was built without a native library for it): %w", resourcePath, err)
-			return
-		}
-
-		tmp, err := os.CreateTemp("", "libhyperuuid-*-"+t.libName)
-		if err != nil {
-			initErr = fmt.Errorf("hyperuuid: creating temp file for native library: %w", err)
-			return
-		}
-		_, writeErr := tmp.Write(data)
-		closeErr := tmp.Close()
-		// The write handle must be closed before openLibrary (dlopen/LoadLibrary) opens the
-		// same path — Windows enforces exclusive file access far more strictly than Unix, and
-		// LoadLibrary fails outright while a write handle on the same file is still open.
-		if writeErr != nil {
-			initErr = fmt.Errorf("hyperuuid: writing native library to temp file: %w", writeErr)
-			return
-		}
-		if closeErr != nil {
-			initErr = fmt.Errorf("hyperuuid: closing temp file for native library: %w", closeErr)
-			return
-		}
-
-		handle, err := openLibrary(tmp.Name())
-		if err != nil {
-			initErr = fmt.Errorf("hyperuuid: loading native library: %w", err)
-			return
-		}
-
-		purego.RegisterLibFunc(&uuidNewV4, handle, "uuid_new_v4")
-		purego.RegisterLibFunc(&uuidNewV5, handle, "uuid_new_v5")
-		purego.RegisterLibFunc(&uuidNewV6, handle, "uuid_new_v6")
-		purego.RegisterLibFunc(&uuidV6UnixMillis, handle, "uuid_v6_unix_millis")
-		purego.RegisterLibFunc(&uuidNewV6Batch, handle, "uuid_new_v6_batch")
-		purego.RegisterLibFunc(&uuidNewV7, handle, "uuid_new_v7")
-		purego.RegisterLibFunc(&uuidV7UnixMillis, handle, "uuid_v7_unix_millis")
-		purego.RegisterLibFunc(&uuidNewV7Batch, handle, "uuid_new_v7_batch")
-		purego.RegisterLibFunc(&uuidV7ToSqlOrder, handle, "uuid_v7_to_sql_order")
-		purego.RegisterLibFunc(&uuidV7ToRfcOrder, handle, "uuid_v7_to_rfc_order")
-		purego.RegisterLibFunc(&uuidV6ToSqlOrder, handle, "uuid_v6_to_sql_order")
-		purego.RegisterLibFunc(&uuidV6ToRfcOrder, handle, "uuid_v6_to_rfc_order")
-	})
-	return initErr
-}
 
 // NewV4 creates a random UUID version 4 (RFC 9562 §5.4).
 func NewV4() (uuid.UUID, error) {

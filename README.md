@@ -5,7 +5,7 @@
 
 **One [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html)-compliant UUID engine, written once in Rust, called directly — not wrapped, not shimmed — from C#, Java, Go, Swift, Ruby, PHP, and Python.**
 
-Every other polyglot ID library either reimplements the same generation logic per language (drift risk: seven codebases that can each get the bit-twiddling subtly wrong in different ways) or ships a server/sidecar process to generate IDs centrally (a network round-trip for something that should cost nanoseconds). HyperUuid does neither: a single Rust `cdylib` exports a plain C ABI, and every binding calls straight into it — `P/Invoke`, `FFM`, `purego`/`dlopen`, `Fiddle`, PHP's `FFI`, `ctypes` — sharing the *same* address space, the *same* generation logic, the *same* test vectors, on every platform. No runtime bridge, no serialization layer, no embedded interpreter.
+Every other polyglot ID library either reimplements the same generation logic per language (drift risk: seven codebases that can each get the bit-twiddling subtly wrong in different ways) or ships a server/sidecar process to generate IDs centrally (a network round-trip for something that should cost nanoseconds). HyperUuid does neither: a single Rust `cdylib` exports a plain C ABI, and every binding calls straight into it — `P/Invoke`, `FFM`, `cgo`/`purego`/`dlopen`, `Fiddle`, PHP's `FFI`, `ctypes` — sharing the *same* address space, the *same* generation logic, the *same* test vectors, on every platform. No runtime bridge, no serialization layer, no embedded interpreter.
 
 And it's not just parity with your platform's built-in UUID call — for C#, it's measurably faster: **`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.8x** with zero heap allocation (real BenchmarkDotNet numbers below, not a marketing claim).
 
@@ -116,10 +116,12 @@ Every one of these is genuinely zero-allocation now — including `NewV5(Guid, s
 | Rust — v6 | 52.5 µs | 20.7 µs | 2.5x |
 | C# — v7 | 93 µs | 24 µs | **3.9x** |
 | C# — v6 | 84 µs | 27 µs | 3.1x |
-| Go — v7 | 514 µs | 27 µs | **19x** |
-| Go — v6 | 512 µs | 33 µs | 15.6x |
+| Go (cgo, darwin/linux default) — v7 | 147.3 µs | 33.6 µs | **4.4x** |
+| Go (cgo, darwin/linux default) — v6 | 140.7 µs | 34.1 µs | 4.1x |
+| Go (purego, Windows/`CGO_ENABLED=0`) — v7 | 574.8 µs | 29.4 µs | **19.6x** |
+| Go (purego, Windows/`CGO_ENABLED=0`) — v6 | 565.9 µs | 33.0 µs | 17.2x |
 
-Go's batch win is the largest of any binding, for a real architectural reason worth knowing about if you're choosing where to put your hot path: **every individual Go call does 4-7 heap allocations** (252-360 B/op via `go test -bench=. -benchmem`) — unlike Rust and C#, which are both genuinely zero-allocation per call. This is almost certainly `unsafe.Pointer` arguments crossing into `purego`'s dynamically-generated call trampolines defeating Go's escape analysis, a real cost of the "no cgo" approach every binding here shares. Batch generation collapses ~5000 of those allocations into 7, which is exactly why it wins bigger in Go than anywhere else.
+Go's two backends tell different stories here, and both are worth knowing before picking where to put your hot path. Every individual purego call does 4-7 heap allocations (252-360 B/op via `go test -bench=. -benchmem`) — unlike Rust and C#, which are both genuinely zero-allocation per call — almost certainly `unsafe.Pointer` arguments crossing into purego's dynamically-generated call trampolines defeating Go's escape analysis. Batch generation collapses ~5000 of those allocations into 7, which is why purego's batch win looks the largest of any binding. Since 2026-08-27, darwin/linux builds default to a real cgo backend instead (`go/backend_cgo.go`, purego remaining the automatic fallback on Windows and any `CGO_ENABLED=0` build — see `go/README.md` for the full tradeoff and why Windows stays on purego unconditionally): cgo cuts per-call allocations to 1-3 and individual calls 3-4x faster outright, which *shrinks* the batch-vs-individual gap rather than widening it, since batch generation was already amortizing most of the cost purego was paying per call. Net effect: cgo wins for individual-call-heavy workloads, purego and cgo land in the same place for batch-heavy ones.
 
 Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and asserts zero allocations, then asserts the batch functions' scratch buffer *does* allocate, confirming it's the one deliberate exception documented in `v6.rs`/`v7.rs`.
 
@@ -130,7 +132,7 @@ Rust's own allocation-free claim isn't just asserted either — `rust/tests/allo
 - **Monotonically increasing v7** — a process-global counter (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls
 - **Batch generation** — `*Batch`/`*_batch` for v6/v7 amortizes timestamp capture, counter reservation, and the random-bytes fetch across the whole batch
 - **SQL Server byte ordering** — `*ToSqlOrder`/`*_to_sql_order` for both v6 and v7, computed once in the Rust core and exported to every binding, verified against the real `System.Data.SqlTypes.SqlGuid` comparator
-- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `purego`, `Fiddle`, PHP `FFI`, `ctypes`) into a shared-address-space native library, not a serialization protocol or an embedded interpreter
+- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`, `ctypes`) into a shared-address-space native library, not a serialization protocol or an embedded interpreter
 - **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
 - **AOT-friendly** — C# publishes cleanly under `PublishAot`; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
 - **CI-proven, not CI-claimed** — 6 real-hardware platforms × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch
