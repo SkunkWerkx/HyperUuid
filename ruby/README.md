@@ -18,7 +18,7 @@ id3 = HyperUuid.new_v7
 Returns `HyperUuid::Uuid`, a minimal value object (`#bytes`, `#to_s`, `#version`, `#variant`,
 comparable/hashable) — this gem has no runtime dependency on the `uuid` gem.
 `HyperUuid::Namespaces::DNS`/`URL`/`OID`/`X500` are RFC 9562 Section 6.6's well-known
-namespaces.
+namespaces. `#timestamp` recovers the embedded UTC `Time` from a version 7 UUID.
 
 Not yet published to RubyGems.org under a registered `SkunkWerkx`/`buvinghausen` presence —
 for now this is proven by CI building and testing the native core plus this gem on real

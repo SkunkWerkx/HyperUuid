@@ -61,6 +61,13 @@ final class Runtime
         return FFI::string($out, 16);
     }
 
+    public static function v7UnixMillis(string $bytes): int
+    {
+        $ptr = self::ffi()->new('uint8_t[16]');
+        FFI::memcpy($ptr, $bytes, 16);
+        return self::ffi()->uuid_v7_unix_millis($ptr);
+    }
+
     /**
      * Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
      * static let — the native library and its function pointers live for the process's
@@ -84,7 +91,8 @@ final class Runtime
         self::$ffi = FFI::cdef(
             'int uuid_new_v4(void *out_ptr);'
             . 'int uuid_new_v5(const void *ns_ptr, const void *name_ptr, uint32_t name_len, void *out_ptr);'
-            . 'int uuid_new_v7(uint64_t unix_millis, void *out_ptr);',
+            . 'int uuid_new_v7(uint64_t unix_millis, void *out_ptr);'
+            . 'uint64_t uuid_v7_unix_millis(const void *uuid_ptr);',
             $path
         );
 

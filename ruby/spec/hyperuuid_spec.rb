@@ -84,4 +84,19 @@ RSpec.describe HyperUuid do
       expect(embedded_ms).to be_between(before, after)
     end
   end
+
+  describe "Uuid#timestamp" do
+    it "recovers the exact millisecond the v7 UUID was created with" do
+      id = described_class.new_v7(RFC_TEST_VECTOR_MS)
+      expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
+    end
+
+    it "round-trips zero and the max 48-bit timestamp" do
+      expect(described_class.new_v7(0).timestamp).to eq(Time.at(0).utc)
+
+      max_ms = 0x0000_FFFF_FFFF_FFFF
+      id = described_class.new_v7(max_ms)
+      expect((id.timestamp.to_r * 1000).to_i).to eq(max_ms)
+    end
+  end
 end

@@ -20,7 +20,8 @@ $id3 = HyperUuid::newV7();
 Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
 `->version()`, `->variant()`, `->equals()`) — this package has no runtime dependency on
 `ramsey/uuid`. `Namespaces::dns()`/`url()`/`oid()`/`x500()` are RFC 9562 Section 6.6's
-well-known namespaces.
+well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from a
+version 7 UUID.
 
 Requires `ext-ffi` enabled (built into PHP by default when compiled `--with-ffi`; check with
 `php -m | grep -i ffi`). PHP's CLI SAPI runs FFI unrestricted regardless of the `ffi.enable`

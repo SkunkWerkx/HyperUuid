@@ -27,12 +27,14 @@ public enum UuidGenerator {
         UnsafePointer<UInt8>?, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?
     ) -> Int32
     private typealias UuidNewV7Fn = @convention(c) (UInt64, UnsafeMutablePointer<UInt8>?) -> Int32
+    private typealias UuidV7UnixMillisFn = @convention(c) (UnsafePointer<UInt8>?) -> UInt64
 
     private struct LoadedLibrary {
         let library: DynamicLibrary
         let newV4: UuidNewV4Fn
         let newV5: UuidNewV5Fn
         let newV7: UuidNewV7Fn
+        let v7UnixMillis: UuidV7UnixMillisFn
     }
 
     // Swift initializes `static let`s lazily and exactly once, thread-safely — the same
@@ -47,7 +49,9 @@ public enum UuidGenerator {
         let newV4 = unsafeBitCast(try library.symbol("uuid_new_v4"), to: UuidNewV4Fn.self)
         let newV5 = unsafeBitCast(try library.symbol("uuid_new_v5"), to: UuidNewV5Fn.self)
         let newV7 = unsafeBitCast(try library.symbol("uuid_new_v7"), to: UuidNewV7Fn.self)
-        return LoadedLibrary(library: library, newV4: newV4, newV5: newV5, newV7: newV7)
+        let v7UnixMillis = unsafeBitCast(
+            try library.symbol("uuid_v7_unix_millis"), to: UuidV7UnixMillisFn.self)
+        return LoadedLibrary(library: library, newV4: newV4, newV5: newV5, newV7: newV7, v7UnixMillis: v7UnixMillis)
     }
 
     private static func loaded() throws -> LoadedLibrary {
@@ -135,5 +139,20 @@ public enum UuidGenerator {
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.
     public static func newV7() throws -> UUID {
         try newV7(unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+    }
+
+    /// Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
+    /// `unix_ts_ms` field. Only meaningful when `uuid`'s version nibble is 7 — the RFC 9562
+    /// bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
+    /// timestamp", so the caller is responsible for checking that first if it matters.
+    public static func v7UnixMillis(_ uuid: UUID) throws -> UInt64 {
+        let l = try loaded()
+        let bytes = uuid.rfcBytes
+        return bytes.withUnsafeBufferPointer { l.v7UnixMillis($0.baseAddress) }
+    }
+
+    /// Recovers the UTC timestamp embedded in a version 7 UUID as a `Date`.
+    public static func v7Timestamp(_ uuid: UUID) throws -> Date {
+        Date(timeIntervalSince1970: Double(try v7UnixMillis(uuid)) / 1000)
     }
 }

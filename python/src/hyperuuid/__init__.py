@@ -13,12 +13,13 @@ that additional build just isn't included here yet.
 
 from __future__ import annotations
 
+import datetime
 import time
 import uuid as _uuid
 
 from . import _runtime
 
-__all__ = ["new_v4", "new_v5", "new_v7"]
+__all__ = ["new_v4", "new_v5", "new_v7", "v7_timestamp"]
 
 
 def new_v4() -> _uuid.UUID:
@@ -45,3 +46,18 @@ def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
     if unix_millis is None:
         unix_millis = int(time.time() * 1000)
     return _uuid.UUID(bytes=_runtime.new_v7(unix_millis))
+
+
+def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
+    """Recover the UTC timestamp embedded in a version 7 UUID's ``unix_ts_ms`` field.
+
+    Only meaningful when ``uuid_value.version == 7`` — the RFC 9562 bit layout doesn't
+    distinguish "not a v7 UUID" from "v7 UUID with a very early timestamp", so the caller is
+    responsible for checking ``version`` first if that matters.
+
+    Raises ``ValueError`` for a (spec-valid) embedded timestamp past year 9999 — the RFC's
+    48-bit millisecond field holds values up to the year 10889, but ``datetime.datetime``
+    cannot represent a year beyond 9999.
+    """
+    millis = _runtime.v7_unix_millis(uuid_value.bytes)
+    return datetime.datetime.fromtimestamp(millis / 1000, tz=datetime.timezone.utc)

@@ -62,4 +62,24 @@ final class Uuid
     {
         return $this->bytes === $other->bytes;
     }
+
+    /**
+     * The UTC timestamp embedded in a version 7 UUID's `unix_ts_ms` field. Only meaningful
+     * when `version() === 7` — the RFC 9562 bit layout doesn't distinguish "not a v7 UUID"
+     * from "v7 UUID with a very early timestamp", so the caller is responsible for checking
+     * `version()` first if that matters.
+     */
+    public function timestamp(): \DateTimeImmutable
+    {
+        $millis = Runtime::v7UnixMillis($this->bytes);
+        $dt = \DateTimeImmutable::createFromFormat(
+            'U.v',
+            sprintf('%d.%03d', intdiv($millis, 1000), $millis % 1000),
+            new \DateTimeZone('UTC')
+        );
+        if ($dt === false) {
+            throw new \RuntimeException('hyperuuid: failed to construct timestamp from v7 UUID');
+        }
+        return $dt;
+    }
 }

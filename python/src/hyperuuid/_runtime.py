@@ -27,6 +27,8 @@ def _load() -> ctypes.CDLL:
     lib.uuid_new_v5.restype = ctypes.c_int32
     lib.uuid_new_v7.argtypes = [ctypes.c_uint64, ctypes.c_void_p]
     lib.uuid_new_v7.restype = ctypes.c_int32
+    lib.uuid_v7_unix_millis.argtypes = [ctypes.c_void_p]
+    lib.uuid_v7_unix_millis.restype = ctypes.c_uint64
     return lib
 
 
@@ -71,3 +73,9 @@ def new_v7(unix_millis: int) -> bytes:
     if rc != 0:
         raise RuntimeError(f"uuid_new_v7 failed with code {rc} (random source failure)")
     return bytes(out)
+
+
+def v7_unix_millis(uuid_bytes: bytes) -> int:
+    lib = _get_lib()
+    buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
+    return lib.uuid_v7_unix_millis(ctypes.byref(buf))

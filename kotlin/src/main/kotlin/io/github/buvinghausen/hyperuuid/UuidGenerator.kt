@@ -67,6 +67,10 @@ object UuidGenerator {
         lookup.find("uuid_new_v7").get(),
         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS),
     )
+    private val uuidV7UnixMillis: MethodHandle = linker.downcallHandle(
+        lookup.find("uuid_v7_unix_millis").get(),
+        FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS),
+    )
 
     /** Creates a random UUID version 4 (RFC 9562 §5.4). */
     @JvmStatic
@@ -121,5 +125,26 @@ object UuidGenerator {
         }
     }
 
+    /**
+     * Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
+     * `unix_ts_ms` field. Only meaningful when [uuid]'s version nibble is 7 — the RFC 9562
+     * bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
+     * timestamp", so the caller is responsible for checking that first if it matters.
+     */
+    @JvmStatic
+    fun v7UnixMillis(uuid: UUID): Long = Arena.ofConfined().use { local ->
+        val seg = local.allocate(16)
+        MemorySegment.copy(uuid.toRfcBytes(), 0, seg, ValueLayout.JAVA_BYTE, 0, 16)
+        uuidV7UnixMillis.invokeExact(seg) as Long
+    }
+
     private fun readUuid(segment: MemorySegment): UUID = uuidFromRfcBytes(segment.toArray(ValueLayout.JAVA_BYTE))
 }
+
+/**
+ * Recovers the UTC timestamp embedded in a version 7 UUID as an [java.time.Instant]. Throws
+ * [java.time.DateTimeException] for a (spec-valid) embedded timestamp past year 999,999,999 —
+ * far beyond the RFC's own 48-bit ceiling (year 10889), so this is unreachable in practice
+ * for any genuine version 7 UUID, unlike the corresponding Python/C# bindings.
+ */
+fun UUID.v7Timestamp(): java.time.Instant = java.time.Instant.ofEpochMilli(UuidGenerator.v7UnixMillis(this))

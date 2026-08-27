@@ -7,7 +7,7 @@
 //!
 //! Return codes: `0` success, `1` random source failure, `2` timestamp out of range.
 
-use crate::{v4, v5, v7};
+use crate::{v4, v5, v7, Uuid};
 use core::slice;
 
 /// Writes a random UUID version 4 (RFC 9562 §5.4) to `out_ptr` (16 bytes).
@@ -61,4 +61,16 @@ pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
         Err(v7::NewV7Error::Random(_)) => 1,
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
     }
+}
+
+/// Extracts the Unix-epoch millisecond timestamp embedded in a version 7 UUID at `uuid_ptr`
+/// (16 bytes). Pure bit-shifting over the caller's bytes — meaningful only for a genuine
+/// version 7 UUID; the caller is responsible for checking the version first if that matters.
+#[unsafe(no_mangle)]
+pub extern "C" fn uuid_v7_unix_millis(uuid_ptr: *const u8) -> u64 {
+    // SAFETY: caller guarantees `uuid_ptr` points to 16 live bytes, per the module contract.
+    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }
+        .try_into()
+        .unwrap();
+    v7::unix_millis(&Uuid::from_bytes(bytes))
 }

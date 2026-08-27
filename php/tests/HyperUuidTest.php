@@ -110,6 +110,26 @@ final class HyperUuidTest extends TestCase
         self::assertLessThanOrEqual($after, $embedded);
     }
 
+    public function testV7TimestampRecoversTheExactMillisecond(): void
+    {
+        $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+        $expected = \DateTimeImmutable::createFromFormat(
+            'U.v',
+            sprintf('%d.%03d', intdiv(self::RFC_TEST_VECTOR_MS, 1000), self::RFC_TEST_VECTOR_MS % 1000),
+            new \DateTimeZone('UTC')
+        );
+        self::assertEquals($expected, $id->timestamp());
+    }
+
+    public function testV7TimestampRoundTripsZeroAndMax(): void
+    {
+        self::assertSame(0, HyperUuid::newV7(0)->timestamp()->getTimestamp());
+
+        $maxMs = 0x0000_FFFF_FFFF_FFFF;
+        $recovered = HyperUuid::newV7($maxMs)->timestamp();
+        self::assertSame($maxMs, $recovered->getTimestamp() * 1000 + (int) $recovered->format('v'));
+    }
+
     private static function embeddedMillis(Uuid $id): int
     {
         $bytes = $id->bytes();

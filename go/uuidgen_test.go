@@ -3,6 +3,7 @@ package hyperuuid
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -143,5 +144,47 @@ func TestV7CurrentTimestampIsEmbedded(t *testing.T) {
 	}
 	if id.Version() != 7 {
 		t.Errorf("version = %d, want 7", id.Version())
+	}
+}
+
+func TestV7TimestampRecoversTheExactMillisecond(t *testing.T) {
+	id, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := V7Timestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.UnixMilli(int64(rfcTestVectorMs)).UTC()
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestV7TimestampRoundTripsZeroAndTheRfc48BitMax(t *testing.T) {
+	zero, err := NewV7At(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := V7Timestamp(zero)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Equal(time.UnixMilli(0).UTC()) {
+		t.Errorf("got %v, want unix epoch", got)
+	}
+
+	const maxMs uint64 = 0x0000_FFFF_FFFF_FFFF
+	id, err := NewV7At(maxMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = V7Timestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(got.UnixMilli()) != maxMs {
+		t.Errorf("got %d ms, want %d", got.UnixMilli(), maxMs)
 	}
 }

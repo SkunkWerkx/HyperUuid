@@ -1,3 +1,4 @@
+import datetime
 import time
 import uuid
 
@@ -84,3 +85,26 @@ def test_v7_current_timestamp_is_embedded():
 
     embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
     assert before <= embedded_ms <= after
+
+
+def test_v7_timestamp_recovers_the_exact_millisecond():
+    id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    expected = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
+    assert hyperuuid.v7_timestamp(id_) == expected
+
+
+def test_v7_timestamp_round_trips_zero_and_a_large_timestamp():
+    assert hyperuuid.v7_timestamp(hyperuuid.new_v7(0)).timestamp() == 0
+
+    # Largest ms value datetime.datetime (year <= 9999) can represent, not the RFC's own
+    # 48-bit max (valid to year 10889) — see test below for that boundary.
+    large_ms = int(datetime.datetime(9999, 1, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+    recovered = hyperuuid.v7_timestamp(hyperuuid.new_v7(large_ms))
+    assert int(recovered.timestamp() * 1000) == large_ms
+
+
+def test_v7_timestamp_raises_past_datetime_year_range():
+    # A legitimate RFC 9562 v7 UUID can embed a timestamp datetime.datetime can't hold.
+    id_ = hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)
+    with pytest.raises(ValueError):
+        hyperuuid.v7_timestamp(id_)

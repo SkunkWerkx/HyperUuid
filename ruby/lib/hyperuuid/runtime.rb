@@ -48,6 +48,11 @@ module HyperUuid
         end
       end
 
+      def v7_unix_millis(bytes)
+        ptr = Fiddle::Pointer.to_ptr(bytes)
+        functions[:v7_unix_millis].call(ptr)
+      end
+
       private
 
       # Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
@@ -77,6 +82,11 @@ module HyperUuid
             handle["uuid_new_v7"],
             [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
+          ),
+          v7_unix_millis: Fiddle::Function.new(
+            handle["uuid_v7_unix_millis"],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT64_T
           ),
         }
       end

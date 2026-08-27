@@ -103,4 +103,30 @@ public sealed class UuidGeneratorTests
         ms.ShouldBeGreaterThanOrEqualTo(before);
         ms.ShouldBeLessThanOrEqualTo(after);
     }
+
+    [Fact]
+    public void V7Timestamp_RecoversTheExactMillisecond()
+    {
+        var id = UuidGenerator.NewV7(RfcTestVectorMs);
+        UuidGenerator.V7Timestamp(id).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
+    }
+
+    [Fact]
+    public void V7Timestamp_RoundTripsZeroAndALargeTimestamp()
+    {
+        UuidGenerator.V7Timestamp(UuidGenerator.NewV7(0)).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(0));
+
+        // Largest ms value DateTimeOffset (year <= 9999) can represent, not the RFC's own
+        // 48-bit max (valid to year 10889) — see test below for that boundary.
+        var largeMs = new DateTimeOffset(9999, 1, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        UuidGenerator.V7Timestamp(UuidGenerator.NewV7(largeMs)).ToUnixTimeMilliseconds().ShouldBe(largeMs);
+    }
+
+    [Fact]
+    public void V7Timestamp_ThrowsPastDateTimeOffsetYearRange()
+    {
+        // A legitimate RFC 9562 v7 UUID can embed a timestamp DateTimeOffset can't hold.
+        var id = UuidGenerator.NewV7(0x0000_FFFF_FFFF_FFFFL);
+        Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.V7Timestamp(id));
+    }
 }

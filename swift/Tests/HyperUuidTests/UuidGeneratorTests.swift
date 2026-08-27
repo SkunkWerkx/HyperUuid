@@ -89,4 +89,19 @@ final class UuidGeneratorTests: XCTestCase {
         }
         XCTAssertTrue(embeddedMs >= before && embeddedMs <= after)
     }
+
+    func testV7TimestampRecoversTheExactMillisecond() throws {
+        let id = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+        let timestamp = try UuidGenerator.v7Timestamp(id)
+        XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
+    }
+
+    func testV7TimestampRoundTripsZeroAndTheRfc48BitMax() throws {
+        let zero = try UuidGenerator.newV7(unixMillis: 0)
+        XCTAssertEqual(try UuidGenerator.v7UnixMillis(zero), 0)
+
+        let maxMs: UInt64 = 0x0000_FFFF_FFFF_FFFF
+        let id = try UuidGenerator.newV7(unixMillis: maxMs)
+        XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), maxMs)
+    }
 }

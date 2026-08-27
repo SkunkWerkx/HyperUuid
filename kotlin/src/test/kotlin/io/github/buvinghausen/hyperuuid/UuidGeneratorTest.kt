@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.util.UUID
 
 class UuidGeneratorTest {
@@ -88,5 +89,19 @@ class UuidGeneratorTest {
 
         val embeddedMs = (id.mostSignificantBits ushr 16) and 0xFFFF_FFFF_FFFFL
         assertTrue(embeddedMs in before..after)
+    }
+
+    @Test
+    fun `v7Timestamp recovers the exact millisecond`() {
+        val id = UuidGenerator.newV7(rfcTestVectorMs)
+        assertEquals(Instant.ofEpochMilli(rfcTestVectorMs), id.v7Timestamp())
+    }
+
+    @Test
+    fun `v7Timestamp round-trips zero and the RFC 48-bit max`() {
+        assertEquals(Instant.ofEpochMilli(0), UuidGenerator.newV7(0).v7Timestamp())
+
+        val maxMs = 0x0000_FFFF_FFFF_FFFFL
+        assertEquals(Instant.ofEpochMilli(maxMs), UuidGenerator.newV7(maxMs).v7Timestamp())
     }
 }

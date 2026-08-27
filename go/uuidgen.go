@@ -34,9 +34,10 @@ var (
 	initOnce sync.Once
 	initErr  error
 
-	uuidNewV4 func(out unsafe.Pointer) int32
-	uuidNewV5 func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
-	uuidNewV7 func(unixMillis uint64, out unsafe.Pointer) int32
+	uuidNewV4        func(out unsafe.Pointer) int32
+	uuidNewV5        func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
+	uuidNewV7        func(unixMillis uint64, out unsafe.Pointer) int32
+	uuidV7UnixMillis func(uuid unsafe.Pointer) uint64
 )
 
 // ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
@@ -86,6 +87,7 @@ func ensureLoaded() error {
 		purego.RegisterLibFunc(&uuidNewV4, handle, "uuid_new_v4")
 		purego.RegisterLibFunc(&uuidNewV5, handle, "uuid_new_v5")
 		purego.RegisterLibFunc(&uuidNewV7, handle, "uuid_new_v7")
+		purego.RegisterLibFunc(&uuidV7UnixMillis, handle, "uuid_v7_unix_millis")
 	})
 	return initErr
 }
@@ -123,6 +125,26 @@ func NewV5(namespace uuid.UUID, name []byte) (uuid.UUID, error) {
 // UTF-8 name.
 func NewV5String(namespace uuid.UUID, name string) (uuid.UUID, error) {
 	return NewV5(namespace, []byte(name))
+}
+
+// V7UnixMillis recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
+// unix_ts_ms field. Only meaningful when id.Version() == 7 — the RFC 9562 bit layout doesn't
+// distinguish "not a v7 UUID" from "v7 UUID with a very early timestamp", so the caller is
+// responsible for checking that first if it matters.
+func V7UnixMillis(id uuid.UUID) (uint64, error) {
+	if err := ensureLoaded(); err != nil {
+		return 0, err
+	}
+	return uuidV7UnixMillis(unsafe.Pointer(&id[0])), nil
+}
+
+// V7Timestamp recovers the UTC timestamp embedded in a version 7 UUID as a time.Time.
+func V7Timestamp(id uuid.UUID) (time.Time, error) {
+	millis, err := V7UnixMillis(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(int64(millis)).UTC(), nil
 }
 
 // NewV7 creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.

@@ -26,6 +26,9 @@ public static partial class UuidGenerator
     [LibraryImport("hyperuuid")]
     private static unsafe partial int uuid_new_v7(long unixMillis, byte* outPtr);
 
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial ulong uuid_v7_unix_millis(byte* uuidPtr);
+
     /// <summary>Well-known namespace UUIDs defined in RFC 9562 Section 6.6.</summary>
     public static class Namespaces
     {
@@ -98,4 +101,31 @@ public static partial class UuidGenerator
         }
         return new Guid(buf, bigEndian: true);
     }
+
+    /// <summary>
+    /// Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
+    /// <c>unix_ts_ms</c> field. Only meaningful when <paramref name="uuid"/>'s version nibble
+    /// is 7 — the RFC 9562 bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a
+    /// very early timestamp", so the caller is responsible for checking that first if it matters.
+    /// </summary>
+    public static unsafe long V7UnixMillis(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        uuid.TryWriteBytes(bytes, bigEndian: true, out _);
+        fixed (byte* p = bytes)
+        {
+            return (long)uuid_v7_unix_millis(p);
+        }
+    }
+
+    /// <summary>
+    /// Recovers the UTC timestamp embedded in a version 7 UUID as a <see cref="DateTimeOffset"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown for a (spec-valid) embedded timestamp past year 9999 — the RFC's 48-bit
+    /// millisecond field holds values up to the year 10889, but <see cref="DateTimeOffset"/>
+    /// cannot represent a year beyond 9999.
+    /// </exception>
+    public static DateTimeOffset V7Timestamp(Guid uuid) =>
+        DateTimeOffset.FromUnixTimeMilliseconds(V7UnixMillis(uuid));
 }

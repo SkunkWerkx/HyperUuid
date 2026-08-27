@@ -17,7 +17,8 @@ let id3 = try UuidGenerator.newV7()
 ```
 
 Returns Foundation's `UUID`. `Namespaces.dns`/`url`/`oid`/`x500` are RFC 9562
-Section 6.6's well-known namespaces.
+Section 6.6's well-known namespaces. `UuidGenerator.v7Timestamp(_:)` recovers the
+embedded UTC `Date` from a version 7 UUID.
 
 Not yet published to the Swift Package Registry under a registered `SkunkWerkx`
 presence — for now this is proven by CI building and testing the native core plus

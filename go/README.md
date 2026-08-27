@@ -23,7 +23,8 @@ Returns [`github.com/google/uuid`](https://pkg.go.dev/github.com/google/uuid)'s
 writes, so there's no byte-swapping in this binding. `NamespaceDNS`/`NamespaceURL`/
 `NamespaceOID`/`NamespaceX500` are re-exports of `google/uuid`'s own (already
 RFC 9562 §6.6-identical) namespace constants, kept here for API-shape symmetry with
-the other bindings' `Namespaces.*`.
+the other bindings' `Namespaces.*`. `V7Timestamp` recovers the embedded UTC
+`time.Time` from a version 7 UUID.
 
 Not yet published to a module proxy under a registered `SkunkWerkx` presence — for
 now this is proven by CI building and testing the native core plus this binding on
