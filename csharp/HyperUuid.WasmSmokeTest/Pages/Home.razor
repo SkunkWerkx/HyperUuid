@@ -1,0 +1,89 @@
+@page "/"
+@using HyperUuid
+
+<PageTitle>@Title</PageTitle>
+
+<h1>HyperUuid WASM smoke test</h1>
+
+<pre id="results">@Results</pre>
+
+@code {
+    private string Title = "RUNNING";
+    private string Results = "running...";
+
+    protected override void OnInitialized()
+    {
+        var lines = new List<string>();
+        var failed = false;
+
+        void Fail(string msg)
+        {
+            failed = true;
+            lines.Add($"FAIL: {msg}");
+        }
+
+        try
+        {
+            var a = UuidGenerator.NewV4();
+            var b = UuidGenerator.NewV4();
+            if (a == b)
+            {
+                Fail("two v4 calls produced identical output");
+            }
+            else
+            {
+                lines.Add($"v4: {a} {b}");
+            }
+
+            var v5 = UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "www.example.com");
+            var expectedV5 = new Guid("2ed6657d-e927-568b-95e1-2665a8aea6a2");
+            if (v5 != expectedV5)
+            {
+                Fail($"v5 mismatch, got {v5}, expected {expectedV5}");
+            }
+            else
+            {
+                lines.Add($"v5: {v5} matches RFC 9562 Appendix A.4 vector");
+            }
+
+            // Fixed-timestamp v7: proves the embedded timestamp round-trips through a
+            // wasm32-unknown-emscripten build of the native core, not just that it links.
+            const long fixedMs = 1_645_557_742_000L;
+            var v7Fixed = UuidGenerator.NewV7(fixedMs);
+            var v7FixedTs = UuidGenerator.V7Timestamp(v7Fixed);
+            var v7FixedMs = v7FixedTs.ToUnixTimeMilliseconds();
+            if (v7FixedMs != fixedMs)
+            {
+                Fail($"v7 fixed-timestamp mismatch, got {v7FixedMs}, expected {fixedMs}");
+            }
+            else
+            {
+                lines.Add($"v7 (fixed): {v7Fixed} embeds timestamp {v7FixedTs:O}");
+            }
+
+            // Real-clock v7: proves DateTimeOffset.UtcNow works inside this WASM host at all
+            // (the actual open question — not the bit math, the browser/Emscripten clock).
+            var before = DateTimeOffset.UtcNow;
+            var v7Now = UuidGenerator.NewV7();
+            var after = DateTimeOffset.UtcNow;
+            var v7NowTs = UuidGenerator.V7Timestamp(v7Now);
+            if (v7NowTs < before.AddSeconds(-2) || v7NowTs > after.AddSeconds(2))
+            {
+                Fail($"v7 real-clock timestamp {v7NowTs:O} not within [{before:O}, {after:O}] (+/- 2s)");
+            }
+            else
+            {
+                lines.Add($"v7 (now): {v7Now} embeds real clock timestamp {v7NowTs:O}, wall clock was [{before:O}, {after:O}]");
+            }
+        }
+        catch (Exception ex)
+        {
+            Fail($"exception: {ex}");
+        }
+
+        lines.Add("");
+        lines.Add(failed ? "SOME WASM CHECKS FAILED" : "ALL WASM CHECKS PASSED");
+        Results = string.Join("\n", lines);
+        Title = failed ? "FAIL" : "PASS";
+    }
+}

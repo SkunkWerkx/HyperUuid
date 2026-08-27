@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <StaticWebAssetSpaFallbackEnabled>true</StaticWebAssetSpaFallbackEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SPIKE, not the real shape yet: references HyperUuid.csproj for the managed
+         UuidGenerator surface, but does NOT pull in its runtimes/**/native/* native assets
+         (those are the 6 real per-platform builds; wasm needs its own). -->
+    <ProjectReference Include="../HyperUuid/HyperUuid.csproj" />
+    <!-- The wasm32-unknown-emscripten STATIC LIBRARY build of the same Rust core (built via
+         "cargo rustc", crate-type staticlib, not the default cdylib): NativeFileReference
+         needs an unlinked .a it can link INTO the final combined build alongside the runtime's
+         own .a files, not an already-linked, complete .wasm module. -->
+    <NativeFileReference Include="../../rust/target/wasm32-unknown-emscripten/release/libhyperuuid.a" />
+  </ItemGroup>
+
+</Project>

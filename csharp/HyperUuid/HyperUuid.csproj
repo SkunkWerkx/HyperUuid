@@ -27,6 +27,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- SPIKE: WASM viability probe, not committed yet — see conversation. Tells the platform
+         compatibility analyzer (CA1416 family) this project claims browser support, so it
+         flags any BCL call this assembly makes that's marked [UnsupportedOSPlatform("browser")]
+         or excluded from a browser allow-list. Cheap, static, no toolchain install required —
+         but only checks the MANAGED C# surface; it can't see whether the native libhyperuuid
+         P/Invoke target actually resolves under Blazor's wasm-tools native-interop model. -->
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Shows up as the package page's description on GitHub Packages/NuGet — sourced from
          csharp/README.md (this project's own, not the repo root's) so the exact same content
          that lives in the repo also ships inside the .nupkg. -->
