@@ -81,4 +81,15 @@ Batch generation is where the FFI overhead gets amortized away entirely — stdl
 | `new_v6_batch(1000)` | 1.03 ms ± 0.06 ms | vs. 1000x `new_v6()`: 2.25 ms ± 0.20 ms — **2.2x** |
 | `new_v7_batch(1000)` | 1.05 ms ± 0.10 ms | vs. 1000x `new_v7()`: 2.21 ms ± 0.18 ms — **2.1x** |
 
+### Timestamp extraction vs. stdlib's `.time` property
+
+CPython 3.14's `uuid.UUID.time` has real version-aware extraction logic of its own (branches on version, computes the right thing for v6/v7, not just a v1-only stub), so this is a genuine head-to-head — each call measured against a UUID generated once outside the timed loop, so only the extraction itself is timed:
+
+| Call | Mean | vs. stdlib `.time` |
+|---|---|---|
+| `hyperuuid.v6_timestamp(...)` | 2.54 µs ± 0.26 µs | `UUID.time` (v6): 686 ns ± 34 ns — stdlib wins, ~3.7x |
+| `hyperuuid.v7_timestamp(...)` | 2.53 µs ± 0.27 µs | `UUID.time` (v7): 626 ns ± 72 ns — stdlib wins, ~4.0x |
+
+No hedging this one: stdlib's `.time` is a pure Python property reading bytes already in the process — zero FFI boundary to cross, the same structural reason `new_v4`/`new_v5` above lose too. `v6_timestamp`/`v7_timestamp` pay the same `ctypes` call cost generation does. Worth noting: stdlib's `.time` for v6 returns raw Gregorian-epoch 100ns ticks, not Unix milliseconds like `hyperuuid.v6_timestamp` — different units if you actually need the value, but a fair timing comparison of "the cost of pulling the embedded time out" either way. If you're already on 3.14+ and just need the timestamp back out of a v6/v7 UUID regardless of who minted it, stdlib's `.time` is faster and simpler — no reason to reach past it for that alone.
+
 Reproduce: `pip install -e ".[bench]"` then `python bench_uuid.py --fast -o results.json`.

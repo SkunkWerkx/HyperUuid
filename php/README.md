@@ -50,6 +50,7 @@ timestamp capture and one native call, instead of `count` of each.
 1. **Zero Composer dependency.** This package needs nothing beyond PHP's own built-in `FFI` extension — no `ramsey/uuid`, no `composer require` at all beyond this package itself. If you're already pulling in `ramsey/uuid` for something else, that's a fine reason to stick with it; if not, this avoids adding it just for ID generation.
 2. **Batch generation.** `newV6Batch(count)`/`newV7Batch(count)` share one timestamp capture, one random-bytes fetch, and (v7) one counter reservation across the whole batch — one native call instead of `count` separate ones.
 3. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, Ruby, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. A pure-PHP library, however good, can't structurally guarantee that against a codebase written in a different language.
+4. **`timestamp()` isn't tied to how the UUID was minted.** It's a plain RFC 9562 bit-layout read, verified (in this package's own test suite) to correctly extract from a `ramsey/uuid`-generated v6 or v7 value too, not just this package's own — so you can keep `ramsey/uuid` for generation and still get this package's (faster, see below) extraction on its output.
 
 Requires `ext-ffi` enabled (built into PHP by default when compiled `--with-ffi`; check with
 `php -m | grep -i ffi`). PHP's CLI SAPI runs FFI unrestricted regardless of the `ffi.enable`
@@ -84,7 +85,29 @@ binding in this repo:
 | v6 | 2.55ms | 7.65ms | 3.0x |
 | v7 | 2.63ms | 7.99ms | 3.0x |
 
-Reproduce: `composer require --dev phpbench/phpbench && vendor/bin/phpbench run --report=aggregate`.
+### Timestamp extraction vs. `ramsey/uuid`'s `getDateTime()`
+
+`ramsey/uuid` has real extraction logic of its own (`UuidInterface::getDateTime()`, works for
+both `UuidV6` and `UuidV7`), so this is a genuine head-to-head, not a strawman — each call
+measured against a UUID generated once outside the timed loop, so only the extraction itself
+is timed. Unlike generation, where PHP's `FFI` boundary was the honest cost, extraction
+flips the result:
+
+| Call | Time | vs. `ramsey/uuid` |
+| --- | ---: | ---: |
+| `->timestamp()` (v6) | 14.98µs | **32.7x faster** |
+| `ramsey/uuid`'s `->getDateTime()` (v6) | 489.92µs | baseline |
+| `->timestamp()` (v7) | 14.64µs | **16.6x faster** |
+| `ramsey/uuid`'s `->getDateTime()` (v7) | 243.43µs | baseline |
+
+`ramsey/uuid`'s `getDateTime()` does real work this package's native extraction doesn't have
+to: parsing a lazily-decoded UUID string representation and constructing a `DateTimeImmutable`
+through its own codec layer, versus this package's single FFI call plus a direct
+`DateTimeImmutable::createFromFormat`. The one FFI crossing that costs this package ~1.5µs on
+generation (see above) is comfortably paid for here — an honest reversal worth stating plainly
+rather than only reporting the numbers where this package wins by default.
+
+Reproduce: `composer require --dev phpbench/phpbench ramsey/uuid && vendor/bin/phpbench run --report=aggregate`.
 
 ## Install
 

@@ -102,3 +102,27 @@ one clean cross-platform story — `CGO_ENABLED=0`, no C toolchain, one module t
 builds unmodified on all 6 platform legs — it isn't worth it here. The batch
 functions already amortize allocations far more effectively than a cgo migration
 would (7 allocations total for 1000 UUIDs, vs 5000 for individual calls).
+
+### Extraction vs. `google/uuid`'s own `Time()`
+
+`google/uuid` isn't just a source type here — it has real extraction logic of its
+own (`UUID.Time()`, documented as defined for versions 1, 2, 6, and 7), so it's a
+genuine head-to-head, not a strawman:
+
+| Call | Mean | Allocations |
+| --- | ---: | ---: |
+| `hyperuuid.V6Timestamp` | 424.1 ns | 256 B, 4 allocs |
+| `google/uuid`'s `id.Time()` (v6) | 3.6 ns | 0 |
+| `hyperuuid.V7Timestamp` | 421.6 ns | 256 B, 4 allocs |
+| `google/uuid`'s `id.Time()` (v7) | 3.6 ns | 0 |
+
+No hedging this one: `google/uuid`'s `Time()` wins by roughly two orders of
+magnitude, because it's pure Go bit-shifting over bytes already in the process —
+zero FFI boundary to cross. `V6Timestamp`/`V7Timestamp` pay the exact same
+`purego` call-trampoline cost the generation functions above do, for the same
+structural reason. `google/uuid.UUID.Time()` works on *any* RFC-conformant v6/v7
+value regardless of where it came from — it's pure bit math, not tied to how the
+value was minted — so there's no provenance argument for reaching past it here.
+Honestly: in Go specifically, prefer `id.Time()` over this binding's
+`V6Timestamp`/`V7Timestamp` unconditionally. They exist for API symmetry with
+every other binding in this repo, not because they're the better choice in Go.

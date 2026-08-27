@@ -297,6 +297,40 @@ final class HyperUuidTest extends TestCase
     }
 
     /**
+     * Proves timestamp() isn't just reading back what our own newV7 wrote — it's a plain
+     * RFC 9562 bit-layout read, so it recovers the real embedded timestamp from a version 7
+     * UUID minted by ramsey/uuid's own independent implementation too.
+     */
+    public function testTimestampExtractsFromRamseyUuidsNativeV7Generator(): void
+    {
+        $ramsey = \Ramsey\Uuid\Uuid::uuid7();
+        $ours = new Uuid($ramsey->getBytes());
+
+        self::assertSame(7, $ours->version());
+        // Millisecond precision only — ramsey's getDateTime() carries microseconds for v7/v6,
+        // but the RFC 9562 field itself (and this binding's timestamp()) is millisecond-only,
+        // so anything finer isn't part of what's actually embedded in the UUID to compare.
+        self::assertSame(self::millis($ramsey->getDateTime()), self::millis($ours->timestamp()));
+    }
+
+    /** Same proof as above, for version 6. */
+    public function testTimestampExtractsFromRamseyUuidsNativeV6Generator(): void
+    {
+        $ramsey = \Ramsey\Uuid\Uuid::uuid6();
+        $ours = new Uuid($ramsey->getBytes());
+
+        self::assertSame(6, $ours->version());
+        self::assertSame(self::millis($ramsey->getDateTime()), self::millis($ours->timestamp()));
+    }
+
+    private static function millis(\DateTimeInterface $dt): int
+    {
+        // Integer arithmetic throughout — float parsing of 'U.u' is lossy right at millisecond
+        // boundaries and produced real off-by-one failures here during development.
+        return ((int) $dt->format('U')) * 1000 + intdiv((int) $dt->format('u'), 1000);
+    }
+
+    /**
      * Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order — the
      * correctness oracle this project's C# test suite checks directly against the real type;
      * no PHP equivalent exists to test against here, so this stands in for it.

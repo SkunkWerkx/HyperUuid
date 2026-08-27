@@ -52,6 +52,17 @@ The honest trade-off: this crate's public surface is much narrower than `uuid`'s
 
 ¹ See the methodology caveat above — `uuid`'s v6/v7 capture the clock internally; this crate's benchmarked calls take a pre-supplied timestamp.
 
+### Timestamp extraction vs. the `uuid` crate's `get_timestamp()`
+
+`uuid` has real extraction logic of its own (`Uuid::get_timestamp() -> Option<Timestamp>`, defined for v1/v6/v7), so this is a genuine head-to-head, not a strawman — each call measured against a UUID generated once outside the timed loop, so only the extraction itself is timed:
+
+| Version | This crate's `unix_millis` | `uuid`'s `get_timestamp()` | Delta |
+| --- | ---: | ---: | ---: |
+| v6 | 2.06 ns | 5.53 ns | **2.68x faster** |
+| v7 | 3.18 ns | 4.49 ns | **1.41x faster** |
+
+The two APIs return different shapes — this crate hands back a plain `u64` millisecond count, `uuid`'s `Option<Timestamp>` wraps 100ns Gregorian-epoch ticks — but both are doing the same underlying job (bit-shifting the embedded time back out of 16 bytes already in hand), so timing them head-to-head is fair. This crate wins here for the same reason it's competitive on generation: no allocation, no indirection beyond what the bit math itself needs. Every other binding in this repo pays a real FFI-crossing cost on top of this same bit math for extraction that this crate, calling itself directly, doesn't — see the Go binding's README for a case where that FFI cost dominates by two orders of magnitude.
+
 ### Batch generation vs. an equivalent loop (this crate only — `uuid` has no batch API)
 
 | Version | 1000 individual calls | `*_batch(1000)` | Speedup |

@@ -83,5 +83,31 @@ fn bench_batch(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_single_item, bench_vs_uuid_crate, bench_batch);
+// Head-to-head against the `uuid` crate's own timestamp-extraction API. Each UUID being
+// measured is generated once, outside the timed closure, so only the extraction call itself
+// is timed, not generation. The two crates' extraction APIs return different shapes — this
+// crate's `unix_millis` returns a plain `u64` millisecond count, `uuid`'s `get_timestamp()`
+// returns an `Option<Timestamp>` (100ns ticks since the Gregorian epoch, `Option`-wrapped
+// since it's only defined for time-based versions) — but timing "the cost of getting the
+// embedded time back out of an existing UUID" is still a fair like-for-like comparison
+// regardless of what shape that time comes back in.
+fn bench_timestamp_extraction(c: &mut Criterion) {
+    let mut group = c.benchmark_group("timestamp_extraction");
+
+    let hyperuuid_v6 = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+    group.bench_function("hyperuuid_v6", |b| b.iter(|| v6::unix_millis(black_box(&hyperuuid_v6))));
+
+    let uuid_crate_v6 = uuid::Uuid::now_v6(&[0, 0, 0, 0, 0, 0]);
+    group.bench_function("uuid_crate_v6", |b| b.iter(|| black_box(&uuid_crate_v6).get_timestamp()));
+
+    let hyperuuid_v7 = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+    group.bench_function("hyperuuid_v7", |b| b.iter(|| v7::unix_millis(black_box(&hyperuuid_v7))));
+
+    let uuid_crate_v7 = uuid::Uuid::now_v7();
+    group.bench_function("uuid_crate_v7", |b| b.iter(|| black_box(&uuid_crate_v7).get_timestamp()));
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_single_item, bench_vs_uuid_crate, bench_timestamp_extraction, bench_batch);
 criterion_main!(benches);
