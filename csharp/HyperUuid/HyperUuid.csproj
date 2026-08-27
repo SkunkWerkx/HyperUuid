@@ -8,7 +8,7 @@
     <Description>RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
     <Authors>Brian Buvinghausen</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/buvinghausen/SkunkWerx</RepositoryUrl>
+    <RepositoryUrl>https://github.com/SkunkWerkx/HyperUuid</RepositoryUrl>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Source-generated LibraryImport P/Invoke only, no reflection anywhere in this assembly:
          opts into (and fails the build on) the trim and Native AOT analyzers. -->

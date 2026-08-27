@@ -49,7 +49,7 @@ publishing {
                         "FFM bindings straight into a native Rust core (libhyperuuid). " +
                         "No runtime bridge, no reflection."
                 )
-                url.set("https://github.com/buvinghausen/SkunkWerx")
+                url.set("https://github.com/SkunkWerkx/HyperUuid")
                 licenses {
                     license {
                         name.set("MIT")
