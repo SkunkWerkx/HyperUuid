@@ -4,7 +4,8 @@
       { "returnType": "jint", "parameterTypes": ["void*"] },
       { "returnType": "jint", "parameterTypes": ["void*", "void*", "jint", "void*"] },
       { "returnType": "jint", "parameterTypes": ["jlong", "void*"] },
-      { "returnType": "jlong", "parameterTypes": ["void*"] }
+      { "returnType": "jlong", "parameterTypes": ["void*"] },
+      { "returnType": "jint", "parameterTypes": ["jlong", "jint", "void*"] }
     ]
   }
 }

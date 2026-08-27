@@ -35,8 +35,12 @@ public final class Main {
         require(UuidGenerator.NIL.toString().equals("00000000-0000-0000-0000-000000000000"), "NIL mismatch");
         require(UuidGenerator.MAX.toString().equals("ffffffff-ffff-ffff-ffff-ffffffffffff"), "MAX mismatch");
 
-        System.out.println(
-                "hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v6=" + v6 + " v7=" + v7);
+        UUID[] v7Batch = UuidGenerator.newV7Batch(10, rfcTestVectorMs);
+        require(v7Batch.length == 10, "expected 10 batch v7 UUIDs, got " + v7Batch.length);
+        require(v7Batch[0].version() == 7, "expected batch v7 version 7, got " + v7Batch[0].version());
+
+        System.out.println("hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v6=" + v6 + " v7="
+                + v7 + " v7Batch[0]=" + v7Batch[0]);
     }
 
     private static void require(boolean condition, String message) {

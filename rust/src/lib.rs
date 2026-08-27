@@ -199,4 +199,96 @@ mod tests {
         assert_eq!(Uuid::from_str(&Uuid::NIL.to_string()).unwrap(), Uuid::NIL);
         assert_eq!(Uuid::from_str(&Uuid::MAX.to_string()).unwrap(), Uuid::MAX);
     }
+
+    #[test]
+    fn v6_batch_matches_single_call_generation() {
+        let mut out = vec![0u8; 5 * 16];
+        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 5, &mut out).unwrap();
+        for chunk in out.chunks_exact(16) {
+            let bytes: [u8; 16] = chunk.try_into().unwrap();
+            let id = Uuid::from_bytes(bytes);
+            assert_eq!(id.version(), 6);
+            assert!(id.is_rfc9562_variant());
+            assert_eq!(v6::unix_millis(&id), RFC_TEST_VECTOR_MS);
+        }
+    }
+
+    #[test]
+    fn v6_batch_items_are_pairwise_distinct() {
+        let mut out = vec![0u8; 100 * 16];
+        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut out).unwrap();
+        let ids: std::collections::HashSet<[u8; 16]> =
+            out.chunks_exact(16).map(|c| c.try_into().unwrap()).collect();
+        assert_eq!(ids.len(), 100);
+    }
+
+    #[test]
+    fn v6_batch_zero_count_is_a_no_op() {
+        let mut out: [u8; 0] = [];
+        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 0, &mut out).unwrap();
+    }
+
+    #[test]
+    fn v6_batch_overflow_timestamp_errors() {
+        let mut out = vec![0u8; 16];
+        let err = v6::new_v6_batch(u64::MAX, 1, &mut out).unwrap_err();
+        assert_eq!(err, v6::NewV6Error::TimestampOutOfRange);
+    }
+
+    #[test]
+    fn v7_batch_matches_single_call_generation() {
+        let mut out = vec![0u8; 5 * 16];
+        v7::new_v7_batch(RFC_TEST_VECTOR_MS, 5, &mut out).unwrap();
+        for chunk in out.chunks_exact(16) {
+            let bytes: [u8; 16] = chunk.try_into().unwrap();
+            let id = Uuid::from_bytes(bytes);
+            assert_eq!(id.version(), 7);
+            assert!(id.is_rfc9562_variant());
+            assert_eq!(v7::unix_millis(&id), RFC_TEST_VECTOR_MS);
+        }
+    }
+
+    #[test]
+    fn v7_batch_is_monotonically_ordered() {
+        let mut out = vec![0u8; 1000 * 16];
+        v7::new_v7_batch(RFC_TEST_VECTOR_MS, 1000, &mut out).unwrap();
+        let ids: Vec<Uuid> = out
+            .chunks_exact(16)
+            .map(|c| Uuid::from_bytes(c.try_into().unwrap()))
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn v7_batch_continues_the_same_counter_sequence_as_individual_calls() {
+        // A batch call shouldn't collide with (or reorder relative to) individual calls
+        // interleaved around it on the same shared counter.
+        let before = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let mut batch = vec![0u8; 10 * 16];
+        v7::new_v7_batch(RFC_TEST_VECTOR_MS, 10, &mut batch).unwrap();
+        let after = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+
+        let mut ids = vec![before];
+        ids.extend(batch.chunks_exact(16).map(|c| Uuid::from_bytes(c.try_into().unwrap())));
+        ids.push(after);
+
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn v7_batch_zero_count_is_a_no_op() {
+        let mut out: [u8; 0] = [];
+        v7::new_v7_batch(RFC_TEST_VECTOR_MS, 0, &mut out).unwrap();
+    }
+
+    #[test]
+    fn v7_batch_overflow_timestamp_errors() {
+        let mut out = vec![0u8; 16];
+        let err = v7::new_v7_batch(v7::MAX_UNIX_MILLIS + 1, 1, &mut out).unwrap_err();
+        assert_eq!(err, v7::NewV7Error::TimestampOutOfRange);
+    }
 }

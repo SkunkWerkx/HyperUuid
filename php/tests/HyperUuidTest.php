@@ -113,6 +113,39 @@ final class HyperUuidTest extends TestCase
         self::assertLessThanOrEqual($after, $embedded);
     }
 
+    public function testV6BatchReturnsCountUuidsSharingTheTimestamp(): void
+    {
+        $ids = HyperUuid::newV6Batch(10, self::RFC_TEST_VECTOR_MS);
+        self::assertCount(10, $ids);
+        $expected = \DateTimeImmutable::createFromFormat(
+            'U.v',
+            sprintf('%d.%03d', intdiv(self::RFC_TEST_VECTOR_MS, 1000), self::RFC_TEST_VECTOR_MS % 1000),
+            new \DateTimeZone('UTC')
+        );
+        foreach ($ids as $id) {
+            self::assertSame(6, $id->version());
+            self::assertEquals($expected, $id->timestamp());
+        }
+    }
+
+    public function testV6BatchProducesPairwiseDistinctUuids(): void
+    {
+        $ids = HyperUuid::newV6Batch(100, self::RFC_TEST_VECTOR_MS);
+        $seen = array_unique(array_map(fn ($id) => (string) $id, $ids));
+        self::assertCount(100, $seen);
+    }
+
+    public function testV6BatchCountZeroReturnsEmptyArray(): void
+    {
+        self::assertSame([], HyperUuid::newV6Batch(0, self::RFC_TEST_VECTOR_MS));
+    }
+
+    public function testV6BatchOverflowTimestampThrows(): void
+    {
+        $this->expectException(TimestampOutOfRangeException::class);
+        HyperUuid::newV6Batch(1, PHP_INT_MAX);
+    }
+
     public function testV7EmbedsTheTimestamp(): void
     {
         $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
@@ -141,6 +174,42 @@ final class HyperUuidTest extends TestCase
         $sorted = $ids;
         sort($sorted, SORT_STRING);
         self::assertSame($sorted, $ids);
+    }
+
+    public function testV7BatchReturnsCountUuidsSortedAndSharingTheTimestamp(): void
+    {
+        $ids = HyperUuid::newV7Batch(1000, self::RFC_TEST_VECTOR_MS);
+        self::assertCount(1000, $ids);
+        $strings = array_map(fn ($id) => (string) $id, $ids);
+        $sorted = $strings;
+        sort($sorted, SORT_STRING);
+        self::assertSame($sorted, $strings);
+        foreach ($ids as $id) {
+            self::assertSame(self::RFC_TEST_VECTOR_MS, self::embeddedMillis($id));
+        }
+    }
+
+    public function testV7BatchContinuesTheSameCounterSequenceAsIndividualCalls(): void
+    {
+        $before = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+        $batch = HyperUuid::newV7Batch(10, self::RFC_TEST_VECTOR_MS);
+        $after = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+
+        $ids = [(string) $before, ...array_map(fn ($id) => (string) $id, $batch), (string) $after];
+        $sorted = $ids;
+        sort($sorted, SORT_STRING);
+        self::assertSame($sorted, $ids);
+    }
+
+    public function testV7BatchCountZeroReturnsEmptyArray(): void
+    {
+        self::assertSame([], HyperUuid::newV7Batch(0, self::RFC_TEST_VECTOR_MS));
+    }
+
+    public function testV7BatchOverflowTimestampThrows(): void
+    {
+        $this->expectException(TimestampOutOfRangeException::class);
+        HyperUuid::newV7Batch(1, 0x0001_0000_0000_0000);
     }
 
     public function testV7CurrentTimestampIsEmbedded(): void

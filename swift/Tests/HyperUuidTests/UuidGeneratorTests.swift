@@ -72,6 +72,33 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertEqual(seen.count, 100)
     }
 
+    func testV6BatchReturnsCountUuidsSharingTheTimestamp() throws {
+        let ids = try UuidGenerator.newV6Batch(count: 10, unixMillis: rfcTestVectorMs)
+        XCTAssertEqual(ids.count, 10)
+        for id in ids {
+            let timestamp = try UuidGenerator.v6Timestamp(id)
+            XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
+        }
+    }
+
+    func testV6BatchProducesPairwiseDistinctUuids() throws {
+        let ids = try UuidGenerator.newV6Batch(count: 100, unixMillis: rfcTestVectorMs)
+        XCTAssertEqual(Set(ids).count, 100)
+    }
+
+    func testV6BatchCountZeroReturnsEmptyArray() throws {
+        XCTAssertEqual(try UuidGenerator.newV6Batch(count: 0, unixMillis: rfcTestVectorMs), [])
+    }
+
+    func testV6BatchOverflowTimestampThrows() {
+        XCTAssertThrowsError(try UuidGenerator.newV6Batch(count: 1, unixMillis: UInt64.max)) { error in
+            guard case UuidGenerator.Error.timestampOutOfRange = error else {
+                XCTFail("expected timestampOutOfRange, got \(error)")
+                return
+            }
+        }
+    }
+
     func testNilAndMaxUUIDs() {
         XCTAssertEqual(WellKnownUuids.nilUUID.uuidString, "00000000-0000-0000-0000-000000000000")
         XCTAssertEqual(WellKnownUuids.maxUUID.uuidString, "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")
@@ -134,5 +161,37 @@ final class UuidGeneratorTests: XCTestCase {
         let maxMs: UInt64 = 0x0000_FFFF_FFFF_FFFF
         let id = try UuidGenerator.newV7(unixMillis: maxMs)
         XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), maxMs)
+    }
+
+    func testV7BatchReturnsCountUuidsSortedAndSharingTheTimestamp() throws {
+        let ids = try UuidGenerator.newV7Batch(count: 1000, unixMillis: rfcTestVectorMs)
+        XCTAssertEqual(ids.count, 1000)
+        XCTAssertEqual(ids.map(\.uuidString), ids.map(\.uuidString).sorted())
+        for id in ids {
+            let timestamp = try UuidGenerator.v7Timestamp(id)
+            XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
+        }
+    }
+
+    func testV7BatchContinuesTheSameCounterSequenceAsIndividualCalls() throws {
+        let before = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+        let batch = try UuidGenerator.newV7Batch(count: 10, unixMillis: rfcTestVectorMs)
+        let after = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+
+        let ids = [before] + batch + [after]
+        XCTAssertEqual(ids.map(\.uuidString), ids.map(\.uuidString).sorted())
+    }
+
+    func testV7BatchCountZeroReturnsEmptyArray() throws {
+        XCTAssertEqual(try UuidGenerator.newV7Batch(count: 0, unixMillis: rfcTestVectorMs), [])
+    }
+
+    func testV7BatchOverflowTimestampThrows() {
+        XCTAssertThrowsError(try UuidGenerator.newV7Batch(count: 1, unixMillis: 0x0001_0000_0000_0000)) { error in
+            guard case UuidGenerator.Error.timestampOutOfRange = error else {
+                XCTFail("expected timestampOutOfRange, got \(error)")
+                return
+            }
+        }
     }
 }

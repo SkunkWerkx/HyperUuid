@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 
 namespace HyperUuid;
@@ -30,10 +31,24 @@ public static partial class UuidGenerator
     private static unsafe partial ulong uuid_v6_unix_millis(byte* uuidPtr);
 
     [LibraryImport("hyperuuid")]
+    private static unsafe partial int uuid_new_v6_batch(long unixMillis, uint count, byte* outPtr);
+
+    [LibraryImport("hyperuuid")]
     private static unsafe partial int uuid_new_v7(long unixMillis, byte* outPtr);
 
     [LibraryImport("hyperuuid")]
     private static unsafe partial ulong uuid_v7_unix_millis(byte* uuidPtr);
+
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial int uuid_new_v7_batch(long unixMillis, uint count, byte* outPtr);
+
+    // Batch calls marshal through a byte scratch buffer rather than Span<Guid> directly —
+    // Guid's in-memory field layout isn't RFC-byte-order (it's mixed-endian and not
+    // guaranteed stable across runtimes), so each 16-byte chunk still needs the same
+    // `new Guid(chunk, bigEndian: true)` conversion the single-item calls already do.
+    // Fixed-size stackalloc + ArrayPool-above-threshold mirrors GuidV7.Fill in the
+    // SequentialGuid library this crate is ported from.
+    const int BatchStackThresholdBytes = 256;
 
     /// <summary>Well-known namespace UUIDs defined in RFC 9562 Section 6.6.</summary>
     public static class Namespaces
@@ -151,6 +166,78 @@ public static partial class UuidGenerator
     public static DateTimeOffset V6Timestamp(Guid uuid) =>
         DateTimeOffset.FromUnixTimeMilliseconds(V6UnixMillis(uuid));
 
+    /// <summary>
+    /// Fills <paramref name="destination"/> with time-sortable version 6 UUIDs sharing one
+    /// timestamp capture — one native call and one random-bytes fetch instead of
+    /// <paramref name="destination"/>'s length worth of each.
+    /// </summary>
+    public static unsafe void FillV6(Span<Guid> destination, long unixMilliseconds)
+    {
+        if (destination.IsEmpty)
+            return;
+
+        int totalBytes = destination.Length * 16;
+        Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
+        byte[]? rented = null;
+        Span<byte> buf = totalBytes <= BatchStackThresholdBytes
+            ? stackBuf[..totalBytes]
+            : (rented = ArrayPool<byte>.Shared.Rent(totalBytes)).AsSpan(0, totalBytes);
+        try
+        {
+            int rc;
+            fixed (byte* p = buf)
+            {
+                rc = uuid_new_v6_batch(unixMilliseconds, (uint)destination.Length, p);
+            }
+            if (rc != 0)
+            {
+                throw rc switch
+                {
+                    2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
+                        "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field."),
+                    _ => new InvalidOperationException(
+                        $"uuid_new_v6_batch failed with code {rc} (random source failure)."),
+                };
+            }
+            for (int i = 0; i < destination.Length; i++)
+            {
+                destination[i] = new Guid(buf.Slice(i * 16, 16), bigEndian: true);
+            }
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> with time-sortable version 6 UUIDs using the
+    /// current UTC time.
+    /// </summary>
+    public static void FillV6(Span<Guid> destination) =>
+        FillV6(destination, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+    /// <summary>
+    /// Creates an array of <paramref name="count"/> time-sortable version 6 UUIDs sharing one
+    /// timestamp capture. <c>clock_seq</c> and <c>node</c> are randomly generated per item —
+    /// unlike version 7, there is no monotonic counter, so items are not guaranteed to sort
+    /// in creation order.
+    /// </summary>
+    public static Guid[] NewV6Batch(int count, long unixMilliseconds)
+    {
+        var result = new Guid[count];
+        FillV6(result, unixMilliseconds);
+        return result;
+    }
+
+    /// <summary>
+    /// Creates an array of <paramref name="count"/> time-sortable version 6 UUIDs using the
+    /// current UTC time.
+    /// </summary>
+    public static Guid[] NewV6Batch(int count) =>
+        NewV6Batch(count, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
     /// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current UTC time.</summary>
     public static Guid NewV7() => NewV7(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
@@ -204,4 +291,75 @@ public static partial class UuidGenerator
     /// </exception>
     public static DateTimeOffset V7Timestamp(Guid uuid) =>
         DateTimeOffset.FromUnixTimeMilliseconds(V7UnixMillis(uuid));
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> with time-sortable version 7 UUIDs sharing one
+    /// timestamp capture and one contiguous block of the monotonic counter — one native call
+    /// and one random-bytes fetch instead of <paramref name="destination"/>'s length worth of
+    /// each.
+    /// </summary>
+    public static unsafe void FillV7(Span<Guid> destination, long unixMilliseconds)
+    {
+        if (destination.IsEmpty)
+            return;
+
+        int totalBytes = destination.Length * 16;
+        Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
+        byte[]? rented = null;
+        Span<byte> buf = totalBytes <= BatchStackThresholdBytes
+            ? stackBuf[..totalBytes]
+            : (rented = ArrayPool<byte>.Shared.Rent(totalBytes)).AsSpan(0, totalBytes);
+        try
+        {
+            int rc;
+            fixed (byte* p = buf)
+            {
+                rc = uuid_new_v7_batch(unixMilliseconds, (uint)destination.Length, p);
+            }
+            if (rc != 0)
+            {
+                throw rc switch
+                {
+                    2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
+                        "Unix millisecond timestamp must be non-negative and fit within 48 bits."),
+                    _ => new InvalidOperationException(
+                        $"uuid_new_v7_batch failed with code {rc} (random source failure)."),
+                };
+            }
+            for (int i = 0; i < destination.Length; i++)
+            {
+                destination[i] = new Guid(buf.Slice(i * 16, 16), bigEndian: true);
+            }
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> with time-sortable version 7 UUIDs using the
+    /// current UTC time.
+    /// </summary>
+    public static void FillV7(Span<Guid> destination) =>
+        FillV7(destination, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+    /// <summary>
+    /// Creates an array of <paramref name="count"/> time-sortable version 7 UUIDs sharing one
+    /// timestamp capture.
+    /// </summary>
+    public static Guid[] NewV7Batch(int count, long unixMilliseconds)
+    {
+        var result = new Guid[count];
+        FillV7(result, unixMilliseconds);
+        return result;
+    }
+
+    /// <summary>
+    /// Creates an array of <paramref name="count"/> time-sortable version 7 UUIDs using the
+    /// current UTC time.
+    /// </summary>
+    public static Guid[] NewV7Batch(int count) =>
+        NewV7Batch(count, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 }

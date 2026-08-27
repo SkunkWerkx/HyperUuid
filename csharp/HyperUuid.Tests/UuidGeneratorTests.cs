@@ -93,6 +93,36 @@ public sealed class UuidGeneratorTests
     }
 
     [Fact]
+    public void V6Batch_ReturnsCountUuidsSharingTheTimestamp()
+    {
+        var ids = UuidGenerator.NewV6Batch(10, RfcTestVectorMs);
+        ids.Length.ShouldBe(10);
+        foreach (var id in ids)
+        {
+            UuidGenerator.V6Timestamp(id).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
+        }
+    }
+
+    [Fact]
+    public void V6Batch_ProducesPairwiseDistinctUuids()
+    {
+        var ids = UuidGenerator.NewV6Batch(100, RfcTestVectorMs);
+        ids.ToHashSet().Count.ShouldBe(100);
+    }
+
+    [Fact]
+    public void V6Batch_CountZeroReturnsEmptyArray()
+    {
+        UuidGenerator.NewV6Batch(0, RfcTestVectorMs).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void V6Batch_OverflowTimestampThrows()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV6Batch(1, long.MaxValue));
+    }
+
+    [Fact]
     public void Nil_IsAllZeroBytes()
     {
         UuidGenerator.Nil.ShouldBe(Guid.Empty);
@@ -180,5 +210,51 @@ public sealed class UuidGeneratorTests
         // A legitimate RFC 9562 v7 UUID can embed a timestamp DateTimeOffset can't hold.
         var id = UuidGenerator.NewV7(0x0000_FFFF_FFFF_FFFFL);
         Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.V7Timestamp(id));
+    }
+
+    [Fact]
+    public void V7Batch_ReturnsCountUuidsSortedAndSharingTheTimestamp()
+    {
+        var ids = UuidGenerator.NewV7Batch(1000, RfcTestVectorMs);
+        ids.Length.ShouldBe(1000);
+        var sorted = ids.OrderBy(x => x).ToArray();
+        sorted.ShouldBe(ids, ignoreOrder: false);
+        foreach (var id in ids)
+        {
+            UuidGenerator.V7Timestamp(id).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
+        }
+    }
+
+    [Fact]
+    public void V7Batch_ContinuesTheSameCounterSequenceAsIndividualCalls()
+    {
+        var before = UuidGenerator.NewV7(RfcTestVectorMs);
+        var batch = UuidGenerator.NewV7Batch(10, RfcTestVectorMs);
+        var after = UuidGenerator.NewV7(RfcTestVectorMs);
+
+        var ids = new[] { before }.Concat(batch).Append(after).ToArray();
+        var sorted = ids.OrderBy(x => x).ToArray();
+        sorted.ShouldBe(ids, ignoreOrder: false);
+    }
+
+    [Fact]
+    public void V7Batch_CountZeroReturnsEmptyArray()
+    {
+        UuidGenerator.NewV7Batch(0, RfcTestVectorMs).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void V7Batch_OverflowTimestampThrows()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7Batch(1, 0x0001_0000_0000_0000L));
+    }
+
+    [Fact]
+    public void V7Batch_AboveStackThresholdUsesArrayPool()
+    {
+        // BatchStackThresholdBytes is 256 (16 items); this exercises the ArrayPool fallback path.
+        var ids = UuidGenerator.NewV7Batch(50, RfcTestVectorMs);
+        ids.Length.ShouldBe(50);
+        ids.ToHashSet().Count.ShouldBe(50);
     }
 }

@@ -21,6 +21,9 @@ Returns Foundation's `UUID`. `Namespaces.dns`/`url`/`oid`/`x500` are RFC 9562
 Section 6.6's well-known namespaces; `WellKnownUuids.nilUUID`/`maxUUID` are the
 §5.9/§5.10 special values. `UuidGenerator.v6Timestamp(_:)`/`v7Timestamp(_:)` recover
 the embedded UTC `Date` from a version 6 or 7 UUID respectively.
+`UuidGenerator.newV6Batch(count:unixMillis:)`/`newV7Batch(count:unixMillis:)` generate
+`count` UUIDs sharing one timestamp capture and one native call, instead of `count`
+of each.
 
 Not yet published to the Swift Package Registry under a registered `SkunkWerkx`
 presence — for now this is proven by CI building and testing the native core plus

@@ -83,6 +83,31 @@ RSpec.describe HyperUuid do
     end
   end
 
+  describe ".new_v6_batch" do
+    it "returns count UUIDs sharing the given timestamp" do
+      ids = described_class.new_v6_batch(10, RFC_TEST_VECTOR_MS)
+      expect(ids.size).to eq(10)
+      ids.each do |id|
+        expect(id.version).to eq(6)
+        expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
+      end
+    end
+
+    it "produces pairwise-distinct UUIDs" do
+      ids = described_class.new_v6_batch(100, RFC_TEST_VECTOR_MS)
+      expect(ids.uniq.size).to eq(100)
+    end
+
+    it "returns an empty array for count zero" do
+      expect(described_class.new_v6_batch(0, RFC_TEST_VECTOR_MS)).to eq([])
+    end
+
+    it "raises on an out-of-range timestamp" do
+      expect { described_class.new_v6_batch(1, 0xFFFF_FFFF_FFFF_FFFF) }
+        .to raise_error(HyperUuid::Runtime::TimestampOutOfRangeError)
+    end
+  end
+
   describe ".new_v7" do
     it "embeds the given timestamp" do
       id = described_class.new_v7(RFC_TEST_VECTOR_MS)
@@ -113,6 +138,33 @@ RSpec.describe HyperUuid do
 
       embedded_ms = id.bytes[0, 6].bytes.reduce(0) { |acc, b| (acc << 8) | b }
       expect(embedded_ms).to be_between(before, after)
+    end
+  end
+
+  describe ".new_v7_batch" do
+    it "returns count UUIDs sharing the given timestamp, sorted" do
+      ids = described_class.new_v7_batch(1000, RFC_TEST_VECTOR_MS)
+      expect(ids.size).to eq(1000)
+      expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
+      ids.each { |id| expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc) }
+    end
+
+    it "continues the same counter sequence as individual calls" do
+      before = described_class.new_v7(RFC_TEST_VECTOR_MS)
+      batch = described_class.new_v7_batch(10, RFC_TEST_VECTOR_MS)
+      after = described_class.new_v7(RFC_TEST_VECTOR_MS)
+
+      ids = [before, *batch, after]
+      expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
+    end
+
+    it "returns an empty array for count zero" do
+      expect(described_class.new_v7_batch(0, RFC_TEST_VECTOR_MS)).to eq([])
+    end
+
+    it "raises on an out-of-range timestamp" do
+      expect { described_class.new_v7_batch(1, 0x0001_0000_0000_0000) }
+        .to raise_error(HyperUuid::Runtime::TimestampOutOfRangeError)
     end
   end
 

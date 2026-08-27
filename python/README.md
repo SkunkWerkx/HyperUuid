@@ -28,4 +28,6 @@ UTC `datetime.datetime` from a version 7 UUID (raises `OverflowError` past year
 9999 — the RFC's 48-bit field holds values up to year 10889, but
 `datetime.datetime` cannot); `hyperuuid.v6_timestamp(id)` does the same for version
 6, and can never raise that way — v6's 60-bit tick count, offset from the 1582 UUID
-epoch, tops out around the year 5236.
+epoch, tops out around the year 5236. `hyperuuid.new_v6_batch(count)`/
+`new_v7_batch(count)` generate `count` UUIDs sharing one timestamp capture and one
+native call, instead of `count` of each.

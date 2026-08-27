@@ -47,6 +47,23 @@ final class HyperUuid
     }
 
     /**
+     * Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI
+     * call and one random-bytes fetch instead of `count` of each. Defaults to the current time.
+     *
+     * @return list<Uuid>
+     */
+    public static function newV6Batch(int $count, ?int $unixMillis = null): array
+    {
+        $unixMillis ??= (int) round(microtime(true) * 1000);
+        $bytes = Runtime::newV6Batch($count, $unixMillis);
+        $ids = [];
+        for ($i = 0; $i < $count; $i++) {
+            $ids[] = new Uuid(substr($bytes, $i * 16, 16));
+        }
+        return $ids;
+    }
+
+    /**
      * Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time;
      * pass an explicit Unix-epoch millisecond timestamp (non-negative, fitting in 48 bits)
      * to embed a specific time instead.
@@ -55,5 +72,23 @@ final class HyperUuid
     {
         $unixMillis ??= (int) round(microtime(true) * 1000);
         return new Uuid(Runtime::newV7($unixMillis));
+    }
+
+    /**
+     * Creates `count` time-sortable version 7 UUIDs sharing one timestamp capture and one
+     * contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
+     * instead of `count` of each. Defaults to the current time.
+     *
+     * @return list<Uuid>
+     */
+    public static function newV7Batch(int $count, ?int $unixMillis = null): array
+    {
+        $unixMillis ??= (int) round(microtime(true) * 1000);
+        $bytes = Runtime::newV7Batch($count, $unixMillis);
+        $ids = [];
+        for ($i = 0; $i < $count; $i++) {
+            $ids[] = new Uuid(substr($bytes, $i * 16, 16));
+        }
+        return $ids;
     }
 }

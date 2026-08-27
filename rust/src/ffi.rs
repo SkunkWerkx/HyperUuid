@@ -75,6 +75,27 @@ pub extern "C" fn uuid_v6_unix_millis(uuid_ptr: *const u8) -> u64 {
     v6::unix_millis(&Uuid::from_bytes(bytes))
 }
 
+/// Writes `count` time-sortable UUID version 6 values to `out_ptr` (`count * 16` bytes),
+/// sharing one `unix_millis` timestamp capture. `clock_seq` and `node` are randomly
+/// generated per item. A `count` of 0 is a no-op success.
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
+#[unsafe(no_mangle)]
+pub extern "C" fn uuid_new_v6_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32 {
+    // count == 0 never touches out_ptr — some callers reasonably pass null/dangling for an
+    // empty batch, and `slice::from_raw_parts_mut` requires non-null even for a 0-length slice.
+    let out: &mut [u8] = if count == 0 {
+        &mut []
+    } else {
+        // SAFETY: caller guarantees `out_ptr` points to a live `count * 16`-byte allocation.
+        unsafe { slice::from_raw_parts_mut(out_ptr, count as usize * 16) }
+    };
+    match v6::new_v6_batch(unix_millis, count, out) {
+        Ok(()) => 0,
+        Err(v6::NewV6Error::Random(_)) => 1,
+        Err(v6::NewV6Error::TimestampOutOfRange) => 2,
+    }
+}
+
 /// Writes a time-sortable UUID version 7 (RFC 9562 §6.2) to `out_ptr` (16 bytes), embedding
 /// `unix_millis` (milliseconds since the Unix epoch, supplied by the host — the guest has
 /// no clock of its own).
@@ -102,4 +123,25 @@ pub extern "C" fn uuid_v7_unix_millis(uuid_ptr: *const u8) -> u64 {
         .try_into()
         .unwrap();
     v7::unix_millis(&Uuid::from_bytes(bytes))
+}
+
+/// Writes `count` time-sortable UUID version 7 values to `out_ptr` (`count * 16` bytes),
+/// sharing one `unix_millis` timestamp capture and one contiguous block of the monotonic
+/// counter. A `count` of 0 is a no-op success.
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
+#[unsafe(no_mangle)]
+pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32 {
+    // count == 0 never touches out_ptr — some callers reasonably pass null/dangling for an
+    // empty batch, and `slice::from_raw_parts_mut` requires non-null even for a 0-length slice.
+    let out: &mut [u8] = if count == 0 {
+        &mut []
+    } else {
+        // SAFETY: caller guarantees `out_ptr` points to a live `count * 16`-byte allocation.
+        unsafe { slice::from_raw_parts_mut(out_ptr, count as usize * 16) }
+    };
+    match v7::new_v7_batch(unix_millis, count, out) {
+        Ok(()) => 0,
+        Err(v7::NewV7Error::Random(_)) => 1,
+        Err(v7::NewV7Error::TimestampOutOfRange) => 2,
+    }
 }

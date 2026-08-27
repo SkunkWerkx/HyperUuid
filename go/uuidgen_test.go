@@ -142,6 +142,59 @@ func TestV6IsNonDeterministicWithinTheSameMillisecond(t *testing.T) {
 	}
 }
 
+func TestV6BatchReturnsCountUuidsSharingTheTimestamp(t *testing.T) {
+	ids, err := NewV6BatchAt(10, rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 10 {
+		t.Fatalf("got %d ids, want 10", len(ids))
+	}
+	for _, id := range ids {
+		if id.Version() != 6 {
+			t.Errorf("version = %d, want 6", id.Version())
+		}
+		got, err := V6Timestamp(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := time.UnixMilli(int64(rfcTestVectorMs)).UTC(); !got.Equal(want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestV6BatchProducesPairwiseDistinctUuids(t *testing.T) {
+	ids, err := NewV6BatchAt(100, rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[uuid.UUID]struct{}, 100)
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	if len(seen) != 100 {
+		t.Errorf("got %d distinct UUIDs, want 100", len(seen))
+	}
+}
+
+func TestV6BatchCountZeroReturnsNil(t *testing.T) {
+	ids, err := NewV6BatchAt(0, rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("got %d ids, want 0", len(ids))
+	}
+}
+
+func TestV6BatchOverflowTimestampErrors(t *testing.T) {
+	_, err := NewV6BatchAt(1, 0xFFFF_FFFF_FFFF_FFFF)
+	if !errors.Is(err, ErrTimestampOutOfRange) {
+		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
+	}
+}
+
 func TestNilAndMax(t *testing.T) {
 	if Nil.String() != "00000000-0000-0000-0000-000000000000" {
 		t.Errorf("Nil = %s, want all zeros", Nil)
@@ -247,5 +300,69 @@ func TestV7TimestampRoundTripsZeroAndTheRfc48BitMax(t *testing.T) {
 	}
 	if uint64(got.UnixMilli()) != maxMs {
 		t.Errorf("got %d ms, want %d", got.UnixMilli(), maxMs)
+	}
+}
+
+func TestV7BatchReturnsCountUuidsSortedAndSharingTheTimestamp(t *testing.T) {
+	ids, err := NewV7BatchAt(1000, rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1000 {
+		t.Fatalf("got %d ids, want 1000", len(ids))
+	}
+	for i := 1; i < len(ids); i++ {
+		if ids[i-1].String() > ids[i].String() {
+			t.Errorf("ids[%d]=%s > ids[%d]=%s, want non-decreasing", i-1, ids[i-1], i, ids[i])
+		}
+	}
+	for _, id := range ids {
+		got, err := V7Timestamp(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := time.UnixMilli(int64(rfcTestVectorMs)).UTC(); !got.Equal(want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestV7BatchContinuesTheSameCounterSequenceAsIndividualCalls(t *testing.T) {
+	before, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := NewV7BatchAt(10, rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := append([]uuid.UUID{before}, batch...)
+	ids = append(ids, after)
+	for i := 1; i < len(ids); i++ {
+		if ids[i-1].String() > ids[i].String() {
+			t.Errorf("ids[%d]=%s > ids[%d]=%s, want non-decreasing", i-1, ids[i-1], i, ids[i])
+		}
+	}
+}
+
+func TestV7BatchCountZeroReturnsNil(t *testing.T) {
+	ids, err := NewV7BatchAt(0, rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("got %d ids, want 0", len(ids))
+	}
+}
+
+func TestV7BatchOverflowTimestampErrors(t *testing.T) {
+	_, err := NewV7BatchAt(1, 0x0001_0000_0000_0000)
+	if !errors.Is(err, ErrTimestampOutOfRange) {
+		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
 	}
 }
