@@ -23,7 +23,9 @@ __all__ = [
     "new_v4",
     "new_v5",
     "new_v6",
+    "new_v6_batch",
     "new_v7",
+    "new_v7_batch",
     "v6_timestamp",
     "v7_timestamp",
     "NIL",
@@ -81,6 +83,18 @@ def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     return epoch + datetime.timedelta(milliseconds=millis)
 
 
+def new_v6_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]:
+    """Create ``count`` time-sortable version 6 UUIDs sharing one timestamp capture — one
+    native call and one random-bytes fetch instead of ``count`` of each.
+
+    Defaults to the current time.
+    """
+    if unix_millis is None:
+        unix_millis = int(time.time() * 1000)
+    raw = _runtime.new_v6_batch(count, unix_millis)
+    return [_uuid.UUID(bytes=raw[i * 16 : i * 16 + 16]) for i in range(count)]
+
+
 def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
     """Create a time-sortable UUID version 7 (RFC 9562 §6.2).
 
@@ -109,3 +123,16 @@ def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     millis = _runtime.v7_unix_millis(uuid_value.bytes)
     epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
     return epoch + datetime.timedelta(milliseconds=millis)
+
+
+def new_v7_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]:
+    """Create ``count`` time-sortable version 7 UUIDs sharing one timestamp capture and one
+    contiguous block of the monotonic counter — one native call and one random-bytes fetch
+    instead of ``count`` of each.
+
+    Defaults to the current time.
+    """
+    if unix_millis is None:
+        unix_millis = int(time.time() * 1000)
+    raw = _runtime.new_v7_batch(count, unix_millis)
+    return [_uuid.UUID(bytes=raw[i * 16 : i * 16 + 16]) for i in range(count)]

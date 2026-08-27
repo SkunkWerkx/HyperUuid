@@ -45,8 +45,10 @@ var (
 	uuidNewV5        func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
 	uuidNewV6        func(unixMillis uint64, out unsafe.Pointer) int32
 	uuidV6UnixMillis func(uuid unsafe.Pointer) uint64
+	uuidNewV6Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
 	uuidNewV7        func(unixMillis uint64, out unsafe.Pointer) int32
 	uuidV7UnixMillis func(uuid unsafe.Pointer) uint64
+	uuidNewV7Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
 )
 
 // ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
@@ -97,8 +99,10 @@ func ensureLoaded() error {
 		purego.RegisterLibFunc(&uuidNewV5, handle, "uuid_new_v5")
 		purego.RegisterLibFunc(&uuidNewV6, handle, "uuid_new_v6")
 		purego.RegisterLibFunc(&uuidV6UnixMillis, handle, "uuid_v6_unix_millis")
+		purego.RegisterLibFunc(&uuidNewV6Batch, handle, "uuid_new_v6_batch")
 		purego.RegisterLibFunc(&uuidNewV7, handle, "uuid_new_v7")
 		purego.RegisterLibFunc(&uuidV7UnixMillis, handle, "uuid_v7_unix_millis")
+		purego.RegisterLibFunc(&uuidNewV7Batch, handle, "uuid_new_v7_batch")
 	})
 	return initErr
 }
@@ -163,6 +167,39 @@ func NewV6At(unixMillis uint64) (uuid.UUID, error) {
 	}
 }
 
+// NewV6Batch creates count time-sortable version 6 UUIDs sharing one timestamp capture,
+// using the current time — one native call and one random-bytes fetch instead of count of
+// each.
+func NewV6Batch(count int) ([]uuid.UUID, error) {
+	return NewV6BatchAt(count, uint64(time.Now().UnixMilli()))
+}
+
+// NewV6BatchAt creates count time-sortable version 6 UUIDs sharing one unixMillis timestamp
+// capture. clock_seq and node are independently random per item — unlike version 7, there is
+// no monotonic counter, so items are not guaranteed to sort in creation order.
+func NewV6BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
+	if err := ensureLoaded(); err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	buf := make([]byte, count*16)
+	switch rc := uuidNewV6Batch(unixMillis, uint32(count), unsafe.Pointer(&buf[0])); rc {
+	case 0:
+		// fall through to conversion below
+	case 2:
+		return nil, fmt.Errorf("uuid_new_v6_batch failed with code %d: %w", rc, ErrTimestampOutOfRange)
+	default:
+		return nil, fmt.Errorf("uuid_new_v6_batch failed with code %d: %w", rc, ErrRandomSource)
+	}
+	result := make([]uuid.UUID, count)
+	for i := range result {
+		copy(result[i][:], buf[i*16:(i+1)*16])
+	}
+	return result, nil
+}
+
 // V6UnixMillis recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's
 // timestamp field. Only meaningful when id.Version() == 6 — the RFC 9562 bit layout doesn't
 // distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp", so the caller is
@@ -223,4 +260,36 @@ func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 	default:
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v7 failed with code %d: %w", rc, ErrRandomSource)
 	}
+}
+
+// NewV7Batch creates count time-sortable version 7 UUIDs sharing one timestamp capture and
+// one contiguous block of the monotonic counter, using the current time — one native call and
+// one random-bytes fetch instead of count of each.
+func NewV7Batch(count int) ([]uuid.UUID, error) {
+	return NewV7BatchAt(count, uint64(time.Now().UnixMilli()))
+}
+
+// NewV7BatchAt creates count time-sortable version 7 UUIDs sharing one unixMillis timestamp
+// capture and one contiguous block of the monotonic counter.
+func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
+	if err := ensureLoaded(); err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	buf := make([]byte, count*16)
+	switch rc := uuidNewV7Batch(unixMillis, uint32(count), unsafe.Pointer(&buf[0])); rc {
+	case 0:
+		// fall through to conversion below
+	case 2:
+		return nil, fmt.Errorf("uuid_new_v7_batch failed with code %d: %w", rc, ErrTimestampOutOfRange)
+	default:
+		return nil, fmt.Errorf("uuid_new_v7_batch failed with code %d: %w", rc, ErrRandomSource)
+	}
+	result := make([]uuid.UUID, count)
+	for i := range result {
+		copy(result[i][:], buf[i*16:(i+1)*16])
+	}
+	return result, nil
 }

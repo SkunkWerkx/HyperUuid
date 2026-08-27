@@ -87,6 +87,29 @@ def test_v6_current_timestamp_is_embedded():
     assert before <= embedded_ms <= after
 
 
+def test_v6_batch_returns_count_uuids_sharing_the_timestamp():
+    ids = hyperuuid.new_v6_batch(10, RFC_TEST_VECTOR_MS)
+    assert len(ids) == 10
+    expected = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
+    for id_ in ids:
+        assert id_.version == 6
+        assert hyperuuid.v6_timestamp(id_) == expected
+
+
+def test_v6_batch_produces_pairwise_distinct_uuids():
+    ids = hyperuuid.new_v6_batch(100, RFC_TEST_VECTOR_MS)
+    assert len(set(ids)) == 100
+
+
+def test_v6_batch_count_zero_returns_empty_list():
+    assert hyperuuid.new_v6_batch(0, RFC_TEST_VECTOR_MS) == []
+
+
+def test_v6_batch_overflow_timestamp_raises():
+    with pytest.raises(ValueError):
+        hyperuuid.new_v6_batch(1, 0xFFFF_FFFF_FFFF_FFFF)
+
+
 def test_nil_is_all_zero_bytes():
     assert hyperuuid.NIL.bytes == bytes(16)
     assert str(hyperuuid.NIL) == "00000000-0000-0000-0000-000000000000"
@@ -149,3 +172,30 @@ def test_v7_timestamp_raises_past_datetime_year_range():
     id_ = hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)
     with pytest.raises(OverflowError):
         hyperuuid.v7_timestamp(id_)
+
+
+def test_v7_batch_returns_count_uuids_sorted_and_sharing_the_timestamp():
+    ids = hyperuuid.new_v7_batch(1000, RFC_TEST_VECTOR_MS)
+    assert len(ids) == 1000
+    assert ids == sorted(ids)
+    for id_ in ids:
+        embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
+        assert embedded_ms == RFC_TEST_VECTOR_MS
+
+
+def test_v7_batch_continues_the_same_counter_sequence_as_individual_calls():
+    before = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    batch = hyperuuid.new_v7_batch(10, RFC_TEST_VECTOR_MS)
+    after = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+
+    ids = [before, *batch, after]
+    assert ids == sorted(ids)
+
+
+def test_v7_batch_count_zero_returns_empty_list():
+    assert hyperuuid.new_v7_batch(0, RFC_TEST_VECTOR_MS) == []
+
+
+def test_v7_batch_overflow_timestamp_raises():
+    with pytest.raises(ValueError):
+        hyperuuid.new_v7_batch(1, 0x0001_0000_0000_0000)

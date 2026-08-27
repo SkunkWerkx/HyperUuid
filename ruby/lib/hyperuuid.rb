@@ -41,11 +41,28 @@ module HyperUuid
     Uuid.new(Runtime.new_v6(unix_millis))
   end
 
+  # Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI call
+  # and one random-bytes fetch instead of `count` of each. Defaults to the current time.
+  def self.new_v6_batch(count, unix_millis = nil)
+    unix_millis ||= (Time.now.to_r * 1000).to_i
+    bytes = Runtime.new_v6_batch(count, unix_millis)
+    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
+  end
+
   # Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time; pass
   # an explicit Unix-epoch millisecond timestamp (non-negative, fitting in 48 bits) to embed a
   # specific time instead.
   def self.new_v7(unix_millis = nil)
     unix_millis ||= (Time.now.to_r * 1000).to_i
     Uuid.new(Runtime.new_v7(unix_millis))
+  end
+
+  # Creates `count` time-sortable version 7 UUIDs sharing one timestamp capture and one
+  # contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
+  # instead of `count` of each. Defaults to the current time.
+  def self.new_v7_batch(count, unix_millis = nil)
+    unix_millis ||= (Time.now.to_r * 1000).to_i
+    bytes = Runtime.new_v7_batch(count, unix_millis)
+    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
   end
 end

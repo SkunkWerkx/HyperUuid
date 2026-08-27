@@ -72,6 +72,50 @@ pub fn new_v6(unix_millis: u64) -> Result<Uuid, NewV6Error> {
     Ok(uuid)
 }
 
+/// Creates `count` time-sortable UUID version 6 values sharing one Unix-epoch millisecond
+/// timestamp capture, writing 16 bytes each into consecutive slots of `out` (which must be
+/// exactly `count * 16` bytes long). `clock_seq` and `node` are independently random per
+/// item, same as [`new_v6`] — there's no shared counter state to batch here, just one
+/// `getrandom` call for the whole batch's random bytes instead of `count` separate ones,
+/// the only allocating path in this crate (the scratch buffer is sized by `count`). A
+/// `count` of 0 is a no-op success. Same errors as [`new_v6`].
+pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), NewV6Error> {
+    let ticks_since_epoch = unix_millis
+        .checked_mul(10_000)
+        .and_then(|v| v.checked_add(GREGORIAN_OFFSET_100NS))
+        .filter(|&v| v <= MAX_60_BIT)
+        .ok_or(NewV6Error::TimestampOutOfRange)?;
+    if count == 0 {
+        return Ok(());
+    }
+
+    let time_high = (ticks_since_epoch >> 28) as u32;
+    let time_mid = ((ticks_since_epoch >> 12) & 0xFFFF) as u16;
+    // Top nibble is always 0 (12-bit value in a 16-bit field), so `item[6] |= 0x60` below is
+    // a safe way to write the version nibble without first masking it off.
+    let time_low = (ticks_since_epoch & 0x0FFF) as u16;
+
+    let mut rand_bytes = vec![0u8; count as usize * 8];
+    getrandom::fill(&mut rand_bytes).map_err(NewV6Error::Random)?;
+
+    for i in 0..count as usize {
+        let item = &mut out[i * 16..(i + 1) * 16];
+
+        item[0..4].copy_from_slice(&time_high.to_be_bytes());
+        item[4..6].copy_from_slice(&time_mid.to_be_bytes());
+        item[6..8].copy_from_slice(&time_low.to_be_bytes());
+        item[6] |= 0x60;
+
+        let r = &rand_bytes[i * 8..(i + 1) * 8];
+        item[8] = 0x80 | (r[0] & 0x3F);
+        item[9] = r[1];
+        item[10..16].copy_from_slice(&r[2..8]);
+        item[10] |= 0x01;
+    }
+
+    Ok(())
+}
+
 /// Extracts the Unix-epoch millisecond timestamp embedded in a version 6 UUID. Saturates to
 /// 0 for a (legitimately RFC-valid) pre-1970 Gregorian timestamp, matching this module's
 /// Unix-millisecond-only API surface.

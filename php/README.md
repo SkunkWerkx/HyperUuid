@@ -23,7 +23,8 @@ Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
 `ramsey/uuid`. `Namespaces::dns()`/`url()`/`oid()`/`x500()` are RFC 9562 Section 6.6's
 well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from a
 version 6 or 7 UUID. `Uuid::nil()`/`Uuid::max()` are the RFC 9562 §5.9/§5.10 special-value
-UUIDs.
+UUIDs. `HyperUuid::newV6Batch(count)`/`newV7Batch(count)` generate `count` UUIDs sharing one
+timestamp capture and one native call, instead of `count` of each.
 
 Requires `ext-ffi` enabled (built into PHP by default when compiled `--with-ffi`; check with
 `php -m | grep -i ffi`). PHP's CLI SAPI runs FFI unrestricted regardless of the `ffi.enable`

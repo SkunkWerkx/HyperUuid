@@ -28,8 +28,10 @@ public enum UuidGenerator {
     ) -> Int32
     private typealias UuidNewV6Fn = @convention(c) (UInt64, UnsafeMutablePointer<UInt8>?) -> Int32
     private typealias UuidV6UnixMillisFn = @convention(c) (UnsafePointer<UInt8>?) -> UInt64
+    private typealias UuidNewV6BatchFn = @convention(c) (UInt64, UInt32, UnsafeMutablePointer<UInt8>?) -> Int32
     private typealias UuidNewV7Fn = @convention(c) (UInt64, UnsafeMutablePointer<UInt8>?) -> Int32
     private typealias UuidV7UnixMillisFn = @convention(c) (UnsafePointer<UInt8>?) -> UInt64
+    private typealias UuidNewV7BatchFn = @convention(c) (UInt64, UInt32, UnsafeMutablePointer<UInt8>?) -> Int32
 
     private struct LoadedLibrary {
         let library: DynamicLibrary
@@ -37,8 +39,10 @@ public enum UuidGenerator {
         let newV5: UuidNewV5Fn
         let newV6: UuidNewV6Fn
         let v6UnixMillis: UuidV6UnixMillisFn
+        let newV6Batch: UuidNewV6BatchFn
         let newV7: UuidNewV7Fn
         let v7UnixMillis: UuidV7UnixMillisFn
+        let newV7Batch: UuidNewV7BatchFn
     }
 
     // Swift initializes `static let`s lazily and exactly once, thread-safely — the same
@@ -55,13 +59,17 @@ public enum UuidGenerator {
         let newV6 = unsafeBitCast(try library.symbol("uuid_new_v6"), to: UuidNewV6Fn.self)
         let v6UnixMillis = unsafeBitCast(
             try library.symbol("uuid_v6_unix_millis"), to: UuidV6UnixMillisFn.self)
+        let newV6Batch = unsafeBitCast(
+            try library.symbol("uuid_new_v6_batch"), to: UuidNewV6BatchFn.self)
         let newV7 = unsafeBitCast(try library.symbol("uuid_new_v7"), to: UuidNewV7Fn.self)
         let v7UnixMillis = unsafeBitCast(
             try library.symbol("uuid_v7_unix_millis"), to: UuidV7UnixMillisFn.self)
+        let newV7Batch = unsafeBitCast(
+            try library.symbol("uuid_new_v7_batch"), to: UuidNewV7BatchFn.self)
         return LoadedLibrary(
             library: library, newV4: newV4, newV5: newV5,
-            newV6: newV6, v6UnixMillis: v6UnixMillis,
-            newV7: newV7, v7UnixMillis: v7UnixMillis)
+            newV6: newV6, v6UnixMillis: v6UnixMillis, newV6Batch: newV6Batch,
+            newV7: newV7, v7UnixMillis: v7UnixMillis, newV7Batch: newV7Batch)
     }
 
     private static func loaded() throws -> LoadedLibrary {
@@ -169,6 +177,28 @@ public enum UuidGenerator {
         Date(timeIntervalSince1970: Double(try v6UnixMillis(uuid)) / 1000)
     }
 
+    /// Creates `count` time-sortable version 6 UUIDs sharing one Unix-epoch millisecond
+    /// timestamp capture — one native call and one random-bytes fetch instead of `count` of
+    /// each. `clock_seq` and `node` are independently random per item.
+    public static func newV6Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
+        guard count > 0 else { return [] }
+        let l = try loaded()
+        var out = [UInt8](repeating: 0, count: count * 16)
+        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
+            l.newV6Batch(unixMillis, UInt32(count), outBuf.baseAddress)
+        }
+        switch rc {
+        case 0: return (0..<count).map { UUID(rfcBytes: Array(out[($0 * 16)..<($0 * 16 + 16)])) }
+        case 2: throw Error.timestampOutOfRange
+        default: throw Error.randomSourceFailure(code: rc)
+        }
+    }
+
+    /// Creates `count` time-sortable version 6 UUIDs sharing the current time.
+    public static func newV6Batch(count: Int) throws -> [UUID] {
+        try newV6Batch(count: count, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+    }
+
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond
     /// timestamp.
     public static func newV7(unixMillis: UInt64) throws -> UUID {
@@ -202,5 +232,27 @@ public enum UuidGenerator {
     /// Recovers the UTC timestamp embedded in a version 7 UUID as a `Date`.
     public static func v7Timestamp(_ uuid: UUID) throws -> Date {
         Date(timeIntervalSince1970: Double(try v7UnixMillis(uuid)) / 1000)
+    }
+
+    /// Creates `count` time-sortable version 7 UUIDs sharing one Unix-epoch millisecond
+    /// timestamp capture and one contiguous block of the monotonic counter — one native call
+    /// and one random-bytes fetch instead of `count` of each.
+    public static func newV7Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
+        guard count > 0 else { return [] }
+        let l = try loaded()
+        var out = [UInt8](repeating: 0, count: count * 16)
+        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
+            l.newV7Batch(unixMillis, UInt32(count), outBuf.baseAddress)
+        }
+        switch rc {
+        case 0: return (0..<count).map { UUID(rfcBytes: Array(out[($0 * 16)..<($0 * 16 + 16)])) }
+        case 2: throw Error.timestampOutOfRange
+        default: throw Error.randomSourceFailure(code: rc)
+        }
+    }
+
+    /// Creates `count` time-sortable version 7 UUIDs sharing the current time.
+    public static func newV7Batch(count: Int) throws -> [UUID] {
+        try newV7Batch(count: count, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
     }
 }

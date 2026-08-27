@@ -29,10 +29,14 @@ def _load() -> ctypes.CDLL:
     lib.uuid_new_v6.restype = ctypes.c_int32
     lib.uuid_v6_unix_millis.argtypes = [ctypes.c_void_p]
     lib.uuid_v6_unix_millis.restype = ctypes.c_uint64
+    lib.uuid_new_v6_batch.argtypes = [ctypes.c_uint64, ctypes.c_uint32, ctypes.c_void_p]
+    lib.uuid_new_v6_batch.restype = ctypes.c_int32
     lib.uuid_new_v7.argtypes = [ctypes.c_uint64, ctypes.c_void_p]
     lib.uuid_new_v7.restype = ctypes.c_int32
     lib.uuid_v7_unix_millis.argtypes = [ctypes.c_void_p]
     lib.uuid_v7_unix_millis.restype = ctypes.c_uint64
+    lib.uuid_new_v7_batch.argtypes = [ctypes.c_uint64, ctypes.c_uint32, ctypes.c_void_p]
+    lib.uuid_new_v7_batch.restype = ctypes.c_int32
     return lib
 
 
@@ -85,6 +89,19 @@ def v6_unix_millis(uuid_bytes: bytes) -> int:
     return lib.uuid_v6_unix_millis(ctypes.byref(buf))
 
 
+def new_v6_batch(count: int, unix_millis: int) -> bytes:
+    lib = _get_lib()
+    if count == 0:
+        return b""
+    out = (ctypes.c_ubyte * (count * 16))()
+    rc = lib.uuid_new_v6_batch(unix_millis, count, ctypes.byref(out))
+    if rc == 2:
+        raise ValueError("unix_millis does not fit the 60-bit v6 timestamp field")
+    if rc != 0:
+        raise RuntimeError(f"uuid_new_v6_batch failed with code {rc} (random source failure)")
+    return bytes(out)
+
+
 def new_v7(unix_millis: int) -> bytes:
     lib = _get_lib()
     out = (ctypes.c_ubyte * 16)()
@@ -100,3 +117,16 @@ def v7_unix_millis(uuid_bytes: bytes) -> int:
     lib = _get_lib()
     buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
     return lib.uuid_v7_unix_millis(ctypes.byref(buf))
+
+
+def new_v7_batch(count: int, unix_millis: int) -> bytes:
+    lib = _get_lib()
+    if count == 0:
+        return b""
+    out = (ctypes.c_ubyte * (count * 16))()
+    rc = lib.uuid_new_v7_batch(unix_millis, count, ctypes.byref(out))
+    if rc == 2:
+        raise ValueError("unix_millis must be non-negative and fit within 48 bits")
+    if rc != 0:
+        raise RuntimeError(f"uuid_new_v7_batch failed with code {rc} (random source failure)")
+    return bytes(out)

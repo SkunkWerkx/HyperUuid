@@ -26,7 +26,9 @@ writes, so there's no byte-swapping in this binding. `NamespaceDNS`/`NamespaceUR
 RFC 9562 §6.6-identical) namespace constants, kept here for API-shape symmetry with
 the other bindings' `Namespaces.*`; `Nil`/`Max` (RFC 9562 §5.9/§5.10) are the same
 kind of re-export. `V6Timestamp`/`V7Timestamp` recover the embedded UTC `time.Time`
-from a version 6 or 7 UUID respectively.
+from a version 6 or 7 UUID respectively. `NewV6BatchAt(count, unixMillis)`/
+`NewV7BatchAt(count, unixMillis)` generate `count` UUIDs sharing one timestamp
+capture and one native call, instead of `count` of each.
 
 Not yet published to a module proxy under a registered `SkunkWerkx` presence — for
 now this is proven by CI building and testing the native core plus this binding on

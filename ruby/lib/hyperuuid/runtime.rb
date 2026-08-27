@@ -53,6 +53,17 @@ module HyperUuid
         functions[:v6_unix_millis].call(ptr)
       end
 
+      def new_v6_batch(count, unix_millis)
+        return "" if count.zero?
+        out = Fiddle::Pointer.malloc(count * 16, Fiddle::RUBY_FREE)
+        rc = functions[:new_v6_batch].call(unix_millis, count, out)
+        case rc
+        when 0 then out[0, count * 16]
+        when 2 then raise TimestampOutOfRangeError, "unix_millis does not fit the 60-bit v6 timestamp field"
+        else raise RandomSourceError, "uuid_new_v6_batch failed with code #{rc}"
+        end
+      end
+
       def new_v7(unix_millis)
         out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
         rc = functions[:new_v7].call(unix_millis, out)
@@ -66,6 +77,17 @@ module HyperUuid
       def v7_unix_millis(bytes)
         ptr = Fiddle::Pointer.to_ptr(bytes)
         functions[:v7_unix_millis].call(ptr)
+      end
+
+      def new_v7_batch(count, unix_millis)
+        return "" if count.zero?
+        out = Fiddle::Pointer.malloc(count * 16, Fiddle::RUBY_FREE)
+        rc = functions[:new_v7_batch].call(unix_millis, count, out)
+        case rc
+        when 0 then out[0, count * 16]
+        when 2 then raise TimestampOutOfRangeError, "unix_millis must fit within the RFC 9562 48-bit field"
+        else raise RandomSourceError, "uuid_new_v7_batch failed with code #{rc}"
+        end
       end
 
       private
@@ -103,6 +125,11 @@ module HyperUuid
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_UINT64_T
           ),
+          new_v6_batch: Fiddle::Function.new(
+            handle["uuid_new_v6_batch"],
+            [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          ),
           new_v7: Fiddle::Function.new(
             handle["uuid_new_v7"],
             [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_VOIDP],
@@ -112,6 +139,11 @@ module HyperUuid
             handle["uuid_v7_unix_millis"],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_UINT64_T
+          ),
+          new_v7_batch: Fiddle::Function.new(
+            handle["uuid_new_v7_batch"],
+            [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
           ),
         }
       end

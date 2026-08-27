@@ -21,6 +21,8 @@ comparable/hashable) — this gem has no runtime dependency on the `uuid` gem.
 `HyperUuid::Namespaces::DNS`/`URL`/`OID`/`X500` are RFC 9562 Section 6.6's well-known
 namespaces. `#timestamp` recovers the embedded UTC `Time` from a version 6 or 7 UUID.
 `HyperUuid::Uuid::NIL`/`MAX` are the RFC 9562 §5.9/§5.10 special-value UUIDs.
+`HyperUuid.new_v6_batch(count)`/`new_v7_batch(count)` generate `count` UUIDs sharing one
+timestamp capture and one native call, instead of `count` of each.
 
 Not yet published to RubyGems.org under a registered `SkunkWerkx`/`buvinghausen` presence —
 for now this is proven by CI building and testing the native core plus this gem on real

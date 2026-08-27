@@ -60,12 +60,20 @@ public final class UuidGenerator {
     private static final MethodHandle UUID_V6_UNIX_MILLIS = LINKER.downcallHandle(
             LOOKUP.find("uuid_v6_unix_millis").orElseThrow(),
             FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V6_BATCH = LINKER.downcallHandle(
+            LOOKUP.find("uuid_new_v6_batch").orElseThrow(),
+            FunctionDescriptor.of(
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
     private static final MethodHandle UUID_NEW_V7 = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v7").orElseThrow(),
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
     private static final MethodHandle UUID_V7_UNIX_MILLIS = LINKER.downcallHandle(
             LOOKUP.find("uuid_v7_unix_millis").orElseThrow(),
             FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V7_BATCH = LINKER.downcallHandle(
+            LOOKUP.find("uuid_new_v7_batch").orElseThrow(),
+            FunctionDescriptor.of(
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
 
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
     public static final UUID NIL = new UUID(0L, 0L);
@@ -220,6 +228,39 @@ public final class UuidGenerator {
         return Instant.ofEpochMilli(v6UnixMillis(uuid));
     }
 
+    /**
+     * Creates {@code count} time-sortable version 6 UUIDs sharing one timestamp capture —
+     * one downcall and one random-bytes fetch instead of {@code count} of each. {@code
+     * clock_seq} and {@code node} are independently random per item.
+     */
+    public static UUID[] newV6Batch(int count, long unixMillis) {
+        if (count == 0) {
+            return new UUID[0];
+        }
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment out = local.allocate((long) count * 16);
+            int rc;
+            try {
+                rc = (int) UUID_NEW_V6_BATCH.invokeExact(unixMillis, count, out);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_new_v6_batch downcall failed unexpectedly", t);
+            }
+            if (rc == 2) {
+                throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
+            }
+            if (rc != 0) {
+                throw new IllegalStateException(
+                        "uuid_new_v6_batch failed with code " + rc + " (random source failure)");
+            }
+            return readUuidBatch(out, count);
+        }
+    }
+
+    /** Creates {@code count} time-sortable version 6 UUIDs sharing the current time. */
+    public static UUID[] newV6Batch(int count) {
+        return newV6Batch(count, System.currentTimeMillis());
+    }
+
     /** Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time. */
     public static UUID newV7() {
         return newV7(System.currentTimeMillis());
@@ -277,7 +318,48 @@ public final class UuidGenerator {
         return Instant.ofEpochMilli(v7UnixMillis(uuid));
     }
 
+    /**
+     * Creates {@code count} time-sortable version 7 UUIDs sharing one timestamp capture and
+     * one contiguous block of the monotonic counter — one downcall and one random-bytes
+     * fetch instead of {@code count} of each.
+     */
+    public static UUID[] newV7Batch(int count, long unixMillis) {
+        if (count == 0) {
+            return new UUID[0];
+        }
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment out = local.allocate((long) count * 16);
+            int rc;
+            try {
+                rc = (int) UUID_NEW_V7_BATCH.invokeExact(unixMillis, count, out);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
+            }
+            if (rc == 2) {
+                throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
+            }
+            if (rc != 0) {
+                throw new IllegalStateException(
+                        "uuid_new_v7_batch failed with code " + rc + " (random source failure)");
+            }
+            return readUuidBatch(out, count);
+        }
+    }
+
+    /** Creates {@code count} time-sortable version 7 UUIDs sharing the current time. */
+    public static UUID[] newV7Batch(int count) {
+        return newV7Batch(count, System.currentTimeMillis());
+    }
+
     private static UUID readUuid(MemorySegment segment) {
         return RfcBytes.fromRfcBytes(segment.toArray(ValueLayout.JAVA_BYTE));
+    }
+
+    private static UUID[] readUuidBatch(MemorySegment segment, int count) {
+        UUID[] result = new UUID[count];
+        for (int i = 0; i < count; i++) {
+            result[i] = RfcBytes.fromRfcBytes(segment.asSlice((long) i * 16, 16).toArray(ValueLayout.JAVA_BYTE));
+        }
+        return result;
     }
 }

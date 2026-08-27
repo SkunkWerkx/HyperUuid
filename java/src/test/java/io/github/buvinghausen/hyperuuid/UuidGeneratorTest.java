@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -92,6 +95,32 @@ class UuidGeneratorTest {
     }
 
     @Test
+    void v6BatchReturnsCountUuidsSharingTheTimestamp() {
+        UUID[] ids = UuidGenerator.newV6Batch(10, RFC_TEST_VECTOR_MS);
+        assertEquals(10, ids.length);
+        for (UUID id : ids) {
+            assertEquals(6, id.version());
+            assertEquals(Instant.ofEpochMilli(RFC_TEST_VECTOR_MS), UuidGenerator.v6Timestamp(id));
+        }
+    }
+
+    @Test
+    void v6BatchProducesPairwiseDistinctUuids() {
+        UUID[] ids = UuidGenerator.newV6Batch(100, RFC_TEST_VECTOR_MS);
+        assertEquals(100, Set.of(ids).size());
+    }
+
+    @Test
+    void v6BatchCountZeroReturnsEmptyArray() {
+        assertEquals(0, UuidGenerator.newV6Batch(0, RFC_TEST_VECTOR_MS).length);
+    }
+
+    @Test
+    void v6BatchOverflowTimestampThrows() {
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6Batch(1, Long.MAX_VALUE));
+    }
+
+    @Test
     void nilIsAllZeroBits() {
         assertEquals("00000000-0000-0000-0000-000000000000", UuidGenerator.NIL.toString());
     }
@@ -151,5 +180,42 @@ class UuidGeneratorTest {
 
         long maxMs = 0x0000_FFFF_FFFF_FFFFL;
         assertEquals(Instant.ofEpochMilli(maxMs), UuidGenerator.v7Timestamp(UuidGenerator.newV7(maxMs)));
+    }
+
+    @Test
+    void v7BatchReturnsCountUuidsSortedAndSharingTheTimestamp() {
+        UUID[] ids = UuidGenerator.newV7Batch(1000, RFC_TEST_VECTOR_MS);
+        assertEquals(1000, ids.length);
+        UUID[] sorted = ids.clone();
+        Arrays.sort(sorted);
+        assertEquals(Arrays.asList(sorted), Arrays.asList(ids));
+        for (UUID id : ids) {
+            assertEquals(Instant.ofEpochMilli(RFC_TEST_VECTOR_MS), UuidGenerator.v7Timestamp(id));
+        }
+    }
+
+    @Test
+    void v7BatchContinuesTheSameCounterSequenceAsIndividualCalls() {
+        UUID before = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+        UUID[] batch = UuidGenerator.newV7Batch(10, RFC_TEST_VECTOR_MS);
+        UUID after = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+
+        List<UUID> ids = new ArrayList<>();
+        ids.add(before);
+        ids.addAll(List.of(batch));
+        ids.add(after);
+        List<UUID> sorted = new ArrayList<>(ids);
+        Collections.sort(sorted);
+        assertEquals(sorted, ids);
+    }
+
+    @Test
+    void v7BatchCountZeroReturnsEmptyArray() {
+        assertEquals(0, UuidGenerator.newV7Batch(0, RFC_TEST_VECTOR_MS).length);
+    }
+
+    @Test
+    void v7BatchOverflowTimestampThrows() {
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV7Batch(1, 0x0001_0000_0000_0000L));
     }
 }
