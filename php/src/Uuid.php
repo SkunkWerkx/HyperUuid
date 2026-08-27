@@ -109,13 +109,16 @@ final class Uuid
      *
      * For **v6**: v6 has no monotonic counter the way v7 does, so the only field determining
      * its creation order is the 60-bit timestamp itself — this moves that whole timestamp
-     * (most significant chunk first) into the comparison's most significant bytes, and
-     * relocates `clock_seq`/`node` (independently random per call here, not a counter, so no
-     * ordering value) into the remaining bytes, each as one intact block. Version and variant
-     * end up at different byte offsets than v7's result (octet 8's top nibble / octet 6's top
-     * two bits, not 7/8) — fine, since `fromSqlOrder()` already knows how to tell the two
-     * apart. **Caveat unlike v7:** two v6 UUIDs minted at the same millisecond have identical
-     * timestamp bits — `clock_seq`/`node` being random rather than a counter means their
+     * (most significant chunk first) into the comparison's most significant bytes. Everything
+     * after it — `variant`, `clock_seq`, and `node` (octets 8-15, already one contiguous run
+     * with no ordering value of its own — `clock_seq`/`node` are independently random per call
+     * here, not a counter, and `variant` is a fixed constant either way) — moves as that single
+     * 8-byte span into the remaining bytes, in the same relative order, not individually
+     * reshuffled. Version and variant end up at different byte offsets than v7's result (octet
+     * 8's top nibble / octet 6's top two bits, not 7/8) — fine, since `fromSqlOrder()` already
+     * knows how to tell the two apart. **Caveat unlike v7:** two v6 UUIDs minted at the same
+     * millisecond have identical timestamp bits — `clock_seq`/`node` being random rather than
+     * a counter means their
      * relative order isn't guaranteed to match creation order, the same limitation plain RFC
      * order already has for v6, not something this transform introduces.
      *

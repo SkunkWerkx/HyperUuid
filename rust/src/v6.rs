@@ -137,16 +137,17 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
 /// determines its creation order is the 60-bit timestamp itself (`time_high`/`time_mid`/
 /// `time_low`, RFC 9562 octets 0-7 alongside the version nibble), so this moves that whole
 /// contiguous timestamp — most significant chunk first — into the comparison's most
-/// significant octets, and relocates `clock_seq` (octets 8-9, no ordering value here — this
-/// crate generates it randomly on every call, not as a counter) and `node` (octets 10-15,
-/// likewise random) into the remaining, less significant octets, each moved as one intact
-/// 2- and 6-byte block rather than individually reshuffled. Unlike
+/// significant octets. Everything after it — `variant`, `clock_seq`, and `node`, RFC 9562
+/// octets 8-15, already one contiguous run with no ordering value of its own (this crate
+/// generates `clock_seq`/`node` randomly on every call, not as a counter, and `variant` is a
+/// fixed constant either way) — moves as that single 8-byte span into the remaining, less
+/// significant octets, in the same relative order, not individually reshuffled. Unlike
 /// [`crate::v7::to_sql_order`], no bit-level repacking is needed here — v6's own RFC field
-/// boundaries already fall on byte pairs, so this is a straight relocation of whole
-/// octet groups; version and variant end up at different byte offsets than in v7's sql
-/// order as a result (octet 8's top nibble and octet 6's top two bits here, not 7/8), which
-/// is fine since the two versions are converted by separate functions and a caller always
-/// knows which one it's calling.
+/// boundaries already fall on byte pairs, so this is a straight relocation of two whole
+/// spans (the timestamp/version pair, then everything after it); version and variant end up
+/// at different byte offsets than in v7's sql order as a result (octet 8's top nibble and
+/// octet 6's top two bits here, not 7/8), which is fine since the two versions are converted
+/// by separate functions and a caller always knows which one it's calling.
 ///
 /// **Caveat, unlike v7:** two version 6 UUIDs minted at the same millisecond have identical
 /// timestamp bits — `clock_seq`/`node` are independently random, not a counter — so this

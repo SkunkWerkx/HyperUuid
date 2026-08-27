@@ -312,8 +312,11 @@ public enum UuidGenerator {
     /// field layout. v6 has no monotonic counter the way v7 does; the only field that
     /// determines its creation order is the 60-bit timestamp itself, so this moves that whole
     /// timestamp — most significant chunk first — into the comparison's most significant
-    /// octets, and relocates `clock_seq`/`node` (no ordering value — randomly generated per
-    /// call, not a counter) into the remaining octets. Version and variant end up at different
+    /// octets. Everything after it — `variant`, `clock_seq`, and `node` (octets 8-15, already
+    /// one contiguous run with no ordering value of its own — `clock_seq`/`node` are randomly
+    /// generated per call, not a counter, and `variant` is a fixed constant either way) —
+    /// moves as that single 8-byte span into the remaining octets, in the same relative order,
+    /// not individually reshuffled. Version and variant end up at different
     /// byte offsets than `v7ToSqlOrder`'s result (octet 8's top nibble and octet 6's top two
     /// bits here, not 7/8) — fine, since the two versions are separate methods and a caller
     /// always knows which one it's calling.

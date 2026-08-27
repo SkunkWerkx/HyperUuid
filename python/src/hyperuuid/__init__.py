@@ -175,9 +175,12 @@ def v6_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     Same ``SqlGuid`` significance order as :func:`v7_to_sql_order`, applied to v6's very
     different field layout. v6 has no monotonic counter the way v7 does; the only field that
     determines its creation order is the 60-bit timestamp itself, so this moves that whole
-    timestamp — most significant chunk first — into the comparison's most significant octets,
-    and relocates ``clock_seq``/``node`` (no ordering value here — generated randomly on every
-    call, not a counter) into the remaining, less significant ones. Version and variant end up
+    timestamp — most significant chunk first — into the comparison's most significant octets.
+    Everything after it — ``variant``, ``clock_seq``, and ``node`` (octets 8-15, already one
+    contiguous run with no ordering value of its own — ``clock_seq``/``node`` are generated
+    randomly on every call, not a counter, and ``variant`` is a fixed constant either way) —
+    moves as that single 8-byte span into the remaining, less significant octets, in the same
+    relative order, not individually reshuffled. Version and variant end up
     at different byte offsets than :func:`v7_to_sql_order`'s result (octet 8's top nibble and
     octet 6's top two bits here, not 7/8) — fine, since the two versions are separate
     functions and a caller always knows which one it's calling.
