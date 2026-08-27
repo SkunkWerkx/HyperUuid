@@ -51,6 +51,8 @@ var (
 	uuidNewV7Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
 	uuidV7ToSqlOrder func(uuid unsafe.Pointer)
 	uuidV7ToRfcOrder func(uuid unsafe.Pointer)
+	uuidV6ToSqlOrder func(uuid unsafe.Pointer)
+	uuidV6ToRfcOrder func(uuid unsafe.Pointer)
 )
 
 // ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
@@ -107,6 +109,8 @@ func ensureLoaded() error {
 		purego.RegisterLibFunc(&uuidNewV7Batch, handle, "uuid_new_v7_batch")
 		purego.RegisterLibFunc(&uuidV7ToSqlOrder, handle, "uuid_v7_to_sql_order")
 		purego.RegisterLibFunc(&uuidV7ToRfcOrder, handle, "uuid_v7_to_rfc_order")
+		purego.RegisterLibFunc(&uuidV6ToSqlOrder, handle, "uuid_v6_to_sql_order")
+		purego.RegisterLibFunc(&uuidV6ToRfcOrder, handle, "uuid_v6_to_rfc_order")
 	})
 	return initErr
 }
@@ -298,7 +302,7 @@ func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	return result, nil
 }
 
-// ToSqlOrder converts an RFC 9562-ordered version 7 id to the byte order SQL Server's
+// V7ToSqlOrder converts an RFC 9562-ordered version 7 id to the byte order SQL Server's
 // uniqueidentifier needs on the wire to sort by creation order.
 //
 // System.Data.SqlTypes.SqlGuid comparison — and therefore T-SQL ORDER BY on a
@@ -310,8 +314,9 @@ func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 // intact block. The permutation is computed once in the native Rust core and verified there
 // (and independently, against the real System.Data.SqlTypes.SqlGuid comparator, in this
 // project's C# test suite); this binding calls the same native function rather than
-// reimplementing the math. Meaningful only for a genuine version 7 UUID.
-func ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
+// reimplementing the math. Meaningful only for a genuine version 7 UUID — see V6ToSqlOrder
+// for the version 6 equivalent.
+func V7ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
@@ -320,13 +325,53 @@ func ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	return out, nil
 }
 
-// FromSqlOrder is the inverse of ToSqlOrder — converts a SQL-Server-ordered version 7 id back
-// to RFC 9562 order.
-func FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
+// V7FromSqlOrder is the inverse of V7ToSqlOrder — converts a SQL-Server-ordered version 7 id
+// back to RFC 9562 order.
+func V7FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
 	out := id
 	uuidV7ToRfcOrder(unsafe.Pointer(&out[0]))
+	return out, nil
+}
+
+// V6ToSqlOrder converts an RFC 9562-ordered version 6 id to the byte order SQL Server's
+// uniqueidentifier needs on the wire to sort by creation order.
+//
+// Same SqlGuid significance order as V7ToSqlOrder, applied to v6's very different field
+// layout. v6 has no monotonic counter the way v7 does; the only field that determines its
+// creation order is the 60-bit timestamp itself, so this moves that whole timestamp — most
+// significant chunk first — into the comparison's most significant octets, and relocates
+// clock_seq/node (no ordering value here — generated randomly on every call, not a counter)
+// into the remaining octets. Version and variant end up at different byte offsets than
+// V7ToSqlOrder's result (octet 8's top nibble and octet 6's top two bits here, not 7/8) —
+// fine, since the two versions are separate functions and a caller always knows which one
+// it's calling.
+//
+// Unlike v7, two version 6 UUIDs minted at the same millisecond have identical timestamp
+// bits — clock_seq/node are independently random, not a counter — so this doesn't (and
+// can't) make same-millisecond v6 UUIDs sort in creation order any more than plain RFC order
+// already does. Distinct timestamps sort correctly; same-timestamp ties don't, by the RFC's
+// own v6 design, not a limitation introduced here.
+//
+// Meaningful only for a genuine version 6 UUID.
+func V6ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
+	if err := ensureLoaded(); err != nil {
+		return uuid.UUID{}, err
+	}
+	out := id
+	uuidV6ToSqlOrder(unsafe.Pointer(&out[0]))
+	return out, nil
+}
+
+// V6FromSqlOrder is the inverse of V6ToSqlOrder — converts a SQL-Server-ordered version 6 id
+// back to RFC 9562 order.
+func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
+	if err := ensureLoaded(); err != nil {
+		return uuid.UUID{}, err
+	}
+	out := id
+	uuidV6ToRfcOrder(unsafe.Pointer(&out[0]))
 	return out, nil
 }

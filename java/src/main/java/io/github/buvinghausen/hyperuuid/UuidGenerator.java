@@ -78,6 +78,10 @@ public final class UuidGenerator {
             LOOKUP.find("uuid_v7_to_sql_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
     private static final MethodHandle UUID_V7_TO_RFC_ORDER = LINKER.downcallHandle(
             LOOKUP.find("uuid_v7_to_rfc_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V6_TO_SQL_ORDER = LINKER.downcallHandle(
+            LOOKUP.find("uuid_v6_to_sql_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V6_TO_RFC_ORDER = LINKER.downcallHandle(
+            LOOKUP.find("uuid_v6_to_rfc_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
 
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
     public static final UUID NIL = new UUID(0L, 0L);
@@ -345,9 +349,9 @@ public final class UuidGenerator {
      * again on top of this hasn't been checked here — verify against your driver, or bind the
      * bytes directly as a fallback that sidesteps the question entirely.
      *
-     * <p>Meaningful only for a genuine version 7 UUID.
+     * <p>Meaningful only for a genuine version 7 UUID; see {@link #v6ToSqlOrder} for v6.
      */
-    public static UUID toSqlOrder(UUID uuid) {
+    public static UUID v7ToSqlOrder(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
             MemorySegment seg = local.allocate(16);
             MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
@@ -361,10 +365,10 @@ public final class UuidGenerator {
     }
 
     /**
-     * Inverse of {@link #toSqlOrder} — converts a SQL-Server-ordered version 7 {@code uuid}
+     * Inverse of {@link #v7ToSqlOrder} — converts a SQL-Server-ordered version 7 {@code uuid}
      * back to RFC 9562 order.
      */
-    public static UUID fromSqlOrder(UUID uuid) {
+    public static UUID v7FromSqlOrder(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
             MemorySegment seg = local.allocate(16);
             MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
@@ -372,6 +376,58 @@ public final class UuidGenerator {
                 UUID_V7_TO_RFC_ORDER.invokeExact(seg);
             } catch (Throwable t) {
                 throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
+            }
+            return readUuid(seg);
+        }
+    }
+
+    /**
+     * Converts an RFC 9562-ordered version 6 {@code uuid} to the byte order SQL Server's
+     * {@code uniqueidentifier} needs on the wire to sort by creation order.
+     *
+     * <p>Same {@code SqlGuid} significance order as {@link #v7ToSqlOrder}, applied to v6's
+     * very different field layout. v6 has no monotonic counter the way v7 does; the only
+     * field that determines its creation order is the 60-bit timestamp itself, so this moves
+     * that whole timestamp — most significant chunk first — into the comparison's most
+     * significant bytes, and relocates {@code clock_seq}/{@code node} (no ordering value —
+     * randomly generated per call, not a counter) into the remaining bytes. Version and
+     * variant end up at different byte offsets than {@link #v7ToSqlOrder}'s result (octet 8's
+     * top nibble and octet 6's top two bits here, not 7/8) — fine, since the two versions are
+     * separate methods and a caller always knows which one it's calling.
+     *
+     * <p>Unlike v7, two version 6 UUIDs minted at the same millisecond have identical
+     * timestamp bits — {@code clock_seq}/{@code node} are independently random, not a
+     * counter — so this doesn't (and can't) make same-millisecond v6 UUIDs sort in creation
+     * order any more than plain RFC order already does. Distinct timestamps sort correctly;
+     * same-timestamp ties don't, by the RFC's own v6 design, not a limitation introduced here.
+     *
+     * <p>Meaningful only for a genuine version 6 UUID.
+     */
+    public static UUID v6ToSqlOrder(UUID uuid) {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment seg = local.allocate(16);
+            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
+            try {
+                UUID_V6_TO_SQL_ORDER.invokeExact(seg);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_v6_to_sql_order downcall failed unexpectedly", t);
+            }
+            return readUuid(seg);
+        }
+    }
+
+    /**
+     * Inverse of {@link #v6ToSqlOrder} — converts a SQL-Server-ordered version 6 {@code uuid}
+     * back to RFC 9562 order.
+     */
+    public static UUID v6FromSqlOrder(UUID uuid) {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment seg = local.allocate(16);
+            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
+            try {
+                UUID_V6_TO_RFC_ORDER.invokeExact(seg);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_v6_to_rfc_order downcall failed unexpectedly", t);
             }
             return readUuid(seg);
         }

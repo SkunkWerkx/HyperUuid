@@ -16,7 +16,7 @@ var id4 = UuidGenerator.NewV7();
 DateTimeOffset created = UuidGenerator.V7Timestamp(id4);
 
 // Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
-Guid sqlOrdered = UuidGenerator.ToSqlOrder(id4);
+Guid sqlOrdered = UuidGenerator.V7ToSqlOrder(id4);
 
 // Bulk generation shares one timestamp capture, one random-bytes fetch, and (v7) one
 // contiguous counter reservation across the whole batch:
@@ -43,7 +43,7 @@ Returns plain `System.Guid` — this binding does no byte-order conversion of it
 3. **v6, which the BCL doesn't have at all.** A field-compatible reordering of v1 for the same sort/index locality as v7, useful when you're migrating off legacy v1 IDs. No `Guid.CreateVersion6` exists anywhere in the BCL.
 4. **Batch generation.** `NewV7Batch(1000)` is ~3.9x faster than 1000 individual `NewV7()` calls (24 µs vs 93 µs) — one native call, one random-bytes fetch, one counter reservation for the whole batch, instead of paying per-item overhead a thousand times. `Guid.NewGuid()`/`CreateVersion7()` have no bulk API; you'd write that loop yourself.
 5. **Cross-language consistency.** The exact same Rust core also mints v5 namespace UUIDs for Ruby, Python, Go, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't C#-only, that's not something the BCL can offer at all.
-6. **SQL Server byte ordering, for free.** `UuidGenerator.ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order, the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use. Verified directly against the real `SqlGuid` comparator in this package's own test suite, not a hand-rolled stand-in — and it's the same native function every other binding in this repo calls, not a C#-only reimplementation. Neither `Guid.NewGuid()` nor `Guid.CreateVersion7()` has any such concept.
+6. **SQL Server byte ordering, for free.** `UuidGenerator.V7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`V6ToSqlOrder` does the same for version 6), the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use. Verified directly against the real `SqlGuid` comparator in this package's own test suite, not a hand-rolled stand-in — and it's the same native function every other binding in this repo calls, not a C#-only reimplementation. Neither `Guid.NewGuid()` nor `Guid.CreateVersion7()` has any such concept.
 
 The honest trade-off: this is a native dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID) instead of a BCL type that's always just there. If you only need plain v4 randomness in a C#-only codebase, `Guid.NewGuid()` is simpler and that's a completely reasonable choice.
 

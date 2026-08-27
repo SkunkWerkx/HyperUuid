@@ -243,20 +243,57 @@ final class HyperUuidTest extends TestCase
         self::assertSame($maxMs, $recovered->getTimestamp() * 1000 + (int) $recovered->format('v'));
     }
 
-    public function testToSqlOrderRoundTripsThroughFromSqlOrder(): void
+    public function testV7ToSqlOrderRoundTripsThroughFromSqlOrder(): void
     {
         $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
         $sqlOrdered = $id->toSqlOrder();
         self::assertFalse($id->equals($sqlOrdered));
         self::assertTrue($id->equals($sqlOrdered->fromSqlOrder()));
+        // Explicit $version should agree with auto-detection.
+        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder(7)));
     }
 
-    public function testToSqlOrderPreservesVersionAndVariantAtOctets7And8(): void
+    public function testV7ToSqlOrderPreservesVersionAndVariantAtOctets7And8(): void
     {
         $sqlOrdered = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
         $bytes = $sqlOrdered->bytes();
         self::assertSame(0x70, \ord($bytes[7]) & 0xF0);
         self::assertSame(0x80, \ord($bytes[8]) & 0xC0);
+    }
+
+    public function testV6ToSqlOrderRoundTripsThroughFromSqlOrder(): void
+    {
+        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        $sqlOrdered = $id->toSqlOrder();
+        self::assertFalse($id->equals($sqlOrdered));
+        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder()));
+        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder(6)));
+    }
+
+    public function testV6ToSqlOrderPreservesVersionAndVariantAtOctets8And6(): void
+    {
+        // Different offsets than v7's sql order — see Uuid::toSqlOrder()'s doc comment for why.
+        $sqlOrdered = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
+        $bytes = $sqlOrdered->bytes();
+        self::assertSame(0x60, \ord($bytes[8]) & 0xF0);
+        self::assertSame(0x80, \ord($bytes[6]) & 0xC0);
+    }
+
+    public function testFromSqlOrderAutoDetectsV6AndV7Independently(): void
+    {
+        $v6 = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        $v7 = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+
+        self::assertSame(6, $v6->toSqlOrder()->fromSqlOrder()->version());
+        self::assertSame(7, $v7->toSqlOrder()->fromSqlOrder()->version());
+        self::assertTrue($v6->equals($v6->toSqlOrder()->fromSqlOrder()));
+        self::assertTrue($v7->equals($v7->toSqlOrder()->fromSqlOrder()));
+    }
+
+    public function testToSqlOrderThrowsForUnsupportedVersion(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        HyperUuid::newV4()->toSqlOrder();
     }
 
     /**
@@ -275,7 +312,7 @@ final class HyperUuidTest extends TestCase
         return 0;
     }
 
-    public function testToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(): void
+    public function testV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(): void
     {
         $ids = [];
         for ($i = 0; $i < 200; $i++) {
@@ -284,6 +321,23 @@ final class HyperUuidTest extends TestCase
         // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
         for ($i = 0; $i < 200; $i++) {
             $ids[] = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS + 1_000_000);
+        }
+
+        $sqlOrdered = array_map(static fn (Uuid $id): string => $id->toSqlOrder()->bytes(), $ids);
+        $sorted = $sqlOrdered;
+        usort($sorted, [self::class, 'sqlGuidCompare']);
+
+        self::assertSame($sqlOrdered, $sorted);
+    }
+
+    public function testV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps(): void
+    {
+        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
+        // to sort in creation order even in plain RFC order, so this only exercises strictly
+        // increasing timestamps, where the timestamp alone determines order with no tie to break.
+        $ids = [];
+        for ($i = 0; $i < 300; $i++) {
+            $ids[] = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS + $i);
         }
 
         $sqlOrdered = array_map(static fn (Uuid $id): string => $id->toSqlOrder()->bytes(), $ids);

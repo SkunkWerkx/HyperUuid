@@ -260,25 +260,25 @@ public sealed class UuidGeneratorTests
     }
 
     [Fact]
-    public void ToSqlOrder_RoundTripsThroughFromSqlOrder()
+    public void V7ToSqlOrder_RoundTripsThroughV7FromSqlOrder()
     {
         var id = UuidGenerator.NewV7(RfcTestVectorMs);
-        var sqlOrdered = UuidGenerator.ToSqlOrder(id);
+        var sqlOrdered = UuidGenerator.V7ToSqlOrder(id);
         sqlOrdered.ShouldNotBe(id);
-        UuidGenerator.FromSqlOrder(sqlOrdered).ShouldBe(id);
+        UuidGenerator.V7FromSqlOrder(sqlOrdered).ShouldBe(id);
     }
 
     [Fact]
-    public void ToSqlOrder_PreservesVersionAndVariant()
+    public void V7ToSqlOrder_PreservesVersionAndVariant()
     {
-        var sqlOrdered = UuidGenerator.ToSqlOrder(UuidGenerator.NewV7(RfcTestVectorMs));
+        var sqlOrdered = UuidGenerator.V7ToSqlOrder(UuidGenerator.NewV7(RfcTestVectorMs));
         var bytes = sqlOrdered.ToByteArray();
         (bytes[7] & 0xF0).ShouldBe(0x70);
         (bytes[8] & 0xC0).ShouldBe(0x80);
     }
 
     [Fact]
-    public void ToSqlOrder_SortsByCreationOrderUnderRealSqlGuidComparison()
+    public void V7ToSqlOrder_SortsByCreationOrderUnderRealSqlGuidComparison()
     {
         // The correctness oracle here is the real System.Data.SqlTypes.SqlGuid — the same
         // type T-SQL's own ORDER BY on a uniqueidentifier column matches — not a hand-rolled
@@ -294,7 +294,44 @@ public sealed class UuidGeneratorTests
             ids.Add(UuidGenerator.NewV7(RfcTestVectorMs + 1_000_000));
         }
 
-        var sqlOrdered = ids.Select(UuidGenerator.ToSqlOrder).ToList();
+        var sqlOrdered = ids.Select(UuidGenerator.V7ToSqlOrder).ToList();
+        var sorted = sqlOrdered.OrderBy(g => new SqlGuid(g)).ToList();
+
+        sorted.ShouldBe(sqlOrdered);
+    }
+
+    [Fact]
+    public void V6ToSqlOrder_RoundTripsThroughV6FromSqlOrder()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+        var sqlOrdered = UuidGenerator.V6ToSqlOrder(id);
+        sqlOrdered.ShouldNotBe(id);
+        UuidGenerator.V6FromSqlOrder(sqlOrdered).ShouldBe(id);
+    }
+
+    [Fact]
+    public void V6ToSqlOrder_PreservesVersionAndVariant()
+    {
+        // Different offsets than v7's sql order — see V6ToSqlOrder's doc comment for why.
+        var sqlOrdered = UuidGenerator.V6ToSqlOrder(UuidGenerator.NewV6(RfcTestVectorMs));
+        var bytes = sqlOrdered.ToByteArray();
+        (bytes[8] & 0xF0).ShouldBe(0x60);
+        (bytes[6] & 0xC0).ShouldBe(0x80);
+    }
+
+    [Fact]
+    public void V6ToSqlOrder_SortsByCreationOrderUnderRealSqlGuidComparisonForDistinctTimestamps()
+    {
+        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
+        // to sort in creation order even in plain RFC order, so this only exercises strictly
+        // increasing timestamps, where the timestamp alone determines order with no tie to break.
+        var ids = new List<Guid>();
+        for (long i = 0; i < 300; i++)
+        {
+            ids.Add(UuidGenerator.NewV6(RfcTestVectorMs + i));
+        }
+
+        var sqlOrdered = ids.Select(UuidGenerator.V6ToSqlOrder).ToList();
         var sorted = sqlOrdered.OrderBy(g => new SqlGuid(g)).ToList();
 
         sorted.ShouldBe(sqlOrdered);

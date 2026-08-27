@@ -149,6 +149,28 @@ final class Runtime
     }
 
     /**
+     * Rewrites `$bytes` from RFC 9562 order to the byte order SQL Server's `uniqueidentifier`
+     * needs on the wire to sort a version 6 UUID by creation order. Meaningful only for a
+     * genuine version 6 UUID.
+     */
+    public static function v6ToSqlOrder(string $bytes): string
+    {
+        $ptr = self::ffi()->new('uint8_t[16]');
+        FFI::memcpy($ptr, $bytes, 16);
+        self::ffi()->uuid_v6_to_sql_order($ptr);
+        return FFI::string($ptr, 16);
+    }
+
+    /** Inverse of {@see v6ToSqlOrder} — rewrites `$bytes` from SQL Server order back to RFC 9562 order. */
+    public static function v6ToRfcOrder(string $bytes): string
+    {
+        $ptr = self::ffi()->new('uint8_t[16]');
+        FFI::memcpy($ptr, $bytes, 16);
+        self::ffi()->uuid_v6_to_rfc_order($ptr);
+        return FFI::string($ptr, 16);
+    }
+
+    /**
      * Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
      * static let — the native library and its function pointers live for the process's
      * lifetime, same as every other binding (never unloaded).
@@ -178,7 +200,9 @@ final class Runtime
             . 'uint64_t uuid_v7_unix_millis(const void *uuid_ptr);'
             . 'int uuid_new_v7_batch(uint64_t unix_millis, uint32_t count, void *out_ptr);'
             . 'void uuid_v7_to_sql_order(void *uuid_ptr);'
-            . 'void uuid_v7_to_rfc_order(void *uuid_ptr);',
+            . 'void uuid_v7_to_rfc_order(void *uuid_ptr);'
+            . 'void uuid_v6_to_sql_order(void *uuid_ptr);'
+            . 'void uuid_v6_to_rfc_order(void *uuid_ptr);',
             $path
         );
 

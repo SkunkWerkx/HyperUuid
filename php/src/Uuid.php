@@ -90,31 +90,91 @@ final class Uuid
     }
 
     /**
-     * Converts an RFC 9562-ordered version 7 UUID to the byte order SQL Server's
-     * `uniqueidentifier` needs on the wire to sort by creation order.
+     * Converts an RFC 9562-ordered version 6 or 7 UUID to the byte order SQL Server's
+     * `uniqueidentifier` needs on the wire to sort by creation order. Dispatches on
+     * `version()` the same way {@see timestamp()} does.
      *
      * `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a
      * `uniqueidentifier` column — doesn't compare a GUID's 16 bytes left to right; it uses a
      * fixed, non-sequential byte significance order (`10,11,12,13,14,15,8,9,6,7,4,5,0,1,2,3`,
-     * most significant first). This moves the timestamp and counter — the two fields that
-     * determine creation order — into that comparison's most-significant bytes, and moves the
-     * trailing entropy, which carries no ordering information, into the least-significant ones
-     * as one intact block. The permutation is computed once in the native Rust core, verified
-     * there and independently against the real `System.Data.SqlTypes.SqlGuid` comparator in
-     * this project's C# test suite; this binding calls the same native function rather than
-     * reimplementing the math.
+     * most significant first). Both permutations are computed once in the native Rust core and
+     * verified there — the v7 one independently against the real `System.Data.SqlTypes.SqlGuid`
+     * comparator in this project's C# test suite too; this binding calls the same native
+     * functions rather than reimplementing the math.
      *
-     * Meaningful only for a genuine version 7 UUID — same convention as {@see timestamp()}.
+     * For **v7**: this moves the timestamp and counter — the two fields that determine
+     * creation order — into the comparison's most-significant bytes, and moves the trailing
+     * entropy, which carries no ordering information, into the least-significant ones as one
+     * intact block.
+     *
+     * For **v6**: v6 has no monotonic counter the way v7 does, so the only field determining
+     * its creation order is the 60-bit timestamp itself — this moves that whole timestamp
+     * (most significant chunk first) into the comparison's most significant bytes, and
+     * relocates `clock_seq`/`node` (independently random per call here, not a counter, so no
+     * ordering value) into the remaining bytes, each as one intact block. Version and variant
+     * end up at different byte offsets than v7's result (octet 8's top nibble / octet 6's top
+     * two bits, not 7/8) — fine, since `fromSqlOrder()` already knows how to tell the two
+     * apart. **Caveat unlike v7:** two v6 UUIDs minted at the same millisecond have identical
+     * timestamp bits — `clock_seq`/`node` being random rather than a counter means their
+     * relative order isn't guaranteed to match creation order, the same limitation plain RFC
+     * order already has for v6, not something this transform introduces.
+     *
+     * Meaningful only for a genuine version 6 or 7 UUID — same convention as {@see timestamp()}.
      */
     public function toSqlOrder(): self
     {
-        return new self(Runtime::v7ToSqlOrder($this->bytes));
+        return new self(match ($this->version()) {
+            6 => Runtime::v6ToSqlOrder($this->bytes),
+            7 => Runtime::v7ToSqlOrder($this->bytes),
+            default => throw new \InvalidArgumentException(
+                "toSqlOrder() is only defined for version 6 or 7 UUIDs, got version {$this->version()}"
+            ),
+        });
     }
 
-    /** Inverse of {@see toSqlOrder()} — converts a SQL-Server-ordered version 7 UUID back to RFC 9562 order. */
-    public function fromSqlOrder(): self
+    /**
+     * Inverse of {@see toSqlOrder()} — converts a SQL-Server-ordered UUID back to RFC 9562
+     * order.
+     *
+     * Unlike `version()`/`timestamp()`, a SQL-ordered blob's version nibble doesn't sit at a
+     * fixed byte offset — it's octet 7 for a v7 value, octet 8 for a v6 one — so which inverse
+     * to apply can't always be read off the bytes with certainty the way it can for an
+     * RFC-ordered UUID (`GuidByteOrder`'s own documented "not detectable from the bits alone
+     * by design" caveat, ported here). Pass `$version` explicitly (6 or 7) when you already
+     * know it — the common case, since you typically just called {@see toSqlOrder()} on a
+     * value whose version you knew. Left null, this tries the v7 inverse first and accepts it
+     * if the result's own RFC-order version/variant bits actually read back as 7/RFC-4122,
+     * then falls back to the v6 inverse under the same check — correct for any value this
+     * binding's own `toSqlOrder()` produced, but not a cryptographic guarantee against
+     * adversarial input, so prefer the explicit form where correctness matters most.
+     *
+     * @throws \InvalidArgumentException if `$version` isn't 6 or 7, or (when null)
+     *     neither inverse's result decodes to a valid version 6 or 7 UUID.
+     */
+    public function fromSqlOrder(?int $version = null): self
     {
-        return new self(Runtime::v7ToRfcOrder($this->bytes));
+        if ($version !== null) {
+            return new self(match ($version) {
+                6 => Runtime::v6ToRfcOrder($this->bytes),
+                7 => Runtime::v7ToRfcOrder($this->bytes),
+                default => throw new \InvalidArgumentException(
+                    "fromSqlOrder() only supports version 6 or 7, got {$version}"
+                ),
+            });
+        }
+
+        $asV7 = new self(Runtime::v7ToRfcOrder($this->bytes));
+        if ($asV7->version() === 7 && $asV7->variant() === 0b10) {
+            return $asV7;
+        }
+        $asV6 = new self(Runtime::v6ToRfcOrder($this->bytes));
+        if ($asV6->version() === 6 && $asV6->variant() === 0b10) {
+            return $asV6;
+        }
+        throw new \InvalidArgumentException(
+            'fromSqlOrder(): could not determine whether these bytes are version 6 or 7 SQL '
+            . 'order; pass $version explicitly'
+        );
     }
 
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */

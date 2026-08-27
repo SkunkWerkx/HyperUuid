@@ -53,6 +53,12 @@ public static partial class UuidGenerator
     [LibraryImport("hyperuuid")]
     private static unsafe partial void uuid_v7_to_rfc_order(byte* uuidPtr);
 
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial void uuid_v6_to_sql_order(byte* uuidPtr);
+
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial void uuid_v6_to_rfc_order(byte* uuidPtr);
+
     // Batch calls marshal through a byte scratch buffer rather than Span<Guid> directly —
     // Guid's in-memory field layout isn't RFC-byte-order (it's mixed-endian and not
     // guaranteed stable across runtimes), so each 16-byte chunk still needs the same
@@ -336,9 +342,9 @@ public static partial class UuidGenerator
     /// project's own <see href="https://github.com/NorseArchitecture/Svartalfheim">Svartalfheim</see>
     /// implements, ported here from the native Rust core instead of reimplemented in C#, so
     /// every binding in this repo (not just this one) gets it from one verified source.
-    /// Meaningful only for a genuine version 7 UUID.
+    /// Meaningful only for a genuine version 7 UUID; see <see cref="V6ToSqlOrder"/> for v6.
     /// </remarks>
-    public static unsafe Guid ToSqlOrder(Guid uuid)
+    public static unsafe Guid V7ToSqlOrder(Guid uuid)
     {
         Span<byte> bytes = stackalloc byte[16];
         uuid.TryWriteBytes(bytes, bigEndian: true, out _);
@@ -353,18 +359,69 @@ public static partial class UuidGenerator
     }
 
     /// <summary>
-    /// Inverse of <see cref="ToSqlOrder"/> — converts a SQL-Server-ordered version 7
+    /// Inverse of <see cref="V7ToSqlOrder"/> — converts a SQL-Server-ordered version 7
     /// <paramref name="uuid"/> (as read back via <see cref="Guid.ToByteArray()"/>) back to
     /// RFC 9562 order.
     /// </summary>
-    public static unsafe Guid FromSqlOrder(Guid uuid)
+    public static unsafe Guid V7FromSqlOrder(Guid uuid)
     {
         Span<byte> bytes = stackalloc byte[16];
-        // Not bigEndian: true — read back the same native layout ToSqlOrder wrote.
+        // Not bigEndian: true — read back the same native layout V7ToSqlOrder wrote.
         uuid.TryWriteBytes(bytes);
         fixed (byte* p = bytes)
         {
             uuid_v7_to_rfc_order(p);
+        }
+        return new Guid(bytes, bigEndian: true);
+    }
+
+    /// <summary>
+    /// Converts an RFC 9562-ordered version 6 <paramref name="uuid"/> to the byte order SQL
+    /// Server's <c>uniqueidentifier</c> needs on the wire to sort by creation order.
+    /// </summary>
+    /// <remarks>
+    /// Same <see cref="System.Data.SqlTypes.SqlGuid"/> significance order as
+    /// <see cref="V7ToSqlOrder"/>, applied to v6's very different field layout. v6 has no
+    /// monotonic counter the way v7 does; the only field that determines its creation order is
+    /// the 60-bit timestamp itself, so this moves that whole timestamp — most significant
+    /// chunk first — into the comparison's most significant bytes, and relocates
+    /// <c>clock_seq</c>/<c>node</c> (no ordering value — randomly generated per call, not a
+    /// counter) into the remaining bytes. Version and variant end up at different byte offsets
+    /// than <see cref="V7ToSqlOrder"/>'s result (octet 8's top nibble and octet 6's top two
+    /// bits here, not 7/8) — fine, since the two versions are separate methods and a caller
+    /// always knows which one it's calling.
+    /// <para>
+    /// Unlike v7, two version 6 UUIDs minted at the same millisecond have identical timestamp
+    /// bits — <c>clock_seq</c>/<c>node</c> are independently random, not a counter — so this
+    /// doesn't (and can't) make same-millisecond v6 UUIDs sort in creation order any more than
+    /// plain RFC order already does. Distinct timestamps sort correctly; same-timestamp ties
+    /// don't, by the RFC's own v6 design, not a limitation introduced here.
+    /// </para>
+    /// Meaningful only for a genuine version 6 UUID.
+    /// </remarks>
+    public static unsafe Guid V6ToSqlOrder(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        uuid.TryWriteBytes(bytes, bigEndian: true, out _);
+        fixed (byte* p = bytes)
+        {
+            uuid_v6_to_sql_order(p);
+        }
+        return new Guid(bytes);
+    }
+
+    /// <summary>
+    /// Inverse of <see cref="V6ToSqlOrder"/> — converts a SQL-Server-ordered version 6
+    /// <paramref name="uuid"/> (as read back via <see cref="Guid.ToByteArray()"/>) back to
+    /// RFC 9562 order.
+    /// </summary>
+    public static unsafe Guid V6FromSqlOrder(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        uuid.TryWriteBytes(bytes);
+        fixed (byte* p = bytes)
+        {
+            uuid_v6_to_rfc_order(p);
         }
         return new Guid(bytes, bigEndian: true);
     }

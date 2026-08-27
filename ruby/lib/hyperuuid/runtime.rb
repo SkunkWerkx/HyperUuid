@@ -104,6 +104,20 @@ module HyperUuid
         buf[0, 16]
       end
 
+      def v6_to_sql_order(bytes)
+        buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        buf[0, 16] = bytes
+        functions[:v6_to_sql_order].call(buf)
+        buf[0, 16]
+      end
+
+      def v6_to_rfc_order(bytes)
+        buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        buf[0, 16] = bytes
+        functions[:v6_to_rfc_order].call(buf)
+        buf[0, 16]
+      end
+
       private
 
       # Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
@@ -166,6 +180,16 @@ module HyperUuid
           ),
           v7_to_rfc_order: Fiddle::Function.new(
             handle["uuid_v7_to_rfc_order"],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          ),
+          v6_to_sql_order: Fiddle::Function.new(
+            handle["uuid_v6_to_sql_order"],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_VOID
+          ),
+          v6_to_rfc_order: Fiddle::Function.new(
+            handle["uuid_v6_to_rfc_order"],
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           ),

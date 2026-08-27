@@ -375,4 +375,51 @@ mod tests {
         let got = v7::unix_millis(&ours);
         assert!(got >= before && got <= after, "got {got}, want within [{before}, {after}]");
     }
+
+    #[test]
+    fn v6_sql_order_round_trips() {
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        let sql = v6::to_sql_order(&id);
+        assert_ne!(sql, id, "a real timestamp should actually move bytes around");
+        assert_eq!(v6::to_rfc_order(&sql), id);
+    }
+
+    #[test]
+    fn v6_sql_order_zero_and_a_large_timestamp_round_trip() {
+        // 100_000_000_000_000 ms (~year 5138) is comfortably under v6's 60-bit tick ceiling
+        // (~year 5236) without needing that exact boundary constant here.
+        for id in [v6::new_v6(0).unwrap(), v6::new_v6(100_000_000_000_000).unwrap()] {
+            assert_eq!(v6::to_rfc_order(&v6::to_sql_order(&id)), id);
+        }
+    }
+
+    #[test]
+    fn v6_sql_order_preserves_version_and_variant() {
+        // Different offsets than v7's sql order (octet 8's top nibble / octet 6's top two
+        // bits here, not 7/8) — see v6::to_sql_order's doc comment for why that's fine.
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        let sql = v6::to_sql_order(&id);
+        assert_eq!(sql.as_bytes()[8] & 0xF0, 0x60);
+        assert_eq!(sql.as_bytes()[6] & 0xC0, 0x80);
+    }
+
+    #[test]
+    fn v6_sql_order_extracts_the_same_timestamp_after_converting_back() {
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        let round_tripped = v6::to_rfc_order(&v6::to_sql_order(&id));
+        assert_eq!(v6::unix_millis(&round_tripped), RFC_TEST_VECTOR_MS);
+    }
+
+    #[test]
+    fn v6_sql_order_sorts_by_creation_order_under_sqlguid_comparison_for_distinct_timestamps() {
+        // Unlike v7, v6 has no counter — two UUIDs at the *same* millisecond aren't
+        // guaranteed to sort in creation order even in plain RFC order, so this only
+        // exercises strictly increasing timestamps, where the timestamp alone determines
+        // order with no tie to break.
+        let ids: Vec<Uuid> = (0..300).map(|i| v6::new_v6(1_000_000 + i).unwrap()).collect();
+        let sql: Vec<[u8; 16]> = ids.iter().map(|id| *v6::to_sql_order(id).as_bytes()).collect();
+        let mut sorted = sql.clone();
+        sorted.sort_by(sql_guid_cmp);
+        assert_eq!(sql, sorted, "SqlGuid-order comparison of SQL-ordered bytes must match creation order");
+    }
 }

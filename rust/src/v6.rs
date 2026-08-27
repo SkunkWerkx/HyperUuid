@@ -127,3 +127,76 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
     let ticks_since_epoch = (time_high << 28) | (time_mid << 12) | time_low;
     ticks_since_epoch.saturating_sub(GREGORIAN_OFFSET_100NS) / 10_000
 }
+
+/// Converts an RFC 9562-ordered version 6 UUID's bytes to the byte order SQL Server's
+/// `uniqueidentifier` needs on the wire to sort by creation order.
+///
+/// Same `SqlGuid` significance order as [`crate::v7::to_sql_order`] — octets
+/// `10,11,12,13,14,15, 8,9, 6,7, 4,5, 0,1,2,3`, most significant first — applied to v6's very
+/// different field layout. v6 has no monotonic counter the way v7 does; the only field that
+/// determines its creation order is the 60-bit timestamp itself (`time_high`/`time_mid`/
+/// `time_low`, RFC 9562 octets 0-7 alongside the version nibble), so this moves that whole
+/// contiguous timestamp — most significant chunk first — into the comparison's most
+/// significant octets, and relocates `clock_seq` (octets 8-9, no ordering value here — this
+/// crate generates it randomly on every call, not as a counter) and `node` (octets 10-15,
+/// likewise random) into the remaining, less significant octets, each moved as one intact
+/// 2- and 6-byte block rather than individually reshuffled. Unlike
+/// [`crate::v7::to_sql_order`], no bit-level repacking is needed here — v6's own RFC field
+/// boundaries already fall on byte pairs, so this is a straight relocation of whole
+/// octet groups; version and variant end up at different byte offsets than in v7's sql
+/// order as a result (octet 8's top nibble and octet 6's top two bits here, not 7/8), which
+/// is fine since the two versions are converted by separate functions and a caller always
+/// knows which one it's calling.
+///
+/// **Caveat, unlike v7:** two version 6 UUIDs minted at the same millisecond have identical
+/// timestamp bits — `clock_seq`/`node` are independently random, not a counter — so this
+/// transform doesn't (and can't) make same-millisecond v6 UUIDs sort in creation order any
+/// more than plain RFC order already does. Distinct timestamps sort correctly; same-timestamp
+/// ties don't, by the RFC's own v6 design, not a limitation introduced here.
+///
+/// Meaningful only for a genuine version 6 UUID.
+pub fn to_sql_order(uuid: &Uuid) -> Uuid {
+    let rfc = uuid.as_bytes();
+    let mut sql = [0u8; 16];
+    sql[0] = rfc[12];
+    sql[1] = rfc[13];
+    sql[2] = rfc[14];
+    sql[3] = rfc[15];
+    sql[4] = rfc[10];
+    sql[5] = rfc[11];
+    sql[6] = rfc[8];
+    sql[7] = rfc[9];
+    sql[8] = rfc[6];
+    sql[9] = rfc[7];
+    sql[10] = rfc[0];
+    sql[11] = rfc[1];
+    sql[12] = rfc[2];
+    sql[13] = rfc[3];
+    sql[14] = rfc[4];
+    sql[15] = rfc[5];
+    Uuid::from_bytes(sql)
+}
+
+/// Inverse of [`to_sql_order`] — converts a SQL-Server-ordered version 6 UUID's bytes back to
+/// RFC 9562 order.
+pub fn to_rfc_order(uuid: &Uuid) -> Uuid {
+    let sql = uuid.as_bytes();
+    let mut rfc = [0u8; 16];
+    rfc[0] = sql[10];
+    rfc[1] = sql[11];
+    rfc[2] = sql[12];
+    rfc[3] = sql[13];
+    rfc[4] = sql[14];
+    rfc[5] = sql[15];
+    rfc[6] = sql[8];
+    rfc[7] = sql[9];
+    rfc[8] = sql[6];
+    rfc[9] = sql[7];
+    rfc[10] = sql[4];
+    rfc[11] = sql[5];
+    rfc[12] = sql[0];
+    rfc[13] = sql[1];
+    rfc[14] = sql[2];
+    rfc[15] = sql[3];
+    Uuid::from_bytes(rfc)
+}

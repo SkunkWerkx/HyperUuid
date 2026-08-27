@@ -195,15 +195,15 @@ final class UuidGeneratorTests: XCTestCase {
         }
     }
 
-    func testToSqlOrderRoundTripsThroughFromSqlOrder() throws {
+    func testV7ToSqlOrderRoundTripsThroughV7FromSqlOrder() throws {
         let id = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
-        let sqlOrdered = try UuidGenerator.toSqlOrder(id)
+        let sqlOrdered = try UuidGenerator.v7ToSqlOrder(id)
         XCTAssertNotEqual(sqlOrdered, id)
-        XCTAssertEqual(try UuidGenerator.fromSqlOrder(sqlOrdered), id)
+        XCTAssertEqual(try UuidGenerator.v7FromSqlOrder(sqlOrdered), id)
     }
 
-    func testToSqlOrderPreservesVersionAndVariantAtOctets7And8() throws {
-        let sqlOrdered = try UuidGenerator.toSqlOrder(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs))
+    func testV7ToSqlOrderPreservesVersionAndVariantAtOctets7And8() throws {
+        let sqlOrdered = try UuidGenerator.v7ToSqlOrder(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs))
         let bytes = sqlOrdered.rfcBytes
         XCTAssertEqual(bytes[7] & 0xF0, 0x70)
         XCTAssertEqual(bytes[8] & 0xC0, 0x80)
@@ -221,7 +221,7 @@ final class UuidGeneratorTests: XCTestCase {
         return false
     }
 
-    func testToSqlOrderSortsByCreationOrderUnderSqlGuidComparison() throws {
+    func testV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison() throws {
         var ids: [UUID] = []
         for i in UInt64(0)..<200 {
             ids.append(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs + i))
@@ -231,7 +231,40 @@ final class UuidGeneratorTests: XCTestCase {
             ids.append(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs + 1_000_000))
         }
 
-        let sqlOrdered = try ids.map { try UuidGenerator.toSqlOrder($0).rfcBytes }
+        let sqlOrdered = try ids.map { try UuidGenerator.v7ToSqlOrder($0).rfcBytes }
+        let sorted = sqlOrdered.sorted(by: sqlGuidCompare)
+
+        XCTAssertEqual(sqlOrdered.count, sorted.count)
+        for (a, b) in zip(sqlOrdered, sorted) {
+            XCTAssertEqual(a, b)
+        }
+    }
+
+    func testV6ToSqlOrderRoundTripsThroughV6FromSqlOrder() throws {
+        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
+        let sqlOrdered = try UuidGenerator.v6ToSqlOrder(id)
+        XCTAssertNotEqual(sqlOrdered, id)
+        XCTAssertEqual(try UuidGenerator.v6FromSqlOrder(sqlOrdered), id)
+    }
+
+    func testV6ToSqlOrderPreservesVersionAndVariant() throws {
+        // Different offsets than v7's sql order — see v6ToSqlOrder's doc comment for why.
+        let sqlOrdered = try UuidGenerator.v6ToSqlOrder(try UuidGenerator.newV6(unixMillis: rfcTestVectorMs))
+        let bytes = sqlOrdered.rfcBytes
+        XCTAssertEqual(bytes[8] & 0xF0, 0x60)
+        XCTAssertEqual(bytes[6] & 0xC0, 0x80)
+    }
+
+    func testV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps() throws {
+        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
+        // to sort in creation order even in plain RFC order, so this only exercises strictly
+        // increasing timestamps, where the timestamp alone determines order with no tie to break.
+        var ids: [UUID] = []
+        for i in UInt64(0)..<300 {
+            ids.append(try UuidGenerator.newV6(unixMillis: rfcTestVectorMs + i))
+        }
+
+        let sqlOrdered = try ids.map { try UuidGenerator.v6ToSqlOrder($0).rfcBytes }
         let sorted = sqlOrdered.sorted(by: sqlGuidCompare)
 
         XCTAssertEqual(sqlOrdered.count, sorted.count)

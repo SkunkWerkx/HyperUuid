@@ -16,7 +16,7 @@ UUID id4 = UuidGenerator.newV7();
 Instant created = UuidGenerator.v7Timestamp(id4);
 
 // Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
-UUID sqlOrdered = UuidGenerator.toSqlOrder(id4);
+UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id4);
 
 // One downcall, one random-bytes fetch, one counter reservation for the whole batch:
 UUID[] batch = UuidGenerator.newV7Batch(1000);
@@ -33,7 +33,7 @@ The honest answer for versions v6/v7 is that there's no comparison to make — t
 3. **A real monotonic counter for v7.** A process-global counter (RFC 9562 §6.2 Method 1) guarantees strict creation order under concurrency, across both individual and batch calls.
 4. **Batch generation.** `newV7Batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch, instead of paying per-item native-call overhead N times. `java.util.UUID` has no bulk generation API at all.
 5. **Cross-language consistency.** The same Rust core mints v5/v6/v7 UUIDs for every other binding in this repo — a Java service and a Python or Go service produce byte-identical v5 UUIDs for the same `(namespace, name)`, which no per-language reimplementation can structurally guarantee.
-6. **SQL Server byte ordering.** `UuidGenerator.toSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order, computed once in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. One caveat worth being direct about: this is verified at the raw-byte level against .NET's own `Guid` wire format, which ADO.NET passes through unchanged — it has *not* been checked against any specific JDBC driver's own `uniqueidentifier` parameter binding, which may or may not apply a further transform of its own. Verify against your driver, or bind the returned bytes directly, before relying on it in a JDBC-facing query.
+6. **SQL Server byte ordering.** `UuidGenerator.v7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`v6ToSqlOrder` does the same for version 6, though same-millisecond v6 UUIDs aren't guaranteed to sort correctly since v6 has no counter), computed once in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. One caveat worth being direct about: this is verified at the raw-byte level against .NET's own `Guid` wire format, which ADO.NET passes through unchanged — it has *not* been checked against any specific JDBC driver's own `uniqueidentifier` parameter binding, which may or may not apply a further transform of its own. Verify against your driver, or bind the returned bytes directly, before relying on it in a JDBC-facing query.
 
 The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
 

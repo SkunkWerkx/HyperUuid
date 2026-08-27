@@ -28,10 +28,15 @@ Returns `HyperUuid::Uuid`, a minimal value object (`#bytes`, `#to_s`, `#version`
 comparable/hashable) — this gem has no runtime dependency on the `uuid` gem.
 `HyperUuid::Namespaces::DNS`/`URL`/`OID`/`X500` are RFC 9562 Section 6.6's well-known
 namespaces. `#timestamp` recovers the embedded UTC `Time` from a version 6 or 7 UUID.
-`#to_sql_order`/`#from_sql_order` convert a version 7 UUID to and from the byte order SQL
-Server's `uniqueidentifier` needs on the wire to sort by creation order — computed once in
+`#to_sql_order`/`#from_sql_order` convert a version 6 or 7 UUID to and from the byte order SQL
+Server's `uniqueidentifier` needs on the wire to sort by creation order (`#to_sql_order`
+dispatches on the UUID's own version, matching `#timestamp`'s convention) — computed once in
 the native Rust core rather than reimplemented in Ruby, and verified there (and independently
 against the real `System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite).
+Same-millisecond v6 UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter,
+so `clock_seq`/`node` (not the timestamp) decide ties, the same pre-existing RFC 9562 v6
+limitation plain order already has. `#from_sql_order` figures out which version to invert by checking a byte position that's
+provably collision-free between the two (see the method's own doc comment).
 `HyperUuid::Uuid::NIL`/`MAX` are the RFC 9562 §5.9/§5.10 special-value UUIDs.
 `HyperUuid.new_v6_batch(count)`/`new_v7_batch(count)` generate `count` UUIDs sharing one
 timestamp capture and one native call, instead of `count` of each.

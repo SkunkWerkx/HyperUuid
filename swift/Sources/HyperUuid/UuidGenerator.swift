@@ -34,6 +34,8 @@ public enum UuidGenerator {
     private typealias UuidNewV7BatchFn = @convention(c) (UInt64, UInt32, UnsafeMutablePointer<UInt8>?) -> Int32
     private typealias UuidV7ToSqlOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias UuidV7ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
+    private typealias UuidV6ToSqlOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
+    private typealias UuidV6ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
 
     private struct LoadedLibrary {
         let library: DynamicLibrary
@@ -47,6 +49,8 @@ public enum UuidGenerator {
         let newV7Batch: UuidNewV7BatchFn
         let v7ToSqlOrder: UuidV7ToSqlOrderFn
         let v7ToRfcOrder: UuidV7ToRfcOrderFn
+        let v6ToSqlOrder: UuidV6ToSqlOrderFn
+        let v6ToRfcOrder: UuidV6ToRfcOrderFn
     }
 
     // Swift initializes `static let`s lazily and exactly once, thread-safely — the same
@@ -74,11 +78,16 @@ public enum UuidGenerator {
             try library.symbol("uuid_v7_to_sql_order"), to: UuidV7ToSqlOrderFn.self)
         let v7ToRfcOrder = unsafeBitCast(
             try library.symbol("uuid_v7_to_rfc_order"), to: UuidV7ToRfcOrderFn.self)
+        let v6ToSqlOrder = unsafeBitCast(
+            try library.symbol("uuid_v6_to_sql_order"), to: UuidV6ToSqlOrderFn.self)
+        let v6ToRfcOrder = unsafeBitCast(
+            try library.symbol("uuid_v6_to_rfc_order"), to: UuidV6ToRfcOrderFn.self)
         return LoadedLibrary(
             library: library, newV4: newV4, newV5: newV5,
             newV6: newV6, v6UnixMillis: v6UnixMillis, newV6Batch: newV6Batch,
             newV7: newV7, v7UnixMillis: v7UnixMillis, newV7Batch: newV7Batch,
-            v7ToSqlOrder: v7ToSqlOrder, v7ToRfcOrder: v7ToRfcOrder)
+            v7ToSqlOrder: v7ToSqlOrder, v7ToRfcOrder: v7ToRfcOrder,
+            v6ToSqlOrder: v6ToSqlOrder, v6ToRfcOrder: v6ToRfcOrder)
     }
 
     private static func loaded() throws -> LoadedLibrary {
@@ -279,20 +288,56 @@ public enum UuidGenerator {
     /// comparator — in this project's C# test suite; this binding calls the same native
     /// function rather than reimplementing the math.
     ///
-    /// Meaningful only for a genuine version 7 UUID.
-    public static func toSqlOrder(_ uuid: UUID) throws -> UUID {
+    /// Meaningful only for a genuine version 7 UUID; see `v6ToSqlOrder` for v6.
+    public static func v7ToSqlOrder(_ uuid: UUID) throws -> UUID {
         let l = try loaded()
         var bytes = uuid.rfcBytes
         bytes.withUnsafeMutableBufferPointer { l.v7ToSqlOrder($0.baseAddress) }
         return UUID(rfcBytes: bytes)
     }
 
-    /// Inverse of `toSqlOrder` — converts a SQL-Server-ordered version 7 `uuid` back to
+    /// Inverse of `v7ToSqlOrder` — converts a SQL-Server-ordered version 7 `uuid` back to
     /// RFC 9562 order.
-    public static func fromSqlOrder(_ uuid: UUID) throws -> UUID {
+    public static func v7FromSqlOrder(_ uuid: UUID) throws -> UUID {
         let l = try loaded()
         var bytes = uuid.rfcBytes
         bytes.withUnsafeMutableBufferPointer { l.v7ToRfcOrder($0.baseAddress) }
+        return UUID(rfcBytes: bytes)
+    }
+
+    /// Converts an RFC 9562-ordered version 6 `uuid` to the byte order SQL Server's
+    /// `uniqueidentifier` needs on the wire to sort by creation order.
+    ///
+    /// Same `SqlGuid` significance order as `v7ToSqlOrder`, applied to v6's very different
+    /// field layout. v6 has no monotonic counter the way v7 does; the only field that
+    /// determines its creation order is the 60-bit timestamp itself, so this moves that whole
+    /// timestamp — most significant chunk first — into the comparison's most significant
+    /// octets, and relocates `clock_seq`/`node` (no ordering value — randomly generated per
+    /// call, not a counter) into the remaining octets. Version and variant end up at different
+    /// byte offsets than `v7ToSqlOrder`'s result (octet 8's top nibble and octet 6's top two
+    /// bits here, not 7/8) — fine, since the two versions are separate methods and a caller
+    /// always knows which one it's calling.
+    ///
+    /// Unlike v7, two version 6 UUIDs minted at the same millisecond have identical timestamp
+    /// bits — `clock_seq`/`node` are independently random, not a counter — so this doesn't
+    /// (and can't) make same-millisecond v6 UUIDs sort in creation order any more than plain
+    /// RFC order already does. Distinct timestamps sort correctly; same-timestamp ties don't,
+    /// by the RFC's own v6 design, not a limitation introduced here.
+    ///
+    /// Meaningful only for a genuine version 6 UUID.
+    public static func v6ToSqlOrder(_ uuid: UUID) throws -> UUID {
+        let l = try loaded()
+        var bytes = uuid.rfcBytes
+        bytes.withUnsafeMutableBufferPointer { l.v6ToSqlOrder($0.baseAddress) }
+        return UUID(rfcBytes: bytes)
+    }
+
+    /// Inverse of `v6ToSqlOrder` — converts a SQL-Server-ordered version 6 `uuid` back to
+    /// RFC 9562 order.
+    public static func v6FromSqlOrder(_ uuid: UUID) throws -> UUID {
+        let l = try loaded()
+        var bytes = uuid.rfcBytes
+        bytes.withUnsafeMutableBufferPointer { l.v6ToRfcOrder($0.baseAddress) }
         return UUID(rfcBytes: bytes)
     }
 }

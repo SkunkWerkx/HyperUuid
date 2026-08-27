@@ -388,33 +388,33 @@ func TestV7BatchOverflowTimestampErrors(t *testing.T) {
 	}
 }
 
-func TestToSqlOrderRoundTripsThroughFromSqlOrder(t *testing.T) {
+func TestV7ToSqlOrderRoundTripsThroughV7FromSqlOrder(t *testing.T) {
 	id, err := NewV7At(rfcTestVectorMs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlOrdered, err := ToSqlOrder(id)
+	sqlOrdered, err := V7ToSqlOrder(id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sqlOrdered == id {
-		t.Fatal("ToSqlOrder returned the input unchanged, want the bytes actually permuted")
+		t.Fatal("V7ToSqlOrder returned the input unchanged, want the bytes actually permuted")
 	}
-	roundTripped, err := FromSqlOrder(sqlOrdered)
+	roundTripped, err := V7FromSqlOrder(sqlOrdered)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if roundTripped != id {
-		t.Errorf("FromSqlOrder(ToSqlOrder(id)) = %v, want %v", roundTripped, id)
+		t.Errorf("V7FromSqlOrder(V7ToSqlOrder(id)) = %v, want %v", roundTripped, id)
 	}
 }
 
-func TestToSqlOrderPreservesVersionAndVariantAtOctets7And8(t *testing.T) {
+func TestV7ToSqlOrderPreservesVersionAndVariantAtOctets7And8(t *testing.T) {
 	id, err := NewV7At(rfcTestVectorMs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlOrdered, err := ToSqlOrder(id)
+	sqlOrdered, err := V7ToSqlOrder(id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func sqlGuidCompare(a, b [16]byte) int {
 	return 0
 }
 
-func TestToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
+func TestV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
 	var ids []uuid.UUID
 	for i := uint64(0); i < 200; i++ {
 		id, err := NewV7At(rfcTestVectorMs + i)
@@ -462,7 +462,79 @@ func TestToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
 
 	sqlOrdered := make([][16]byte, len(ids))
 	for i, id := range ids {
-		sql, err := ToSqlOrder(id)
+		sql, err := V7ToSqlOrder(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqlOrdered[i] = [16]byte(sql)
+	}
+
+	sorted := make([][16]byte, len(sqlOrdered))
+	copy(sorted, sqlOrdered)
+	sort.Slice(sorted, func(i, j int) bool { return sqlGuidCompare(sorted[i], sorted[j]) < 0 })
+
+	for i := range sqlOrdered {
+		if sqlOrdered[i] != sorted[i] {
+			t.Fatalf("SQL-ordered bytes do not sort in creation order under SqlGuid comparison at index %d", i)
+		}
+	}
+}
+
+func TestV6ToSqlOrderRoundTripsThroughV6FromSqlOrder(t *testing.T) {
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlOrdered, err := V6ToSqlOrder(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlOrdered == id {
+		t.Fatal("V6ToSqlOrder returned the input unchanged, want the bytes actually permuted")
+	}
+	roundTripped, err := V6FromSqlOrder(sqlOrdered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundTripped != id {
+		t.Errorf("V6FromSqlOrder(V6ToSqlOrder(id)) = %v, want %v", roundTripped, id)
+	}
+}
+
+func TestV6ToSqlOrderPreservesVersionAndVariant(t *testing.T) {
+	// Different offsets than v7's sql order — see V6ToSqlOrder's doc comment for why.
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlOrdered, err := V6ToSqlOrder(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlOrdered[8]&0xF0 != 0x60 {
+		t.Errorf("version nibble at octet 8 = %#x, want 0x60..0x6F", sqlOrdered[8])
+	}
+	if sqlOrdered[6]&0xC0 != 0x80 {
+		t.Errorf("variant bits at octet 6 = %#x, want top two bits 10", sqlOrdered[6])
+	}
+}
+
+// Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed to sort
+// in creation order even in plain RFC order, so this only exercises strictly increasing
+// timestamps, where the timestamp alone determines order with no tie to break.
+func TestV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps(t *testing.T) {
+	var ids []uuid.UUID
+	for i := uint64(0); i < 300; i++ {
+		id, err := NewV6At(rfcTestVectorMs + i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+
+	sqlOrdered := make([][16]byte, len(ids))
+	for i, id := range ids {
+		sql, err := V6ToSqlOrder(id)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -52,27 +52,70 @@ module HyperUuid
       Time.at(millis / 1000, millis % 1000, :millisecond).utc
     end
 
-    # Converts an RFC 9562-ordered version 7 UUID to the byte order SQL Server's
-    # `uniqueidentifier` needs on the wire to sort by creation order.
+    # Converts an RFC 9562-ordered version 6 or 7 UUID to the byte order SQL Server's
+    # `uniqueidentifier` needs on the wire to sort by creation order. Dispatches on `version`
+    # the same way #timestamp does.
     #
     # `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a
     # `uniqueidentifier` column — doesn't compare a GUID's 16 bytes left to right; it uses a
     # fixed, non-sequential byte significance order (octets 10,11,12,13,14,15,8,9,6,7,4,5,
-    # 0,1,2,3, most significant first). This moves the timestamp and counter — the two fields
-    # that determine creation order — into that comparison's most-significant bytes, and moves
-    # the trailing entropy, which carries no ordering information, into the least-significant
-    # ones as one intact block. Computed once in the native Rust core and verified there (and
-    # independently, against the real SqlGuid comparator, in this project's C# test suite);
-    # this binding calls the same native function rather than reimplementing the byte math.
+    # 0,1,2,3, most significant first). Computed once in the native Rust core and verified
+    # there (and independently, against the real SqlGuid comparator, in this project's C#
+    # test suite); this binding calls the same native functions rather than reimplementing
+    # the byte math.
     #
-    # Meaningful only for a genuine version 7 UUID.
+    # For v7, this moves the timestamp and counter — the two fields that determine creation
+    # order — into that comparison's most-significant bytes, and moves the trailing entropy,
+    # which carries no ordering information, into the least-significant ones as one intact
+    # block. For v6, which has no monotonic counter the way v7 does, the only field that
+    # determines creation order is the 60-bit timestamp itself, so that moves into the most
+    # significant bytes instead, with `clock_seq`/`node` (independently random per call, not
+    # a counter, so no ordering value either way) relocated into the rest. v6's much simpler
+    # byte layout needs no bit-level repacking to do this — just whole-octet-group
+    # relocation — unlike v7's, and its version/variant land at different sql-order offsets
+    # as a result (octet 8's top nibble / octet 6's top two bits, not 7/8).
+    #
+    # **v6-specific caveat, unlike v7:** two version 6 UUIDs minted at the same millisecond
+    # have identical timestamp bits, so they aren't guaranteed to sort in creation order any
+    # more than plain RFC order already does — a pre-existing RFC 9562 v6 limitation, not one
+    # this transform introduces.
+    #
+    # Meaningful only for a genuine version 6 or 7 UUID.
     def to_sql_order
-      self.class.new(Runtime.v7_to_sql_order(bytes))
+      case version
+      when 7 then self.class.new(Runtime.v7_to_sql_order(bytes))
+      when 6 then self.class.new(Runtime.v6_to_sql_order(bytes))
+      else raise ArgumentError, "to_sql_order is only defined for version 6 or 7 UUIDs, got version #{version}"
+      end
     end
 
-    # Inverse of #to_sql_order — converts a SQL-Server-ordered version 7 UUID back to RFC 9562 order.
+    # Inverse of #to_sql_order — converts a SQL-Server-ordered version 6 or 7 UUID back to
+    # RFC 9562 order.
+    #
+    # A SQL-ordered value's version nibble sits at a different octet depending on which
+    # version produced it (octet 7's top nibble = 7 for v7-sql-order, octet 8's top nibble =
+    # 6 for v6-sql-order — #version itself assumes RFC order's octet 6 and can't tell these
+    # apart), so this checks both fixed positions directly rather than calling #version.
+    #
+    # Order matters here and isn't arbitrary: octet 8 must be checked *first*. For v6-sql-order
+    # it's deterministic (top nibble always 0x6, by construction), and for v7-sql-order it's
+    # also deterministic but structurally excluded from ever reading 0x6 (its top two bits are
+    # the fixed variant `10`, so the nibble only ever lands in 0x8-0xB) — no collision either
+    # way. Octet 7, by contrast, is *not* safe to check first: for v7-sql-order it's
+    # deterministically 0x7, but for v6-sql-order it holds `clock_seq`'s fully random low
+    # byte, which has a real (~1-in-16) chance of a top nibble that also happens to read 0x7 —
+    # confirmed by an actual test failure during development, not a hypothetical. Checking
+    # octet 8 first rules v6 in or out unambiguously before octet 7's reading can matter.
     def from_sql_order
-      self.class.new(Runtime.v7_to_rfc_order(bytes))
+      octet8_version = (bytes.getbyte(8) >> 4) & 0x0F
+      octet7_version = (bytes.getbyte(7) >> 4) & 0x0F
+      if octet8_version == 6
+        self.class.new(Runtime.v6_to_rfc_order(bytes))
+      elsif octet7_version == 7
+        self.class.new(Runtime.v7_to_rfc_order(bytes))
+      else
+        raise ArgumentError, "from_sql_order: not a recognized version 6 or 7 SQL-ordered UUID"
+      end
     end
 
     def ==(other)

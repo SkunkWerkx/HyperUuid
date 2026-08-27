@@ -215,15 +215,15 @@ def test_v7_batch_overflow_timestamp_raises():
         hyperuuid.new_v7_batch(1, 0x0001_0000_0000_0000)
 
 
-def test_to_sql_order_round_trips_through_from_sql_order():
+def test_v7_to_sql_order_round_trips_through_v7_from_sql_order():
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
-    sql_ordered = hyperuuid.to_sql_order(id_)
+    sql_ordered = hyperuuid.v7_to_sql_order(id_)
     assert sql_ordered != id_
-    assert hyperuuid.from_sql_order(sql_ordered) == id_
+    assert hyperuuid.v7_from_sql_order(sql_ordered) == id_
 
 
-def test_to_sql_order_preserves_version_and_variant_at_octets_7_and_8():
-    sql_ordered = hyperuuid.to_sql_order(hyperuuid.new_v7(RFC_TEST_VECTOR_MS))
+def test_v7_to_sql_order_preserves_version_and_variant_at_octets_7_and_8():
+    sql_ordered = hyperuuid.v7_to_sql_order(hyperuuid.new_v7(RFC_TEST_VECTOR_MS))
     b = sql_ordered.bytes
     assert b[7] & 0xF0 == 0x70
     assert b[8] & 0xC0 == 0x80
@@ -238,12 +238,39 @@ def _sql_guid_key(uuid_value):
     return tuple(b[i] for i in significance_order)
 
 
-def test_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison():
+def test_v7_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison():
     ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + i) for i in range(200)]
     # Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
     ids += [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + 1_000_000) for _ in range(200)]
 
-    sql_ordered = [hyperuuid.to_sql_order(id_) for id_ in ids]
+    sql_ordered = [hyperuuid.v7_to_sql_order(id_) for id_ in ids]
+    sorted_by_sqlguid = sorted(sql_ordered, key=_sql_guid_key)
+
+    assert sql_ordered == sorted_by_sqlguid
+
+
+def test_v6_to_sql_order_round_trips_through_v6_from_sql_order():
+    id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
+    sql_ordered = hyperuuid.v6_to_sql_order(id_)
+    assert sql_ordered != id_
+    assert hyperuuid.v6_from_sql_order(sql_ordered) == id_
+
+
+def test_v6_to_sql_order_preserves_version_and_variant():
+    # Different offsets than v7's sql order — see v6_to_sql_order's docstring for why.
+    sql_ordered = hyperuuid.v6_to_sql_order(hyperuuid.new_v6(RFC_TEST_VECTOR_MS))
+    b = sql_ordered.bytes
+    assert b[8] & 0xF0 == 0x60
+    assert b[6] & 0xC0 == 0x80
+
+
+def test_v6_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison_for_distinct_timestamps():
+    # Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed to
+    # sort in creation order even in plain RFC order, so this only exercises strictly
+    # increasing timestamps, where the timestamp alone determines order with no tie to break.
+    ids = [hyperuuid.new_v6(RFC_TEST_VECTOR_MS + i) for i in range(300)]
+
+    sql_ordered = [hyperuuid.v6_to_sql_order(id_) for id_ in ids]
     sorted_by_sqlguid = sorted(sql_ordered, key=_sql_guid_key)
 
     assert sql_ordered == sorted_by_sqlguid

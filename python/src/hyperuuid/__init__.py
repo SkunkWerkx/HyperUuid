@@ -28,8 +28,10 @@ __all__ = [
     "new_v7_batch",
     "v6_timestamp",
     "v7_timestamp",
-    "to_sql_order",
-    "from_sql_order",
+    "v6_to_sql_order",
+    "v6_from_sql_order",
+    "v7_to_sql_order",
+    "v7_from_sql_order",
     "NIL",
     "MAX",
 ]
@@ -140,7 +142,7 @@ def new_v7_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]
     return [_uuid.UUID(bytes=raw[i * 16 : i * 16 + 16]) for i in range(count)]
 
 
-def to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
+def v7_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     """Convert an RFC 9562-ordered version 7 UUID to the byte order SQL Server's
     ``uniqueidentifier`` needs on the wire to sort by creation order.
 
@@ -155,12 +157,43 @@ def to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     comparator — in this project's C# test suite; this binding calls the same native function
     rather than reimplementing the math.
 
-    Meaningful only for a genuine version 7 UUID.
+    Meaningful only for a genuine version 7 UUID; see :func:`v6_to_sql_order` for v6.
     """
     return _uuid.UUID(bytes=_runtime.v7_to_sql_order(uuid_value.bytes))
 
 
-def from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
-    """Inverse of :func:`to_sql_order` — convert a SQL-Server-ordered version 7 UUID back to
-    RFC 9562 order."""
+def v7_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
+    """Inverse of :func:`v7_to_sql_order` — convert a SQL-Server-ordered version 7 UUID back
+    to RFC 9562 order."""
     return _uuid.UUID(bytes=_runtime.v7_to_rfc_order(uuid_value.bytes))
+
+
+def v6_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
+    """Convert an RFC 9562-ordered version 6 UUID to the byte order SQL Server's
+    ``uniqueidentifier`` needs on the wire to sort by creation order.
+
+    Same ``SqlGuid`` significance order as :func:`v7_to_sql_order`, applied to v6's very
+    different field layout. v6 has no monotonic counter the way v7 does; the only field that
+    determines its creation order is the 60-bit timestamp itself, so this moves that whole
+    timestamp — most significant chunk first — into the comparison's most significant octets,
+    and relocates ``clock_seq``/``node`` (no ordering value here — generated randomly on every
+    call, not a counter) into the remaining, less significant ones. Version and variant end up
+    at different byte offsets than :func:`v7_to_sql_order`'s result (octet 8's top nibble and
+    octet 6's top two bits here, not 7/8) — fine, since the two versions are separate
+    functions and a caller always knows which one it's calling.
+
+    Unlike v7, two version 6 UUIDs minted at the same millisecond have identical timestamp
+    bits — ``clock_seq``/``node`` are independently random, not a counter — so this doesn't
+    (and can't) make same-millisecond v6 UUIDs sort in creation order any more than plain RFC
+    order already does. Distinct timestamps sort correctly; same-timestamp ties don't, by the
+    RFC's own v6 design, not a limitation introduced here.
+
+    Meaningful only for a genuine version 6 UUID.
+    """
+    return _uuid.UUID(bytes=_runtime.v6_to_sql_order(uuid_value.bytes))
+
+
+def v6_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
+    """Inverse of :func:`v6_to_sql_order` — convert a SQL-Server-ordered version 6 UUID back
+    to RFC 9562 order."""
+    return _uuid.UUID(bytes=_runtime.v6_to_rfc_order(uuid_value.bytes))

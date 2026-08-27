@@ -41,6 +41,10 @@ def _load() -> ctypes.CDLL:
     lib.uuid_v7_to_sql_order.restype = None
     lib.uuid_v7_to_rfc_order.argtypes = [ctypes.c_void_p]
     lib.uuid_v7_to_rfc_order.restype = None
+    lib.uuid_v6_to_sql_order.argtypes = [ctypes.c_void_p]
+    lib.uuid_v6_to_sql_order.restype = None
+    lib.uuid_v6_to_rfc_order.argtypes = [ctypes.c_void_p]
+    lib.uuid_v6_to_rfc_order.restype = None
     return lib
 
 
@@ -147,4 +151,18 @@ def v7_to_rfc_order(uuid_bytes: bytes) -> bytes:
     lib = _get_lib()
     buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
     lib.uuid_v7_to_rfc_order(ctypes.byref(buf))
+    return bytes(buf)
+
+
+def v6_to_sql_order(uuid_bytes: bytes) -> bytes:
+    lib = _get_lib()
+    buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
+    lib.uuid_v6_to_sql_order(ctypes.byref(buf))
+    return bytes(buf)
+
+
+def v6_to_rfc_order(uuid_bytes: bytes) -> bytes:
+    lib = _get_lib()
+    buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
+    lib.uuid_v6_to_rfc_order(ctypes.byref(buf))
     return bytes(buf)

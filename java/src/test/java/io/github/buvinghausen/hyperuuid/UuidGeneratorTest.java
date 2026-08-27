@@ -221,16 +221,16 @@ class UuidGeneratorTest {
     }
 
     @Test
-    void toSqlOrderRoundTripsThroughFromSqlOrder() {
+    void v7ToSqlOrderRoundTripsThroughV7FromSqlOrder() {
         UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
-        UUID sqlOrdered = UuidGenerator.toSqlOrder(id);
+        UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id);
         assertNotEquals(id, sqlOrdered);
-        assertEquals(id, UuidGenerator.fromSqlOrder(sqlOrdered));
+        assertEquals(id, UuidGenerator.v7FromSqlOrder(sqlOrdered));
     }
 
     @Test
-    void toSqlOrderPreservesVersionAndVariantAtOctets7And8() {
-        UUID sqlOrdered = UuidGenerator.toSqlOrder(UuidGenerator.newV7(RFC_TEST_VECTOR_MS));
+    void v7ToSqlOrderPreservesVersionAndVariantAtOctets7And8() {
+        UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(UuidGenerator.newV7(RFC_TEST_VECTOR_MS));
         byte[] bytes = RfcBytes.toRfcBytes(sqlOrdered);
         assertEquals(0x70, bytes[7] & 0xF0);
         assertEquals((byte) 0x80, (byte) (bytes[8] & 0xC0));
@@ -253,7 +253,7 @@ class UuidGeneratorTest {
     }
 
     @Test
-    void toSqlOrderSortsByCreationOrderUnderSqlGuidComparison() {
+    void v7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison() {
         List<UUID> ids = new ArrayList<>();
         for (long i = 0; i < 200; i++) {
             ids.add(UuidGenerator.newV7(RFC_TEST_VECTOR_MS + i));
@@ -264,7 +264,47 @@ class UuidGeneratorTest {
         }
 
         List<byte[]> sqlOrdered = ids.stream()
-                .map(UuidGenerator::toSqlOrder)
+                .map(UuidGenerator::v7ToSqlOrder)
+                .map(RfcBytes::toRfcBytes)
+                .collect(Collectors.toList());
+        List<byte[]> sorted = new ArrayList<>(sqlOrdered);
+        sorted.sort(UuidGeneratorTest::sqlGuidCompare);
+
+        assertEquals(sqlOrdered.size(), sorted.size());
+        for (int i = 0; i < sqlOrdered.size(); i++) {
+            assertArrayEquals(sqlOrdered.get(i), sorted.get(i));
+        }
+    }
+
+    @Test
+    void v6ToSqlOrderRoundTripsThroughV6FromSqlOrder() {
+        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
+        UUID sqlOrdered = UuidGenerator.v6ToSqlOrder(id);
+        assertNotEquals(id, sqlOrdered);
+        assertEquals(id, UuidGenerator.v6FromSqlOrder(sqlOrdered));
+    }
+
+    @Test
+    void v6ToSqlOrderPreservesVersionAndVariant() {
+        // Different offsets than v7's sql order — see v6ToSqlOrder's doc comment for why.
+        UUID sqlOrdered = UuidGenerator.v6ToSqlOrder(UuidGenerator.newV6(RFC_TEST_VECTOR_MS));
+        byte[] bytes = RfcBytes.toRfcBytes(sqlOrdered);
+        assertEquals(0x60, bytes[8] & 0xF0);
+        assertEquals((byte) 0x80, (byte) (bytes[6] & 0xC0));
+    }
+
+    @Test
+    void v6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps() {
+        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
+        // to sort in creation order even in plain RFC order, so this only exercises strictly
+        // increasing timestamps, where the timestamp alone determines order with no tie to break.
+        List<UUID> ids = new ArrayList<>();
+        for (long i = 0; i < 300; i++) {
+            ids.add(UuidGenerator.newV6(RFC_TEST_VECTOR_MS + i));
+        }
+
+        List<byte[]> sqlOrdered = ids.stream()
+                .map(UuidGenerator::v6ToSqlOrder)
                 .map(RfcBytes::toRfcBytes)
                 .collect(Collectors.toList());
         List<byte[]> sorted = new ArrayList<>(sqlOrdered);
