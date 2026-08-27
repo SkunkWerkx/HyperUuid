@@ -144,6 +144,16 @@ jobs:
         working-directory: swift
         run: swift test
 
+      # fiddle (Ruby's Fiddle gem, see below) has no precompiled binary for any platform —
+      # RubyGems.org only ever hosts it as platform "ruby" — so it always compiles a native
+      # extension from source on `bundle install`. On macos-15-intel specifically this hits
+      # mkmf's `try_link0` with "You have to install development tools first", even though
+      # Rust/Swift compiled fine earlier in this same job — a known class of GHA macOS-runner
+      # issue where `xcode-select` isn't pointed at a full Xcode.app. No-op on every other OS.
+      - name: Point Xcode at a full toolchain (works around a Ruby native-extension mkmf issue)
+        if: runner.os == 'macOS'
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
       # Same rationale again, for Ruby's Fiddle dlopen/dlsym (LoadLibraryW/GetProcAddress on
       # Windows) call path. Fiddle is bundled with every Ruby install (see ruby/README.md).
       - uses: ruby/setup-ruby@v1
@@ -184,7 +194,11 @@ jobs:
 
       - name: Test PHP bindings against this platform's native lib
         working-directory: php
-        run: vendor/bin/phpunit
+        # `php vendor/bin/phpunit`, not bare `vendor/bin/phpunit` — Composer's proxy script is
+        # a `#!/usr/bin/env php`-shebang PHP file, which the default shell on the two Windows
+        # legs (pwsh, not Git Bash) can't execute directly; invoking `php` explicitly against
+        # it works identically on every OS/shell, shebang or not.
+        run: php vendor/bin/phpunit
 
       # Python has no build-native counterpart to publish yet (no wheel/RID packaging, no
       # pip server to push to) — this just exercises the real ctypes.CDLL load path on this
