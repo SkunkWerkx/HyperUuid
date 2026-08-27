@@ -1,0 +1,58 @@
+# HyperUuid
+
+**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.86x — with zero heap allocation — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
+
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via source-generated [`LibraryImport`](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/pinvoke-source-generation) P/Invoke — no runtime bridge, no reflection, AOT/trim-friendly. Ships as RID-specific native assets inside the package the standard NuGet way.
+
+```csharp
+using HyperUuid;
+
+var id = UuidGenerator.NewV4();
+var id2 = UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "example.com");
+var id3 = UuidGenerator.NewV6();
+var id4 = UuidGenerator.NewV7();
+
+// Time-sortable versions round-trip their embedded timestamp:
+DateTimeOffset created = UuidGenerator.V7Timestamp(id4);
+
+// Bulk generation shares one timestamp capture, one random-bytes fetch, and (v7) one
+// contiguous counter reservation across the whole batch:
+Guid[] batch = UuidGenerator.NewV7Batch(1000);
+```
+
+Returns plain `System.Guid` — this binding does no byte-order conversion of its own beyond the `bigEndian: true` `Guid` constructor overload (.NET 8+), since that's already the correct, direct RFC 9562 mapping. `UuidGenerator.Namespaces.Dns`/`Url`/`Oid`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.Nil`/`Max` are the §5.9/§5.10 special values (`Nil` is literally `Guid.Empty`).
+
+## Why not `Guid.NewGuid()` / `Guid.CreateVersion7()`?
+
+1. **It's measurably faster, not just different.** Real BenchmarkDotNet numbers, `[MemoryDiagnoser]`, linux-arm64 (`dotnet run -c Release --project ../csharp/HyperUuid.Benchmarks -- --filter *Generation*`):
+
+   | Method | Mean | Allocated |
+   | --- | ---: | ---: |
+   | `Guid.NewGuid()` | 695.05 ns | 0 B |
+   | `UuidGenerator.NewV4()` | 118.60 ns (**5.86x faster**) | 0 B |
+   | `UuidGenerator.NewV5()` | 159.51 ns (4.36x faster) | 40 B¹ |
+   | `UuidGenerator.NewV6()` | 82.68 ns (**8.41x faster**) | 0 B |
+   | `UuidGenerator.NewV7()` | 92.53 ns (7.51x faster) | 0 B |
+
+   ¹ `NewV5(Guid, string)` allocates 40 B encoding the name to UTF-8 — call `NewV5(Guid, ReadOnlySpan<byte>)` directly with your own bytes to stay allocation-free there too.
+
+2. **A real monotonic counter, on every target framework this package supports.** `Guid.CreateVersion7()` only exists from .NET 9 onward — this package targets net8.0, so it's the only way to get RFC 9562 v7 there at all. Even where `CreateVersion7` *is* available, it implements no counter (RFC 9562 §6.2 Method 1): two BCL v7 GUIDs minted in the same millisecond sort randomly relative to each other, which is exactly the clustered-index fragmentation problem v7 adoption exists to solve. `UuidGenerator.NewV7()` reserves a slot in a process-global counter every call, guaranteeing strict creation order under concurrency — verified across interleaved individual *and* batch calls in this project's own test suite, not just in isolation.
+3. **v6, which the BCL doesn't have at all.** A field-compatible reordering of v1 for the same sort/index locality as v7, useful when you're migrating off legacy v1 IDs. No `Guid.CreateVersion6` exists anywhere in the BCL.
+4. **Batch generation.** `NewV7Batch(1000)` is ~3.9x faster than 1000 individual `NewV7()` calls (24 µs vs 93 µs) — one native call, one random-bytes fetch, one counter reservation for the whole batch, instead of paying per-item overhead a thousand times. `Guid.NewGuid()`/`CreateVersion7()` have no bulk API; you'd write that loop yourself.
+5. **Cross-language consistency.** The exact same Rust core also mints v5 namespace UUIDs for Ruby, Python, Go, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't C#-only, that's not something the BCL can offer at all.
+
+The honest trade-off: this is a native dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID) instead of a BCL type that's always just there. If you only need plain v4 randomness in a C#-only codebase, `Guid.NewGuid()` is simpler and that's a completely reasonable choice.
+
+## AOT
+
+Publishes cleanly under `PublishAot` — `LibraryImport` is source-generated with no runtime reflection anywhere in this assembly, and the project opts into (and fails the build on) the trim/Native-AOT analyzers via `IsAotCompatible`. See `HyperUuid.AotSmokeTest/` for a minimal AOT-published console app exercising it.
+
+## Install
+
+Published to this repo's GitHub Packages NuGet feed — add it as a package source, then:
+
+```shell
+dotnet add package HyperUuid
+```
+
+See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.

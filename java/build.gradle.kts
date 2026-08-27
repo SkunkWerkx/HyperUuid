@@ -43,7 +43,7 @@ publishing {
             pom {
                 name.set("hyperuuid")
                 description.set(
-                    "RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free " +
+                    "RFC 9562 UUID v4/v5/v6/v7 generation — high-performance, allocation-free " +
                         "FFM bindings straight into a native Rust core (libhyperuuid). " +
                         "No runtime bridge, no reflection, no extra dependency."
                 )

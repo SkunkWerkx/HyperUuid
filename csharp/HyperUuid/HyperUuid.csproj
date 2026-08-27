@@ -15,10 +15,11 @@
          RootNamespace kept explicit so this rename doesn't shift the default namespace. -->
     <AssemblyName>HyperUuid.Managed</AssemblyName>
     <RootNamespace>HyperUuid</RootNamespace>
-    <Description>RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
+    <Description>RFC 9562 UUID v4/v5/v6/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
     <Authors>Brian Buvinghausen</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/SkunkWerkx/HyperUuid</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Source-generated LibraryImport P/Invoke only, no reflection anywhere in this assembly:
          opts into (and fails the build on) the trim and Native AOT analyzers. -->
@@ -26,6 +27,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Shows up as the package page's description on GitHub Packages/NuGet — sourced from
+         csharp/README.md (this project's own, not the repo root's) so the exact same content
+         that lives in the repo also ships inside the .nupkg. -->
+    <None Include="../README.md" Pack="true" PackagePath="\" />
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
          .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time. -->
     <None Include="runtimes/**" Pack="true" PackagePath="runtimes" CopyToOutputDirectory="PreserveNewest" />
