@@ -1,5 +1,4 @@
 plugins {
-    kotlin("jvm") version "2.4.10"
     `java-library`
     `maven-publish`
 }
@@ -20,14 +19,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-kotlin {
-    // Target JDK 21 bytecode without pinning a toolchain — avoids Gradle needing to
-    // auto-provision a JDK when a newer one is already what's running the build.
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
-    }
-}
-
 tasks.test {
     useJUnitPlatform()
     // UuidGenerator's FFM downcalls are a "restricted method" — silences the runtime
@@ -36,8 +27,12 @@ tasks.test {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    // 22 (not 21, as the prior Kotlin build targeted): java.lang.foreign is a stable, non-
+    // preview API only from JDK 22 (JEP 454) onward — plain javac (unlike kotlinc, which
+    // doesn't gate on the JDK's own @PreviewFeature markers the same way) enforces that at
+    // this project's own source/target level, not just the compiling JDK's.
+    sourceCompatibility = JavaVersion.VERSION_22
+    targetCompatibility = JavaVersion.VERSION_22
     withSourcesJar()
 }
 
@@ -50,7 +45,7 @@ publishing {
                 description.set(
                     "RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free " +
                         "FFM bindings straight into a native Rust core (libhyperuuid). " +
-                        "No runtime bridge, no reflection."
+                        "No runtime bridge, no reflection, no extra dependency."
                 )
                 url.set("https://github.com/SkunkWerkx/HyperUuid")
                 licenses {

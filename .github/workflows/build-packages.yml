@@ -95,20 +95,20 @@ jobs:
           distribution: "temurin"
           java-version: "23"
 
-      - name: Place native lib for Kotlin in-repo testing
+      - name: Place native lib for Java in-repo testing
         shell: bash
         run: |
-          mkdir -p "kotlin/src/main/resources/native/${{ matrix.rid }}"
-          cp "out/${{ matrix.lib_name }}" "kotlin/src/main/resources/native/${{ matrix.rid }}/"
+          mkdir -p "java/src/main/resources/native/${{ matrix.rid }}"
+          cp "out/${{ matrix.lib_name }}" "java/src/main/resources/native/${{ matrix.rid }}/"
 
-      - name: Test Kotlin bindings against this platform's native lib
-        working-directory: kotlin
+      - name: Test Java bindings against this platform's native lib
+        working-directory: java
         shell: bash
         run: |
           chmod +x gradlew
           ./gradlew test --console=plain
 
-      # Same rationale as the C#/Kotlin steps above: exercises the real purego dlopen/dlsym +
+      # Same rationale as the C#/Java steps above: exercises the real purego dlopen/dlsym +
       # call-trampoline path on this specific platform, not just that Rust builds. purego is
       # Tier-1 on all 6 legs here (confirmed against its own platform matrix), including
       # windows-11-arm.
@@ -318,8 +318,8 @@ jobs:
           path: artifacts
 
       # Unlike NuGet's per-RID pack-nuget job, this jar bundles every platform's native lib —
-      # a .jar has no package-manager-level platform selection, so NativePlatform.kt picks the
-      # right one at runtime instead. All 6 go into the same jar.
+      # a .jar has no package-manager-level platform selection, so NativePlatform.java picks
+      # the right one at runtime instead. All 6 go into the same jar.
       - name: Arrange native/{rid}/ layout for the jar
         shell: bash
         run: |
@@ -333,7 +333,7 @@ jobs:
             [win-arm64]=hyperuuid.dll
           )
           for rid in "${!LIB_NAMES[@]}"; do
-            dest="kotlin/src/main/resources/native/$rid"
+            dest="java/src/main/resources/native/$rid"
             mkdir -p "$dest"
             cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
           done
@@ -349,7 +349,7 @@ jobs:
       # a Maven/Gradle repository and pull io.github.buvinghausen:hyperuuid, that's the real
       # proof, not just an artifact listing.
       - name: Publish to GitHub Packages
-        working-directory: kotlin
+        working-directory: java
         env:
           HYPERUUID_VERSION: 0.1.0-ci.${{ github.run_number }}
           GITHUB_ACTOR: ${{ github.actor }}

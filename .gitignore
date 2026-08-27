@@ -9,14 +9,13 @@
 # csproj's runtimes/**/native/* wildcard item), but it's regenerable via `cargo build --release`.
 csharp/HyperUuid/runtimes/
 
-# Gradle / Kotlin
+# Gradle / Java
 **/.gradle/
-**/.kotlin/
 **/build/
 # Same story as csharp/HyperUuid/runtimes/ above: CI (build-nuget.yml's pack-maven job)
 # bundles all platforms' natives here at pack time; regenerable locally via
 # `cargo build --release` for local dev/test.
-kotlin/src/main/resources/native/
+java/src/main/resources/native/
 
 # Python
 **/__pycache__/
