@@ -129,7 +129,7 @@ jobs:
       # swift-actions/setup-swift because its own CI has directly-verified, currently-green
       # support for windows-11-arm — a native arm64 Windows host toolchain, not a cross-compile
       # target — which is the one leg most likely to have no Swift toolchain available at all.
-      - uses: SwiftyLab/setup-swift@v2
+      - uses: SwiftyLab/setup-swift@v1.14.0
         with:
           swift-version: "6.3"
 
