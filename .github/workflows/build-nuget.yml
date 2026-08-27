@@ -82,12 +82,15 @@ jobs:
       - name: Build test project
         run: dotnet build csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
 
-      - name: Inspect DLL exports in test bin output
+      # Round 2 revealed bin/Release/net8.0/ doesn't even exist on Windows — the build must
+      # be landing under a RID-suffixed subfolder (bin/Release/net8.0/<rid>/, likely from
+      # apphost/RuntimeIdentifier inference for this OutputType=Exe test project, which may
+      # behave differently once native runtimes/** assets are in the graph). List the whole
+      # tree rather than guess the exact path again.
+      - name: List test bin output tree (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          Get-ChildItem -Recurse -Filter "hyperuuid*" csharp/HyperUuid.Tests/bin/Release/net8.0/
-          dumpbin /exports "csharp/HyperUuid.Tests/bin/Release/net8.0/hyperuuid.dll"
+        run: Get-ChildItem -Recurse csharp/HyperUuid.Tests/bin/
 
       - name: Test C# bindings against this platform's native lib
         run: dotnet test --project csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release --no-build
