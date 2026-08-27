@@ -54,6 +54,13 @@ php/vendor/
 php/composer.lock
 php/.phpunit.result.cache
 
+# BenchmarkDotNet
+# Writes output relative to the process's working directory when invoked via `dotnet run`
+# rather than the project directory, so this can land almost anywhere in the tree — not just
+# csharp/HyperUuid.Benchmarks/. Criterion's own output already lands under rust/target/,
+# covered by the **/target/ rule above.
+**/BenchmarkDotNet.Artifacts/
+
 # IDE
 .idea/
 .vs/

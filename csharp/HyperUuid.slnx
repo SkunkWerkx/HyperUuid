@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj" />
+  <Project Path="HyperUuid.Benchmarks/HyperUuid.Benchmarks.csproj" />
   <Project Path="HyperUuid.Tests/HyperUuid.Tests.csproj" />
   <Project Path="HyperUuid/HyperUuid.csproj" />
 </Solution>

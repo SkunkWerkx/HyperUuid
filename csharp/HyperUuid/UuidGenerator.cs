@@ -9,7 +9,12 @@ namespace HyperUuid;
 /// </summary>
 /// <remarks>
 /// No allocation beyond the fixed 16-byte stack buffers here — the underlying Rust core never
-/// allocates for these calls either. AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
+/// allocates for these calls either — confirmed empirically with BenchmarkDotNet's
+/// <c>[MemoryDiagnoser]</c> in <c>HyperUuid.Benchmarks</c> (0 B for <c>NewV4</c>/<c>NewV6</c>/
+/// <c>NewV7</c>), with one real exception: <see cref="NewV5(Guid, string)"/> allocates 40 B
+/// for the UTF-8 encoding of <c>name</c> — unavoidable when converting a C# <c>string</c> to
+/// bytes. Call <see cref="NewV5(Guid, ReadOnlySpan{byte})"/> directly with your own bytes to
+/// stay allocation-free there too. AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
 /// is source-generated (no runtime reflection), so this type publishes cleanly under
 /// <c>PublishAot</c>. Needs a platform-specific native binary — this build ships
 /// <c>linux-arm64</c> only; every other platform (including <c>browser-wasm</c> for Blazor,

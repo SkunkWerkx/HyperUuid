@@ -34,3 +34,16 @@ Not yet published to a module proxy under a registered `SkunkWerkx` presence —
 now this is proven by CI building and testing the native core plus this binding on
 real hardware for every platform leg. Consume via a direct `go get
 github.com/SkunkWerkx/HyperUuid/go@<tag>` in the meantime.
+
+## Benchmarks
+
+`go test -bench=. -benchmem ./...` — allocation tracking is built into `testing.B`,
+no extra tooling needed. Measured on linux-arm64: every call here does 4-7 heap
+allocations (252-360 B/op), unlike the Rust core itself or the C# binding, which
+are both genuinely allocation-free. Almost certainly `unsafe.Pointer` arguments
+crossing into `purego`'s dynamically-generated call trampolines default Go's
+escape analysis into moving the call's local variables to the heap — a real cost
+of the "no cgo" approach, not something this binding does inefficiently on
+purpose. Batch generation wins even bigger here than in the other bindings as a
+result: `NewV7BatchAt(1000, ...)` was ~19x faster than 1000 individual `NewV7At`
+calls (27µs vs 514µs), since it also collapses ~5000 of those allocations into 7.

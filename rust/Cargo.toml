@@ -2,7 +2,7 @@
 name = "hyperuuid"
 version = "0.1.0"
 edition = "2024"
-description = "RFC 9562 UUID v4 (random), v5 (deterministic), and v7 (time-sortable) generation — a high-performance, allocation-free core, wrapped as a native library (libhyperuuid) for direct FFI from every host language."
+description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — a high-performance, allocation-free core, wrapped as a native library (libhyperuuid) for direct FFI from every host language."
 license = "MIT"
 
 [lib]
@@ -11,3 +11,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 getrandom = { version = "0.4.3", default-features = false, features = ["std"] }
 sha1 = { version = "0.11.0", default-features = false }
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "uuid_benchmarks"
+harness = false
