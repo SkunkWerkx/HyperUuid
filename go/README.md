@@ -121,6 +121,30 @@ Command Line Tools' `clang` respectively, confirmed against
 [actions/runner-images](https://github.com/actions/runner-images)' own published
 tool manifests), so no CI changes were needed to pick this up.
 
+**The real caveat this doesn't cover: a native darwin/linux build with no C
+compiler installed at all.** Cross-compiling protects you automatically (above);
+building natively without one doesn't. Verified directly, not assumed — pointing
+`CC` at a nonexistent binary on this native linux/arm64 machine:
+
+```
+$ CC=/nonexistent/no-such-cc go build ./...
+# runtime/cgo
+cgo: C compiler "/nonexistent/no-such-cc" not found: exec: "/nonexistent/no-such-cc": stat /nonexistent/no-such-cc: no such file or directory
+```
+
+`CGO_ENABLED` defaults to `1` on a native darwin/linux build regardless of whether
+a compiler is actually present, so this module now hard-fails to build in that
+specific situation — a minimal/distroless-style Linux container without
+`build-essential`, or a macOS box without Xcode Command Line Tools installed.
+Before this backend split, purego being unconditional meant this module built
+with zero C toolchain requirement, full stop, on every darwin/linux machine
+regardless of what was installed. That guarantee is now conditional: it holds for
+every cross-compile and for GitHub's own `ubuntu-latest`/`macos-latest` runners
+(both confirmed to ship a compiler by default, see above), but not for an
+arbitrary native build environment you don't control. If you hit this, the fix is
+one env var: `CGO_ENABLED=0 go build ./...` forces the purego fallback on any
+platform, native or not.
+
 ## Benchmarks
 
 `go test -bench=. -benchmem ./...` — allocation tracking is built into `testing.B`,
