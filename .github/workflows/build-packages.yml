@@ -106,6 +106,43 @@ jobs:
           chmod +x gradlew
           ./gradlew test --console=plain
 
+      # Same rationale as the C#/Kotlin steps above: exercises the real purego dlopen/dlsym +
+      # call-trampoline path on this specific platform, not just that Rust builds. purego is
+      # Tier-1 on all 6 legs here (confirmed against its own platform matrix), including
+      # windows-11-arm.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+
+      - name: Place native lib for Go in-repo testing
+        shell: bash
+        run: |
+          mkdir -p "go/native/${{ matrix.rid }}"
+          cp "out/${{ matrix.lib_name }}" "go/native/${{ matrix.rid }}/"
+
+      - name: Test Go bindings against this platform's native lib
+        working-directory: go
+        run: go test ./...
+
+      # Same rationale again, for Swift's dlopen/dlsym (LoadLibraryW/GetProcAddress on
+      # Windows) + @convention(c) call path. Uses SwiftyLab/setup-swift rather than
+      # swift-actions/setup-swift because its own CI has directly-verified, currently-green
+      # support for windows-11-arm — a native arm64 Windows host toolchain, not a cross-compile
+      # target — which is the one leg most likely to have no Swift toolchain available at all.
+      - uses: SwiftyLab/setup-swift@v2
+        with:
+          swift-version: "6.3"
+
+      - name: Place native lib for Swift in-repo testing
+        shell: bash
+        run: |
+          mkdir -p "swift/Sources/HyperUuid/NativeLibs/${{ matrix.rid }}"
+          cp "out/${{ matrix.lib_name }}" "swift/Sources/HyperUuid/NativeLibs/${{ matrix.rid }}/"
+
+      - name: Test Swift bindings against this platform's native lib
+        working-directory: swift
+        run: swift test
+
   pack-nuget:
     needs: build-native
     runs-on: ubuntu-latest
