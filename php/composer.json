@@ -1,0 +1,29 @@
+{
+    "name": "skunkwerkx/hyperuuid",
+    "description": "RFC 9562 UUID v4/v5/v7 generation — direct native FFI into a Rust core, no runtime bridge.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Brian Buvinghausen"
+        }
+    ],
+    "homepage": "https://github.com/SkunkWerkx/HyperUuid",
+    "require": {
+        "php": ">=8.1",
+        "ext-ffi": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "HyperUuid\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "HyperUuid\\Tests\\": "tests/"
+        }
+    }
+}

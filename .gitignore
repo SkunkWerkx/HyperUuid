@@ -36,6 +36,21 @@ go/native/*/
 swift/Sources/HyperUuid/NativeLibs/*/
 **/.build/
 
+# Ruby
+# Same story — CI places each leg's native lib here for `bundle exec rspec` at build-native
+# time; regenerable locally via `cargo build --release`.
+ruby/lib/hyperuuid/native/*/
+ruby/Gemfile.lock
+ruby/pkg/
+
+# PHP
+# Same story — CI places each leg's native lib here for `phpunit` at build-native time;
+# regenerable locally via `cargo build --release`.
+php/src/native/*/
+php/vendor/
+php/composer.lock
+php/.phpunit.result.cache
+
 # IDE
 .idea/
 .vs/

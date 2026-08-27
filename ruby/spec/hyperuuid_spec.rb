@@ -1,0 +1,87 @@
+require "hyperuuid"
+
+RFC_TEST_VECTOR_MS = 1_645_557_742_000
+
+RSpec.describe HyperUuid do
+  describe ".new_v4" do
+    it "has version and variant bits set" do
+      id = described_class.new_v4
+      expect(id.version).to eq(4)
+      expect(id.variant).to eq(0b10)
+    end
+
+    it "is non-deterministic" do
+      results = Array.new(100) { described_class.new_v4 }
+      expect(results.uniq.size).to eq(100)
+    end
+  end
+
+  describe ".new_v5" do
+    it "matches the RFC 9562 Appendix A.4 test vector" do
+      id = described_class.new_v5(HyperUuid::Namespaces::DNS, "www.example.com")
+      expect(id).to eq(HyperUuid::Uuid.parse("2ed6657d-e927-568b-95e1-2665a8aea6a2"))
+    end
+
+    it "matches Python's uuid documentation test vector" do
+      id = described_class.new_v5(HyperUuid::Namespaces::DNS, "python.org")
+      expect(id).to eq(HyperUuid::Uuid.parse("886313e1-3b8a-5372-9b90-0c9aee199e5d"))
+    end
+
+    it "is deterministic" do
+      a = described_class.new_v5(HyperUuid::Namespaces::DNS, "same-name")
+      b = described_class.new_v5(HyperUuid::Namespaces::DNS, "same-name")
+      expect(a).to eq(b)
+    end
+
+    it "differs across namespaces" do
+      dns = described_class.new_v5(HyperUuid::Namespaces::DNS, "test")
+      url = described_class.new_v5(HyperUuid::Namespaces::URL, "test")
+      expect(dns).not_to eq(url)
+    end
+
+    it "agrees for a String name and its raw ASCII-8BIT bytes" do
+      a = described_class.new_v5(HyperUuid::Namespaces::URL, "test-name")
+      b = described_class.new_v5(HyperUuid::Namespaces::URL, "test-name".b)
+      expect(a).to eq(b)
+    end
+
+    it "handles multi-byte UTF-8 names" do
+      a = described_class.new_v5(HyperUuid::Namespaces::URL, "café — 日本語")
+      b = described_class.new_v5(HyperUuid::Namespaces::URL, "café — 日本語")
+      expect(a).to eq(b)
+    end
+  end
+
+  describe ".new_v7" do
+    it "embeds the given timestamp" do
+      id = described_class.new_v7(RFC_TEST_VECTOR_MS)
+      embedded_ms = id.bytes[0, 6].bytes.reduce(0) { |acc, b| (acc << 8) | b }
+      expect(embedded_ms).to eq(RFC_TEST_VECTOR_MS)
+    end
+
+    it "has version and variant bits set" do
+      id = described_class.new_v7(RFC_TEST_VECTOR_MS)
+      expect(id.version).to eq(7)
+      expect(id.variant).to eq(0b10)
+    end
+
+    it "raises on an out-of-range timestamp" do
+      expect { described_class.new_v7(0x0001_0000_0000_0000) }
+        .to raise_error(HyperUuid::Runtime::TimestampOutOfRangeError)
+    end
+
+    it "produces a monotonically ordered batch within the same millisecond" do
+      ids = Array.new(100) { described_class.new_v7(RFC_TEST_VECTOR_MS) }
+      expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
+    end
+
+    it "embeds the current time when called with no argument" do
+      before = (Time.now.to_r * 1000).to_i
+      id = described_class.new_v7
+      after = (Time.now.to_r * 1000).to_i
+
+      embedded_ms = id.bytes[0, 6].bytes.reduce(0) { |acc, b| (acc << 8) | b }
+      expect(embedded_ms).to be_between(before, after)
+    end
+  end
+end
