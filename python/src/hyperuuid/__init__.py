@@ -1,0 +1,47 @@
+"""RFC 9562 UUID v4 (random), v5 (deterministic), and v7 (time-sortable) generation,
+calling directly into the native libhyperuuid shared library via ctypes — no runtime bridge.
+
+Returns stdlib ``uuid.UUID`` objects. For v5's namespace argument, use the RFC 9562
+Section 6.6 well-known namespaces already in the standard library:
+``uuid.NAMESPACE_DNS``, ``NAMESPACE_URL``, ``NAMESPACE_OID``, ``NAMESPACE_X500``.
+
+Needs a platform-specific native binary — this build ships linux-arm64 only. The same
+ctypes.CDLL code also runs under Pyodide in the browser given an Emscripten-built
+libhyperuuid.so "side module" (Pyodide has shipped real ctypes support since 0.18);
+that additional build just isn't included here yet.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid as _uuid
+
+from . import _runtime
+
+__all__ = ["new_v4", "new_v5", "new_v7"]
+
+
+def new_v4() -> _uuid.UUID:
+    """Create a random UUID version 4 (RFC 9562 §5.4)."""
+    return _uuid.UUID(bytes=_runtime.new_v4())
+
+
+def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
+    """Create a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a name.
+
+    The same ``(namespace, name)`` pair always produces the same UUID. ``name`` may
+    be ``str`` (encoded as UTF-8) or raw ``bytes``.
+    """
+    name_bytes = name.encode("utf-8") if isinstance(name, str) else bytes(name)
+    return _uuid.UUID(bytes=_runtime.new_v5(namespace.bytes, name_bytes))
+
+
+def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
+    """Create a time-sortable UUID version 7 (RFC 9562 §6.2).
+
+    Defaults to the current time; pass an explicit Unix-epoch millisecond timestamp
+    (non-negative, fitting in 48 bits) to embed a specific time instead.
+    """
+    if unix_millis is None:
+        unix_millis = int(time.time() * 1000)
+    return _uuid.UUID(bytes=_runtime.new_v7(unix_millis))

@@ -1,0 +1,86 @@
+import time
+import uuid
+
+import pytest
+
+import hyperuuid
+
+RFC_TEST_VECTOR_MS = 1_645_557_742_000
+
+
+def test_v4_has_version_and_variant_bits_set():
+    id_ = hyperuuid.new_v4()
+    assert id_.version == 4
+    assert id_.variant == uuid.RFC_4122
+
+
+def test_v4_is_non_deterministic():
+    results = {hyperuuid.new_v4() for _ in range(100)}
+    assert len(results) == 100
+
+
+def test_v5_matches_rfc_test_vector():
+    # RFC 9562 Appendix A.4 official test vector.
+    id_ = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "www.example.com")
+    assert id_ == uuid.UUID("2ed6657d-e927-568b-95e1-2665a8aea6a2")
+
+
+def test_v5_matches_python_docs_vector():
+    # Same test vector Python's own uuid module documentation uses.
+    id_ = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "python.org")
+    assert id_ == uuid.UUID("886313e1-3b8a-5372-9b90-0c9aee199e5d")
+
+
+def test_v5_matches_stdlib_uuid5():
+    # hyperuuid's v5 should agree byte-for-byte with Python's own (SHA-1-based) uuid5.
+    for name in ("same-name", "café — 日本語"):
+        assert hyperuuid.new_v5(uuid.NAMESPACE_URL, name) == uuid.uuid5(uuid.NAMESPACE_URL, name)
+
+
+def test_v5_is_deterministic():
+    a = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "same-name")
+    b = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "same-name")
+    assert a == b
+
+
+def test_v5_different_namespaces_differ():
+    dns = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "test")
+    url = hyperuuid.new_v5(uuid.NAMESPACE_URL, "test")
+    assert dns != url
+
+
+def test_v5_bytes_and_str_name_agree():
+    a = hyperuuid.new_v5(uuid.NAMESPACE_URL, "test-name")
+    b = hyperuuid.new_v5(uuid.NAMESPACE_URL, b"test-name")
+    assert a == b
+
+
+def test_v7_embeds_the_timestamp():
+    id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
+    assert embedded_ms == RFC_TEST_VECTOR_MS
+
+
+def test_v7_has_version_and_variant_bits_set():
+    id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    assert id_.version == 7
+    assert id_.variant == uuid.RFC_4122
+
+
+def test_v7_overflow_timestamp_raises():
+    with pytest.raises(ValueError):
+        hyperuuid.new_v7(0x0001_0000_0000_0000)
+
+
+def test_v7_same_millisecond_batch_is_monotonically_ordered():
+    ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS) for _ in range(100)]
+    assert ids == sorted(ids)
+
+
+def test_v7_current_timestamp_is_embedded():
+    before = int(time.time() * 1000)
+    id_ = hyperuuid.new_v7()
+    after = int(time.time() * 1000)
+
+    embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
+    assert before <= embedded_ms <= after

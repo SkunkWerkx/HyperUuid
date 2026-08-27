@@ -1,0 +1,22 @@
+# Rust
+**/target/
+
+# .NET
+**/bin/
+**/obj/
+
+# Gradle / Kotlin
+**/.gradle/
+**/.kotlin/
+**/build/
+
+# Python
+**/__pycache__/
+**/*.egg-info/
+**/.venv/
+**/dist/
+**/.pytest_cache/
+
+# IDE
+.idea/
+.vs/

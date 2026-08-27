@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>HyperUuid</PackageId>
+    <Description>RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
+    <Authors>Brian Buvinghausen</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/buvinghausen/SkunkWerx</RepositoryUrl>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Source-generated LibraryImport P/Invoke only, no reflection anywhere in this assembly:
+         opts into (and fails the build on) the trim and Native AOT analyzers. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
+         .nupkg gets). Currently built for linux-arm64 only (this dev machine); shipping every
+         platform needs a per-RID build matrix. -->
+    <None Include="runtimes/**" Pack="true" PackagePath="runtimes" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Same file also copied straight to the output root: a plain in-repo ProjectReference
+         (as used by HyperUuid.Tests) doesn't get the deps.json-driven runtimes/{RID}/native
+         probing that only kicks in for an actual consumed NuGet package, but every native
+         library load DOES probe the assembly's own directory. -->
+    <None Include="runtimes/linux-arm64/native/libhyperuuid.so" Link="libhyperuuid.so" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

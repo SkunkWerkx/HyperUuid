@@ -1,0 +1,101 @@
+using System.Runtime.InteropServices;
+
+namespace HyperUuid;
+
+/// <summary>
+/// RFC 9562 UUID generation (v4 random, v5 deterministic, v7 time-sortable) calling directly
+/// into the native <c>libhyperuuid</c> shared library via source-generated P/Invoke.
+/// </summary>
+/// <remarks>
+/// No allocation beyond the fixed 16-byte stack buffers here — the underlying Rust core never
+/// allocates for these calls either. AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
+/// is source-generated (no runtime reflection), so this type publishes cleanly under
+/// <c>PublishAot</c>. Needs a platform-specific native binary — this build ships
+/// <c>linux-arm64</c> only; every other platform (including <c>browser-wasm</c> for Blazor,
+/// which uses this exact same P/Invoke surface statically linked into <c>dotnet.wasm</c> via
+/// Emscripten) needs its own build.
+/// </remarks>
+public static partial class UuidGenerator
+{
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial int uuid_new_v4(byte* outPtr);
+
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial int uuid_new_v5(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr);
+
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial int uuid_new_v7(long unixMillis, byte* outPtr);
+
+    /// <summary>Well-known namespace UUIDs defined in RFC 9562 Section 6.6.</summary>
+    public static class Namespaces
+    {
+        public static readonly Guid Dns = new("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+        public static readonly Guid Url = new("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
+        public static readonly Guid Oid = new("6ba7b812-9dad-11d1-80b4-00c04fd430c8");
+        public static readonly Guid X500 = new("6ba7b814-9dad-11d1-80b4-00c04fd430c8");
+    }
+
+    /// <summary>Creates a random UUID version 4 (RFC 9562 §5.4).</summary>
+    public static unsafe Guid NewV4()
+    {
+        Span<byte> buf = stackalloc byte[16];
+        int rc;
+        fixed (byte* p = buf)
+        {
+            rc = uuid_new_v4(p);
+        }
+        if (rc != 0)
+            throw new InvalidOperationException($"uuid_new_v4 failed with code {rc} (random source failure).");
+        return new Guid(buf, bigEndian: true);
+    }
+
+    /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8 name.</summary>
+    public static Guid NewV5(Guid namespaceId, string name) =>
+        NewV5(namespaceId, System.Text.Encoding.UTF8.GetBytes(name));
+
+    /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name bytes.</summary>
+    public static unsafe Guid NewV5(Guid namespaceId, ReadOnlySpan<byte> name)
+    {
+        Span<byte> ns = stackalloc byte[16];
+        namespaceId.TryWriteBytes(ns, bigEndian: true, out _);
+        Span<byte> outBuf = stackalloc byte[16];
+
+        int rc;
+        fixed (byte* nsPtr = ns)
+        fixed (byte* namePtr = name)
+        fixed (byte* outPtr = outBuf)
+        {
+            rc = uuid_new_v5(nsPtr, name.IsEmpty ? null : namePtr, (uint)name.Length, outPtr);
+        }
+        if (rc != 0)
+            throw new InvalidOperationException($"uuid_new_v5 failed with code {rc}.");
+        return new Guid(outBuf, bigEndian: true);
+    }
+
+    /// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current UTC time.</summary>
+    public static Guid NewV7() => NewV7(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+    /// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a <see cref="DateTimeOffset"/>.</summary>
+    public static Guid NewV7(DateTimeOffset timestamp) => NewV7(timestamp.ToUnixTimeMilliseconds());
+
+    /// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond timestamp.</summary>
+    public static unsafe Guid NewV7(long unixMilliseconds)
+    {
+        Span<byte> buf = stackalloc byte[16];
+        int rc;
+        fixed (byte* p = buf)
+        {
+            rc = uuid_new_v7(unixMilliseconds, p);
+        }
+        if (rc != 0)
+        {
+            throw rc switch
+            {
+                2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
+                    "Unix millisecond timestamp must be non-negative and fit within 48 bits."),
+                _ => new InvalidOperationException($"uuid_new_v7 failed with code {rc} (random source failure)."),
+            };
+        }
+        return new Guid(buf, bigEndian: true);
+    }
+}
