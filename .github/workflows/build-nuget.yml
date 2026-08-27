@@ -60,6 +60,18 @@ jobs:
           name: native-${{ matrix.rid }}
           path: out/${{ matrix.lib_name }}
 
+      # Diagnostic only, Windows only: the win-x64 leg loads hyperuuid.dll fine but .NET
+      # can't find uuid_new_v4/v5/v7 inside it (EntryPointNotFoundException, not
+      # DllNotFoundException) — a Windows cdylib export-table issue, not a file-placement
+      # one. Ground-truth the actual export table before guessing at a fix.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Inspect DLL exports
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: dumpbin /exports "out/${{ matrix.lib_name }}"
+
       # This is the actual thing worth confirming: not just that the Rust core cross-target
       # builds, but that .NET running on THIS platform can load libhyperuuid through
       # [LibraryImport] and get correct results — the real P/Invoke marshalling/resolution
