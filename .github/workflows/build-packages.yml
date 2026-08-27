@@ -12,8 +12,10 @@ jobs:
       fail-fast: false
       # Runner labels checked against GitHub's current retirement schedule as of Aug 2026;
       # macos-13 (this workflow's original osx-x64 pick) was already retired Dec 2025.
-      # GitHub is winding x86_64 macOS support down entirely by Fall 2027 — macos-15-intel
-      # is the current label, but this leg has a shelf life; osx-arm64 does not.
+      # GitHub is winding x86_64 macOS support down entirely by Fall 2027 — macos-26-intel
+      # is the current label (macOS 26 "Tahoe", matching macos-latest's arm64 leg, which
+      # already moved to 26 — confirmed via the runner's own reported OS version, not just
+      # the label), but this leg has a shelf life; osx-arm64 does not.
       # windows-11-arm (GA as of Aug 2026, free for public repos same as the others) covers
       # win-arm64 — Rust just uses its native host triple (aarch64-pc-windows-msvc) here same
       # as every other leg, no cross-compiling.
@@ -25,7 +27,7 @@ jobs:
           - os: ubuntu-24.04-arm
             rid: linux-arm64
             lib_name: libhyperuuid.so
-          - os: macos-15-intel
+          - os: macos-26-intel
             rid: osx-x64
             lib_name: libhyperuuid.dylib
           - os: macos-latest
@@ -146,10 +148,12 @@ jobs:
 
       # fiddle (Ruby's Fiddle gem, see below) has no precompiled binary for any platform —
       # RubyGems.org only ever hosts it as platform "ruby" — so it always compiles a native
-      # extension from source on `bundle install`. On macos-15-intel specifically this hits
-      # mkmf's `try_link0` with "You have to install development tools first", even though
-      # Rust/Swift compiled fine earlier in this same job — a known class of GHA macOS-runner
-      # issue where `xcode-select` isn't pointed at a full Xcode.app. No-op on every other OS.
+      # extension from source on `bundle install`. Hit this on the (since-replaced)
+      # macos-15-intel leg: mkmf's `try_link0` failed with "You have to install development
+      # tools first", even though Rust/Swift compiled fine earlier in this same job — a known
+      # class of GHA macOS-runner issue where `xcode-select` isn't pointed at a full
+      # Xcode.app. Kept as a defensive no-op on every OS in case macos-26-intel hits the same
+      # thing.
       - name: Point Xcode at a full toolchain (works around a Ruby native-extension mkmf issue)
         if: runner.os == 'macOS'
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -176,23 +180,35 @@ jobs:
       # CLI SAPI (what `phpunit` runs under) runs FFI unrestricted regardless of the
       # `ffi.enable` ini setting — that directive only restricts non-CLI SAPIs like FPM — so
       # no ini-values override is needed here.
+      #
+      # Skipped on win-arm64: PHP for Windows has never shipped a native ARM64 build (unlike
+      # Ruby/Go/Java, which all install to an arch-tagged hostedtoolcache path on this same
+      # runner) — confirmed by shivammathur/setup-php installing to the generic `c:\tools\php`
+      # with no arch subfolder. It runs under Windows' x64 emulation regardless of host CPU,
+      # so "PHP on windows-11-arm" would really be testing PHP-as-x64 against an ARM64-built
+      # hyperuuid.dll, which can never load — already covered for real by the windows-latest
+      # (win-x64) leg.
       - uses: shivammathur/setup-php@v2
+        if: matrix.rid != 'win-arm64'
         with:
           php-version: "8.5"
           extensions: ffi
           tools: composer
 
       - name: Install PHP dependencies
+        if: matrix.rid != 'win-arm64'
         working-directory: php
         run: composer install --no-interaction --prefer-dist
 
       - name: Place native lib for PHP in-repo testing
+        if: matrix.rid != 'win-arm64'
         shell: bash
         run: |
           mkdir -p "php/src/native/${{ matrix.rid }}"
           cp "out/${{ matrix.lib_name }}" "php/src/native/${{ matrix.rid }}/"
 
       - name: Test PHP bindings against this platform's native lib
+        if: matrix.rid != 'win-arm64'
         working-directory: php
         # `php vendor/bin/phpunit`, not bare `vendor/bin/phpunit` — Composer's proxy script is
         # a `#!/usr/bin/env php`-shebang PHP file, which the default shell on the two Windows
