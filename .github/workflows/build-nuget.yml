@@ -14,6 +14,9 @@ jobs:
       # macos-13 (this workflow's original osx-x64 pick) was already retired Dec 2025.
       # GitHub is winding x86_64 macOS support down entirely by Fall 2027 — macos-15-intel
       # is the current label, but this leg has a shelf life; osx-arm64 does not.
+      # windows-11-arm (GA as of Aug 2026, free for public repos same as the others) covers
+      # win-arm64 — Rust just uses its native host triple (aarch64-pc-windows-msvc) here same
+      # as every other leg, no cross-compiling.
       matrix:
         include:
           - os: ubuntu-latest
@@ -30,6 +33,9 @@ jobs:
             lib_name: libhyperuuid.dylib
           - os: windows-latest
             rid: win-x64
+            lib_name: hyperuuid.dll
+          - os: windows-11-arm
+            rid: win-arm64
             lib_name: hyperuuid.dll
     runs-on: ${{ matrix.os }}
     steps:
@@ -106,6 +112,7 @@ jobs:
             [osx-x64]=libhyperuuid.dylib
             [osx-arm64]=libhyperuuid.dylib
             [win-x64]=hyperuuid.dll
+            [win-arm64]=hyperuuid.dll
           )
           for rid in "${!LIB_NAMES[@]}"; do
             dest="csharp/HyperUuid/runtimes/$rid/native"
