@@ -5,7 +5,10 @@ plugins {
 }
 
 group = "io.github.buvinghausen"
-version = "0.1.0"
+// CI overrides this (0.1.0-ci.<run_number>) via HYPERUUID_VERSION so repeated manual
+// workflow_dispatch runs during testing don't collide with an already-published version on
+// the GitHub Packages feed. Real releases (tag push) still need a deliberate bump here.
+version = System.getenv("HYPERUUID_VERSION") ?: "0.1.0"
 
 repositories {
     mavenCentral()
@@ -55,6 +58,20 @@ publishing {
                         name.set("MIT")
                     }
                 }
+            }
+        }
+    }
+    repositories {
+        // This repo's GitHub Packages Maven registry (private by default, repo-scoped —
+        // github.com/SkunkWerkx/HyperUuid/packages). Credentials come from CI's own
+        // GITHUB_ACTOR/GITHUB_TOKEN; empty locally, which only matters if you actually run
+        // `./gradlew publish` (publishToMavenLocal doesn't touch this repository).
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/SkunkWerkx/HyperUuid")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
             }
         }
     }
