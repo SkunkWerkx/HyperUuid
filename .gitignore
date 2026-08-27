@@ -16,6 +16,15 @@ csharp/HyperUuid/runtimes/
 # bundles all platforms' natives here at pack time; regenerable locally via
 # `cargo build --release` for local dev/test.
 java/src/main/resources/native/
+# csharp/HyperUuid/build/ is NuGet's real, tracked build/{tfm}/{PackageId}.targets packaging
+# convention (auto-imported into every consumer for the WASM NativeFileReference wiring — see
+# HyperUuid.csproj), not a build output — collides with **/build/ above, which would otherwise
+# silently swallow it. Each directory level needs its own negation; git won't descend into an
+# excluded directory to find a deeper !file re-inclusion, and gitignore rules apply in file
+# order, so this has to come after the rule it's un-ignoring.
+!csharp/HyperUuid/build/
+!csharp/HyperUuid/build/net8.0/
+!csharp/HyperUuid/build/net8.0/HyperUuid.targets
 
 # Python
 **/__pycache__/

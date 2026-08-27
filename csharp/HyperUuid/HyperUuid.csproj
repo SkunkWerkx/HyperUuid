@@ -26,13 +26,28 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
+  <!-- Second build of this exact source, invoked separately (e.g. `dotnet build
+       -p:HyperUuidBrowserBuild=true -p:BaseOutputPath=bin-browser/`) to produce the
+       browser-wasm-specific assembly variant: UuidGenerator.cs's BROWSER-gated
+       NativeLibraryName switches from "hyperuuid" (dlopen — every real native platform) to
+       "*" (resolve against the current module — the only thing that works for a
+       statically-linked WASM native, which has no separate module to dlopen). This output
+       gets copied to runtimes/browser-wasm/lib/net8.0/ before packing (see
+       build-packages.yml) — NuGet's own asset selection picks it automatically for any
+       consumer building with RuntimeIdentifier=browser-wasm, falling back to the default
+       build under plain lib/net8.0/ for every other RID, with zero action needed from a
+       consumer either way. See UuidGenerator.cs's own remarks and the README's WebAssembly
+       (Blazor) section for the full story. -->
+  <PropertyGroup Condition="'$(HyperUuidBrowserBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);BROWSER</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
-    <!-- SPIKE: WASM viability probe, not committed yet — see conversation. Tells the platform
-         compatibility analyzer (CA1416 family) this project claims browser support, so it
-         flags any BCL call this assembly makes that's marked [UnsupportedOSPlatform("browser")]
-         or excluded from a browser allow-list. Cheap, static, no toolchain install required —
-         but only checks the MANAGED C# surface; it can't see whether the native libhyperuuid
-         P/Invoke target actually resolves under Blazor's wasm-tools native-interop model. -->
+    <!-- Tells the platform compatibility analyzer (CA1416 family) this project claims browser
+         support, so it flags any BCL call this assembly makes that's marked
+         [UnsupportedOSPlatform("browser")] or excluded from a browser allow-list. Cheap,
+         static, no toolchain install required — checked clean (zero warnings) against the
+         real managed surface below. -->
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 
@@ -42,15 +57,31 @@
          that lives in the repo also ships inside the .nupkg. -->
     <None Include="../README.md" Pack="true" PackagePath="\" />
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
-         .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time. -->
+         .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time,
+         including runtimes/browser-wasm/lib/net8.0/ (the BROWSER-defined build of this same
+         assembly) and runtimes/browser-wasm/nativeassets/net8.0/ (the Rust core's
+         wasm32-unknown-emscripten staticlib) placed there before packing — see
+         build-packages.yml. -->
     <None Include="runtimes/**" Pack="true" PackagePath="runtimes" CopyToOutputDirectory="PreserveNewest" />
     <!-- Every native file also copied straight to the output root, flattened: a plain in-repo
          ProjectReference (as used by HyperUuid.Tests) doesn't get the deps.json-driven
          runtimes/{RID}/native probing that only kicks in for an actual consumed NuGet package,
          but every native library load DOES probe the assembly's own directory. Platform-generic
          on purpose — CI runs this same project on 5 different RIDs, each with only its own
-         single native file present, so this can't be hardcoded to one of them. -->
+         single native file present, so this can't be hardcoded to one of them. Deliberately
+         doesn't match runtimes/browser-wasm/nativeassets/ (different folder name, "nativeassets"
+         not "native") — that asset needs the real NativeFileReference wiring below, not a flat
+         copy; nothing loads it via dlopen. -->
     <None Include="runtimes/**/native/*" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Auto-imported into every consuming project via NuGet's build/{tfm}/{PackageId}.targets
+         convention — see the file itself for why this is required at all (NuGet's
+         runtimes/{rid}/nativeassets/ package convention is real, and the WASM SDK really does
+         auto-promote @(NativeLibrary) into @(NativeFileReference), but restore doesn't
+         populate @(NativeLibrary) from a plain PackageReference's nativeassets folder the way
+         it does runtimes/{rid}/native/ for ordinary P/Invoke — verified empirically, not
+         assumed). Without this file, a real NuGet consumer's browser-wasm build succeeds but
+         throws DllNotFoundException("*") at runtime. -->
+    <None Include="build/**" Pack="true" PackagePath="build" />
   </ItemGroup>
 
 </Project>

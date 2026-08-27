@@ -18,50 +18,65 @@ namespace HyperUuid;
 /// is source-generated (no runtime reflection), so this type publishes cleanly under
 /// <c>PublishAot</c>. Needs a platform-specific native binary — this build ships
 /// <c>linux-arm64</c> only; every other native platform needs its own build.
-/// <c>browser-wasm</c> (Blazor) is NOT one of those platforms this <c>[LibraryImport("hyperuuid")]</c>
-/// surface works for as-is: a statically-linked WASM native has no separate <c>"hyperuuid"</c>
-/// module to dlopen, so it needs <c>[LibraryImport("*")]</c> instead (resolve against the
-/// current module) — proven working via a hand-written WASM-specific P/Invoke surface in
-/// <c>HyperUuid.WasmSmokeTest/NativeWasm.cs</c>, not this type. See this package's own
-/// README's WebAssembly (Blazor) section for the full story, including a real,
-/// currently-open upstream blocker (dotnet/runtime#132858).
+/// <c>browser-wasm</c> (Blazor) is a second, separate build of this exact source, not the
+/// same compiled assembly: a statically-linked WASM native has no separate module to dlopen
+/// the way <c>"hyperuuid"</c> resolves everywhere else, so that build defines the
+/// <c>BROWSER</c> compilation symbol to switch <see cref="NativeLibraryName"/> to
+/// <c>"*"</c> (resolve against the current module) instead — see <c>HyperUuid.csproj</c>'s
+/// packaging targets for exactly how both builds land in the same NuGet package. Proven
+/// working end-to-end in a real headless-browser session — see this package's own README's
+/// WebAssembly (Blazor) section, including a real, currently-open upstream blocker
+/// (dotnet/runtime#132858).
 /// </remarks>
 public static partial class UuidGenerator
 {
-    [LibraryImport("hyperuuid")]
+    // "hyperuuid" resolves via dlopen on every real native platform (linux/osx/win). A
+    // statically-linked WASM native has no separate module to dlopen — its functions are
+    // already part of the same dotnet.native.wasm the app itself runs in — so that build
+    // defines BROWSER (see HyperUuid.csproj's WasmBrowserBuild-conditioned DefineConstants)
+    // and uses "*" instead, which resolves against the current module. Two separate builds
+    // of this same source, not a runtime switch: LibraryImport's source generator needs the
+    // library name at compile time.
+#if BROWSER
+    private const string NativeLibraryName = "*";
+#else
+    private const string NativeLibraryName = "hyperuuid";
+#endif
+
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial int uuid_new_v4(byte* outPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial int uuid_new_v5(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial int uuid_new_v6(long unixMillis, byte* outPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial ulong uuid_v6_unix_millis(byte* uuidPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial int uuid_new_v6_batch(long unixMillis, uint count, byte* outPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial int uuid_new_v7(long unixMillis, byte* outPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial ulong uuid_v7_unix_millis(byte* uuidPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial int uuid_new_v7_batch(long unixMillis, uint count, byte* outPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial void uuid_v7_to_sql_order(byte* uuidPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial void uuid_v7_to_rfc_order(byte* uuidPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial void uuid_v6_to_sql_order(byte* uuidPtr);
 
-    [LibraryImport("hyperuuid")]
+    [LibraryImport(NativeLibraryName)]
     private static unsafe partial void uuid_v6_to_rfc_order(byte* uuidPtr);
 
     // Batch calls marshal through a byte scratch buffer rather than Span<Guid> directly —
