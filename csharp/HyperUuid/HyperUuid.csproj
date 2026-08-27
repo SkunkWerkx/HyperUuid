@@ -5,6 +5,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
+    <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
+         (HyperUuid.dll, from the project name) and the native library's filename
+         (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
+         case, so on Windows one silently overwrites the other in the shared output directory
+         — one gets loaded fine, it's just the wrong one (EntryPointNotFoundException, not
+         DllNotFoundException). Linux/macOS never hit this: their native filenames
+         (libhyperuuid.so/.dylib) don't collide with HyperUuid.dll even case-sensitively.
+         RootNamespace kept explicit so this rename doesn't shift the default namespace. -->
+    <AssemblyName>HyperUuid.Managed</AssemblyName>
+    <RootNamespace>HyperUuid</RootNamespace>
     <Description>RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
     <Authors>Brian Buvinghausen</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

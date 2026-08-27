@@ -60,15 +60,12 @@ jobs:
           name: native-${{ matrix.rid }}
           path: out/${{ matrix.lib_name }}
 
-      # Round 1 confirmed the freshly-built DLL itself is fine: dumpbin showed
-      # uuid_new_v4/v5/v7 correctly exported, unmangled. So EntryPointNotFoundException
-      # isn't a Rust/Windows export quirk — .NET must be loading a different hyperuuid.dll
-      # than the one we just verified. Round 2: inspect the exact file sitting in the test's
-      # own bin output directory (what LibraryImport actually resolves against), not the
-      # one fresh out of cargo.
-      - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
-
+      # This is the actual thing worth confirming: not just that the Rust core cross-target
+      # builds, but that .NET running on THIS platform can load libhyperuuid through
+      # [LibraryImport] and get correct results — the real P/Invoke marshalling/resolution
+      # path per OS, which cargo test above cannot exercise at all. (Root-caused a real
+      # Windows-only bug here: the managed HyperUuid.dll and native hyperuuid.dll collided on
+      # Windows' case-insensitive filesystem — fixed via AssemblyName in HyperUuid.csproj.)
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
@@ -79,21 +76,8 @@ jobs:
           mkdir -p "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native"
           cp "out/${{ matrix.lib_name }}" "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native/"
 
-      - name: Build test project
-        run: dotnet build csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
-
-      # Round 2 revealed bin/Release/net8.0/ doesn't even exist on Windows — the build must
-      # be landing under a RID-suffixed subfolder (bin/Release/net8.0/<rid>/, likely from
-      # apphost/RuntimeIdentifier inference for this OutputType=Exe test project, which may
-      # behave differently once native runtimes/** assets are in the graph). List the whole
-      # tree rather than guess the exact path again.
-      - name: List test bin output tree (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Get-ChildItem -Recurse csharp/HyperUuid.Tests/bin/
-
       - name: Test C# bindings against this platform's native lib
-        run: dotnet test --project csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release --no-build
+        run: dotnet test --project csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
 
   pack-nuget:
     needs: build-native
