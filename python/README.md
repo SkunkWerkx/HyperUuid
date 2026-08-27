@@ -22,6 +22,6 @@ Returns stdlib `uuid.UUID` objects. For v5's namespace argument, use the RFC 956
 Section 6.6 well-known namespaces already in the standard library —
 `uuid.NAMESPACE_DNS`, `NAMESPACE_URL`, `NAMESPACE_OID`, `NAMESPACE_X500` — no need
 for this package to redefine them. `hyperuuid.v7_timestamp(id)` recovers the
-embedded UTC `datetime.datetime` from a version 7 UUID (raises `ValueError` past
+embedded UTC `datetime.datetime` from a version 7 UUID (raises `OverflowError` past
 year 9999 — the RFC's 48-bit field holds values up to year 10889, but
 `datetime.datetime` cannot).

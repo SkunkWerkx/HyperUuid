@@ -106,5 +106,5 @@ def test_v7_timestamp_round_trips_zero_and_a_large_timestamp():
 def test_v7_timestamp_raises_past_datetime_year_range():
     # A legitimate RFC 9562 v7 UUID can embed a timestamp datetime.datetime can't hold.
     id_ = hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)
-    with pytest.raises(ValueError):
+    with pytest.raises(OverflowError):
         hyperuuid.v7_timestamp(id_)

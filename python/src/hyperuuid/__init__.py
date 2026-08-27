@@ -55,9 +55,13 @@ def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     distinguish "not a v7 UUID" from "v7 UUID with a very early timestamp", so the caller is
     responsible for checking ``version`` first if that matters.
 
-    Raises ``ValueError`` for a (spec-valid) embedded timestamp past year 9999 — the RFC's
+    Raises ``OverflowError`` for a (spec-valid) embedded timestamp past year 9999 — the RFC's
     48-bit millisecond field holds values up to the year 10889, but ``datetime.datetime``
-    cannot represent a year beyond 9999.
+    cannot represent a year beyond 9999. Built from ``timedelta`` arithmetic on the epoch
+    rather than ``fromtimestamp()``, which delegates to the platform C library and — on
+    Windows specifically — raises ``OSError`` well before year 9999 rather than reaching
+    datetime's own year-9999 ceiling (confirmed on a real windows-11-arm CI runner).
     """
     millis = _runtime.v7_unix_millis(uuid_value.bytes)
-    return datetime.datetime.fromtimestamp(millis / 1000, tz=datetime.timezone.utc)
+    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    return epoch + datetime.timedelta(milliseconds=millis)
