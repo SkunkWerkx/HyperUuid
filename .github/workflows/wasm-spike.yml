@@ -93,6 +93,28 @@ jobs:
       - name: Install .NET wasm-tools workload
         run: dotnet workload install wasm-tools
 
+      # Real, verified bug (confirmed identically on linux-arm64 and linux-x64, and
+      # independently in an unrelated project — PyO3/maturin#2549): rustc >= 1.87 emits WASM
+      # target-feature metadata that Binaryen's wasm-opt only learned to honor from
+      # Emscripten 3.1.74 onward. .NET 10 SDK 10.0.11's wasm-tools workload bundles
+      # Emscripten 3.1.56 — squarely inside the broken range — so its bundled wasm-opt dies
+      # with `Unknown option '--enable-bulk-memory-opt'` during the native relink
+      # NativeFileReference triggers. Fix: drop in the newer, compatible wasm-opt from our own
+      # standalone emsdk (installed above) in place of the bundled one — same binary swap
+      # verified locally first, not guessed here.
+      - name: Patch the bundled wasm-opt (version-skewed against modern rustc's WASM output)
+        run: |
+          for sdk_pack in /usr/share/dotnet/packs/Microsoft.NET.Runtime.Emscripten.*.Sdk.*; do
+            version_dir=$(find "$sdk_pack" -maxdepth 1 -mindepth 1 -type d | head -1)
+            target="$version_dir/tools/bin/wasm-opt"
+            if [ -f "$target" ]; then
+              echo "Patching $target"
+              cp "$target" "$target.orig"
+              cp "$HOME/emsdk/upstream/bin/wasm-opt" "$target"
+              "$target" --version
+            fi
+          done
+
       - name: Build the Blazor WASM smoke test (NativeFileReference -> the Rust staticlib)
         working-directory: csharp/HyperUuid.WasmSmokeTest
         run: dotnet build -c Release

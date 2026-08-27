@@ -1,5 +1,4 @@
 @page "/"
-@using HyperUuid
 
 <PageTitle>@Title</PageTitle>
 
@@ -11,7 +10,7 @@
     private string Title = "RUNNING";
     private string Results = "running...";
 
-    protected override void OnInitialized()
+    protected override unsafe void OnInitialized()
     {
         var lines = new List<string>();
         var failed = false;
@@ -24,56 +23,83 @@
 
         try
         {
-            var a = UuidGenerator.NewV4();
-            var b = UuidGenerator.NewV4();
-            if (a == b)
+            Span<byte> a = stackalloc byte[16];
+            Span<byte> b = stackalloc byte[16];
+            fixed (byte* aPtr = a)
+            fixed (byte* bPtr = b)
+            {
+                if (NativeWasm.uuid_new_v4(aPtr) != 0) Fail("uuid_new_v4 (a) failed");
+                if (NativeWasm.uuid_new_v4(bPtr) != 0) Fail("uuid_new_v4 (b) failed");
+            }
+            var aGuid = new Guid(a, bigEndian: true);
+            var bGuid = new Guid(b, bigEndian: true);
+            if (aGuid == bGuid)
             {
                 Fail("two v4 calls produced identical output");
             }
             else
             {
-                lines.Add($"v4: {a} {b}");
+                lines.Add($"v4: {aGuid} {bGuid}");
             }
 
-            var v5 = UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "www.example.com");
-            var expectedV5 = new Guid("2ed6657d-e927-568b-95e1-2665a8aea6a2");
-            if (v5 != expectedV5)
+            Span<byte> ns = stackalloc byte[16];
+            new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8").TryWriteBytes(ns, bigEndian: true, out _);
+            var name = "www.example.com"u8;
+            Span<byte> v5 = stackalloc byte[16];
+            fixed (byte* nsPtr = ns)
+            fixed (byte* namePtr = name)
+            fixed (byte* outPtr = v5)
             {
-                Fail($"v5 mismatch, got {v5}, expected {expectedV5}");
+                if (NativeWasm.uuid_new_v5(nsPtr, namePtr, (uint)name.Length, outPtr) != 0) Fail("uuid_new_v5 failed");
+            }
+            var v5Guid = new Guid(v5, bigEndian: true);
+            var expectedV5 = new Guid("2ed6657d-e927-568b-95e1-2665a8aea6a2");
+            if (v5Guid != expectedV5)
+            {
+                Fail($"v5 mismatch, got {v5Guid}, expected {expectedV5}");
             }
             else
             {
-                lines.Add($"v5: {v5} matches RFC 9562 Appendix A.4 vector");
+                lines.Add($"v5: {v5Guid} matches RFC 9562 Appendix A.4 vector");
             }
 
-            // Fixed-timestamp v7: proves the embedded timestamp round-trips through a
-            // wasm32-unknown-emscripten build of the native core, not just that it links.
             const long fixedMs = 1_645_557_742_000L;
-            var v7Fixed = UuidGenerator.NewV7(fixedMs);
-            var v7FixedTs = UuidGenerator.V7Timestamp(v7Fixed);
-            var v7FixedMs = v7FixedTs.ToUnixTimeMilliseconds();
+            Span<byte> v7Fixed = stackalloc byte[16];
+            fixed (byte* outPtr = v7Fixed)
+            {
+                if (NativeWasm.uuid_new_v7(fixedMs, outPtr) != 0) Fail("uuid_new_v7 (fixed) failed");
+            }
+            long v7FixedMs;
+            fixed (byte* p = v7Fixed) { v7FixedMs = (long)NativeWasm.uuid_v7_unix_millis(p); }
+            var v7FixedGuid = new Guid(v7Fixed, bigEndian: true);
             if (v7FixedMs != fixedMs)
             {
                 Fail($"v7 fixed-timestamp mismatch, got {v7FixedMs}, expected {fixedMs}");
             }
             else
             {
-                lines.Add($"v7 (fixed): {v7Fixed} embeds timestamp {v7FixedTs:O}");
+                lines.Add($"v7 (fixed): {v7FixedGuid} embeds timestamp {v7FixedMs}");
             }
 
-            // Real-clock v7: proves DateTimeOffset.UtcNow works inside this WASM host at all
-            // (the actual open question — not the bit math, the browser/Emscripten clock).
+            // Real-clock v7: proves DateTimeOffset.UtcNow works inside this WASM host at all.
             var before = DateTimeOffset.UtcNow;
-            var v7Now = UuidGenerator.NewV7();
-            var after = DateTimeOffset.UtcNow;
-            var v7NowTs = UuidGenerator.V7Timestamp(v7Now);
-            if (v7NowTs < before.AddSeconds(-2) || v7NowTs > after.AddSeconds(2))
+            var nowMs = before.ToUnixTimeMilliseconds();
+            Span<byte> v7Now = stackalloc byte[16];
+            fixed (byte* outPtr = v7Now)
             {
-                Fail($"v7 real-clock timestamp {v7NowTs:O} not within [{before:O}, {after:O}] (+/- 2s)");
+                if (NativeWasm.uuid_new_v7(nowMs, outPtr) != 0) Fail("uuid_new_v7 (now) failed");
+            }
+            var after = DateTimeOffset.UtcNow;
+            long v7NowMs;
+            fixed (byte* p = v7Now) { v7NowMs = (long)NativeWasm.uuid_v7_unix_millis(p); }
+            var v7NowGuid = new Guid(v7Now, bigEndian: true);
+            if (v7NowMs < before.AddSeconds(-2).ToUnixTimeMilliseconds() || v7NowMs > after.AddSeconds(2).ToUnixTimeMilliseconds())
+            {
+                Fail($"v7 real-clock timestamp {v7NowMs} not within +/-2s of wall clock [{before:O}, {after:O}]");
             }
             else
             {
-                lines.Add($"v7 (now): {v7Now} embeds real clock timestamp {v7NowTs:O}, wall clock was [{before:O}, {after:O}]");
+                lines.Add($"v7 (now): {v7NowGuid} embeds real clock timestamp {v7NowMs}, wall clock was [{before:O}, {after:O}]");
             }
         }
         catch (Exception ex)
