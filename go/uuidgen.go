@@ -63,9 +63,17 @@ func ensureLoaded() error {
 			initErr = fmt.Errorf("hyperuuid: creating temp file for native library: %w", err)
 			return
 		}
-		defer tmp.Close()
-		if _, err := tmp.Write(data); err != nil {
-			initErr = fmt.Errorf("hyperuuid: writing native library to temp file: %w", err)
+		_, writeErr := tmp.Write(data)
+		closeErr := tmp.Close()
+		// The write handle must be closed before openLibrary (dlopen/LoadLibrary) opens the
+		// same path — Windows enforces exclusive file access far more strictly than Unix, and
+		// LoadLibrary fails outright while a write handle on the same file is still open.
+		if writeErr != nil {
+			initErr = fmt.Errorf("hyperuuid: writing native library to temp file: %w", writeErr)
+			return
+		}
+		if closeErr != nil {
+			initErr = fmt.Errorf("hyperuuid: closing temp file for native library: %w", closeErr)
 			return
 		}
 
