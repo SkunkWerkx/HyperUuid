@@ -75,7 +75,7 @@ jobs:
           cp "out/${{ matrix.lib_name }}" "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native/"
 
       - name: Test C# bindings against this platform's native lib
-        run: dotnet test csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
+        run: dotnet test --project csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
 
   pack-nuget:
     needs: build-native
