@@ -91,7 +91,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "25"
+          java-version: "23"
 
       - name: Place native lib for Kotlin in-repo testing
         shell: bash
@@ -211,7 +211,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "25"
+          java-version: "23"
 
       # Publishes to this repo's GitHub Packages Maven registry (private by default, repo-
       # scoped — different URL shape than NuGet's org-scoped feed, confirmed against GitHub's
