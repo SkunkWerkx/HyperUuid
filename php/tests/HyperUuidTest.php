@@ -243,6 +243,56 @@ final class HyperUuidTest extends TestCase
         self::assertSame($maxMs, $recovered->getTimestamp() * 1000 + (int) $recovered->format('v'));
     }
 
+    public function testToSqlOrderRoundTripsThroughFromSqlOrder(): void
+    {
+        $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+        $sqlOrdered = $id->toSqlOrder();
+        self::assertFalse($id->equals($sqlOrdered));
+        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder()));
+    }
+
+    public function testToSqlOrderPreservesVersionAndVariantAtOctets7And8(): void
+    {
+        $sqlOrdered = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
+        $bytes = $sqlOrdered->bytes();
+        self::assertSame(0x70, \ord($bytes[7]) & 0xF0);
+        self::assertSame(0x80, \ord($bytes[8]) & 0xC0);
+    }
+
+    /**
+     * Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order — the
+     * correctness oracle this project's C# test suite checks directly against the real type;
+     * no PHP equivalent exists to test against here, so this stands in for it.
+     */
+    private static function sqlGuidCompare(string $a, string $b): int
+    {
+        foreach ([10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3] as $i) {
+            $cmp = \ord($a[$i]) <=> \ord($b[$i]);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+        }
+        return 0;
+    }
+
+    public function testToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(): void
+    {
+        $ids = [];
+        for ($i = 0; $i < 200; $i++) {
+            $ids[] = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS + $i);
+        }
+        // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
+        for ($i = 0; $i < 200; $i++) {
+            $ids[] = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS + 1_000_000);
+        }
+
+        $sqlOrdered = array_map(static fn (Uuid $id): string => $id->toSqlOrder()->bytes(), $ids);
+        $sorted = $sqlOrdered;
+        usort($sorted, [self::class, 'sqlGuidCompare']);
+
+        self::assertSame($sqlOrdered, $sorted);
+    }
+
     public function testNilIsAllZeroBytes(): void
     {
         self::assertSame(str_repeat("\x00", 16), Uuid::nil()->bytes());

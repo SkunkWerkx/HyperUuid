@@ -52,6 +52,29 @@ module HyperUuid
       Time.at(millis / 1000, millis % 1000, :millisecond).utc
     end
 
+    # Converts an RFC 9562-ordered version 7 UUID to the byte order SQL Server's
+    # `uniqueidentifier` needs on the wire to sort by creation order.
+    #
+    # `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a
+    # `uniqueidentifier` column — doesn't compare a GUID's 16 bytes left to right; it uses a
+    # fixed, non-sequential byte significance order (octets 10,11,12,13,14,15,8,9,6,7,4,5,
+    # 0,1,2,3, most significant first). This moves the timestamp and counter — the two fields
+    # that determine creation order — into that comparison's most-significant bytes, and moves
+    # the trailing entropy, which carries no ordering information, into the least-significant
+    # ones as one intact block. Computed once in the native Rust core and verified there (and
+    # independently, against the real SqlGuid comparator, in this project's C# test suite);
+    # this binding calls the same native function rather than reimplementing the byte math.
+    #
+    # Meaningful only for a genuine version 7 UUID.
+    def to_sql_order
+      self.class.new(Runtime.v7_to_sql_order(bytes))
+    end
+
+    # Inverse of #to_sql_order — converts a SQL-Server-ordered version 7 UUID back to RFC 9562 order.
+    def from_sql_order
+      self.class.new(Runtime.v7_to_rfc_order(bytes))
+    end
+
     def ==(other)
       other.is_a?(Uuid) && bytes == other.bytes
     end

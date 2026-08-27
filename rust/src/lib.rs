@@ -1,12 +1,15 @@
 //! A Rust port of the RFC 9562 UUID generation from
-//! [SequentialGuid](https://github.com/buvinghausen/SequentialGuid), covering only the
-//! standard UUID versions the RFC itself defines — no SQL Server byte-ordering, ORM, or
-//! serializer integrations.
+//! [SequentialGuid](https://github.com/buvinghausen/SequentialGuid), covering the standard
+//! UUID versions the RFC itself defines, plus [`v7::to_sql_order`]'s SQL Server byte-ordering
+//! (ported from this project's own [Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim))
+//! — no ORM or serializer integrations.
 //!
 //! - [`v4::new_v4`] — random (RFC 9562 §5.4)
 //! - [`v5::new_v5`] — deterministic, namespace + name based, SHA-1 (RFC 9562 §5.5)
 //! - [`v6::new_v6`] — time-sortable, v1-field-compatible reordering (RFC 9562 §5.6)
 //! - [`v7::new_v7`] — time-sortable, millisecond timestamp + monotonic counter (RFC 9562 §6.2)
+//! - [`v7::to_sql_order`] / [`v7::to_rfc_order`] — the byte order SQL Server's
+//!   `uniqueidentifier` needs to sort a version 7 UUID by creation order, and back
 //! - [`Uuid::NIL`] / [`Uuid::MAX`] — the all-zero and all-one special values (RFC 9562 §5.9/§5.10)
 
 mod ffi;
@@ -290,5 +293,86 @@ mod tests {
         let mut out = vec![0u8; 16];
         let err = v7::new_v7_batch(v7::MAX_UNIX_MILLIS + 1, 1, &mut out).unwrap_err();
         assert_eq!(err, v7::NewV7Error::TimestampOutOfRange);
+    }
+
+    #[test]
+    fn v7_sql_order_round_trips() {
+        let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let sql = v7::to_sql_order(&id);
+        assert_ne!(sql, id, "a real timestamp/counter should actually move bytes around");
+        assert_eq!(v7::to_rfc_order(&sql), id);
+    }
+
+    #[test]
+    fn v7_sql_order_zero_and_max_round_trip() {
+        for id in [v7::new_v7(0).unwrap(), v7::new_v7(v7::MAX_UNIX_MILLIS).unwrap()] {
+            assert_eq!(v7::to_rfc_order(&v7::to_sql_order(&id)), id);
+        }
+    }
+
+    #[test]
+    fn v7_sql_order_preserves_version_and_variant_at_octets_7_and_8() {
+        // Matches Svartalfheim's own documented invariant: version/variant sit at the same
+        // byte-and-nibble offsets in both orderings, so a value's version is readable without
+        // first knowing which order it's in.
+        let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let sql = v7::to_sql_order(&id);
+        assert_eq!(sql.as_bytes()[7] & 0xF0, 0x70);
+        assert_eq!(sql.as_bytes()[8] & 0xC0, 0x80);
+    }
+
+    #[test]
+    fn v7_sql_order_extracts_the_same_timestamp_after_converting_back() {
+        let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let round_tripped = v7::to_rfc_order(&v7::to_sql_order(&id));
+        assert_eq!(v7::unix_millis(&round_tripped), RFC_TEST_VECTOR_MS);
+    }
+
+    /// Replicates `System.Data.SqlTypes.SqlGuid.CompareTo` — and therefore T-SQL `ORDER BY`
+    /// on a `uniqueidentifier` column — which compares a GUID's 16 bytes in this fixed
+    /// significance order rather than left to right. This is the correctness oracle for
+    /// [`v7::to_sql_order`]: no real SQL Server available in this crate's test suite, so this
+    /// stands in for it, the same role Svartalfheim's own tests use the real `SqlGuid` for.
+    fn sql_guid_cmp(a: &[u8; 16], b: &[u8; 16]) -> std::cmp::Ordering {
+        const SIGNIFICANCE_ORDER: [usize; 16] = [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3];
+        for &i in &SIGNIFICANCE_ORDER {
+            match a[i].cmp(&b[i]) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    #[test]
+    fn v7_sql_order_sorts_by_creation_order_under_sqlguid_comparison() {
+        // Increasing timestamps, one per millisecond...
+        let mut ids: Vec<Uuid> = (0..200).map(|i| v7::new_v7(1_000_000 + i).unwrap()).collect();
+        // ...plus a same-millisecond run, so the counter (not just the timestamp) has to sort
+        // correctly too.
+        ids.extend((0..200).map(|_| v7::new_v7(5_000_000).unwrap()));
+
+        let sql: Vec<[u8; 16]> = ids.iter().map(|id| *v7::to_sql_order(id).as_bytes()).collect();
+        let mut sorted = sql.clone();
+        sorted.sort_by(sql_guid_cmp);
+        assert_eq!(sql, sorted, "SqlGuid-order comparison of SQL-ordered bytes must match creation order");
+    }
+
+    /// Proves [`v7::unix_millis`] isn't just reading back what our own [`v7::new_v7`] wrote —
+    /// it's a plain RFC 9562 bit-layout read, so it recovers the real embedded timestamp from
+    /// a version 7 UUID minted by a completely independent implementation too. `::uuid` here
+    /// is the external `uuid` crate dev-dependency, disambiguated by the leading `::` from
+    /// this crate's own private `uuid` module of the same name.
+    #[test]
+    fn v7_timestamp_extracts_from_the_external_uuid_crates_native_generator() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let external = ::uuid::Uuid::now_v7();
+        let after = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        let ours = Uuid::from_bytes(*external.as_bytes());
+        let got = v7::unix_millis(&ours);
+        assert!(got >= before && got <= after, "got {got}, want within [{before}, {after}]");
     }
 }

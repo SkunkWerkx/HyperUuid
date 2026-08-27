@@ -1,5 +1,6 @@
 package io.github.buvinghausen.hyperuuid;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -217,5 +218,61 @@ class UuidGeneratorTest {
     @Test
     void v7BatchOverflowTimestampThrows() {
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV7Batch(1, 0x0001_0000_0000_0000L));
+    }
+
+    @Test
+    void toSqlOrderRoundTripsThroughFromSqlOrder() {
+        UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+        UUID sqlOrdered = UuidGenerator.toSqlOrder(id);
+        assertNotEquals(id, sqlOrdered);
+        assertEquals(id, UuidGenerator.fromSqlOrder(sqlOrdered));
+    }
+
+    @Test
+    void toSqlOrderPreservesVersionAndVariantAtOctets7And8() {
+        UUID sqlOrdered = UuidGenerator.toSqlOrder(UuidGenerator.newV7(RFC_TEST_VECTOR_MS));
+        byte[] bytes = RfcBytes.toRfcBytes(sqlOrdered);
+        assertEquals(0x70, bytes[7] & 0xF0);
+        assertEquals((byte) 0x80, (byte) (bytes[8] & 0xC0));
+    }
+
+    /**
+     * Replicates {@code System.Data.SqlTypes.SqlGuid.CompareTo}'s fixed byte significance
+     * order — the correctness oracle this project's C# test suite checks directly against the
+     * real type; no JVM equivalent exists to test against here, so this stands in for it.
+     */
+    private static int sqlGuidCompare(byte[] a, byte[] b) {
+        int[] significanceOrder = {10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3};
+        for (int i : significanceOrder) {
+            int cmp = Integer.compare(a[i] & 0xFF, b[i] & 0xFF);
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return 0;
+    }
+
+    @Test
+    void toSqlOrderSortsByCreationOrderUnderSqlGuidComparison() {
+        List<UUID> ids = new ArrayList<>();
+        for (long i = 0; i < 200; i++) {
+            ids.add(UuidGenerator.newV7(RFC_TEST_VECTOR_MS + i));
+        }
+        // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
+        for (int i = 0; i < 200; i++) {
+            ids.add(UuidGenerator.newV7(RFC_TEST_VECTOR_MS + 1_000_000));
+        }
+
+        List<byte[]> sqlOrdered = ids.stream()
+                .map(UuidGenerator::toSqlOrder)
+                .map(RfcBytes::toRfcBytes)
+                .collect(Collectors.toList());
+        List<byte[]> sorted = new ArrayList<>(sqlOrdered);
+        sorted.sort(UuidGeneratorTest::sqlGuidCompare);
+
+        assertEquals(sqlOrdered.size(), sorted.size());
+        for (int i = 0; i < sqlOrdered.size(); i++) {
+            assertArrayEquals(sqlOrdered.get(i), sorted.get(i));
+        }
     }
 }

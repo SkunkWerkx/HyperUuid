@@ -89,6 +89,34 @@ final class Uuid
         return $dt;
     }
 
+    /**
+     * Converts an RFC 9562-ordered version 7 UUID to the byte order SQL Server's
+     * `uniqueidentifier` needs on the wire to sort by creation order.
+     *
+     * `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a
+     * `uniqueidentifier` column — doesn't compare a GUID's 16 bytes left to right; it uses a
+     * fixed, non-sequential byte significance order (`10,11,12,13,14,15,8,9,6,7,4,5,0,1,2,3`,
+     * most significant first). This moves the timestamp and counter — the two fields that
+     * determine creation order — into that comparison's most-significant bytes, and moves the
+     * trailing entropy, which carries no ordering information, into the least-significant ones
+     * as one intact block. The permutation is computed once in the native Rust core, verified
+     * there and independently against the real `System.Data.SqlTypes.SqlGuid` comparator in
+     * this project's C# test suite; this binding calls the same native function rather than
+     * reimplementing the math.
+     *
+     * Meaningful only for a genuine version 7 UUID — same convention as {@see timestamp()}.
+     */
+    public function toSqlOrder(): self
+    {
+        return new self(Runtime::v7ToSqlOrder($this->bytes));
+    }
+
+    /** Inverse of {@see toSqlOrder()} — converts a SQL-Server-ordered version 7 UUID back to RFC 9562 order. */
+    public function fromSqlOrder(): self
+    {
+        return new self(Runtime::v7ToRfcOrder($this->bytes));
+    }
+
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
     public static function nil(): self
     {

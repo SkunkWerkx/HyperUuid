@@ -194,4 +194,49 @@ final class UuidGeneratorTests: XCTestCase {
             }
         }
     }
+
+    func testToSqlOrderRoundTripsThroughFromSqlOrder() throws {
+        let id = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+        let sqlOrdered = try UuidGenerator.toSqlOrder(id)
+        XCTAssertNotEqual(sqlOrdered, id)
+        XCTAssertEqual(try UuidGenerator.fromSqlOrder(sqlOrdered), id)
+    }
+
+    func testToSqlOrderPreservesVersionAndVariantAtOctets7And8() throws {
+        let sqlOrdered = try UuidGenerator.toSqlOrder(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs))
+        let bytes = sqlOrdered.rfcBytes
+        XCTAssertEqual(bytes[7] & 0xF0, 0x70)
+        XCTAssertEqual(bytes[8] & 0xC0, 0x80)
+    }
+
+    /// Replicates `System.Data.SqlTypes.SqlGuid.CompareTo`'s fixed byte significance order —
+    /// the correctness oracle this project's C# test suite checks directly against the real
+    /// type; no equivalent exists in Foundation to test against here, so this stands in for it,
+    /// the same role the hand-rolled comparator in the Rust core's own test suite plays.
+    private func sqlGuidCompare(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        let significanceOrder = [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3]
+        for i in significanceOrder {
+            if a[i] != b[i] { return a[i] < b[i] }
+        }
+        return false
+    }
+
+    func testToSqlOrderSortsByCreationOrderUnderSqlGuidComparison() throws {
+        var ids: [UUID] = []
+        for i in UInt64(0)..<200 {
+            ids.append(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs + i))
+        }
+        // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
+        for _ in 0..<200 {
+            ids.append(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs + 1_000_000))
+        }
+
+        let sqlOrdered = try ids.map { try UuidGenerator.toSqlOrder($0).rfcBytes }
+        let sorted = sqlOrdered.sorted(by: sqlGuidCompare)
+
+        XCTAssertEqual(sqlOrdered.count, sorted.count)
+        for (a, b) in zip(sqlOrdered, sorted) {
+            XCTAssertEqual(a, b)
+        }
+    }
 }

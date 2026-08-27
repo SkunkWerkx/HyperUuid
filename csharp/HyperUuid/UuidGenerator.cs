@@ -47,6 +47,12 @@ public static partial class UuidGenerator
     [LibraryImport("hyperuuid")]
     private static unsafe partial int uuid_new_v7_batch(long unixMillis, uint count, byte* outPtr);
 
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial void uuid_v7_to_sql_order(byte* uuidPtr);
+
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial void uuid_v7_to_rfc_order(byte* uuidPtr);
+
     // Batch calls marshal through a byte scratch buffer rather than Span<Guid> directly —
     // Guid's in-memory field layout isn't RFC-byte-order (it's mixed-endian and not
     // guaranteed stable across runtimes), so each 16-byte chunk still needs the same
@@ -312,6 +318,56 @@ public static partial class UuidGenerator
     /// </exception>
     public static DateTimeOffset V7Timestamp(Guid uuid) =>
         DateTimeOffset.FromUnixTimeMilliseconds(V7UnixMillis(uuid));
+
+    /// <summary>
+    /// Converts an RFC 9562-ordered version 7 <paramref name="uuid"/> to the byte order SQL
+    /// Server's <c>uniqueidentifier</c> needs on the wire to sort by creation order.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="System.Data.SqlTypes.SqlGuid"/> comparison — and therefore T-SQL
+    /// <c>ORDER BY</c> on a <c>uniqueidentifier</c> column — doesn't compare a GUID's 16 bytes
+    /// left to right; it uses a fixed, non-sequential byte significance order. This moves the
+    /// timestamp and counter (the two fields that determine creation order) into that
+    /// comparison's most-significant bytes, and moves the trailing entropy, which carries no
+    /// ordering information, into the least-significant ones as one intact block. The result
+    /// is exactly what <see cref="Guid.ToByteArray()"/> on the returned value needs to produce
+    /// to sort correctly once written to SQL Server — pass the result straight through
+    /// ADO.NET as you would any other <see cref="Guid"/> parameter. Same permutation this
+    /// project's own <see href="https://github.com/NorseArchitecture/Svartalfheim">Svartalfheim</see>
+    /// implements, ported here from the native Rust core instead of reimplemented in C#, so
+    /// every binding in this repo (not just this one) gets it from one verified source.
+    /// Meaningful only for a genuine version 7 UUID.
+    /// </remarks>
+    public static unsafe Guid ToSqlOrder(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        uuid.TryWriteBytes(bytes, bigEndian: true, out _);
+        fixed (byte* p = bytes)
+        {
+            uuid_v7_to_sql_order(p);
+        }
+        // Not bigEndian: true — the native call already rewrote these bytes into the exact
+        // layout Guid.ToByteArray() needs to reproduce for SQL Server, so the default
+        // constructor (no further byte-order conversion) is the correct one here.
+        return new Guid(bytes);
+    }
+
+    /// <summary>
+    /// Inverse of <see cref="ToSqlOrder"/> — converts a SQL-Server-ordered version 7
+    /// <paramref name="uuid"/> (as read back via <see cref="Guid.ToByteArray()"/>) back to
+    /// RFC 9562 order.
+    /// </summary>
+    public static unsafe Guid FromSqlOrder(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        // Not bigEndian: true — read back the same native layout ToSqlOrder wrote.
+        uuid.TryWriteBytes(bytes);
+        fixed (byte* p = bytes)
+        {
+            uuid_v7_to_rfc_order(p);
+        }
+        return new Guid(bytes, bigEndian: true);
+    }
 
     /// <summary>
     /// Fills <paramref name="destination"/> with time-sortable version 7 UUIDs sharing one

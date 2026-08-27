@@ -74,6 +74,10 @@ public final class UuidGenerator {
             LOOKUP.find("uuid_new_v7_batch").orElseThrow(),
             FunctionDescriptor.of(
                     ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V7_TO_SQL_ORDER = LINKER.downcallHandle(
+            LOOKUP.find("uuid_v7_to_sql_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V7_TO_RFC_ORDER = LINKER.downcallHandle(
+            LOOKUP.find("uuid_v7_to_rfc_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
 
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
     public static final UUID NIL = new UUID(0L, 0L);
@@ -316,6 +320,61 @@ public final class UuidGenerator {
      */
     public static Instant v7Timestamp(UUID uuid) {
         return Instant.ofEpochMilli(v7UnixMillis(uuid));
+    }
+
+    /**
+     * Converts an RFC 9562-ordered version 7 {@code uuid} to the byte order SQL Server's
+     * {@code uniqueidentifier} needs on the wire to sort by creation order.
+     *
+     * <p>{@code System.Data.SqlTypes.SqlGuid} comparison — and therefore T-SQL {@code ORDER BY}
+     * on a {@code uniqueidentifier} column — doesn't compare a GUID's 16 bytes left to right;
+     * it uses a fixed, non-sequential byte significance order. This moves the timestamp and
+     * counter (the two fields that determine creation order) into that comparison's
+     * most-significant bytes, and moves the trailing entropy, which carries no ordering
+     * information, into the least-significant ones as one intact block. The permutation is
+     * computed once in the native Rust core and verified there — and independently, against
+     * the real {@code System.Data.SqlTypes.SqlGuid} comparator — in this project's C# test
+     * suite; this binding calls the same native function rather than reimplementing the math.
+     *
+     * <p><b>Driver caveat:</b> this returns the raw 16 bytes SQL Server's wire format expects
+     * for a {@code uniqueidentifier}, verified at that byte level — not against any specific
+     * JDBC driver's own {@code UUID} parameter binding. ADO.NET's {@code Guid} binding applies
+     * no further transform of its own (confirmed against the C# binding), so its equivalent
+     * method can be passed straight through as an ordinary parameter; whether a given JDBC
+     * driver's {@code setObject(UUID)} for a {@code uniqueidentifier} column reorders bytes
+     * again on top of this hasn't been checked here — verify against your driver, or bind the
+     * bytes directly as a fallback that sidesteps the question entirely.
+     *
+     * <p>Meaningful only for a genuine version 7 UUID.
+     */
+    public static UUID toSqlOrder(UUID uuid) {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment seg = local.allocate(16);
+            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
+            try {
+                UUID_V7_TO_SQL_ORDER.invokeExact(seg);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_v7_to_sql_order downcall failed unexpectedly", t);
+            }
+            return readUuid(seg);
+        }
+    }
+
+    /**
+     * Inverse of {@link #toSqlOrder} — converts a SQL-Server-ordered version 7 {@code uuid}
+     * back to RFC 9562 order.
+     */
+    public static UUID fromSqlOrder(UUID uuid) {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment seg = local.allocate(16);
+            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
+            try {
+                UUID_V7_TO_RFC_ORDER.invokeExact(seg);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
+            }
+            return readUuid(seg);
+        }
     }
 
     /**

@@ -161,3 +161,91 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
         | ((b[4] as u64) << 8)
         | (b[5] as u64)
 }
+
+/// Converts an RFC 9562-ordered version 7 UUID's bytes to the byte order SQL Server's
+/// `uniqueidentifier` needs on the wire to sort by creation order.
+///
+/// `System.Data.SqlTypes.SqlGuid` (and therefore T-SQL `ORDER BY` on a `uniqueidentifier`
+/// column) doesn't compare a GUID's 16 bytes left to right — it compares them in this fixed
+/// significance order, most-significant first: octets `10,11,12,13,14,15, 8,9, 6,7, 4,5,
+/// 0,1,2,3`. This function moves this UUID's 48-bit timestamp and 26-bit counter — the two
+/// fields that actually determine creation order — into those most-significant octets, and
+/// moves the 48 bits of trailing entropy, which carries no ordering information, into the
+/// least-significant ones as one untouched 6-byte block (its bits are relocated, not
+/// individually reshuffled). The version nibble stays at octet 7's top nibble and the variant
+/// bits at octet 8's top two, matching where they already sit once run through .NET's own
+/// `Guid.ToByteArray()` layout — the reason a value's version is readable without first
+/// knowing which of the two orders it's in.
+///
+/// Re-derived directly against these RFC 9562 byte offsets — see this project's own
+/// [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) and
+/// [Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) for the C# prior art this
+/// was checked against, which works in terms of .NET's internal mixed-endian `Guid` layout
+/// instead; the two are algebraically equivalent.
+///
+/// Meaningful only for a genuine version 7 UUID — same convention as [`unix_millis`], the
+/// caller is responsible for checking that first if it matters.
+pub fn to_sql_order(uuid: &Uuid) -> Uuid {
+    let rfc = uuid.as_bytes();
+
+    let counter = ((rfc[6] as u32 & 0x0F) << 22)
+        | ((rfc[7] as u32) << 14)
+        | ((rfc[8] as u32 & 0x3F) << 8)
+        | (rfc[9] as u32);
+    let top14 = (counter >> 12) & 0x3FFF;
+    let bottom12 = counter & 0xFFF;
+    let version = rfc[6] & 0xF0;
+    let variant = rfc[8] & 0xC0;
+
+    let mut sql = [0u8; 16];
+    sql[0] = rfc[12];
+    sql[1] = rfc[13];
+    sql[2] = rfc[14];
+    sql[3] = rfc[15];
+    sql[4] = rfc[10];
+    sql[5] = rfc[11];
+    sql[6] = ((bottom12 >> 4) & 0xFF) as u8;
+    sql[7] = version | (bottom12 & 0x0F) as u8;
+    sql[8] = variant | ((top14 >> 8) & 0x3F) as u8;
+    sql[9] = (top14 & 0xFF) as u8;
+    sql[10] = rfc[0];
+    sql[11] = rfc[1];
+    sql[12] = rfc[2];
+    sql[13] = rfc[3];
+    sql[14] = rfc[4];
+    sql[15] = rfc[5];
+
+    Uuid::from_bytes(sql)
+}
+
+/// Inverse of [`to_sql_order`] — converts a SQL-Server-ordered version 7 UUID's bytes back to
+/// RFC 9562 order.
+pub fn to_rfc_order(uuid: &Uuid) -> Uuid {
+    let sql = uuid.as_bytes();
+
+    let top14 = ((sql[8] as u32 & 0x3F) << 8) | (sql[9] as u32);
+    let bottom12 = ((sql[6] as u32) << 4) | (sql[7] as u32 & 0x0F);
+    let counter = (top14 << 12) | bottom12;
+    let version = sql[7] & 0xF0;
+    let variant = sql[8] & 0xC0;
+
+    let mut rfc = [0u8; 16];
+    rfc[0] = sql[10];
+    rfc[1] = sql[11];
+    rfc[2] = sql[12];
+    rfc[3] = sql[13];
+    rfc[4] = sql[14];
+    rfc[5] = sql[15];
+    rfc[6] = version | ((counter >> 22) & 0x0F) as u8;
+    rfc[7] = ((counter >> 14) & 0xFF) as u8;
+    rfc[8] = variant | ((counter >> 8) & 0x3F) as u8;
+    rfc[9] = (counter & 0xFF) as u8;
+    rfc[10] = sql[4];
+    rfc[11] = sql[5];
+    rfc[12] = sql[0];
+    rfc[13] = sql[1];
+    rfc[14] = sql[2];
+    rfc[15] = sql[3];
+
+    Uuid::from_bytes(rfc)
+}

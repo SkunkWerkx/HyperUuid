@@ -13,13 +13,14 @@ let id3 = v6::new_v6(unix_millis)?;
 let id4 = v7::now_v7()?;
 
 let ts = v7::unix_millis(&id4); // recover the embedded timestamp
+let sql_ordered = v7::to_sql_order(&id4); // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One random-bytes fetch, one counter reservation for the whole batch:
 let mut out = vec![0u8; 1000 * 16];
 v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 ```
 
-`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture and one counter reservation, instead of `count` of each — this is also the one deliberate exception to the zero-allocation claim: the scratch buffer itself allocates (or is caller-provided, as above), the generation loop inside it does not.
+`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed here once and exported over FFI so every binding in this repo gets it from one verified source. Verified against the real `System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite; this crate's own test suite verifies the same sort behavior against a comparator replicating `SqlGuid`'s documented byte order. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture and one counter reservation, instead of `count` of each — this is also the one deliberate exception to the zero-allocation claim: the scratch buffer itself allocates (or is caller-provided, as above), the generation loop inside it does not.
 
 This crate is also what makes the rest of this repo possible: a single `cdylib` (`libhyperuuid.so`/`.dylib`/`.dll`) exports a plain C ABI, and every other language binding in this repo (`../csharp`, `../java`, `../go`, `../swift`, `../ruby`, `../php`, `../python`) calls straight into it — same address space, same generation logic, same test vectors, on every platform. See [the repo root README](../README.md) for the full picture.
 

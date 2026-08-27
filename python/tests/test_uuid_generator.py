@@ -1,4 +1,5 @@
 import datetime
+import sys
 import time
 import uuid
 
@@ -174,6 +175,19 @@ def test_v7_timestamp_raises_past_datetime_year_range():
         hyperuuid.v7_timestamp(id_)
 
 
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="stdlib uuid.uuid7() was added in Python 3.14")
+def test_v7_timestamp_extracts_from_the_stdlib_native_generator():
+    # Proves v7_timestamp isn't just reading back what our own new_v7 wrote — it's a plain
+    # RFC 9562 bit-layout read, so it recovers the real embedded timestamp from a version 7
+    # UUID minted by Python's own stdlib generator too.
+    before = time.time()
+    native = uuid.uuid7()
+    after = time.time()
+
+    got = hyperuuid.v7_timestamp(native)
+    assert before - 0.001 <= got.timestamp() <= after + 0.001
+
+
 def test_v7_batch_returns_count_uuids_sorted_and_sharing_the_timestamp():
     ids = hyperuuid.new_v7_batch(1000, RFC_TEST_VECTOR_MS)
     assert len(ids) == 1000
@@ -199,3 +213,37 @@ def test_v7_batch_count_zero_returns_empty_list():
 def test_v7_batch_overflow_timestamp_raises():
     with pytest.raises(ValueError):
         hyperuuid.new_v7_batch(1, 0x0001_0000_0000_0000)
+
+
+def test_to_sql_order_round_trips_through_from_sql_order():
+    id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    sql_ordered = hyperuuid.to_sql_order(id_)
+    assert sql_ordered != id_
+    assert hyperuuid.from_sql_order(sql_ordered) == id_
+
+
+def test_to_sql_order_preserves_version_and_variant_at_octets_7_and_8():
+    sql_ordered = hyperuuid.to_sql_order(hyperuuid.new_v7(RFC_TEST_VECTOR_MS))
+    b = sql_ordered.bytes
+    assert b[7] & 0xF0 == 0x70
+    assert b[8] & 0xC0 == 0x80
+
+
+def _sql_guid_key(uuid_value):
+    # Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order — the
+    # correctness oracle this project's C# test suite checks directly against the real type;
+    # no equivalent exists in Python's stdlib to test against here, so this stands in for it.
+    significance_order = [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3]
+    b = uuid_value.bytes
+    return tuple(b[i] for i in significance_order)
+
+
+def test_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison():
+    ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + i) for i in range(200)]
+    # Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
+    ids += [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + 1_000_000) for _ in range(200)]
+
+    sql_ordered = [hyperuuid.to_sql_order(id_) for id_ in ids]
+    sorted_by_sqlguid = sorted(sql_ordered, key=_sql_guid_key)
+
+    assert sql_ordered == sorted_by_sqlguid

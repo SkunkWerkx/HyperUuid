@@ -183,6 +183,43 @@ RSpec.describe HyperUuid do
     end
   end
 
+  describe "Uuid#to_sql_order" do
+    it "round-trips through #from_sql_order" do
+      id = described_class.new_v7(RFC_TEST_VECTOR_MS)
+      sql_ordered = id.to_sql_order
+      expect(sql_ordered).not_to eq(id)
+      expect(sql_ordered.from_sql_order).to eq(id)
+    end
+
+    it "preserves the version and variant bits at octets 7 and 8" do
+      sql_ordered = described_class.new_v7(RFC_TEST_VECTOR_MS).to_sql_order
+      expect(sql_ordered.bytes.getbyte(7) & 0xF0).to eq(0x70)
+      expect(sql_ordered.bytes.getbyte(8) & 0xC0).to eq(0x80)
+    end
+
+    it "sorts by creation order under SqlGuid-style comparison" do
+      # Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order —
+      # the correctness oracle this project's C# test suite checks directly against the real
+      # type; no Ruby equivalent exists to test against here, so this stands in for it.
+      significance_order = [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3]
+      sql_guid_cmp = lambda do |a, b|
+        significance_order.each do |i|
+          cmp = a.getbyte(i) <=> b.getbyte(i)
+          return cmp unless cmp.zero?
+        end
+        0
+      end
+
+      ids = (0...200).map { |i| described_class.new_v7(RFC_TEST_VECTOR_MS + i) }
+      ids += Array.new(200) { described_class.new_v7(RFC_TEST_VECTOR_MS + 1_000_000) }
+
+      sql_ordered = ids.map { |id| id.to_sql_order.bytes }
+      sorted = sql_ordered.sort { |a, b| sql_guid_cmp.call(a, b) }
+
+      expect(sorted).to eq(sql_ordered)
+    end
+  end
+
   describe "Uuid::NIL and Uuid::MAX" do
     it "NIL is all zero bytes" do
       expect(HyperUuid::Uuid::NIL.bytes).to eq("\x00".b * 16)

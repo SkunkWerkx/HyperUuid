@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 using Shouldly;
 
 namespace HyperUuid.Tests;
@@ -256,5 +257,46 @@ public sealed class UuidGeneratorTests
         var ids = UuidGenerator.NewV7Batch(50, RfcTestVectorMs);
         ids.Length.ShouldBe(50);
         ids.ToHashSet().Count.ShouldBe(50);
+    }
+
+    [Fact]
+    public void ToSqlOrder_RoundTripsThroughFromSqlOrder()
+    {
+        var id = UuidGenerator.NewV7(RfcTestVectorMs);
+        var sqlOrdered = UuidGenerator.ToSqlOrder(id);
+        sqlOrdered.ShouldNotBe(id);
+        UuidGenerator.FromSqlOrder(sqlOrdered).ShouldBe(id);
+    }
+
+    [Fact]
+    public void ToSqlOrder_PreservesVersionAndVariant()
+    {
+        var sqlOrdered = UuidGenerator.ToSqlOrder(UuidGenerator.NewV7(RfcTestVectorMs));
+        var bytes = sqlOrdered.ToByteArray();
+        (bytes[7] & 0xF0).ShouldBe(0x70);
+        (bytes[8] & 0xC0).ShouldBe(0x80);
+    }
+
+    [Fact]
+    public void ToSqlOrder_SortsByCreationOrderUnderRealSqlGuidComparison()
+    {
+        // The correctness oracle here is the real System.Data.SqlTypes.SqlGuid — the same
+        // type T-SQL's own ORDER BY on a uniqueidentifier column matches — not a hand-rolled
+        // stand-in for it, unlike the Rust core's own version of this test.
+        var ids = new List<Guid>();
+        for (long i = 0; i < 200; i++)
+        {
+            ids.Add(UuidGenerator.NewV7(RfcTestVectorMs + i));
+        }
+        // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
+        for (var i = 0; i < 200; i++)
+        {
+            ids.Add(UuidGenerator.NewV7(RfcTestVectorMs + 1_000_000));
+        }
+
+        var sqlOrdered = ids.Select(UuidGenerator.ToSqlOrder).ToList();
+        var sorted = sqlOrdered.OrderBy(g => new SqlGuid(g)).ToList();
+
+        sorted.ShouldBe(sqlOrdered);
     }
 }

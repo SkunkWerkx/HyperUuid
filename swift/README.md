@@ -19,6 +19,7 @@ let id3 = try UuidGenerator.newV6()
 let id4 = try UuidGenerator.newV7()
 
 let created = try UuidGenerator.v7Timestamp(id4) // recover the embedded UTC Date
+let sqlOrdered = try UuidGenerator.toSqlOrder(id4) // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
 let batch = try UuidGenerator.newV7Batch(count: 1000)
@@ -30,7 +31,11 @@ Section 6.6's well-known namespaces; `WellKnownUuids.nilUUID`/`maxUUID` are the
 the embedded UTC `Date` from a version 6 or 7 UUID respectively.
 `UuidGenerator.newV6Batch(count:unixMillis:)`/`newV7Batch(count:unixMillis:)` generate
 `count` UUIDs sharing one timestamp capture and one native call, instead of `count`
-of each.
+of each. `UuidGenerator.toSqlOrder(_:)`/`fromSqlOrder(_:)` convert a version 7 UUID
+to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort
+by creation order — computed once in the native Rust core rather than reimplemented
+in Swift, and verified there (and independently against the real
+`System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite).
 
 ## Why not Foundation's `UUID()`?
 

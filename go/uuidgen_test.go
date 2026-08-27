@@ -2,6 +2,7 @@ package hyperuuid
 
 import (
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -18,6 +19,26 @@ func TestV4HasVersionAndVariantBits(t *testing.T) {
 	}
 	if id.Variant() != uuid.RFC4122 {
 		t.Errorf("variant = %v, want RFC4122", id.Variant())
+	}
+}
+
+// Proves V7Timestamp isn't just reading back what our own NewV7 wrote — it's a plain RFC
+// 9562 bit-layout read, so it recovers the real embedded timestamp from a version 7 UUID
+// minted by google/uuid's own native generator too.
+func TestV7TimestampExtractsFromGoogleUuidsNativeGenerator(t *testing.T) {
+	before := time.Now()
+	id, err := uuid.NewV7()
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now()
+
+	got, err := V7Timestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Before(before.Truncate(time.Millisecond)) || got.After(after) {
+		t.Errorf("V7Timestamp(uuid.NewV7()) = %v, want within [%v, %v]", got, before, after)
 	}
 }
 
@@ -364,5 +385,97 @@ func TestV7BatchOverflowTimestampErrors(t *testing.T) {
 	_, err := NewV7BatchAt(1, 0x0001_0000_0000_0000)
 	if !errors.Is(err, ErrTimestampOutOfRange) {
 		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
+	}
+}
+
+func TestToSqlOrderRoundTripsThroughFromSqlOrder(t *testing.T) {
+	id, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlOrdered, err := ToSqlOrder(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlOrdered == id {
+		t.Fatal("ToSqlOrder returned the input unchanged, want the bytes actually permuted")
+	}
+	roundTripped, err := FromSqlOrder(sqlOrdered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundTripped != id {
+		t.Errorf("FromSqlOrder(ToSqlOrder(id)) = %v, want %v", roundTripped, id)
+	}
+}
+
+func TestToSqlOrderPreservesVersionAndVariantAtOctets7And8(t *testing.T) {
+	id, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlOrdered, err := ToSqlOrder(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlOrdered[7]&0xF0 != 0x70 {
+		t.Errorf("version nibble at octet 7 = %#x, want 0x70..0x7F", sqlOrdered[7])
+	}
+	if sqlOrdered[8]&0xC0 != 0x80 {
+		t.Errorf("variant bits at octet 8 = %#x, want top two bits 10", sqlOrdered[8])
+	}
+}
+
+// sqlGuidCompare replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance
+// order — the correctness oracle this project's C# test suite checks directly against the
+// real type; no Go equivalent exists to test against here, so this stands in for it.
+func sqlGuidCompare(a, b [16]byte) int {
+	significanceOrder := [16]int{10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3}
+	for _, i := range significanceOrder {
+		if a[i] != b[i] {
+			if a[i] < b[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+func TestToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
+	var ids []uuid.UUID
+	for i := uint64(0); i < 200; i++ {
+		id, err := NewV7At(rfcTestVectorMs + i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	// Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
+	for i := 0; i < 200; i++ {
+		id, err := NewV7At(rfcTestVectorMs + 1_000_000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+
+	sqlOrdered := make([][16]byte, len(ids))
+	for i, id := range ids {
+		sql, err := ToSqlOrder(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqlOrdered[i] = [16]byte(sql)
+	}
+
+	sorted := make([][16]byte, len(sqlOrdered))
+	copy(sorted, sqlOrdered)
+	sort.Slice(sorted, func(i, j int) bool { return sqlGuidCompare(sorted[i], sorted[j]) < 0 })
+
+	for i := range sqlOrdered {
+		if sqlOrdered[i] != sorted[i] {
+			t.Fatalf("SQL-ordered bytes do not sort in creation order under SqlGuid comparison at index %d", i)
+		}
 	}
 }

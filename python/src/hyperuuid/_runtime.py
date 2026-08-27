@@ -37,6 +37,10 @@ def _load() -> ctypes.CDLL:
     lib.uuid_v7_unix_millis.restype = ctypes.c_uint64
     lib.uuid_new_v7_batch.argtypes = [ctypes.c_uint64, ctypes.c_uint32, ctypes.c_void_p]
     lib.uuid_new_v7_batch.restype = ctypes.c_int32
+    lib.uuid_v7_to_sql_order.argtypes = [ctypes.c_void_p]
+    lib.uuid_v7_to_sql_order.restype = None
+    lib.uuid_v7_to_rfc_order.argtypes = [ctypes.c_void_p]
+    lib.uuid_v7_to_rfc_order.restype = None
     return lib
 
 
@@ -130,3 +134,17 @@ def new_v7_batch(count: int, unix_millis: int) -> bytes:
     if rc != 0:
         raise RuntimeError(f"uuid_new_v7_batch failed with code {rc} (random source failure)")
     return bytes(out)
+
+
+def v7_to_sql_order(uuid_bytes: bytes) -> bytes:
+    lib = _get_lib()
+    buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
+    lib.uuid_v7_to_sql_order(ctypes.byref(buf))
+    return bytes(buf)
+
+
+def v7_to_rfc_order(uuid_bytes: bytes) -> bytes:
+    lib = _get_lib()
+    buf = (ctypes.c_ubyte * 16).from_buffer_copy(uuid_bytes)
+    lib.uuid_v7_to_rfc_order(ctypes.byref(buf))
+    return bytes(buf)

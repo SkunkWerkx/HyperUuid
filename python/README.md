@@ -21,6 +21,7 @@ hyperuuid.new_v6()
 id4 = hyperuuid.new_v7()
 
 hyperuuid.v7_timestamp(id4) # recover the embedded UTC datetime.datetime
+hyperuuid.to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
 batch = hyperuuid.new_v7_batch(1000)
@@ -37,7 +38,12 @@ UTC `datetime.datetime` from a version 7 UUID (raises `OverflowError` past year
 6, and can never raise that way — v6's 60-bit tick count, offset from the 1582 UUID
 epoch, tops out around the year 5236. `hyperuuid.new_v6_batch(count)`/
 `new_v7_batch(count)` generate `count` UUIDs sharing one timestamp capture and one
-native call, instead of `count` of each.
+native call, instead of `count` of each. `hyperuuid.to_sql_order(id)`/
+`from_sql_order(id)` convert a version 7 UUID to and from the byte order SQL
+Server's `uniqueidentifier` needs on the wire to sort by creation order — computed
+once in the native Rust core rather than reimplemented in Python, and verified
+there (and independently against the real `System.Data.SqlTypes.SqlGuid`
+comparator in the C# binding's test suite).
 
 ## Why not stdlib `uuid`?
 

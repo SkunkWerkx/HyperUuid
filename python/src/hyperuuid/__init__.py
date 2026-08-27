@@ -28,6 +28,8 @@ __all__ = [
     "new_v7_batch",
     "v6_timestamp",
     "v7_timestamp",
+    "to_sql_order",
+    "from_sql_order",
     "NIL",
     "MAX",
 ]
@@ -136,3 +138,29 @@ def new_v7_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]
         unix_millis = int(time.time() * 1000)
     raw = _runtime.new_v7_batch(count, unix_millis)
     return [_uuid.UUID(bytes=raw[i * 16 : i * 16 + 16]) for i in range(count)]
+
+
+def to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
+    """Convert an RFC 9562-ordered version 7 UUID to the byte order SQL Server's
+    ``uniqueidentifier`` needs on the wire to sort by creation order.
+
+    ``System.Data.SqlTypes.SqlGuid`` comparison — and therefore T-SQL ``ORDER BY`` on a
+    ``uniqueidentifier`` column — doesn't compare a GUID's 16 bytes left to right; it uses a
+    fixed, non-sequential byte significance order (most significant first): octets
+    ``10,11,12,13,14,15, 8,9, 6,7, 4,5, 0,1,2,3``. This moves the timestamp and counter — the
+    two fields that determine creation order — into those most-significant octets, and moves
+    the trailing entropy, which carries no ordering information, into the least-significant
+    ones as one intact block. The permutation itself is computed once in the native Rust core
+    and verified there — and independently, against the real ``System.Data.SqlTypes.SqlGuid``
+    comparator — in this project's C# test suite; this binding calls the same native function
+    rather than reimplementing the math.
+
+    Meaningful only for a genuine version 7 UUID.
+    """
+    return _uuid.UUID(bytes=_runtime.v7_to_sql_order(uuid_value.bytes))
+
+
+def from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
+    """Inverse of :func:`to_sql_order` — convert a SQL-Server-ordered version 7 UUID back to
+    RFC 9562 order."""
+    return _uuid.UUID(bytes=_runtime.v7_to_rfc_order(uuid_value.bytes))

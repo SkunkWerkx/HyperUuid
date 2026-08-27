@@ -18,6 +18,7 @@ id3 = HyperUuid.new_v6
 id4 = HyperUuid.new_v7
 
 id4.timestamp # recover the embedded UTC Time
+id4.to_sql_order # byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
 batch = HyperUuid.new_v7_batch(1000)
@@ -27,6 +28,10 @@ Returns `HyperUuid::Uuid`, a minimal value object (`#bytes`, `#to_s`, `#version`
 comparable/hashable) — this gem has no runtime dependency on the `uuid` gem.
 `HyperUuid::Namespaces::DNS`/`URL`/`OID`/`X500` are RFC 9562 Section 6.6's well-known
 namespaces. `#timestamp` recovers the embedded UTC `Time` from a version 6 or 7 UUID.
+`#to_sql_order`/`#from_sql_order` convert a version 7 UUID to and from the byte order SQL
+Server's `uniqueidentifier` needs on the wire to sort by creation order — computed once in
+the native Rust core rather than reimplemented in Ruby, and verified there (and independently
+against the real `System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite).
 `HyperUuid::Uuid::NIL`/`MAX` are the RFC 9562 §5.9/§5.10 special-value UUIDs.
 `HyperUuid.new_v6_batch(count)`/`new_v7_batch(count)` generate `count` UUIDs sharing one
 timestamp capture and one native call, instead of `count` of each.

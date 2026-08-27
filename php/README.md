@@ -20,6 +20,7 @@ $id3 = HyperUuid::newV6();
 $id4 = HyperUuid::newV7();
 
 $id4->timestamp(); // recover the embedded UTC DateTimeImmutable
+$id4->toSqlOrder(); // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
 $batch = HyperUuid::newV7Batch(1000);
@@ -29,7 +30,11 @@ Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
 `->version()`, `->variant()`, `->equals()`) — this package has no runtime dependency on
 `ramsey/uuid`. `Namespaces::dns()`/`url()`/`oid()`/`x500()` are RFC 9562 Section 6.6's
 well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from a
-version 6 or 7 UUID. `Uuid::nil()`/`Uuid::max()` are the RFC 9562 §5.9/§5.10 special-value
+version 6 or 7 UUID. `->toSqlOrder()`/`->fromSqlOrder()` convert a version 7 UUID to and from
+the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order —
+computed once in the native Rust core rather than reimplemented in PHP, and verified there
+(and independently against the real `System.Data.SqlTypes.SqlGuid` comparator in the C#
+binding's test suite). `Uuid::nil()`/`Uuid::max()` are the RFC 9562 §5.9/§5.10 special-value
 UUIDs. `HyperUuid::newV6Batch(count)`/`newV7Batch(count)` generate `count` UUIDs sharing one
 timestamp capture and one native call, instead of `count` of each.
 

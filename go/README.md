@@ -20,6 +20,7 @@ id, err = hyperuuid.NewV5String(hyperuuid.NamespaceDNS, "example.com")
 id, err = hyperuuid.NewV6()
 id, err = hyperuuid.NewV7()
 batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
+sqlOrdered, err := hyperuuid.ToSqlOrder(id) // byte order SQL Server's uniqueidentifier needs to sort by creation order
 ```
 
 Returns [`github.com/google/uuid`](https://pkg.go.dev/github.com/google/uuid)'s
@@ -31,7 +32,11 @@ the other bindings' `Namespaces.*`; `Nil`/`Max` (RFC 9562 §5.9/§5.10) are the 
 kind of re-export. `V6Timestamp`/`V7Timestamp` recover the embedded UTC `time.Time`
 from a version 6 or 7 UUID respectively. `NewV6BatchAt(count, unixMillis)`/
 `NewV7BatchAt(count, unixMillis)` generate `count` UUIDs sharing one timestamp
-capture and one native call, instead of `count` of each.
+capture and one native call, instead of `count` of each. `ToSqlOrder`/`FromSqlOrder`
+convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier`
+needs on the wire to sort by creation order — computed once in the native Rust core
+(and verified there, and independently against the real `System.Data.SqlTypes.SqlGuid`
+comparator in the C# binding's test suite) rather than reimplemented per binding.
 
 ## Why not `google/uuid`'s own `NewV6`/`NewV7`?
 

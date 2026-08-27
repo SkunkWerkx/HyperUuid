@@ -145,3 +145,25 @@ pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut 
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
     }
 }
+
+/// Rewrites the 16 bytes at `uuid_ptr` in place from RFC 9562 order to the byte order SQL
+/// Server's `uniqueidentifier` needs on the wire to sort a version 7 UUID by creation order.
+/// See [`v7::to_sql_order`] for the byte-level rationale. Meaningful only for a genuine
+/// version 7 UUID.
+#[unsafe(no_mangle)]
+pub extern "C" fn uuid_v7_to_sql_order(uuid_ptr: *mut u8) {
+    // SAFETY: caller guarantees `uuid_ptr` points to 16 live, writable bytes.
+    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }.try_into().unwrap();
+    let sql = v7::to_sql_order(&Uuid::from_bytes(bytes));
+    unsafe { core::ptr::copy_nonoverlapping(sql.as_bytes().as_ptr(), uuid_ptr, 16) };
+}
+
+/// Inverse of [`uuid_v7_to_sql_order`] — rewrites the 16 bytes at `uuid_ptr` in place from
+/// SQL Server order back to RFC 9562 order.
+#[unsafe(no_mangle)]
+pub extern "C" fn uuid_v7_to_rfc_order(uuid_ptr: *mut u8) {
+    // SAFETY: caller guarantees `uuid_ptr` points to 16 live, writable bytes.
+    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }.try_into().unwrap();
+    let rfc = v7::to_rfc_order(&Uuid::from_bytes(bytes));
+    unsafe { core::ptr::copy_nonoverlapping(rfc.as_bytes().as_ptr(), uuid_ptr, 16) };
+}
