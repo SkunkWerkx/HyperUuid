@@ -21,8 +21,8 @@ import java.util.UUID
  * never allocates for these calls either. This is JVM-only: `java.lang.foreign` doesn't exist
  * outside the JVM, so this does not extend to a browser target the way the C#/Blazor P/Invoke
  * path does — Kotlin's actual browser story (Kotlin/Wasm, the `wasmJs` target) is a different
- * compiler backend entirely and would need its own JS-interop-based binding. Needs a
- * platform-specific native binary — this build ships `linux-arm64` only.
+ * compiler backend entirely and would need its own JS-interop-based binding. This jar bundles
+ * a native build for every platform (see [NativePlatform]) and picks the right one at runtime.
  */
 object UuidGenerator {
 
@@ -40,10 +40,13 @@ object UuidGenerator {
         // The library must outlive every downcall made through it, so it's loaded into the
         // JDK-provided arena that lives for the process's lifetime rather than one we'd have
         // to remember to keep a reference to.
-        val resource = requireNotNull(UuidGenerator::class.java.getResourceAsStream("/libhyperuuid.so")) {
-            "libhyperuuid.so classpath resource not found"
+        val resourcePath = NativePlatform.resourcePath
+        val resource = requireNotNull(UuidGenerator::class.java.getResourceAsStream(resourcePath)) {
+            "$resourcePath classpath resource not found (unsupported platform, or this jar was " +
+                "built without a native library for it)"
         }
-        val tmp = Files.createTempFile("libhyperuuid", ".so")
+        val extension = "." + NativePlatform.current.libraryFileName.substringAfterLast('.')
+        val tmp = Files.createTempFile("hyperuuid", extension)
         tmp.toFile().deleteOnExit()
         resource.use { input -> Files.copy(input, tmp, StandardCopyOption.REPLACE_EXISTING) }
         SymbolLookup.libraryLookup(tmp, Arena.global())
