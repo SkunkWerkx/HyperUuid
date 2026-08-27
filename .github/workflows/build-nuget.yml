@@ -1,0 +1,107 @@
+name: Build native libraries and pack NuGet
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-native:
+    strategy:
+      fail-fast: false
+      # Runner labels checked against GitHub's current retirement schedule as of Aug 2026;
+      # macos-13 (this workflow's original osx-x64 pick) was already retired Dec 2025.
+      # GitHub is winding x86_64 macOS support down entirely by Fall 2027 — macos-15-intel
+      # is the current label, but this leg has a shelf life; osx-arm64 does not.
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            lib_name: libhyperuuid.so
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+            lib_name: libhyperuuid.so
+          - os: macos-15-intel
+            rid: osx-x64
+            lib_name: libhyperuuid.dylib
+          - os: macos-latest
+            rid: osx-arm64
+            lib_name: libhyperuuid.dylib
+          - os: windows-latest
+            rid: win-x64
+            lib_name: hyperuuid.dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build libhyperuuid (release)
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Run Rust test suite
+        working-directory: rust
+        run: cargo test --release
+
+      - name: Collect native artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          case "${{ runner.os }}" in
+            Windows) cp rust/target/release/hyperuuid.dll "out/${{ matrix.lib_name }}" ;;
+            macOS)   cp rust/target/release/libhyperuuid.dylib "out/${{ matrix.lib_name }}" ;;
+            Linux)   cp rust/target/release/libhyperuuid.so "out/${{ matrix.lib_name }}" ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: out/${{ matrix.lib_name }}
+
+  pack-nuget:
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts
+
+      # actions/download-artifact@v4 lands each artifact under artifacts/<artifact-name>/<file>.
+      # Fan each one out into the csproj's runtimes/**/native/ Pack item so `dotnet pack` picks
+      # them all up via the existing wildcard — no csproj changes needed per RID.
+      - name: Arrange runtimes/{rid}/native/ layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A LIB_NAMES=(
+            [linux-x64]=libhyperuuid.so
+            [linux-arm64]=libhyperuuid.so
+            [osx-x64]=libhyperuuid.dylib
+            [osx-arm64]=libhyperuuid.dylib
+            [win-x64]=hyperuuid.dll
+          )
+          for rid in "${!LIB_NAMES[@]}"; do
+            dest="csharp/HyperUuid/runtimes/$rid/native"
+            mkdir -p "$dest"
+            cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
+          done
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Pack
+        run: dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o nupkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: nupkg/*.nupkg
+
+      # Nothing pushes to nuget.org from here yet — that's a separate, explicit decision
+      # (needs a NUGET_API_KEY secret and someone deciding it's time to actually publish).
