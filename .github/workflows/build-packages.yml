@@ -39,7 +39,7 @@ jobs:
             lib_name: hyperuuid.dll
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -61,7 +61,7 @@ jobs:
             Linux)   cp rust/target/release/libhyperuuid.so "out/${{ matrix.lib_name }}" ;;
           esac
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.rid }}
           path: out/${{ matrix.lib_name }}
@@ -72,7 +72,7 @@ jobs:
       # path per OS, which cargo test above cannot exercise at all. (Root-caused a real
       # Windows-only bug here: the managed HyperUuid.dll and native hyperuuid.dll collided on
       # Windows' case-insensitive filesystem — fixed via AssemblyName in HyperUuid.csproj.)
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -88,7 +88,7 @@ jobs:
       # Same rationale as the C# step above: a jar has no per-platform package selection like
       # NuGet's RID folders, so this exercises NativePlatform's runtime OS/arch detection and
       # the actual FFM downcall path on this specific platform, not just that Rust builds.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: "temurin"
           java-version: "23"
@@ -110,9 +110,10 @@ jobs:
       # call-trampoline path on this specific platform, not just that Rust builds. purego is
       # Tier-1 on all 6 legs here (confirmed against its own platform matrix), including
       # windows-11-arm.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
 
       - name: Place native lib for Go in-repo testing
         shell: bash
@@ -150,14 +151,14 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: native-*
           path: artifacts
 
-      # actions/download-artifact@v4 lands each artifact under artifacts/<artifact-name>/<file>.
+      # actions/download-artifact@v8 lands each artifact under artifacts/<artifact-name>/<file>.
       # Fan each one out into the csproj's runtimes/**/native/ Pack item so `dotnet pack` picks
       # them all up via the existing wildcard — no csproj changes needed per RID.
       - name: Arrange runtimes/{rid}/native/ layout
@@ -178,7 +179,7 @@ jobs:
             cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
           done
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -191,7 +192,7 @@ jobs:
           dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o nupkg
           -p:PackageVersion=0.1.0-ci.${{ github.run_number }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nuget-package
           path: nupkg/*.nupkg
@@ -217,9 +218,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: native-*
           path: artifacts
@@ -245,7 +246,7 @@ jobs:
             cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
           done
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: "temurin"
           java-version: "23"
