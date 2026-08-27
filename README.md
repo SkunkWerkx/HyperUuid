@@ -1,34 +1,131 @@
 # HyperUuid
 
-High-performance, allocation-free RFC 9562 UUID generation. One Rust core, direct native FFI into C#, Java, Go, Swift, Ruby, PHP, and Python — no runtime bridge, no reflection. Runs on the server and all the way out to the browser.
+[![Build native libraries and pack NuGet + Maven](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/build-packages.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/build-packages.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A single `cdylib` (`rust/`) exports a plain C ABI (`uuid_new_v4`/`v5`/`v6`/`v7`, plus `_batch` variants for v6/v7); every language binds straight to it — P/Invoke, FFM, `purego`/`dlopen`, `Fiddle`, PHP's `FFI`, or `ctypes` — rather than going through a serialization layer or embedded runtime. Covers every standard version RFC 9562 itself still recommends generating (v1 and v3 are superseded by v6/v5 respectively, so they're skipped), plus the Nil and Max special-value UUIDs. Batch generation (`NewV6Batch`/`NewV7Batch`, or each binding's equivalent) shares one timestamp capture, one random-bytes fetch, and — for v7 — one contiguous block of the monotonic counter across the whole batch, instead of paying per-item native-call and RNG overhead.
+**One [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html)-compliant UUID engine, written once in Rust, called directly — not wrapped, not shimmed — from C#, Java, Go, Swift, Ruby, PHP, and Python.**
+
+Every other polyglot ID library either reimplements the same generation logic per language (drift risk: seven codebases that can each get the bit-twiddling subtly wrong in different ways) or ships a server/sidecar process to generate IDs centrally (a network round-trip for something that should cost nanoseconds). HyperUuid does neither: a single Rust `cdylib` exports a plain C ABI, and every binding calls straight into it — `P/Invoke`, `FFM`, `purego`/`dlopen`, `Fiddle`, PHP's `FFI`, `ctypes` — sharing the *same* address space, the *same* generation logic, the *same* test vectors, on every platform. No runtime bridge, no serialization layer, no embedded interpreter.
+
+And it's not just parity with your platform's built-in UUID call — for C#, it's measurably faster: **`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.8x** with zero heap allocation (real BenchmarkDotNet numbers below, not a marketing claim).
+
+## Quick start
+
+```csharp
+// C# — package "HyperUuid" on this repo's GitHub Packages feed (see "Published" below)
+var id = UuidGenerator.NewV7();                     // time-sortable, RFC 9562 §6.2
+var ts = UuidGenerator.V7Timestamp(id);              // recover the embedded timestamp
+var batch = UuidGenerator.NewV7Batch(1000);          // 1000 IDs, one native call
+```
+
+```go
+// Go — go get github.com/SkunkWerkx/HyperUuid/go
+id, err := hyperuuid.NewV7()
+ts, err := hyperuuid.V7Timestamp(id)
+```
+
+```ruby
+# Ruby — gem "hyperuuid", git: "https://github.com/SkunkWerkx/HyperUuid", glob: "ruby/*.gemspec"
+id = HyperUuid.new_v7
+id.timestamp
+```
+
+Every binding follows the same shape — `new_v4`/`new_v5`/`new_v6`/`new_v7`, batch variants for v6/v7, timestamp extraction for v6/v7, and the RFC's `Nil`/`Max` constants. See each language's own README (linked in the table below) for its exact idiom and install instructions.
+
+## RFC 9562 coverage
+
+| Version | Purpose | RFC section |
+| --- | --- | --- |
+| **v4** | Cryptographically random | §5.4 |
+| **v5** | Deterministic, namespace + name, SHA-1 (cross-language interoperable — the same `(namespace, name)` pair produces the same UUID everywhere, including against Python's own `uuid.uuid5`) | §5.5 |
+| **v6** | Time-ordered, v1-field-compatible reordering for sort/index locality — no monotonic counter | §5.6 |
+| **v7** | Time-ordered, 48-bit Unix-ms timestamp + 26-bit monotonic counter + random bits — strictly increasing even under concurrent generation | §6.2 |
+| **Nil** / **Max** | The all-zero and all-one special values | §5.9 / §5.10 |
+
+v1 (classic time-based, leaks a MAC-derived node ID) and v3 (MD5 name-based) are deliberately not implemented — RFC 9562 itself treats them as superseded by v6 and v5 respectively, so building them would just be completeness theater. v6 and v7 both embed a timestamp `*Timestamp`/`*_timestamp` can recover on every binding; v6's Gregorian-epoch tick count tops out around the year 5236, well short of any language's own datetime ceiling, so unlike v7 it can never realistically raise an overflow decoding it.
 
 ## State of the union
 
 Every language, on every platform, proven for real: `.github/workflows/build-packages.yml`'s `build-native` matrix builds the Rust core fresh on each of 6 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library — not just that it compiles.
 
-| Language | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Language | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | --- |
+| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://github.com/SkunkWerkx/HyperUuid/packages) |
+| [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven](https://github.com/SkunkWerkx/HyperUuid/packages) |
+| [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
+| [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
+| [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
+| [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | — | proven, not yet published |
+| [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
 
 PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 build, so it always runs under x64 emulation there regardless of host CPU — already exercised for real by the win-x64 leg.
 
-**Published:** C# ([NuGet](https://github.com/SkunkWerkx/HyperUuid/packages), via GitHub Packages) and Java ([Maven](https://github.com/SkunkWerkx/HyperUuid/packages), via GitHub Packages). The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) that produces a genuine standalone native binary, no JVM required to run it.
+**Published:** C# and Java, both to this repo's GitHub Packages feed. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it.
 
-**Proven, not yet published:** Go, Swift, Ruby, PHP, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, Packagist, PyPI) — see each language's own README for how to consume it directly in the meantime.
+**Proven, not yet published:** Go, Swift, Ruby, PHP, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, Packagist, PyPI) — see each language's own README for how to consume it directly (a git dependency, VCS repository, etc.) in the meantime.
+
+## Why not your platform's built-in UUID call?
+
+Most languages *do* already have one — `Guid.NewGuid()`, `java.util.UUID.randomUUID()`, `uuid.uuid4()`, `SecureRandom.uuid`. HyperUuid isn't arguing you should never use those. It's for the specific, common situation where you need more than plain v4 randomness gives you:
+
+1. **Time-sortable IDs with real ordering guarantees.** A v7 ID minted a microsecond after another one you generated on the same thread will sort after it — HyperUuid's monotonic counter (RFC 9562 §6.2 Method 1) guarantees that even under concurrent generation. Most stdlib v4 generators have no time-ordering story at all, and even a stdlib that *does* offer v7 (C#'s `Guid.CreateVersion7`, added in .NET 9) doesn't implement the counter, so two IDs minted in the same millisecond sort randomly relative to each other — exactly the index-fragmentation problem v7 adoption is meant to solve in the first place.
+2. **One generation engine across a polyglot system.** If your API is C#, your batch jobs are Go, and your data pipeline is Python, plain per-language UUID libraries give you three independent implementations that all *should* agree bit-for-bit on RFC 9562 semantics but have no structural reason to. HyperUuid's v5 namespace UUIDs are verified in CI to match byte-for-byte with Python's own `uuid.uuid5` — because it's the literal same Rust code minting them everywhere, not three ports of the same spec.
+3. **Batch throughput.** Need to backfill a million IDs? `NewV7Batch`/`new_v7_batch`/`NewV7BatchAt` (binding-dependent naming) shares one timestamp capture and one contiguous counter reservation across the whole batch instead of paying per-item overhead N times. Measured 3.5-19x faster than the equivalent loop of individual calls, depending on binding (numbers below) — most stdlib UUID facilities have no batch API at all.
+4. **It's not slower for the trouble.** For C#, it's faster outright — see the benchmarks below.
+
+The honest trade-off: this is one more native dependency to ship (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll`) versus a UUID call that's already sitting in your standard library. If you only need plain v4 randomness and don't care about cross-language consistency, the stdlib call is simpler and that's a completely reasonable choice.
 
 ## Benchmarks
 
-The "high-performance, allocation-free" claim above is measured, not just asserted — each has its own benchmark harness, and the numbers agree with each other (measured on linux-arm64):
+The "high-performance, allocation-free" claim is measured, not just asserted — each binding with a mature benchmarking ecosystem has its own harness, and the numbers agree with each other (all measured on linux-arm64; regenerate with the commands below on your own hardware).
 
-- **Rust** (`rust/benches/uuid_benchmarks.rs`, `cargo bench`) — single-item generation is 57-95ns; `rust/tests/allocation_free.rs` empirically proves zero heap allocations per call for v4/v5/v6/v7 (a counting `#[global_allocator]`, not a doc comment), and that the batch functions' scratch buffer is the *only* allocating path in the crate. `v7::new_v7_batch(1000)` is ~3.5x faster than 1000 individual calls (19µs vs 67µs).
-- **C#** (`csharp/HyperUuid.Benchmarks`, BenchmarkDotNet `[MemoryDiagnoser]`) — 4-8x faster than `Guid.NewGuid()`, and genuinely 0 B allocated for `NewV4`/`NewV6`/`NewV7`. One real exception: `NewV5(Guid, string)` allocates 40 B for the UTF-8 encoding of the name — call the `ReadOnlySpan<byte>` overload directly to avoid it. `NewV7Batch(1000)` is ~3.9x faster than 1000 individual calls.
-- **Go** (`go test -bench=. -benchmem`) — the one binding that *isn't* allocation-free: every call does 4-7 heap allocations, almost certainly because `unsafe.Pointer` arguments crossing into `purego`'s dynamically-generated call trampolines defeat Go's escape analysis — a real cost of the "no cgo" approach. Batch generation wins the most here as a result: `NewV7BatchAt(1000, ...)` is ~19x faster than 1000 individual calls, since it also collapses ~5000 of those allocations into 7.
+### C# vs. `Guid.NewGuid()`
+
+`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Generation*` (BenchmarkDotNet, `[MemoryDiagnoser]`):
+
+| Method | Mean | Allocated |
+| --- | ---: | ---: |
+| `Guid.NewGuid()` | 695.05 ns | 0 B |
+| `UuidGenerator.NewV4()` | 118.60 ns (**5.86x faster**) | 0 B |
+| `UuidGenerator.NewV5()` | 159.51 ns (4.36x faster) | 40 B¹ |
+| `UuidGenerator.NewV6()` | 82.68 ns (**8.41x faster**) | 0 B |
+| `UuidGenerator.NewV7()` | 92.53 ns (7.51x faster) | 0 B |
+
+¹ The one real exception: `NewV5(Guid, string)` allocates 40 B encoding the name to UTF-8. Call the `NewV5(Guid, ReadOnlySpan<byte>)` overload directly with your own bytes to stay allocation-free there too.
+
+### Batch generation vs. an equivalent loop
+
+`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Batch*`, `cargo bench` (`rust/benches/`), `go test -bench=. -benchmem ./go/...`:
+
+| Binding | 1000 individual calls | `*Batch(1000)` | Speedup |
+| --- | ---: | ---: | ---: |
+| Rust — v7 | 67 µs | 19 µs | **3.5x** |
+| Rust — v6 | 63 µs | 23 µs | 2.7x |
+| C# — v7 | 93 µs | 24 µs | **3.9x** |
+| C# — v6 | 84 µs | 27 µs | 3.1x |
+| Go — v7 | 514 µs | 27 µs | **19x** |
+| Go — v6 | 512 µs | 33 µs | 15.6x |
+
+Go's batch win is the largest of any binding, for a real architectural reason worth knowing about if you're choosing where to put your hot path: **every individual Go call does 4-7 heap allocations** (252-360 B/op via `go test -bench=. -benchmem`) — unlike Rust and C#, which are both genuinely zero-allocation per call. This is almost certainly `unsafe.Pointer` arguments crossing into `purego`'s dynamically-generated call trampolines defeating Go's escape analysis, a real cost of the "no cgo" approach every binding here shares. Batch generation collapses ~5000 of those allocations into 7, which is exactly why it wins bigger in Go than anywhere else.
+
+Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and asserts zero allocations, then asserts the batch functions' scratch buffer *does* allocate, confirming it's the one deliberate exception documented in `v6.rs`/`v7.rs`.
+
+## Key features
+
+- **RFC 9562 compliant** — correct version nibble and variant bits on every UUID, from every binding, because they all come from the same Rust core
+- **One implementation, seven call sites** — no per-language reimplementation to drift out of sync; v5's SHA-1 hashing, v7's monotonic counter, and v6's Gregorian-epoch math are each written exactly once
+- **Monotonically increasing v7** — a process-global counter (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls
+- **Batch generation** — `*Batch`/`*_batch` for v6/v7 amortizes timestamp capture, counter reservation, and the random-bytes fetch across the whole batch
+- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `purego`, `Fiddle`, PHP `FFI`, `ctypes`) into a shared-address-space native library, not a serialization protocol or an embedded interpreter
+- **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
+- **AOT-friendly** — C# publishes cleanly under `PublishAot`; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
+- **CI-proven, not CI-claimed** — 6 real-hardware platforms × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch
+
+## Contributing
+
+Pull requests and issues are welcome. `.github/workflows/build-packages.yml` builds and tests every binding on every platform — a PR should stay green there before merging.
+
+## License
+
+[MIT](LICENSE)
