@@ -25,6 +25,17 @@ kotlin/src/main/resources/native/
 **/dist/
 **/.pytest_cache/
 
+# Go
+# Same story as csharp/HyperUuid/runtimes/ above: CI places each leg's native lib here for
+# `go test` at build-native time; regenerable locally via `cargo build --release`. The
+# go:embed directive needs *something* tracked to match, hence the README.md carve-out.
+go/native/*/
+
+# Swift
+# Same story — SPM resources, CI-populated per leg, regenerable via `cargo build --release`.
+swift/Sources/HyperUuid/NativeLibs/*/
+**/.build/
+
 # IDE
 .idea/
 .vs/
