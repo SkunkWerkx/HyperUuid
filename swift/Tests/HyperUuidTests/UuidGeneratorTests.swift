@@ -46,6 +46,37 @@ final class UuidGeneratorTests: XCTestCase {
     // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
     let rfcTestVectorMs: UInt64 = 1_645_557_742_000
 
+    func testV6EmbedsTheTimestamp() throws {
+        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
+        let timestamp = try UuidGenerator.v6Timestamp(id)
+        XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
+    }
+
+    func testV6HasVersionAndVariantBits() throws {
+        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
+        let bytes = id.rfcBytes
+        XCTAssertEqual(bytes[6] >> 4, 6)
+        XCTAssertEqual(bytes[8] >> 6, 0b10)
+    }
+
+    func testV6SetsTheNodeIdMulticastBit() throws {
+        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
+        XCTAssertEqual(id.rfcBytes[10] & 0x01, 0x01)
+    }
+
+    func testV6IsNonDeterministicWithinTheSameMillisecond() throws {
+        var seen = Set<UUID>()
+        for _ in 0..<100 {
+            seen.insert(try UuidGenerator.newV6(unixMillis: rfcTestVectorMs))
+        }
+        XCTAssertEqual(seen.count, 100)
+    }
+
+    func testNilAndMaxUUIDs() {
+        XCTAssertEqual(WellKnownUuids.nilUUID.uuidString, "00000000-0000-0000-0000-000000000000")
+        XCTAssertEqual(WellKnownUuids.maxUUID.uuidString, "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")
+    }
+
     func testV7EmbedsTheTimestamp() throws {
         let id = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
         let bytes = id.rfcBytes

@@ -63,6 +63,45 @@ class UuidGeneratorTest {
     private static final long RFC_TEST_VECTOR_MS = 1_645_557_742_000L;
 
     @Test
+    void v6EmbedsTheTimestamp() {
+        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
+        assertEquals(Instant.ofEpochMilli(RFC_TEST_VECTOR_MS), UuidGenerator.v6Timestamp(id));
+    }
+
+    @Test
+    void v6HasVersionAndVariantBitsSet() {
+        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
+        assertEquals(6, id.version());
+        assertEquals(2, id.variant());
+    }
+
+    @Test
+    void v6SetsTheNodeIdMulticastBit() {
+        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
+        long lsb = id.getLeastSignificantBits();
+        int nodeFirstOctet = (int) ((lsb >>> 40) & 0xFF);
+        assertEquals(1, nodeFirstOctet & 0x01);
+    }
+
+    @Test
+    void v6IsNonDeterministicWithinTheSameMillisecond() {
+        Set<UUID> results = IntStream.range(0, 100)
+                .mapToObj(i -> UuidGenerator.newV6(RFC_TEST_VECTOR_MS))
+                .collect(Collectors.toCollection(HashSet::new));
+        assertEquals(100, results.size());
+    }
+
+    @Test
+    void nilIsAllZeroBits() {
+        assertEquals("00000000-0000-0000-0000-000000000000", UuidGenerator.NIL.toString());
+    }
+
+    @Test
+    void maxIsAllOneBits() {
+        assertEquals("ffffffff-ffff-ffff-ffff-ffffffffffff", UuidGenerator.MAX.toString());
+    }
+
+    @Test
     void v7EmbedsTheTimestamp() {
         UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
         long embeddedMs = (id.getMostSignificantBits() >>> 16) & 0xFFFF_FFFF_FFFFL;

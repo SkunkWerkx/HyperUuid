@@ -64,22 +64,42 @@ final class Uuid
     }
 
     /**
-     * The UTC timestamp embedded in a version 7 UUID's `unix_ts_ms` field. Only meaningful
-     * when `version() === 7` — the RFC 9562 bit layout doesn't distinguish "not a v7 UUID"
-     * from "v7 UUID with a very early timestamp", so the caller is responsible for checking
-     * `version()` first if that matters.
+     * The UTC timestamp embedded in a version 6 or 7 UUID's timestamp field. Only meaningful
+     * when `version()` is 6 or 7 — the RFC 9562 bit layout doesn't distinguish "not a
+     * time-based UUID" from "time-based UUID with a very early timestamp", so the caller is
+     * responsible for checking `version()` first if that matters.
      */
     public function timestamp(): \DateTimeImmutable
     {
-        $millis = Runtime::v7UnixMillis($this->bytes);
+        $millis = match ($this->version()) {
+            6 => Runtime::v6UnixMillis($this->bytes),
+            7 => Runtime::v7UnixMillis($this->bytes),
+            default => throw new \InvalidArgumentException(
+                "timestamp() is only defined for version 6 or 7 UUIDs, got version {$this->version()}"
+            ),
+        };
         $dt = \DateTimeImmutable::createFromFormat(
             'U.v',
             sprintf('%d.%03d', intdiv($millis, 1000), $millis % 1000),
             new \DateTimeZone('UTC')
         );
         if ($dt === false) {
-            throw new \RuntimeException('hyperuuid: failed to construct timestamp from v7 UUID');
+            throw new \RuntimeException('hyperuuid: failed to construct timestamp from UUID');
         }
         return $dt;
+    }
+
+    /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
+    public static function nil(): self
+    {
+        static $v = null;
+        return $v ??= new self(str_repeat("\x00", 16));
+    }
+
+    /** The RFC 9562 §5.10 Max UUID — all 128 bits one. */
+    public static function max(): self
+    {
+        static $v = null;
+        return $v ??= new self(str_repeat("\xFF", 16));
     }
 }

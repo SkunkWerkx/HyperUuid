@@ -8,7 +8,7 @@ let package = Package(
     ],
     targets: [
         // Bundles every platform's native build under NativeLibs/{rid}/{lib} (see the
-        // Kotlin/Go bindings for the same reason) since SwiftPM's real binary-distribution
+        // Go/Java bindings for the same reason) since SwiftPM's real binary-distribution
         // mechanism (a binaryTarget/XCFramework) is Apple-only and can't cover
         // win-x64/win-arm64/linux-x64/linux-arm64. NativePlatform.swift picks the right
         // resource path at compile time; DynamicLibrary.swift dlopen/dlsym's (or

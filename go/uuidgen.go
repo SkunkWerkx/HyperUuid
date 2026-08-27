@@ -1,11 +1,11 @@
-// Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v7
+// Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7
 // time-sortable) calling directly into the native libhyperuuid shared library via
 // github.com/ebitengine/purego — dlopen/dlsym plus per-arch call trampolines, no cgo and no C
 // compiler required to build or consume this module (the same "no runtime bridge" positioning
-// as the Python/ctypes and Kotlin/FFM bindings).
+// as the Python/ctypes and Java/FFM bindings).
 //
 // This module bundles a native build for every supported platform (see currentTarget) and
-// loads the right one at runtime, the same trick the Kotlin binding uses since neither a Go
+// loads the right one at runtime, the same trick the Java binding uses since neither a Go
 // module nor a .jar has NuGet-style per-RID package selection.
 package hyperuuid
 
@@ -30,19 +30,28 @@ var (
 	NamespaceX500 = uuid.NameSpaceX500
 )
 
+// The RFC 9562 §5.9 Nil and §5.10 Max UUIDs. Same story as the Namespace* vars above —
+// byte-identical to google/uuid's own Nil/Max, re-exported for API-shape symmetry.
+var (
+	Nil = uuid.Nil
+	Max = uuid.Max
+)
+
 var (
 	initOnce sync.Once
 	initErr  error
 
 	uuidNewV4        func(out unsafe.Pointer) int32
 	uuidNewV5        func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
+	uuidNewV6        func(unixMillis uint64, out unsafe.Pointer) int32
+	uuidV6UnixMillis func(uuid unsafe.Pointer) uint64
 	uuidNewV7        func(unixMillis uint64, out unsafe.Pointer) int32
 	uuidV7UnixMillis func(uuid unsafe.Pointer) uint64
 )
 
 // ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
 // it, exactly once. The temp file is deliberately never removed afterward — Go has no
-// reliable process-exit hook, the same best-effort tradeoff the Kotlin binding makes with
+// reliable process-exit hook, the same best-effort tradeoff the Java binding makes with
 // File.deleteOnExit (itself not guaranteed, e.g. on kill -9).
 func ensureLoaded() error {
 	initOnce.Do(func() {
@@ -86,6 +95,8 @@ func ensureLoaded() error {
 
 		purego.RegisterLibFunc(&uuidNewV4, handle, "uuid_new_v4")
 		purego.RegisterLibFunc(&uuidNewV5, handle, "uuid_new_v5")
+		purego.RegisterLibFunc(&uuidNewV6, handle, "uuid_new_v6")
+		purego.RegisterLibFunc(&uuidV6UnixMillis, handle, "uuid_v6_unix_millis")
 		purego.RegisterLibFunc(&uuidNewV7, handle, "uuid_new_v7")
 		purego.RegisterLibFunc(&uuidV7UnixMillis, handle, "uuid_v7_unix_millis")
 	})
@@ -125,6 +136,51 @@ func NewV5(namespace uuid.UUID, name []byte) (uuid.UUID, error) {
 // UTF-8 name.
 func NewV5String(namespace uuid.UUID, name string) (uuid.UUID, error) {
 	return NewV5(namespace, []byte(name))
+}
+
+// NewV6 creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible
+// reordering of version 1 for better sort/index locality, using the current time.
+func NewV6() (uuid.UUID, error) {
+	return NewV6At(uint64(time.Now().UnixMilli()))
+}
+
+// NewV6At creates a time-sortable UUID version 6 (RFC 9562 §5.6), embedding unixMillis
+// (milliseconds since the Unix epoch). clock_seq and node are randomly generated on every
+// call — unlike version 7, there is no monotonic counter, so calls within the same
+// millisecond are not guaranteed to sort in creation order.
+func NewV6At(unixMillis uint64) (uuid.UUID, error) {
+	if err := ensureLoaded(); err != nil {
+		return uuid.UUID{}, err
+	}
+	var out uuid.UUID
+	switch rc := uuidNewV6(unixMillis, unsafe.Pointer(&out[0])); rc {
+	case 0:
+		return out, nil
+	case 2:
+		return uuid.UUID{}, fmt.Errorf("uuid_new_v6 failed with code %d: %w", rc, ErrTimestampOutOfRange)
+	default:
+		return uuid.UUID{}, fmt.Errorf("uuid_new_v6 failed with code %d: %w", rc, ErrRandomSource)
+	}
+}
+
+// V6UnixMillis recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's
+// timestamp field. Only meaningful when id.Version() == 6 — the RFC 9562 bit layout doesn't
+// distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp", so the caller is
+// responsible for checking that first if it matters.
+func V6UnixMillis(id uuid.UUID) (uint64, error) {
+	if err := ensureLoaded(); err != nil {
+		return 0, err
+	}
+	return uuidV6UnixMillis(unsafe.Pointer(&id[0])), nil
+}
+
+// V6Timestamp recovers the UTC timestamp embedded in a version 6 UUID as a time.Time.
+func V6Timestamp(id uuid.UUID) (time.Time, error) {
+	millis, err := V6UnixMillis(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(int64(millis)).UTC(), nil
 }
 
 // V7UnixMillis recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's

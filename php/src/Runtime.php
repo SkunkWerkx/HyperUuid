@@ -46,6 +46,28 @@ final class Runtime
         return FFI::string($out, 16);
     }
 
+    public static function newV6(int $unixMillis): string
+    {
+        $out = self::ffi()->new('uint8_t[16]');
+        $rc = self::ffi()->uuid_new_v6($unixMillis, $out);
+        if ($rc === 2) {
+            throw new TimestampOutOfRangeException(
+                'unix_millis does not fit the 60-bit v6 timestamp field'
+            );
+        }
+        if ($rc !== 0) {
+            throw new RandomSourceException("uuid_new_v6 failed with code {$rc}");
+        }
+        return FFI::string($out, 16);
+    }
+
+    public static function v6UnixMillis(string $bytes): int
+    {
+        $ptr = self::ffi()->new('uint8_t[16]');
+        FFI::memcpy($ptr, $bytes, 16);
+        return self::ffi()->uuid_v6_unix_millis($ptr);
+    }
+
     public static function newV7(int $unixMillis): string
     {
         $out = self::ffi()->new('uint8_t[16]');
@@ -91,6 +113,8 @@ final class Runtime
         self::$ffi = FFI::cdef(
             'int uuid_new_v4(void *out_ptr);'
             . 'int uuid_new_v5(const void *ns_ptr, const void *name_ptr, uint32_t name_len, void *out_ptr);'
+            . 'int uuid_new_v6(uint64_t unix_millis, void *out_ptr);'
+            . 'uint64_t uuid_v6_unix_millis(const void *uuid_ptr);'
             . 'int uuid_new_v7(uint64_t unix_millis, void *out_ptr);'
             . 'uint64_t uuid_v7_unix_millis(const void *uuid_ptr);',
             $path

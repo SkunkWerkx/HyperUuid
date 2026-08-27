@@ -5,7 +5,7 @@ import (
 	"runtime"
 )
 
-// target names the RID-style directory (matching the C#/Kotlin bindings' runtimes/{rid}/
+// target names the RID-style directory (matching the C#/Java bindings' runtimes/{rid}/
 // convention) and native library filename for the running GOOS/GOARCH.
 type target struct {
 	rid     string
@@ -13,7 +13,7 @@ type target struct {
 }
 
 // currentTarget maps the running GOOS/GOARCH to the embedded native library it should load,
-// mirroring the Kotlin binding's NativePlatform.detect().
+// mirroring the Java binding's NativePlatform.detect().
 func currentTarget() (target, error) {
 	isArm := runtime.GOARCH == "arm64"
 

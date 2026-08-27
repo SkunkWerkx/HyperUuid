@@ -62,7 +62,7 @@ final class DynamicLibrary {
     }
 
     // Deliberately no `deinit` that closes the handle: `UuidGenerator.library` holds this for
-    // the process's lifetime (same as the Kotlin/Go bindings, which never unload either), and
+    // the process's lifetime (same as the Go/Java bindings, which never unload either), and
     // its cached `@convention(c)` function pointers would dangle if the library were unloaded
     // while still in use.
 }

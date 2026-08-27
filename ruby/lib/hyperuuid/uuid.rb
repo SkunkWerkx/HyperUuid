@@ -12,6 +12,12 @@ module HyperUuid
       @bytes = bytes.dup.force_encoding(Encoding::BINARY).freeze
     end
 
+    # The RFC 9562 §5.9 Nil UUID — all 128 bits zero.
+    NIL = new(("\x00" * 16).b).freeze
+
+    # The RFC 9562 §5.10 Max UUID — all 128 bits one.
+    MAX = new(("\xFF" * 16).b).freeze
+
     def self.parse(string)
       hex = string.delete("-")
       raise ArgumentError, "invalid UUID string: #{string.inspect}" unless hex.match?(/\A[0-9a-fA-F]{32}\z/)
@@ -32,12 +38,17 @@ module HyperUuid
     end
     alias_method :to_str, :to_s
 
-    # The UTC timestamp embedded in a version 7 UUID's `unix_ts_ms` field. Only meaningful
-    # when `version == 7` — the RFC 9562 bit layout doesn't distinguish "not a v7 UUID" from
-    # "v7 UUID with a very early timestamp", so the caller is responsible for checking
-    # `version` first if that matters.
+    # The UTC timestamp embedded in a version 6 or 7 UUID's timestamp field. Only meaningful
+    # when `version` is 6 or 7 — the RFC 9562 bit layout doesn't distinguish "not a time-based
+    # UUID" from "time-based UUID with a very early timestamp", so the caller is responsible
+    # for checking `version` first if that matters.
     def timestamp
-      millis = Runtime.v7_unix_millis(bytes)
+      millis =
+        case version
+        when 6 then Runtime.v6_unix_millis(bytes)
+        when 7 then Runtime.v7_unix_millis(bytes)
+        else raise ArgumentError, "timestamp is only defined for version 6 or 7 UUIDs, got version #{version}"
+        end
       Time.at(millis / 1000, millis % 1000, :millisecond).utc
     end
 

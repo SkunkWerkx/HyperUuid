@@ -12,7 +12,7 @@ package io.github.buvinghausen.hyperuuid;
 final class NativePlatform {
     record Target(String rid, String libraryFileName) {}
 
-    // Resolved once on first access to this class, mirroring the Kotlin binding's `by lazy`
+    // Resolved once on first access to this class, mirroring the Java binding's `by lazy`
     // — a plain static field initializer already only runs on class-init, which happens on
     // first use.
     private static final Target CURRENT = detect();

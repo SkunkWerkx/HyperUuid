@@ -19,7 +19,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * RFC 9562 UUID generation (v4 random, v5 deterministic, v7 time-sortable) calling directly
+ * RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7 time-sortable) calling directly
  * into the native {@code libhyperuuid} shared library via the Java Foreign Function & Memory
  * API (stable since JDK 22 / JEP 454) — no runtime bridge, no reflection, no extra runtime
  * dependency (plain Java rather than Kotlin: {@code kotlin-stdlib} would otherwise be a real
@@ -54,12 +54,24 @@ public final class UuidGenerator {
             FunctionDescriptor.of(
                     ValueLayout.JAVA_INT,
                     ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V6 = LINKER.downcallHandle(
+            LOOKUP.find("uuid_new_v6").orElseThrow(),
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V6_UNIX_MILLIS = LINKER.downcallHandle(
+            LOOKUP.find("uuid_v6_unix_millis").orElseThrow(),
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
     private static final MethodHandle UUID_NEW_V7 = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v7").orElseThrow(),
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
     private static final MethodHandle UUID_V7_UNIX_MILLIS = LINKER.downcallHandle(
             LOOKUP.find("uuid_v7_unix_millis").orElseThrow(),
             FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+
+    /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
+    public static final UUID NIL = new UUID(0L, 0L);
+
+    /** The RFC 9562 §5.10 Max UUID — all 128 bits one. */
+    public static final UUID MAX = new UUID(-1L, -1L);
 
     // The library must outlive every downcall made through it, so it's loaded into the
     // JDK-provided global arena that lives for the process's lifetime rather than one this
@@ -146,6 +158,66 @@ public final class UuidGenerator {
             }
             return readUuid(out);
         }
+    }
+
+    /**
+     * Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
+     * of version 1 for better sort/index locality, using the current time.
+     */
+    public static UUID newV6() {
+        return newV6(System.currentTimeMillis());
+    }
+
+    /**
+     * Creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a Unix-epoch millisecond
+     * timestamp. {@code clock_seq} and {@code node} are randomly generated on every call —
+     * unlike version 7, there is no monotonic counter, so calls within the same millisecond
+     * are not guaranteed to sort in creation order.
+     */
+    public static UUID newV6(long unixMillis) {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment out = local.allocate(16);
+            int rc;
+            try {
+                rc = (int) UUID_NEW_V6.invokeExact(unixMillis, out);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_new_v6 downcall failed unexpectedly", t);
+            }
+            if (rc == 2) {
+                throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
+            }
+            if (rc != 0) {
+                throw new IllegalStateException("uuid_new_v6 failed with code " + rc + " (random source failure)");
+            }
+            return readUuid(out);
+        }
+    }
+
+    /**
+     * Recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's timestamp
+     * field. Only meaningful when {@code uuid}'s version nibble is 6 — the RFC 9562 bit
+     * layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp",
+     * so the caller is responsible for checking that first if it matters.
+     */
+    public static long v6UnixMillis(UUID uuid) {
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment seg = local.allocate(16);
+            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
+            try {
+                return (long) UUID_V6_UNIX_MILLIS.invokeExact(seg);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: uuid_v6_unix_millis downcall failed unexpectedly", t);
+            }
+        }
+    }
+
+    /**
+     * Recovers the UTC timestamp embedded in a version 6 UUID as an {@link Instant}. Unlike
+     * {@link #v7Timestamp}, this can never realistically overflow: v6's 60-bit tick count,
+     * offset from the 1582 UUID epoch rather than 1970, tops out around the year 5236.
+     */
+    public static Instant v6Timestamp(UUID uuid) {
+        return Instant.ofEpochMilli(v6UnixMillis(uuid));
     }
 
     /** Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time. */

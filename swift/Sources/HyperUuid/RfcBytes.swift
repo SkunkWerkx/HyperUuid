@@ -4,7 +4,7 @@ extension UUID {
     /// This UUID's 16 RFC 9562 network-byte-order bytes. `Foundation.UUID.uuid` (a `uuid_t`
     /// 16-tuple) already stores bytes in this order on every platform Foundation supports —
     /// verified here against RFC 9562's own test vectors in `UuidGeneratorTests`, the same way
-    /// the Kotlin binding's `RfcBytes.kt` conversion is verified against `java.util.UUID`'s
+    /// the Java binding's `RfcBytes.kt` conversion is verified against `java.util.UUID`'s
     /// actual bit layout — so this is a plain reinterpretation, not a byte-order conversion.
     var rfcBytes: [UInt8] {
         let u = self.uuid

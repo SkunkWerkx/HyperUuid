@@ -10,6 +10,12 @@ use core::str::FromStr;
 pub struct Uuid([u8; 16]);
 
 impl Uuid {
+    /// The RFC 9562 §5.9 Nil UUID — all 128 bits zero.
+    pub const NIL: Uuid = Uuid([0u8; 16]);
+
+    /// The RFC 9562 §5.10 Max UUID — all 128 bits one.
+    pub const MAX: Uuid = Uuid([0xFFu8; 16]);
+
     pub const fn from_bytes(bytes: [u8; 16]) -> Self {
         Self(bytes)
     }

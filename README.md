@@ -2,7 +2,7 @@
 
 High-performance, allocation-free RFC 9562 UUID generation. One Rust core, direct native FFI into C#, Java, Go, Swift, Ruby, PHP, and Python — no runtime bridge, no reflection. Runs on the server and all the way out to the browser.
 
-A single `cdylib` (`rust/`) exports a plain C ABI (`uuid_new_v4`/`v5`/`v7`); every language binds straight to it — P/Invoke, FFM, `purego`/`dlopen`, `Fiddle`, PHP's `FFI`, or `ctypes` — rather than going through a serialization layer or embedded runtime.
+A single `cdylib` (`rust/`) exports a plain C ABI (`uuid_new_v4`/`v5`/`v6`/`v7`); every language binds straight to it — P/Invoke, FFM, `purego`/`dlopen`, `Fiddle`, PHP's `FFI`, or `ctypes` — rather than going through a serialization layer or embedded runtime. Covers every standard version RFC 9562 itself still recommends generating (v1 and v3 are superseded by v6/v5 respectively, so they're skipped), plus the Nil and Max special-value UUIDs.
 
 ## State of the union
 

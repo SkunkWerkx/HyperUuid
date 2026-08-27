@@ -2,7 +2,7 @@
 /// bindings' `runtimes/{rid}/native/` / `native/{rid}/` convention) and filename the native
 /// library was built for.
 ///
-/// Unlike the Kotlin/Go bindings — which each produce one artifact that must pick a native
+/// Unlike the Go/Java bindings — which each produce one artifact that must pick a native
 /// build at *runtime* (a .jar or a Go binary can end up running on any platform) — a single
 /// Swift build product is already single-arch/single-OS, compiled per target triple by the
 /// toolchain itself. So this resolves at compile time via `#if os(...) && arch(...)` rather

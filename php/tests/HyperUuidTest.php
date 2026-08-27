@@ -69,6 +69,50 @@ final class HyperUuidTest extends TestCase
         self::assertSame(5, $id->version());
     }
 
+    public function testV6EmbedsTheTimestamp(): void
+    {
+        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        $expected = \DateTimeImmutable::createFromFormat(
+            'U.v',
+            sprintf('%d.%03d', intdiv(self::RFC_TEST_VECTOR_MS, 1000), self::RFC_TEST_VECTOR_MS % 1000),
+            new \DateTimeZone('UTC')
+        );
+        self::assertEquals($expected, $id->timestamp());
+    }
+
+    public function testV6HasVersionAndVariantBits(): void
+    {
+        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        self::assertSame(6, $id->version());
+        self::assertSame(0b10, $id->variant());
+    }
+
+    public function testV6SetsTheNodeIdMulticastBit(): void
+    {
+        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        self::assertSame(1, \ord($id->bytes()[10]) & 0x01);
+    }
+
+    public function testV6IsNonDeterministicWithinTheSameMillisecond(): void
+    {
+        $seen = [];
+        for ($i = 0; $i < 100; $i++) {
+            $seen[(string) HyperUuid::newV6(self::RFC_TEST_VECTOR_MS)] = true;
+        }
+        self::assertCount(100, $seen);
+    }
+
+    public function testV6CurrentTimestampIsEmbedded(): void
+    {
+        $before = (int) round(microtime(true) * 1000);
+        $id = HyperUuid::newV6();
+        $after = (int) round(microtime(true) * 1000);
+
+        $embedded = $id->timestamp()->getTimestamp() * 1000 + (int) $id->timestamp()->format('v');
+        self::assertGreaterThanOrEqual($before, $embedded);
+        self::assertLessThanOrEqual($after, $embedded);
+    }
+
     public function testV7EmbedsTheTimestamp(): void
     {
         $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
@@ -128,6 +172,24 @@ final class HyperUuidTest extends TestCase
         $maxMs = 0x0000_FFFF_FFFF_FFFF;
         $recovered = HyperUuid::newV7($maxMs)->timestamp();
         self::assertSame($maxMs, $recovered->getTimestamp() * 1000 + (int) $recovered->format('v'));
+    }
+
+    public function testNilIsAllZeroBytes(): void
+    {
+        self::assertSame(str_repeat("\x00", 16), Uuid::nil()->bytes());
+        self::assertSame('00000000-0000-0000-0000-000000000000', (string) Uuid::nil());
+    }
+
+    public function testMaxIsAllOneBytes(): void
+    {
+        self::assertSame(str_repeat("\xFF", 16), Uuid::max()->bytes());
+        self::assertSame('ffffffff-ffff-ffff-ffff-ffffffffffff', (string) Uuid::max());
+    }
+
+    public function testNilAndMaxRoundTripThroughParse(): void
+    {
+        self::assertTrue(Uuid::parse((string) Uuid::nil())->equals(Uuid::nil()));
+        self::assertTrue(Uuid::parse((string) Uuid::max())->equals(Uuid::max()));
     }
 
     private static function embeddedMillis(Uuid $id): int

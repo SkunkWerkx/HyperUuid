@@ -1,6 +1,6 @@
 # HyperUuid
 
-RFC 9562 UUID v4 (random), v5 (deterministic), and v7 (time-sortable) generation,
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
 calling directly into the native `libhyperuuid` shared library via `dlopen`/`dlsym`
 (Linux/macOS) or `LoadLibraryW`/`GetProcAddress` (Windows) plus an `@convention(c)`
 function-pointer cast — no runtime bridge, no shim. Bundles a native build for every
@@ -13,12 +13,14 @@ import HyperUuid
 
 let id = try UuidGenerator.newV4()
 let id2 = try UuidGenerator.newV5(namespace: Namespaces.dns, name: "example.com")
-let id3 = try UuidGenerator.newV7()
+let id3 = try UuidGenerator.newV6()
+let id4 = try UuidGenerator.newV7()
 ```
 
 Returns Foundation's `UUID`. `Namespaces.dns`/`url`/`oid`/`x500` are RFC 9562
-Section 6.6's well-known namespaces. `UuidGenerator.v7Timestamp(_:)` recovers the
-embedded UTC `Date` from a version 7 UUID.
+Section 6.6's well-known namespaces; `WellKnownUuids.nilUUID`/`maxUUID` are the
+§5.9/§5.10 special values. `UuidGenerator.v6Timestamp(_:)`/`v7Timestamp(_:)` recover
+the embedded UTC `Date` from a version 6 or 7 UUID respectively.
 
 Not yet published to the Swift Package Registry under a registered `SkunkWerkx`
 presence — for now this is proven by CI building and testing the native core plus

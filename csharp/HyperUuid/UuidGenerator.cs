@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace HyperUuid;
 
 /// <summary>
-/// RFC 9562 UUID generation (v4 random, v5 deterministic, v7 time-sortable) calling directly
+/// RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7 time-sortable) calling directly
 /// into the native <c>libhyperuuid</c> shared library via source-generated P/Invoke.
 /// </summary>
 /// <remarks>
@@ -24,6 +24,12 @@ public static partial class UuidGenerator
     private static unsafe partial int uuid_new_v5(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr);
 
     [LibraryImport("hyperuuid")]
+    private static unsafe partial int uuid_new_v6(long unixMillis, byte* outPtr);
+
+    [LibraryImport("hyperuuid")]
+    private static unsafe partial ulong uuid_v6_unix_millis(byte* uuidPtr);
+
+    [LibraryImport("hyperuuid")]
     private static unsafe partial int uuid_new_v7(long unixMillis, byte* outPtr);
 
     [LibraryImport("hyperuuid")]
@@ -37,6 +43,16 @@ public static partial class UuidGenerator
         public static readonly Guid Oid = new("6ba7b812-9dad-11d1-80b4-00c04fd430c8");
         public static readonly Guid X500 = new("6ba7b814-9dad-11d1-80b4-00c04fd430c8");
     }
+
+    /// <summary>The RFC 9562 §5.9 Nil UUID — all 128 bits zero. Equivalent to <see cref="Guid.Empty"/>.</summary>
+    public static readonly Guid Nil = Guid.Empty;
+
+    /// <summary>The RFC 9562 §5.10 Max UUID — all 128 bits one.</summary>
+    public static readonly Guid Max = new(new byte[]
+    {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    });
 
     /// <summary>Creates a random UUID version 4 (RFC 9562 §5.4).</summary>
     public static unsafe Guid NewV4()
@@ -74,6 +90,66 @@ public static partial class UuidGenerator
             throw new InvalidOperationException($"uuid_new_v5 failed with code {rc}.");
         return new Guid(outBuf, bigEndian: true);
     }
+
+    /// <summary>
+    /// Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
+    /// of version 1 for better sort/index locality, using the current UTC time.
+    /// </summary>
+    public static Guid NewV6() => NewV6(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+    /// <summary>Creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a <see cref="DateTimeOffset"/>.</summary>
+    public static Guid NewV6(DateTimeOffset timestamp) => NewV6(timestamp.ToUnixTimeMilliseconds());
+
+    /// <summary>
+    /// Creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a Unix-epoch millisecond
+    /// timestamp. <c>clock_seq</c> and <c>node</c> are randomly generated on every call —
+    /// unlike version 7, there is no monotonic counter, so calls within the same millisecond
+    /// are not guaranteed to sort in creation order.
+    /// </summary>
+    public static unsafe Guid NewV6(long unixMilliseconds)
+    {
+        Span<byte> buf = stackalloc byte[16];
+        int rc;
+        fixed (byte* p = buf)
+        {
+            rc = uuid_new_v6(unixMilliseconds, p);
+        }
+        if (rc != 0)
+        {
+            throw rc switch
+            {
+                2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
+                    "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field."),
+                _ => new InvalidOperationException($"uuid_new_v6 failed with code {rc} (random source failure)."),
+            };
+        }
+        return new Guid(buf, bigEndian: true);
+    }
+
+    /// <summary>
+    /// Recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's timestamp
+    /// field. Only meaningful when <paramref name="uuid"/>'s version nibble is 6 — the RFC
+    /// 9562 bit layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early
+    /// timestamp", so the caller is responsible for checking that first if it matters.
+    /// </summary>
+    public static unsafe long V6UnixMillis(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        uuid.TryWriteBytes(bytes, bigEndian: true, out _);
+        fixed (byte* p = bytes)
+        {
+            return (long)uuid_v6_unix_millis(p);
+        }
+    }
+
+    /// <summary>
+    /// Recovers the UTC timestamp embedded in a version 6 UUID as a <see cref="DateTimeOffset"/>.
+    /// Unlike <see cref="V7Timestamp"/>, this can't throw <see cref="ArgumentOutOfRangeException"/>:
+    /// v6's 60-bit tick count, offset from the 1582 UUID epoch rather than 1970, tops out
+    /// around the year 5236 — well short of <see cref="DateTimeOffset"/>'s own year-9999 ceiling.
+    /// </summary>
+    public static DateTimeOffset V6Timestamp(Guid uuid) =>
+        DateTimeOffset.FromUnixTimeMilliseconds(V6UnixMillis(uuid));
 
     /// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current UTC time.</summary>
     public static Guid NewV7() => NewV7(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());

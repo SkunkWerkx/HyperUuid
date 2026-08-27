@@ -52,6 +52,37 @@ RSpec.describe HyperUuid do
     end
   end
 
+  describe ".new_v6" do
+    it "embeds the given timestamp" do
+      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
+      expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
+    end
+
+    it "has version and variant bits set" do
+      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
+      expect(id.version).to eq(6)
+      expect(id.variant).to eq(0b10)
+    end
+
+    it "sets the node ID multicast bit" do
+      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
+      expect(id.bytes.getbyte(10) & 0x01).to eq(1)
+    end
+
+    it "is non-deterministic within the same millisecond" do
+      results = Array.new(100) { described_class.new_v6(RFC_TEST_VECTOR_MS) }
+      expect(results.uniq.size).to eq(100)
+    end
+
+    it "embeds the current time when called with no argument" do
+      before = (Time.now.to_r * 1000).to_i
+      id = described_class.new_v6
+      after = (Time.now.to_r * 1000).to_i
+
+      expect((id.timestamp.to_r * 1000).to_i).to be_between(before, after)
+    end
+  end
+
   describe ".new_v7" do
     it "embeds the given timestamp" do
       id = described_class.new_v7(RFC_TEST_VECTOR_MS)
@@ -97,6 +128,23 @@ RSpec.describe HyperUuid do
       max_ms = 0x0000_FFFF_FFFF_FFFF
       id = described_class.new_v7(max_ms)
       expect((id.timestamp.to_r * 1000).to_i).to eq(max_ms)
+    end
+  end
+
+  describe "Uuid::NIL and Uuid::MAX" do
+    it "NIL is all zero bytes" do
+      expect(HyperUuid::Uuid::NIL.bytes).to eq("\x00".b * 16)
+      expect(HyperUuid::Uuid::NIL.to_s).to eq("00000000-0000-0000-0000-000000000000")
+    end
+
+    it "MAX is all one bytes" do
+      expect(HyperUuid::Uuid::MAX.bytes).to eq("\xFF".b * 16)
+      expect(HyperUuid::Uuid::MAX.to_s).to eq("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    end
+
+    it "round-trip through parse" do
+      expect(HyperUuid::Uuid.parse(HyperUuid::Uuid::NIL.to_s)).to eq(HyperUuid::Uuid::NIL)
+      expect(HyperUuid::Uuid.parse(HyperUuid::Uuid::MAX.to_s)).to eq(HyperUuid::Uuid::MAX)
     end
   end
 end

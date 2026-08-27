@@ -1,11 +1,11 @@
 # hyperuuid
 
-RFC 9562 UUID v4 (random), v5 (deterministic), and v7 (time-sortable) generation,
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
 calling directly into the native `libhyperuuid` shared library via
 [purego](https://github.com/ebitengine/purego) — dlopen/dlsym plus per-arch call
 trampolines, no cgo and no C compiler required. Bundles a native build for every
 supported platform (linux/darwin/windows × amd64/arm64) and picks the right one at
-runtime, the same trick the Kotlin binding uses.
+runtime, the same trick the Java binding uses.
 
 ```go
 import (
@@ -15,6 +15,7 @@ import (
 
 id, err := hyperuuid.NewV4()
 id, err = hyperuuid.NewV5String(hyperuuid.NamespaceDNS, "example.com")
+id, err = hyperuuid.NewV6()
 id, err = hyperuuid.NewV7()
 ```
 
@@ -23,8 +24,9 @@ Returns [`github.com/google/uuid`](https://pkg.go.dev/github.com/google/uuid)'s
 writes, so there's no byte-swapping in this binding. `NamespaceDNS`/`NamespaceURL`/
 `NamespaceOID`/`NamespaceX500` are re-exports of `google/uuid`'s own (already
 RFC 9562 §6.6-identical) namespace constants, kept here for API-shape symmetry with
-the other bindings' `Namespaces.*`. `V7Timestamp` recovers the embedded UTC
-`time.Time` from a version 7 UUID.
+the other bindings' `Namespaces.*`; `Nil`/`Max` (RFC 9562 §5.9/§5.10) are the same
+kind of re-export. `V6Timestamp`/`V7Timestamp` recover the embedded UTC `time.Time`
+from a version 6 or 7 UUID respectively.
 
 Not yet published to a module proxy under a registered `SkunkWerkx` presence — for
 now this is proven by CI building and testing the native core plus this binding on

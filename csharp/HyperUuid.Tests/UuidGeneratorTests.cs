@@ -54,6 +54,58 @@ public sealed class UuidGeneratorTests
     const long RfcTestVectorMs = 1_645_557_742_000;
 
     [Fact]
+    public void V6_EmbedsTheTimestamp()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+        UuidGenerator.V6Timestamp(id).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
+    }
+
+    [Fact]
+    public void V6_HasVersionAndVariantBitsSet()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+        Span<byte> rfc = stackalloc byte[16];
+        id.TryWriteBytes(rfc, bigEndian: true, out _);
+        (rfc[6] >> 4).ShouldBe((byte)6);
+        (rfc[8] & 0xC0).ShouldBe((byte)0x80);
+    }
+
+    [Fact]
+    public void V6_SetsTheNodeIdMulticastBit()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+        Span<byte> rfc = stackalloc byte[16];
+        id.TryWriteBytes(rfc, bigEndian: true, out _);
+        (rfc[10] & 0x01).ShouldBe(0x01);
+    }
+
+    [Fact]
+    public void V6_IsNonDeterministicWithinTheSameMillisecond()
+    {
+        var results = Enumerable.Range(0, 100).Select(_ => UuidGenerator.NewV6(RfcTestVectorMs)).ToHashSet();
+        results.Count.ShouldBe(100);
+    }
+
+    [Fact]
+    public void V6Timestamp_RoundTripsZero()
+    {
+        UuidGenerator.V6Timestamp(UuidGenerator.NewV6(0)).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(0));
+    }
+
+    [Fact]
+    public void Nil_IsAllZeroBytes()
+    {
+        UuidGenerator.Nil.ShouldBe(Guid.Empty);
+        UuidGenerator.Nil.ToString().ShouldBe("00000000-0000-0000-0000-000000000000");
+    }
+
+    [Fact]
+    public void Max_IsAllOneBytes()
+    {
+        UuidGenerator.Max.ToString().ShouldBe("ffffffff-ffff-ffff-ffff-ffffffffffff");
+    }
+
+    [Fact]
     public void V7_EmbedsTheTimestamp()
     {
         var id = UuidGenerator.NewV7(RfcTestVectorMs);

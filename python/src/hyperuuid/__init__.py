@@ -1,4 +1,4 @@
-"""RFC 9562 UUID v4 (random), v5 (deterministic), and v7 (time-sortable) generation,
+"""RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
 calling directly into the native libhyperuuid shared library via ctypes — no runtime bridge.
 
 Returns stdlib ``uuid.UUID`` objects. For v5's namespace argument, use the RFC 9562
@@ -19,7 +19,22 @@ import uuid as _uuid
 
 from . import _runtime
 
-__all__ = ["new_v4", "new_v5", "new_v7", "v7_timestamp"]
+__all__ = [
+    "new_v4",
+    "new_v5",
+    "new_v6",
+    "new_v7",
+    "v6_timestamp",
+    "v7_timestamp",
+    "NIL",
+    "MAX",
+]
+
+#: The RFC 9562 §5.9 Nil UUID — all 128 bits zero.
+NIL = _uuid.UUID(bytes=bytes(16))
+
+#: The RFC 9562 §5.10 Max UUID — all 128 bits one.
+MAX = _uuid.UUID(bytes=b"\xff" * 16)
 
 
 def new_v4() -> _uuid.UUID:
@@ -35,6 +50,35 @@ def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
     """
     name_bytes = name.encode("utf-8") if isinstance(name, str) else bytes(name)
     return _uuid.UUID(bytes=_runtime.new_v5(namespace.bytes, name_bytes))
+
+
+def new_v6(unix_millis: int | None = None) -> _uuid.UUID:
+    """Create a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
+    of version 1 for better sort/index locality.
+
+    Defaults to the current time; pass an explicit Unix-epoch millisecond timestamp to embed
+    a specific time instead. ``clock_seq`` and ``node`` are randomly generated on every call
+    — unlike version 7, there is no monotonic counter, so calls within the same millisecond
+    are not guaranteed to sort in creation order.
+    """
+    if unix_millis is None:
+        unix_millis = int(time.time() * 1000)
+    return _uuid.UUID(bytes=_runtime.new_v6(unix_millis))
+
+
+def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
+    """Recover the UTC timestamp embedded in a version 6 UUID's timestamp field.
+
+    Only meaningful when ``uuid_value.version == 6`` — the RFC 9562 bit layout doesn't
+    distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp", so the caller is
+    responsible for checking ``version`` first if that matters. Unlike :func:`v7_timestamp`,
+    this can't raise ``OverflowError``: v6's 60-bit tick count, offset from the 1582 UUID
+    epoch rather than 1970, tops out around the year 5236 — well short of ``datetime``'s own
+    year-9999 ceiling.
+    """
+    millis = _runtime.v6_unix_millis(uuid_value.bytes)
+    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    return epoch + datetime.timedelta(milliseconds=millis)
 
 
 def new_v7(unix_millis: int | None = None) -> _uuid.UUID:

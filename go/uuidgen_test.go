@@ -90,6 +90,67 @@ func TestV5DifferentNamespacesDiffer(t *testing.T) {
 // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
 const rfcTestVectorMs uint64 = 1_645_557_742_000
 
+func TestV6EmbedsTheTimestamp(t *testing.T) {
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := V6Timestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.UnixMilli(int64(rfcTestVectorMs)).UTC()
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestV6HasVersionAndVariantBits(t *testing.T) {
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Version() != 6 {
+		t.Errorf("version = %d, want 6", id.Version())
+	}
+	if id.Variant() != uuid.RFC4122 {
+		t.Errorf("variant = %v, want RFC4122", id.Variant())
+	}
+}
+
+func TestV6SetsTheNodeIdMulticastBit(t *testing.T) {
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id[10]&0x01 != 0x01 {
+		t.Errorf("node[0] = %#x, want multicast bit set", id[10])
+	}
+}
+
+func TestV6IsNonDeterministicWithinTheSameMillisecond(t *testing.T) {
+	seen := make(map[uuid.UUID]struct{}, 100)
+	for i := 0; i < 100; i++ {
+		id, err := NewV6At(rfcTestVectorMs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != 100 {
+		t.Errorf("got %d distinct UUIDs, want 100", len(seen))
+	}
+}
+
+func TestNilAndMax(t *testing.T) {
+	if Nil.String() != "00000000-0000-0000-0000-000000000000" {
+		t.Errorf("Nil = %s, want all zeros", Nil)
+	}
+	if Max.String() != "ffffffff-ffff-ffff-ffff-ffffffffffff" {
+		t.Errorf("Max = %s, want all ones", Max)
+	}
+}
+
 func TestV7EmbedsTheTimestamp(t *testing.T) {
 	id, err := NewV7At(rfcTestVectorMs)
 	if err != nil {

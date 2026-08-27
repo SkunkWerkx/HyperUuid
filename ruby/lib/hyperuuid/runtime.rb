@@ -38,6 +38,21 @@ module HyperUuid
         out[0, 16]
       end
 
+      def new_v6(unix_millis)
+        out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        rc = functions[:new_v6].call(unix_millis, out)
+        case rc
+        when 0 then out[0, 16]
+        when 2 then raise TimestampOutOfRangeError, "unix_millis does not fit the 60-bit v6 timestamp field"
+        else raise RandomSourceError, "uuid_new_v6 failed with code #{rc}"
+        end
+      end
+
+      def v6_unix_millis(bytes)
+        ptr = Fiddle::Pointer.to_ptr(bytes)
+        functions[:v6_unix_millis].call(ptr)
+      end
+
       def new_v7(unix_millis)
         out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
         rc = functions[:new_v7].call(unix_millis, out)
@@ -77,6 +92,16 @@ module HyperUuid
             handle["uuid_new_v5"],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
+          ),
+          new_v6: Fiddle::Function.new(
+            handle["uuid_new_v6"],
+            [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_INT
+          ),
+          v6_unix_millis: Fiddle::Function.new(
+            handle["uuid_v6_unix_millis"],
+            [Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT64_T
           ),
           new_v7: Fiddle::Function.new(
             handle["uuid_new_v7"],

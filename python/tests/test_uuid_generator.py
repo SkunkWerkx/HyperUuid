@@ -56,6 +56,47 @@ def test_v5_bytes_and_str_name_agree():
     assert a == b
 
 
+def test_v6_embeds_the_timestamp():
+    id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
+    expected = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
+    assert hyperuuid.v6_timestamp(id_) == expected
+
+
+def test_v6_has_version_and_variant_bits_set():
+    id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
+    assert id_.version == 6
+    assert id_.variant == uuid.RFC_4122
+
+
+def test_v6_sets_the_node_id_multicast_bit():
+    id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
+    assert id_.bytes[10] & 0x01 == 1
+
+
+def test_v6_is_non_deterministic_within_the_same_millisecond():
+    results = {hyperuuid.new_v6(RFC_TEST_VECTOR_MS) for _ in range(100)}
+    assert len(results) == 100
+
+
+def test_v6_current_timestamp_is_embedded():
+    before = int(time.time() * 1000)
+    id_ = hyperuuid.new_v6()
+    after = int(time.time() * 1000)
+
+    embedded_ms = int(hyperuuid.v6_timestamp(id_).timestamp() * 1000)
+    assert before <= embedded_ms <= after
+
+
+def test_nil_is_all_zero_bytes():
+    assert hyperuuid.NIL.bytes == bytes(16)
+    assert str(hyperuuid.NIL) == "00000000-0000-0000-0000-000000000000"
+
+
+def test_max_is_all_one_bytes():
+    assert hyperuuid.MAX.bytes == b"\xff" * 16
+    assert str(hyperuuid.MAX) == "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+
 def test_v7_embeds_the_timestamp():
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     embedded_ms = int.from_bytes(id_.bytes[0:6], "big")

@@ -5,12 +5,15 @@
 //!
 //! - [`v4::new_v4`] — random (RFC 9562 §5.4)
 //! - [`v5::new_v5`] — deterministic, namespace + name based, SHA-1 (RFC 9562 §5.5)
+//! - [`v6::new_v6`] — time-sortable, v1-field-compatible reordering (RFC 9562 §5.6)
 //! - [`v7::new_v7`] — time-sortable, millisecond timestamp + monotonic counter (RFC 9562 §6.2)
+//! - [`Uuid::NIL`] / [`Uuid::MAX`] — the all-zero and all-one special values (RFC 9562 §5.9/§5.10)
 
 mod ffi;
 mod uuid;
 pub mod v4;
 pub mod v5;
+pub mod v6;
 pub mod v7;
 
 pub use uuid::{ParseUuidError, Uuid};
@@ -138,5 +141,62 @@ mod tests {
         let id = v5::new_v5(v5::namespace::DNS, b"round-trip");
         let text = id.to_string();
         assert_eq!(Uuid::from_str(&text).unwrap(), id);
+    }
+
+    #[test]
+    fn v6_embeds_the_timestamp() {
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        assert_eq!(v6::unix_millis(&id), RFC_TEST_VECTOR_MS);
+    }
+
+    #[test]
+    fn v6_has_version_and_variant_bits_set() {
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        assert_eq!(id.version(), 6);
+        assert!(id.is_rfc9562_variant());
+    }
+
+    #[test]
+    fn v6_zero_timestamp_succeeds() {
+        let id = v6::new_v6(0).unwrap();
+        assert_eq!(v6::unix_millis(&id), 0);
+    }
+
+    #[test]
+    fn v6_is_non_deterministic_within_the_same_millisecond() {
+        let a = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        let b = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn v6_sets_the_node_id_multicast_bit() {
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        assert_eq!(id.as_bytes()[10] & 0x01, 0x01);
+    }
+
+    #[test]
+    fn v6_increasing_timestamps_sort_in_creation_order() {
+        const BASE_MS: u64 = 1_000_000;
+        let ids: Vec<Uuid> = (0..10).map(|i| v6::new_v6(BASE_MS + i).unwrap()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn nil_uuid_is_all_zero_bytes() {
+        assert_eq!(Uuid::NIL.as_bytes(), &[0u8; 16]);
+    }
+
+    #[test]
+    fn max_uuid_is_all_one_bytes() {
+        assert_eq!(Uuid::MAX.as_bytes(), &[0xFFu8; 16]);
+    }
+
+    #[test]
+    fn nil_and_max_round_trip_through_display_and_from_str() {
+        assert_eq!(Uuid::from_str(&Uuid::NIL.to_string()).unwrap(), Uuid::NIL);
+        assert_eq!(Uuid::from_str(&Uuid::MAX.to_string()).unwrap(), Uuid::MAX);
     }
 }
