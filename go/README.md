@@ -78,3 +78,18 @@ of the "no cgo" approach, not something this binding does inefficiently on
 purpose. Batch generation wins even bigger here than in the other bindings as a
 result: `NewV7BatchAt(1000, ...)` was ~19x faster than 1000 individual `NewV7At`
 calls (27µs vs 514µs), since it also collapses ~5000 of those allocations into 7.
+
+**Would switching to cgo fix this?** Measured, not assumed: a real cgo prototype
+against the same native library cut per-call allocations from 4-7 down to 1 (2 for
+v5) and was faster outright (125-181 ns/op vs purego's 546-688 ns/op here) — but it
+never reached zero. `go build -gcflags=-m` confirms why: any pointer crossing into
+opaque foreign code — cgo included, not a purego-specific issue — is categorically
+excluded from Go's escape analysis, so the compiler must conservatively heap-allocate
+the pointee. That's a structural floor for this call shape (an out-param pointer into
+C), independent of FFI mechanism; closing it fully would need a different API shape
+(a caller-owned buffer passed by value, or a pool) rather than a different FFI
+library. Given cgo would only close part of the gap while costing this binding its
+one clean cross-platform story — `CGO_ENABLED=0`, no C toolchain, one module that
+builds unmodified on all 6 platform legs — it isn't worth it here. The batch
+functions already amortize allocations far more effectively than a cgo migration
+would (7 allocations total for 1000 UUIDs, vs 5000 for individual calls).

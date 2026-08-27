@@ -42,6 +42,31 @@ timestamp capture and one native call, instead of `count` of each.
 
 The honest trade-off: this gem `dlopen`s a native library instead of being pure Ruby, so it needs a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled alongside it. If plain v4 randomness is all you need, `SecureRandom.uuid` is simpler and already in stdlib — that's a completely reasonable choice.
 
+## Benchmarks
+
+Real numbers, `benchmark-ips` on Ruby 4.0.6, linux-arm64 (`ruby benchmark/uuid_benchmark.rb`) — not claimed, measured:
+
+| Call | i/s | vs `SecureRandom.uuid` |
+|---|---:|---:|
+| `SecureRandom.uuid` | 651,909 | baseline |
+| `HyperUuid.new_v4` | 500,765 | 1.30x slower |
+| `HyperUuid.new_v5` | 319,013 | 2.04x slower |
+| `HyperUuid.new_v7` | 249,230 | 2.62x slower |
+| `HyperUuid.new_v6` | 243,862 | 2.67x slower |
+
+Honestly: single-item calls lose to `SecureRandom.uuid`, and that gap is structural, not a bug to fix — every `HyperUuid.new_v*` call crosses into native code via `Fiddle`'s `dlopen`/`dlsym` call path, while `SecureRandom.uuid` never leaves the Ruby/C stdlib boundary Ruby itself was built with. No amount of tuning closes that gap for a single call; it's the fixed cost of getting v5/v6/v7 and cross-language consistency that `SecureRandom.uuid` structurally cannot offer at any speed.
+
+Batch generation is where that fixed cost gets amortized away — one `Fiddle` crossing for the whole batch instead of one per item:
+
+| Call | i/s |
+|---|---:|
+| `new_v6` × 1000 (individual) | 249.2 |
+| `new_v6_batch(1000)` | 2,721.2 (**11.2x**) |
+| `new_v7` × 1000 (individual) | 253.2 |
+| `new_v7_batch(1000)` | 2,792.3 (**11.0x**) |
+
+If you're minting one UUID at a time and only need v4, `SecureRandom.uuid` is faster and simpler — a genuinely reasonable choice. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for.
+
 ## Install
 
 Not yet published to RubyGems.org under a registered `SkunkWerkx`/`buvinghausen` presence —

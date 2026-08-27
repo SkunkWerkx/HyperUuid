@@ -1,6 +1,6 @@
 # HyperUuid
 
-**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.86x — with zero heap allocation — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
+**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.67x — with zero heap allocation, on every version including v5 — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via source-generated [`LibraryImport`](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/pinvoke-source-generation) P/Invoke — no runtime bridge, no reflection, AOT/trim-friendly. Ships as RID-specific native assets inside the package the standard NuGet way.
 
@@ -28,13 +28,13 @@ Returns plain `System.Guid` — this binding does no byte-order conversion of it
 
    | Method | Mean | Allocated |
    | --- | ---: | ---: |
-   | `Guid.NewGuid()` | 695.05 ns | 0 B |
-   | `UuidGenerator.NewV4()` | 118.60 ns (**5.86x faster**) | 0 B |
-   | `UuidGenerator.NewV5()` | 159.51 ns (4.36x faster) | 40 B¹ |
-   | `UuidGenerator.NewV6()` | 82.68 ns (**8.41x faster**) | 0 B |
-   | `UuidGenerator.NewV7()` | 92.53 ns (7.51x faster) | 0 B |
+   | `Guid.NewGuid()` | 630.26 ns | 0 B |
+   | `UuidGenerator.NewV4()` | 111.20 ns (**5.67x faster**) | 0 B |
+   | `UuidGenerator.NewV5()` | 131.31 ns (4.80x faster) | 0 B |
+   | `UuidGenerator.NewV6()` | 75.57 ns (**8.34x faster**) | 0 B |
+   | `UuidGenerator.NewV7()` | 82.10 ns (7.68x faster) | 0 B |
 
-   ¹ `NewV5(Guid, string)` allocates 40 B encoding the name to UTF-8 — call `NewV5(Guid, ReadOnlySpan<byte>)` directly with your own bytes to stay allocation-free there too.
+   Including `NewV5(Guid, string)` — it used to allocate 40 B encoding the name to UTF-8 via `Encoding.UTF8.GetBytes(name)`; now it UTF-8-encodes into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods already used (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library). `NewV5(Guid, ReadOnlySpan<byte>)` remains available if you already have bytes and want to skip the encode step entirely.
 
 2. **A real monotonic counter, on every target framework this package supports.** `Guid.CreateVersion7()` only exists from .NET 9 onward — this package targets net8.0, so it's the only way to get RFC 9562 v7 there at all. Even where `CreateVersion7` *is* available, it implements no counter (RFC 9562 §6.2 Method 1): two BCL v7 GUIDs minted in the same millisecond sort randomly relative to each other, which is exactly the clustered-index fragmentation problem v7 adoption exists to solve. `UuidGenerator.NewV7()` reserves a slot in a process-global counter every call, guaranteeing strict creation order under concurrency — verified across interleaved individual *and* batch calls in this project's own test suite, not just in isolation.
 3. **v6, which the BCL doesn't have at all.** A field-compatible reordering of v1 for the same sort/index locality as v7, useful when you're migrating off legacy v1 IDs. No `Guid.CreateVersion6` exists anywhere in the BCL.

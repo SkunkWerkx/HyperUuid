@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — a high-performance, allocation-free core, wrapped as a native library (libhyperuuid) for direct FFI from every host language."
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/SkunkWerkx/HyperUuid"
+keywords = ["uuid", "rfc9562", "guid", "identifier", "ffi"]
+categories = ["data-structures", "no-std"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -14,6 +18,7 @@ sha1 = { version = "0.11.0", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8.2"
+uuid = { version = "1", features = ["v4", "v5", "v6", "v7"] }
 
 [[bench]]
 name = "uuid_benchmarks"

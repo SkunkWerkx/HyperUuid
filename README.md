@@ -50,7 +50,7 @@ Every language, on every platform, proven for real: `.github/workflows/build-pac
 
 | Language | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | --- |
-| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
 | [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://github.com/SkunkWerkx/HyperUuid/packages) |
 | [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven](https://github.com/SkunkWerkx/HyperUuid/packages) |
 | [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
@@ -86,13 +86,13 @@ The "high-performance, allocation-free" claim is measured, not just asserted —
 
 | Method | Mean | Allocated |
 | --- | ---: | ---: |
-| `Guid.NewGuid()` | 695.05 ns | 0 B |
-| `UuidGenerator.NewV4()` | 118.60 ns (**5.86x faster**) | 0 B |
-| `UuidGenerator.NewV5()` | 159.51 ns (4.36x faster) | 40 B¹ |
-| `UuidGenerator.NewV6()` | 82.68 ns (**8.41x faster**) | 0 B |
-| `UuidGenerator.NewV7()` | 92.53 ns (7.51x faster) | 0 B |
+| `Guid.NewGuid()` | 630.26 ns | 0 B |
+| `UuidGenerator.NewV4()` | 111.20 ns (**5.67x faster**) | 0 B |
+| `UuidGenerator.NewV5()` | 131.31 ns (4.80x faster) | 0 B |
+| `UuidGenerator.NewV6()` | 75.57 ns (**8.34x faster**) | 0 B |
+| `UuidGenerator.NewV7()` | 82.10 ns (7.68x faster) | 0 B |
 
-¹ The one real exception: `NewV5(Guid, string)` allocates 40 B encoding the name to UTF-8. Call the `NewV5(Guid, ReadOnlySpan<byte>)` overload directly with your own bytes to stay allocation-free there too.
+Every one of these is genuinely zero-allocation now — including `NewV5(Guid, string)`, which used to allocate 40 B encoding the name to UTF-8. Fixed by UTF-8-encoding into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique already used by the batch methods (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library).
 
 ### Batch generation vs. an equivalent loop
 
@@ -100,8 +100,8 @@ The "high-performance, allocation-free" claim is measured, not just asserted —
 
 | Binding | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| Rust — v7 | 67 µs | 19 µs | **3.5x** |
-| Rust — v6 | 63 µs | 23 µs | 2.7x |
+| Rust — v7 | 61.7 µs | 16.9 µs | **3.6x** |
+| Rust — v6 | 52.5 µs | 20.7 µs | 2.5x |
 | C# — v7 | 93 µs | 24 µs | **3.9x** |
 | C# — v6 | 84 µs | 27 µs | 3.1x |
 | Go — v7 | 514 µs | 27 µs | **19x** |

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hyperuuid"
 version = "0.1.0"
-description = "RFC 9562 UUID v4/v5/v7 generation — high-performance, allocation-free ctypes bindings straight into a native Rust core (libhyperuuid). No runtime bridge."
+description = "RFC 9562 UUID v4/v5/v6/v7 generation — high-performance, allocation-free ctypes bindings straight into a native Rust core (libhyperuuid). No runtime bridge."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Brian Buvinghausen" }]
@@ -17,6 +17,7 @@ Repository = "https://github.com/SkunkWerkx/HyperUuid"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+bench = ["pyperf>=2.6"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hyperuuid"]

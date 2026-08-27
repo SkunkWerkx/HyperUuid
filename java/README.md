@@ -33,6 +33,29 @@ The honest answer for versions v6/v7 is that there's no comparison to make — t
 
 The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
 
+## Benchmarks
+
+Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode:
+
+| Method | Mean | vs. `UUID.randomUUID()` |
+| --- | ---: | ---: |
+| `UUID.randomUUID()` | 1111.64 ns | baseline |
+| `UuidGenerator.newV4()` | 152.82 ns | **7.27x faster** |
+| `UuidGenerator.newV5()` | 221.03 ns | **5.03x faster** |
+| `UuidGenerator.newV6()` | 118.49 ns | **9.38x faster** |
+| `UuidGenerator.newV7()` | 136.37 ns | **8.15x faster** |
+
+Unlike the Ruby/PHP bindings in this repo, the FFM downcall here doesn't lose to the JDK's own generator — `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default, not because the comparison is unfair to it. Reported as measured, not adjusted to make the story better.
+
+Batch generation vs. an equivalent loop:
+
+| Method | 1000 individual calls | `*Batch(1000)` | Speedup |
+| --- | ---: | ---: | ---: |
+| v7 | 124.39 µs | 31.80 µs | **3.91x** |
+| v6 | 107.47 µs | 36.95 µs | 2.91x |
+
+Reproduce: `./gradlew :benchmarks:jmh`.
+
 ## AOT
 
 Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary exercising v4/v5/v6/v7 generation and batch, no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register the FFM downcall shapes ahead of time — already shipped in this jar, so a consumer's own `native-image` build picks it up automatically.

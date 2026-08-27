@@ -50,3 +50,25 @@ This is the one binding where the honest answer genuinely depends on which Pytho
   3. **One behavior across your whole supported range.** If your package needs to run on 3.9 *and* 3.14, this avoids `sys.version_info`-gated code paths for v6/v7 support.
 
 If you're already on 3.14+ and only need v6/v7 in a Python-only codebase, stdlib is genuinely the simpler, dependency-free choice — that's not a close call, and this package isn't pretending otherwise.
+
+## Benchmarks
+
+Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-arm64, CPython 3.14.5, `python bench_uuid.py --fast`; see `bench_uuid.py`). Honest result: for a single call, the `ctypes` crossing into the native library costs real, measurable overhead against stdlib's C-accelerated `uuid4` — that's the trade this package makes for having v6 and one behavior across 3.9-3.14+.
+
+| Call | Mean | vs. closest stdlib equivalent |
+|---|---|---|
+| `hyperuuid.new_v4()` | 1.93 µs ± 0.10 µs | `uuid.uuid4()`: 0.99 µs — stdlib wins, ~2x |
+| `hyperuuid.new_v5(...)` | 3.64 µs ± 0.57 µs | `uuid.uuid5(...)`: 1.76 µs — stdlib wins, ~2x |
+| `hyperuuid.new_v6(...)` | 2.18 µs ± 0.14 µs | `uuid.uuid6()` (3.14+): 2.58 µs ± 0.08 µs — **this package wins** |
+| `hyperuuid.new_v7(...)` | 2.19 µs ± 0.11 µs | `uuid.uuid7()` (3.14+): 2.55 µs ± 0.08 µs — **this package wins** |
+
+For v4/v5, stdlib's `_uuid` C extension has no FFI boundary to cross at all, so it's the faster choice there — no reason to pretend otherwise. For v6/v7, stdlib 3.14's implementation is pure Python (object construction, a Python-level monotonic-counter lock) which costs more than this package's single `ctypes` call into native code recovers in FFI overhead — a genuine, if narrow, win, and consistent across repeated runs.
+
+Batch generation is where the FFI overhead gets amortized away entirely — stdlib has no bulk-generation API to compare against at any version:
+
+| | Mean | vs. individual calls |
+|---|---|---|
+| `new_v6_batch(1000)` | 1.03 ms ± 0.06 ms | vs. 1000x `new_v6()`: 2.25 ms ± 0.20 ms — **2.2x** |
+| `new_v7_batch(1000)` | 1.05 ms ± 0.10 ms | vs. 1000x `new_v7()`: 2.21 ms ± 0.18 ms — **2.1x** |
+
+Reproduce: `pip install -e ".[bench]"` then `python bench_uuid.py --fast -o results.json`.

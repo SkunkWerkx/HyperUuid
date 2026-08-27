@@ -10,11 +10,11 @@ namespace HyperUuid;
 /// <remarks>
 /// No allocation beyond the fixed 16-byte stack buffers here — the underlying Rust core never
 /// allocates for these calls either — confirmed empirically with BenchmarkDotNet's
-/// <c>[MemoryDiagnoser]</c> in <c>HyperUuid.Benchmarks</c> (0 B for <c>NewV4</c>/<c>NewV6</c>/
-/// <c>NewV7</c>), with one real exception: <see cref="NewV5(Guid, string)"/> allocates 40 B
-/// for the UTF-8 encoding of <c>name</c> — unavoidable when converting a C# <c>string</c> to
-/// bytes. Call <see cref="NewV5(Guid, ReadOnlySpan{byte})"/> directly with your own bytes to
-/// stay allocation-free there too. AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
+/// <c>[MemoryDiagnoser]</c> in <c>HyperUuid.Benchmarks</c> (0 B for <c>NewV4</c>/<c>NewV5</c>/
+/// <c>NewV6</c>/<c>NewV7</c>, including the <c>string</c>-based <see cref="NewV5(Guid, string)"/>
+/// overload, which UTF-8-encodes into a 256-byte stack buffer with an <see cref="ArrayPool{T}"/>
+/// fallback for longer names — the same pattern the batch methods already use, ported from this
+/// project's own <c>SequentialGuid</c> library). AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
 /// is source-generated (no runtime reflection), so this type publishes cleanly under
 /// <c>PublishAot</c>. Needs a platform-specific native binary — this build ships
 /// <c>linux-arm64</c> only; every other platform (including <c>browser-wasm</c> for Blazor,
@@ -89,8 +89,24 @@ public static partial class UuidGenerator
     }
 
     /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8 name.</summary>
-    public static Guid NewV5(Guid namespaceId, string name) =>
-        NewV5(namespaceId, System.Text.Encoding.UTF8.GetBytes(name));
+    public static unsafe Guid NewV5(Guid namespaceId, string name)
+    {
+        var maxByteCount = System.Text.Encoding.UTF8.GetMaxByteCount(name.Length);
+        Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
+        byte[]? rented = null;
+        var buffer = maxByteCount <= BatchStackThresholdBytes
+            ? stackBuf[..maxByteCount]
+            : (rented = ArrayPool<byte>.Shared.Rent(maxByteCount)).AsSpan(0, maxByteCount);
+        try
+        {
+            var len = System.Text.Encoding.UTF8.GetBytes(name, buffer);
+            return NewV5(namespaceId, buffer[..len]);
+        }
+        finally
+        {
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
 
     /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name bytes.</summary>
     public static unsafe Guid NewV5(Guid namespaceId, ReadOnlySpan<byte> name)

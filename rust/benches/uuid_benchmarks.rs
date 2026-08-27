@@ -23,6 +23,33 @@ fn bench_single_item(c: &mut Criterion) {
     group.finish();
 }
 
+// Head-to-head against the `uuid` crate (the de facto standard Rust UUID crate) — same
+// process, same machine, same run, so the comparison is apples-to-apples rather than pulled
+// from someone else's benchmark environment. `uuid` has no batch-generation API, so this
+// comparison is single-item only; see `bench_batch` for what batch generation buys on its own.
+fn bench_vs_uuid_crate(c: &mut Criterion) {
+    let mut group = c.benchmark_group("vs_uuid_crate");
+    group.bench_function("hyperuuid_v4", |b| b.iter(|| v4::new_v4().unwrap()));
+    group.bench_function("uuid_crate_v4", |b| b.iter(uuid::Uuid::new_v4));
+    group.bench_function("hyperuuid_v5", |b| {
+        b.iter(|| v5::new_v5(v5::namespace::DNS, black_box(b"www.example.com")))
+    });
+    group.bench_function("uuid_crate_v5", |b| {
+        b.iter(|| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, black_box(b"www.example.com")))
+    });
+    group.bench_function("hyperuuid_v6", |b| {
+        b.iter(|| v6::new_v6(black_box(RFC_TEST_VECTOR_MS)).unwrap())
+    });
+    group.bench_function("uuid_crate_v6", |b| {
+        b.iter(|| uuid::Uuid::now_v6(black_box(&[0, 0, 0, 0, 0, 0])))
+    });
+    group.bench_function("hyperuuid_v7", |b| {
+        b.iter(|| v7::new_v7(black_box(RFC_TEST_VECTOR_MS)).unwrap())
+    });
+    group.bench_function("uuid_crate_v7", |b| b.iter(uuid::Uuid::now_v7));
+    group.finish();
+}
+
 fn bench_batch(c: &mut Criterion) {
     let mut group = c.benchmark_group("batch_1000");
     group.bench_function("v6_batch", |b| {
@@ -56,5 +83,5 @@ fn bench_batch(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_single_item, bench_batch);
+criterion_group!(benches, bench_single_item, bench_vs_uuid_crate, bench_batch);
 criterion_main!(benches);

@@ -43,6 +43,31 @@ There's no real comparison to make for v5/v6/v7 — Foundation's `UUID` type has
 
 The honest trade-off: this package bundles a native library per platform instead of being pure Swift, and every call is `throws` where `UUID()` never fails. If plain v4 randomness is all you need, `UUID()` is simpler, has no native dependency, and is already there — a completely reasonable choice.
 
+## Benchmarks
+
+Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-arm64, p50 of 10,000 samples):
+
+| Call | Time (wall clock) | Malloc (total) |
+|---|---|---|
+| `Foundation.UUID()` | 3,101 ns | 0 |
+| `UuidGenerator.newV4()` | 1,000 ns | 1 |
+| `UuidGenerator.newV5(namespace:name:)` | 1,100 ns | 3 |
+| `UuidGenerator.newV6()` | 1,700 ns | 1 |
+| `UuidGenerator.newV7()` | 2,201 ns | 1 |
+
+Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the `dlopen`/`@convention(c)` call path is cheap. The honest asterisk: unlike the Rust core, the C# binding, and `UUID()` itself, these calls aren't allocation-free — each one heap-allocates the fixed-size `[UInt8]` marshaling buffers Swift's `Array` always backs with a heap allocation (Span-style stack buffers aren't available to Swift the way C#'s `stackalloc`/`ReadOnlySpan<byte>` are). 1-3 small, fixed-size allocations per call is cheap in absolute terms, but it's real, and worth saying plainly rather than claiming zero-alloc across every binding uniformly.
+
+Batch generation amortizes both the native call and that allocation over the whole batch:
+
+| Call | Time for 1,000 UUIDs | Per-UUID |
+|---|---|---|
+| `newV6()` × 1000 (individual) | 944 µs | 944 ns |
+| `newV6Batch(count: 1000)` | 86 µs | 86 ns |
+| `newV7()` × 1000 (individual) | 943 µs | 943 ns |
+| `newV7Batch(count: 1000)` | 90 µs | 90 ns |
+
+**≈11x for v6, ≈10.5x for v7** — one native call and one marshaling allocation instead of a thousand of each.
+
 ## Install
 
 Not yet published to the Swift Package Registry under a registered `SkunkWerkx`

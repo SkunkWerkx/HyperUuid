@@ -1,9 +1,9 @@
 Gem::Specification.new do |spec|
   spec.name = "hyperuuid"
   spec.version = "0.1.0"
-  spec.summary = "RFC 9562 UUID v4/v5/v7 generation — direct native FFI into a Rust core, no runtime bridge."
+  spec.summary = "RFC 9562 UUID v4/v5/v6/v7 generation — direct native FFI into a Rust core, no runtime bridge."
   spec.description = <<~DESC
-    High-performance, allocation-free RFC 9562 UUID v4 (random), v5 (deterministic), and v7
+    High-performance, allocation-free RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7
     (time-sortable) generation, calling directly into the native libhyperuuid shared library
     via Fiddle (Ruby's standard-library FFI) — no runtime bridge, no extra gem dependency.
   DESC
@@ -22,6 +22,7 @@ Gem::Specification.new do |spec|
   # with every Ruby install (rbenv/RubyGems installs it alongside the interpreter), just no
   # longer implicitly on the load path.
   spec.add_dependency "fiddle"
+  spec.add_development_dependency "benchmark-ips", "~> 2.15"
 
   spec.metadata["source_code_uri"] = spec.homepage
 end
