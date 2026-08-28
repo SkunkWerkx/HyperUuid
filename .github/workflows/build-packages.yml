@@ -172,7 +172,39 @@ jobs:
           mkdir -p "ruby/lib/hyperuuid/native/${{ matrix.rid }}"
           cp "out/${{ matrix.lib_name }}" "ruby/lib/hyperuuid/native/${{ matrix.rid }}/"
 
-      - name: Test Ruby bindings against this platform's native lib
+      # The Fiddle backend, forced explicitly — the universal zero-compile path every
+      # platform must keep green regardless of whether the Magnus extension exists there.
+      # (Before this was forced, backend auto-selection made these runs prove only
+      # whichever backend happened to be loadable — i.e. always Fiddle, silently.)
+      - name: Test Ruby bindings (Fiddle backend) against this platform's native lib
+        working-directory: ruby
+        env:
+          HYPERUUID_PURE: "1"
+        run: bundle exec rspec
+
+      # The Magnus extension backend, unix legs (proven pattern from HyperCast's CI):
+      # build the extension crate against this leg's Ruby, stage it under the require name
+      # (DLEXT is .so on Linux, .bundle on macOS), and run the same suite again with
+      # auto-selection picking it up — including the cross-backend agreement specs that
+      # skip when the extension is absent. Windows stays Fiddle-only for now: RubyInstaller
+      # rubies are MinGW-built, so a compatible extension is a windows-gnu-target exercise
+      # queued for the packaging round.
+      - name: Build Magnus extension
+        if: runner.os != 'Windows'
+        working-directory: ruby/native
+        run: cargo build --release
+
+      - name: Stage Magnus extension
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            macOS) cp ruby/native/target/release/libhyperuuid_native.dylib ruby/lib/hyperuuid_native.bundle ;;
+            Linux) cp ruby/native/target/release/libhyperuuid_native.so ruby/lib/hyperuuid_native.so ;;
+          esac
+
+      - name: Test Ruby bindings (Magnus backend)
+        if: runner.os != 'Windows'
         working-directory: ruby
         run: bundle exec rspec
 
@@ -216,11 +248,15 @@ jobs:
         # it works identically on every OS/shell, shebang or not.
         run: php vendor/bin/phpunit
 
-      # Python has no build-native counterpart to publish yet (no wheel/RID packaging, no
-      # pip server to push to) — this just exercises the real ctypes.CDLL load path on this
-      # platform leg, one at a time, overwriting the single hardcoded native lib path
-      # python/src/hyperuuid/libhyperuuid.so regardless of this leg's real extension (ctypes
-      # loads by path, not by file extension, so a renamed .dylib/.dll loads identically).
+      # Python, both backends (proven pattern from HyperCast's CI). The ctypes run is
+      # forced pure — the universal fallback and the Pyodide path — exercising the real
+      # ctypes.CDLL load path per leg via the single hardcoded resource name
+      # libhyperuuid.so (ctypes loads by path, not extension, so a renamed .dylib/.dll
+      # loads identically). Then the PyO3 extension builds on every leg, Windows included
+      # (the Python-on-Windows audience is too large to leave on the fallback; the MSVC
+      # linker plus CPython's own import library is all it takes), and the suite runs
+      # again with auto-selection picking it up — including the backend-agreement tests
+      # that skip when the extension is absent.
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -229,12 +265,31 @@ jobs:
         shell: bash
         run: cp "out/${{ matrix.lib_name }}" "python/src/hyperuuid/libhyperuuid.so"
 
-      - name: Test Python bindings against this platform's native lib
+      - name: Test Python bindings (ctypes backend) against this platform's native lib
         working-directory: python
+        env:
+          HYPERUUID_PURE: "1"
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[test]"
           pytest
+
+      - name: Build PyO3 extension
+        working-directory: python/native
+        run: cargo build --release
+
+      - name: Stage PyO3 extension
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            macOS)   cp python/native/target/release/libhyperuuid_native.dylib python/src/hyperuuid_native.so ;;
+            Linux)   cp python/native/target/release/libhyperuuid_native.so python/src/hyperuuid_native.so ;;
+            Windows) cp python/native/target/release/hyperuuid_native.dll python/src/hyperuuid_native.pyd ;;
+          esac
+
+      - name: Test Python bindings (PyO3 backend)
+        working-directory: python
+        run: pytest
 
   pack-nuget:
     needs: build-native

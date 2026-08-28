@@ -78,6 +78,8 @@ php/.phpunit.result.cache
 .idea/
 .vs/
 python/src/hyperuuid_native.so
+python/src/hyperuuid_native.pyd
 # Staged Magnus extension for local dev/test (built from ruby/native/, staged the same way
 # as the Python line above; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so
+ruby/lib/hyperuuid_native.bundle
