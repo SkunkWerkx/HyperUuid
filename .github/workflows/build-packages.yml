@@ -1,5 +1,11 @@
 name: Build native libraries and pack NuGet + Maven
 
+# The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
+# pipeline — 6 real-hardware legs, the Rust core built fresh per leg, every binding's
+# suite run against it, and the Python/Ruby suites run twice (forced ctypes/Fiddle
+# fallback + PyO3/Magnus extension backends). This file states what's specific to
+# HyperUuid, plus the packaging jobs that consume the pipeline's native-{rid} artifacts.
+
 on:
   workflow_dispatch:
   push:
@@ -8,288 +14,20 @@ on:
 
 jobs:
   build-native:
-    strategy:
-      fail-fast: false
-      # Runner labels checked against GitHub's current retirement schedule as of Aug 2026;
-      # macos-13 (this workflow's original osx-x64 pick) was already retired Dec 2025.
-      # GitHub is winding x86_64 macOS support down entirely by Fall 2027 — macos-26-intel
-      # is the current label (macOS 26 "Tahoe", matching macos-latest's arm64 leg, which
-      # already moved to 26 — confirmed via the runner's own reported OS version, not just
-      # the label), but this leg has a shelf life; osx-arm64 does not.
-      # windows-11-arm (GA as of Aug 2026, free for public repos same as the others) covers
-      # win-arm64 — Rust just uses its native host triple (aarch64-pc-windows-msvc) here same
-      # as every other leg, no cross-compiling.
-      matrix:
-        include:
-          - os: ubuntu-latest
-            rid: linux-x64
-            lib_name: libhyperuuid.so
-          - os: ubuntu-24.04-arm
-            rid: linux-arm64
-            lib_name: libhyperuuid.so
-          - os: macos-26-intel
-            rid: osx-x64
-            lib_name: libhyperuuid.dylib
-          - os: macos-latest
-            rid: osx-arm64
-            lib_name: libhyperuuid.dylib
-          - os: windows-latest
-            rid: win-x64
-            lib_name: hyperuuid.dll
-          - os: windows-11-arm
-            rid: win-arm64
-            lib_name: hyperuuid.dll
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Build libhyperuuid (release)
-        working-directory: rust
-        run: cargo build --release
-
-      - name: Run Rust test suite
-        working-directory: rust
-        run: cargo test --release
-
-      - name: Collect native artifact
-        shell: bash
-        run: |
-          mkdir -p out
-          case "${{ runner.os }}" in
-            Windows) cp rust/target/release/hyperuuid.dll "out/${{ matrix.lib_name }}" ;;
-            macOS)   cp rust/target/release/libhyperuuid.dylib "out/${{ matrix.lib_name }}" ;;
-            Linux)   cp rust/target/release/libhyperuuid.so "out/${{ matrix.lib_name }}" ;;
-          esac
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: native-${{ matrix.rid }}
-          path: out/${{ matrix.lib_name }}
-
-      # This is the actual thing worth confirming: not just that the Rust core cross-target
-      # builds, but that .NET running on THIS platform can load libhyperuuid through
-      # [LibraryImport] and get correct results — the real P/Invoke marshalling/resolution
-      # path per OS, which cargo test above cannot exercise at all. (Root-caused a real
-      # Windows-only bug here: the managed HyperUuid.dll and native hyperuuid.dll collided on
-      # Windows' case-insensitive filesystem — fixed via AssemblyName in HyperUuid.csproj.)
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Place native lib for in-repo testing
-        shell: bash
-        run: |
-          mkdir -p "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native"
-          cp "out/${{ matrix.lib_name }}" "csharp/HyperUuid/runtimes/${{ matrix.rid }}/native/"
-
-      - name: Test C# bindings against this platform's native lib
-        run: dotnet test --project csharp/HyperUuid.Tests/HyperUuid.Tests.csproj -c Release
-
-      # Same rationale as the C# step above: a jar has no per-platform package selection like
-      # NuGet's RID folders, so this exercises NativePlatform's runtime OS/arch detection and
-      # the actual FFM downcall path on this specific platform, not just that Rust builds.
-      - uses: actions/setup-java@v6
-        with:
-          distribution: "temurin"
-          java-version: "23"
-
-      - name: Place native lib for Java in-repo testing
-        shell: bash
-        run: |
-          mkdir -p "java/src/main/resources/native/${{ matrix.rid }}"
-          cp "out/${{ matrix.lib_name }}" "java/src/main/resources/native/${{ matrix.rid }}/"
-
-      - name: Test Java bindings against this platform's native lib
-        working-directory: java
-        shell: bash
-        run: |
-          chmod +x gradlew
-          ./gradlew test --console=plain
-
-      # Same rationale as the C#/Java steps above: exercises the real purego dlopen/dlsym +
-      # call-trampoline path on this specific platform, not just that Rust builds. purego is
-      # Tier-1 on all 6 legs here (confirmed against its own platform matrix), including
-      # windows-11-arm.
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
-
-      - name: Place native lib for Go in-repo testing
-        shell: bash
-        run: |
-          mkdir -p "go/native/${{ matrix.rid }}"
-          cp "out/${{ matrix.lib_name }}" "go/native/${{ matrix.rid }}/"
-
-      - name: Test Go bindings against this platform's native lib
-        working-directory: go
-        run: go test ./...
-
-      # Same rationale again, for Swift's dlopen/dlsym (LoadLibraryW/GetProcAddress on
-      # Windows) + @convention(c) call path. Uses SwiftyLab/setup-swift rather than
-      # swift-actions/setup-swift because its own CI has directly-verified, currently-green
-      # support for windows-11-arm — a native arm64 Windows host toolchain, not a cross-compile
-      # target — which is the one leg most likely to have no Swift toolchain available at all.
-      - uses: SwiftyLab/setup-swift@v1.14.0
-        with:
-          swift-version: "6.3"
-
-      - name: Place native lib for Swift in-repo testing
-        shell: bash
-        run: |
-          mkdir -p "swift/Sources/HyperUuid/NativeLibs/${{ matrix.rid }}"
-          cp "out/${{ matrix.lib_name }}" "swift/Sources/HyperUuid/NativeLibs/${{ matrix.rid }}/"
-
-      - name: Test Swift bindings against this platform's native lib
-        working-directory: swift
-        run: swift test
-
-      # fiddle (Ruby's Fiddle gem, see below) has no precompiled binary for any platform —
-      # RubyGems.org only ever hosts it as platform "ruby" — so it always compiles a native
-      # extension from source on `bundle install`. Hit this on the (since-replaced)
-      # macos-15-intel leg: mkmf's `try_link0` failed with "You have to install development
-      # tools first", even though Rust/Swift compiled fine earlier in this same job — a known
-      # class of GHA macOS-runner issue where `xcode-select` isn't pointed at a full
-      # Xcode.app. Kept as a defensive no-op on every OS in case macos-26-intel hits the same
-      # thing.
-      - name: Point Xcode at a full toolchain (works around a Ruby native-extension mkmf issue)
-        if: runner.os == 'macOS'
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-      # Same rationale again, for Ruby's Fiddle dlopen/dlsym (LoadLibraryW/GetProcAddress on
-      # Windows) call path. Fiddle is bundled with every Ruby install (see ruby/README.md).
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.4"
-          bundler-cache: true
-          working-directory: ruby
-
-      - name: Place native lib for Ruby in-repo testing
-        shell: bash
-        run: |
-          mkdir -p "ruby/lib/hyperuuid/native/${{ matrix.rid }}"
-          cp "out/${{ matrix.lib_name }}" "ruby/lib/hyperuuid/native/${{ matrix.rid }}/"
-
-      # The Fiddle backend, forced explicitly — the universal zero-compile path every
-      # platform must keep green regardless of whether the Magnus extension exists there.
-      # (Before this was forced, backend auto-selection made these runs prove only
-      # whichever backend happened to be loadable — i.e. always Fiddle, silently.)
-      - name: Test Ruby bindings (Fiddle backend) against this platform's native lib
-        working-directory: ruby
-        env:
-          HYPERUUID_PURE: "1"
-        run: bundle exec rspec
-
-      # The Magnus extension backend, unix legs (proven pattern from HyperCast's CI):
-      # build the extension crate against this leg's Ruby, stage it under the require name
-      # (DLEXT is .so on Linux, .bundle on macOS), and run the same suite again with
-      # auto-selection picking it up — including the cross-backend agreement specs that
-      # skip when the extension is absent. Windows stays Fiddle-only for now: RubyInstaller
-      # rubies are MinGW-built, so a compatible extension is a windows-gnu-target exercise
-      # queued for the packaging round.
-      - name: Build Magnus extension
-        if: runner.os != 'Windows'
-        working-directory: ruby/native
-        run: cargo build --release
-
-      - name: Stage Magnus extension
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          case "${{ runner.os }}" in
-            macOS) cp ruby/native/target/release/libhyperuuid_native.dylib ruby/lib/hyperuuid_native.bundle ;;
-            Linux) cp ruby/native/target/release/libhyperuuid_native.so ruby/lib/hyperuuid_native.so ;;
-          esac
-
-      - name: Test Ruby bindings (Magnus backend)
-        if: runner.os != 'Windows'
-        working-directory: ruby
-        run: bundle exec rspec
-
-      # Same rationale again, for PHP's built-in FFI extension dlopen/dlsym call path. PHP's
-      # CLI SAPI (what `phpunit` runs under) runs FFI unrestricted regardless of the
-      # `ffi.enable` ini setting — that directive only restricts non-CLI SAPIs like FPM — so
-      # no ini-values override is needed here.
-      #
-      # Skipped on win-arm64: PHP for Windows has never shipped a native ARM64 build (unlike
-      # Ruby/Go/Java, which all install to an arch-tagged hostedtoolcache path on this same
-      # runner) — confirmed by shivammathur/setup-php installing to the generic `c:\tools\php`
-      # with no arch subfolder. It runs under Windows' x64 emulation regardless of host CPU,
-      # so "PHP on windows-11-arm" would really be testing PHP-as-x64 against an ARM64-built
-      # hyperuuid.dll, which can never load — already covered for real by the windows-latest
-      # (win-x64) leg.
-      - uses: shivammathur/setup-php@v2
-        if: matrix.rid != 'win-arm64'
-        with:
-          php-version: "8.5"
-          extensions: ffi
-          tools: composer
-
-      - name: Install PHP dependencies
-        if: matrix.rid != 'win-arm64'
-        working-directory: php
-        run: composer install --no-interaction --prefer-dist
-
-      - name: Place native lib for PHP in-repo testing
-        if: matrix.rid != 'win-arm64'
-        shell: bash
-        run: |
-          mkdir -p "php/src/native/${{ matrix.rid }}"
-          cp "out/${{ matrix.lib_name }}" "php/src/native/${{ matrix.rid }}/"
-
-      - name: Test PHP bindings against this platform's native lib
-        if: matrix.rid != 'win-arm64'
-        working-directory: php
-        # `php vendor/bin/phpunit`, not bare `vendor/bin/phpunit` — Composer's proxy script is
-        # a `#!/usr/bin/env php`-shebang PHP file, which the default shell on the two Windows
-        # legs (pwsh, not Git Bash) can't execute directly; invoking `php` explicitly against
-        # it works identically on every OS/shell, shebang or not.
-        run: php vendor/bin/phpunit
-
-      # Python, both backends (proven pattern from HyperCast's CI). The ctypes run is
-      # forced pure — the universal fallback and the Pyodide path — exercising the real
-      # ctypes.CDLL load path per leg via the single hardcoded resource name
-      # libhyperuuid.so (ctypes loads by path, not extension, so a renamed .dylib/.dll
-      # loads identically). Then the PyO3 extension builds on every leg, Windows included
-      # (the Python-on-Windows audience is too large to leave on the fallback; the MSVC
-      # linker plus CPython's own import library is all it takes), and the suite runs
-      # again with auto-selection picking it up — including the backend-agreement tests
-      # that skip when the extension is absent.
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-
-      - name: Place native lib for Python in-repo testing
-        shell: bash
-        run: cp "out/${{ matrix.lib_name }}" "python/src/hyperuuid/libhyperuuid.so"
-
-      - name: Test Python bindings (ctypes backend) against this platform's native lib
-        working-directory: python
-        env:
-          HYPERUUID_PURE: "1"
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[test]"
-          pytest
-
-      - name: Build PyO3 extension
-        working-directory: python/native
-        run: cargo build --release
-
-      - name: Stage PyO3 extension
-        shell: bash
-        run: |
-          case "${{ runner.os }}" in
-            macOS)   cp python/native/target/release/libhyperuuid_native.dylib python/src/hyperuuid_native.so ;;
-            Linux)   cp python/native/target/release/libhyperuuid_native.so python/src/hyperuuid_native.so ;;
-            Windows) cp python/native/target/release/hyperuuid_native.dll python/src/hyperuuid_native.pyd ;;
-          esac
-
-      - name: Test Python bindings (PyO3 backend)
-        working-directory: python
-        run: pytest
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
+    with:
+      project: HyperUuid
+      crate: hyperuuid
+      pure_env: HYPERUUID_PURE
+      csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
+      # A jar has no per-platform package selection like NuGet's RID folders, and the
+      # csproj's runtimes/**/native wildcard stages at pack time — so both bindings take
+      # the pipeline's explicit per-leg placement for in-repo testing.
+      csharp_runtimes_dir: csharp/HyperUuid/runtimes
+      java_resources_dir: java/src/main/resources/native
+      # This repo packages its Python tests behind pip install -e ".[test]".
+      python_editable: true
+      # go_windows stays default-true: the purego fallback carries the Windows legs.
 
   pack-nuget:
     needs: build-native
