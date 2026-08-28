@@ -22,24 +22,24 @@ module HyperUuid
 
     class << self
       def new_v4
-        out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        out = scratch
         rc = functions[:new_v4].call(out)
         raise RandomSourceError, "uuid_new_v4 failed with code #{rc}" unless rc.zero?
         out[0, 16]
       end
 
       def new_v5(namespace_bytes, name_bytes)
-        ns = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
-        ns[0, 16] = namespace_bytes
-        name_ptr = name_bytes.empty? ? nil : Fiddle::Pointer.to_ptr(name_bytes)
-        out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
-        rc = functions[:new_v5].call(ns, name_ptr, name_bytes.bytesize, out)
+        out = scratch
+        # Fiddle passes a String's bytes for void* directly (read-only) — no Pointer
+        # wrapper, no copy — the same zero-copy crossing every other input here uses.
+        name = name_bytes.empty? ? nil : name_bytes
+        rc = functions[:new_v5].call(namespace_bytes, name, name_bytes.bytesize, out)
         raise RandomSourceError, "uuid_new_v5 failed with code #{rc}" unless rc.zero?
         out[0, 16]
       end
 
       def new_v6(unix_millis)
-        out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        out = scratch
         rc = functions[:new_v6].call(unix_millis, out)
         case rc
         when 0 then out[0, 16]
@@ -49,8 +49,7 @@ module HyperUuid
       end
 
       def v6_unix_millis(bytes)
-        ptr = Fiddle::Pointer.to_ptr(bytes)
-        functions[:v6_unix_millis].call(ptr)
+        functions[:v6_unix_millis].call(bytes)
       end
 
       def new_v6_batch(count, unix_millis)
@@ -65,7 +64,7 @@ module HyperUuid
       end
 
       def new_v7(unix_millis)
-        out = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        out = scratch
         rc = functions[:new_v7].call(unix_millis, out)
         case rc
         when 0 then out[0, 16]
@@ -75,8 +74,7 @@ module HyperUuid
       end
 
       def v7_unix_millis(bytes)
-        ptr = Fiddle::Pointer.to_ptr(bytes)
-        functions[:v7_unix_millis].call(ptr)
+        functions[:v7_unix_millis].call(bytes)
       end
 
       def new_v7_batch(count, unix_millis)
@@ -91,40 +89,46 @@ module HyperUuid
       end
 
       def v7_to_sql_order(bytes)
-        buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
-        buf[0, 16] = bytes
-        functions[:v7_to_sql_order].call(buf)
-        buf[0, 16]
+        rewrite(:v7_to_sql_order, bytes)
       end
 
       def v7_to_rfc_order(bytes)
-        buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
-        buf[0, 16] = bytes
-        functions[:v7_to_rfc_order].call(buf)
-        buf[0, 16]
+        rewrite(:v7_to_rfc_order, bytes)
       end
 
       def v6_to_sql_order(bytes)
-        buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
-        buf[0, 16] = bytes
-        functions[:v6_to_sql_order].call(buf)
-        buf[0, 16]
+        rewrite(:v6_to_sql_order, bytes)
       end
 
       def v6_to_rfc_order(bytes)
-        buf = Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
-        buf[0, 16] = bytes
-        functions[:v6_to_rfc_order].call(buf)
-        buf[0, 16]
+        rewrite(:v6_to_rfc_order, bytes)
       end
 
       private
 
+      # One 16-byte scratch allocation per thread, reused by every single-item call —
+      # Fiddle::Pointer.malloc(..., RUBY_FREE) registers a GC finalizer per call, measured
+      # (in HyperCast, same mechanism) as the dominant per-call cost by an order of
+      # magnitude. Batches keep a per-call buffer: one malloc amortized over `count` IDs.
+      def scratch
+        Thread.current[:hyperuuid_scratch] ||= Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+      end
+
+      # The in-place byte-order rewrites are the one shape that must copy in: the native
+      # call genuinely mutates the buffer, and the input String is frozen.
+      def rewrite(symbol, bytes)
+        buf = scratch
+        buf[0, 16] = bytes
+        functions[symbol].call(buf)
+        buf[0, 16]
+      end
+
       # Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
       # static let — the native library and its function pointers live for the process's
-      # lifetime, same as every other binding (never dlclose'd).
+      # lifetime, same as every other binding (never dlclose'd). The unsynchronized read is
+      # the hot path; the mutex only guards the one-time load (a benign race — idempotent).
       def functions
-        @mutex.synchronize { @functions ||= load_functions }
+        @functions || @mutex.synchronize { @functions ||= load_functions }
       end
 
       def load_functions

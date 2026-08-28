@@ -13,6 +13,8 @@ final class Uuid
 {
     private readonly string $bytes;
 
+    private static ?bool $fastInstants = null;
+
     public function __construct(string $bytes)
     {
         if (\strlen($bytes) !== 16) {
@@ -78,6 +80,15 @@ final class Uuid
                 "timestamp() is only defined for version 6 or 7 UUIDs, got version {$this->version()}"
             ),
         };
+        // PHP 8.4+: build from exact integers instead of a date-string format parse (the
+        // HyperCast instant lesson); older PHP keeps the createFromFormat path.
+        self::$fastInstants ??= method_exists(\DateTimeImmutable::class, 'createFromTimestamp')
+            && method_exists(\DateTimeImmutable::class, 'setMicrosecond');
+        if (self::$fastInstants) {
+            $instant = \DateTimeImmutable::createFromTimestamp(intdiv($millis, 1000));
+            $micros = ($millis % 1000) * 1000;
+            return $micros === 0 ? $instant : $instant->setMicrosecond($micros);
+        }
         $dt = \DateTimeImmutable::createFromFormat(
             'U.v',
             sprintf('%d.%03d', intdiv($millis, 1000), $millis % 1000),

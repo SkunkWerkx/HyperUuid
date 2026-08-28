@@ -58,32 +58,38 @@ ini setting — the `preload`-only default only matters for non-CLI SAPIs like F
 
 ## Benchmarks
 
-Real numbers, measured with [PHPBench](https://phpbench.readthedocs.io/) on linux-arm64
-(`vendor/bin/phpbench run --report=aggregate`, mode across 5 iterations × 1000 revs each).
-PHP core has nothing to compare against — the honest baseline here is a naive inline v4
-built from `random_bytes(16)` with no FFI call at all, to isolate what the FFI boundary
-itself actually costs:
+Real numbers, measured with [PHPBench](https://phpbench.readthedocs.io/) on linux-arm64,
+PHP 8.5 (`XDEBUG_MODE=off vendor/bin/phpbench run --report=aggregate`, mode across 5
+iterations × 1000 revs each — an earlier edition of this table was measured with Xdebug
+loaded, which inflates everything ~14x uniformly; these numbers are clean). PHP core has
+nothing to compare against — the honest baseline here is a naive inline v4 built from
+`random_bytes(16)` with no FFI call at all, to isolate what the FFI boundary itself
+actually costs:
 
 | Call | Time | vs. naive inline (no FFI) |
 | --- | --- | --- |
-| Naive inline v4 (`random_bytes`, no RFC validation) | 6.43µs | — |
-| `newV4()` | 8.22µs | +1.79µs |
-| `newV5()` | 18.66µs | +12.23µs |
-| `newV6()` | 8.12µs | +1.69µs |
-| `newV7()` | 7.89µs | +1.46µs |
+| Naive inline v4 (`random_bytes`, no RFC validation) | 595ns | — |
+| `newV4()` | 308ns | **1.9x faster** |
+| `newV5()` | 466ns | 1.3x faster |
+| `newV6()` | 413ns | 1.4x faster |
+| `newV7()` | 303ns | **2.0x faster** |
 
-That +1.5-1.8µs delta for v4/v6/v7 is the real, honest cost of PHP's `FFI` call boundary
-itself — small in absolute terms, but it's there, and this isn't hiding it. `newV5()` costs
-more because it marshals a variable-length name buffer across FFI in addition to the fixed
-16-byte namespace, not because SHA-1 hashing is expensive.
+Read that top row again: the full RFC-complete v4 — real entropy, correct version and
+variant bits, crossing into native code and back — is **faster than the naive pure-PHP
+three-liner that doesn't even validate anything**. The FFI crossing itself costs ~105ns;
+what used to make these calls look expensive was wrapper, not boundary — per-call `CData`
+allocations and `memcpy`s that are now a single static out-buffer and zero-copy
+`const char *` string passes (inputs cross as plain PHP strings, no copy at all). The
+naive inline version, meanwhile, pays PHP-level `chr`/`ord`/string-index fiddling that
+costs more than the entire native round trip.
 
-Batch generation amortizes that per-call FFI cost the same way it does in every other
-binding in this repo:
+Batch generation still amortizes the remaining per-call cost, though the diet shrank the
+gap it has to amortize:
 
 | Call | Batch (1000 items) | Individual × 1000 | Speedup |
 | --- | --- | --- | --- |
-| v6 | 2.55ms | 7.65ms | 3.0x |
-| v7 | 2.63ms | 7.99ms | 3.0x |
+| v6 | 0.64ms | 0.87ms | 1.4x |
+| v7 | 0.66ms | 0.87ms | 1.3x |
 
 ### Timestamp extraction vs. `ramsey/uuid`'s `getDateTime()`
 
@@ -95,19 +101,18 @@ flips the result:
 
 | Call | Time | vs. `ramsey/uuid` |
 | --- | ---: | ---: |
-| `->timestamp()` (v6) | 14.98µs | **32.7x faster** |
-| `ramsey/uuid`'s `->getDateTime()` (v6) | 489.92µs | baseline |
-| `->timestamp()` (v7) | 14.64µs | **16.6x faster** |
-| `ramsey/uuid`'s `->getDateTime()` (v7) | 243.43µs | baseline |
+| `->timestamp()` (v6) | 451ns | **74x faster** |
+| `ramsey/uuid`'s `->getDateTime()` (v6) | 33.3µs | baseline |
+| `->timestamp()` (v7) | 380ns | **48x faster** |
+| `ramsey/uuid`'s `->getDateTime()` (v7) | 18.3µs | baseline |
 
 `ramsey/uuid`'s `getDateTime()` does real work this package's native extraction doesn't have
 to: parsing a lazily-decoded UUID string representation and constructing a `DateTimeImmutable`
-through its own codec layer, versus this package's single FFI call plus a direct
-`DateTimeImmutable::createFromFormat`. The one FFI crossing that costs this package ~1.5µs on
-generation (see above) is comfortably paid for here — an honest reversal worth stating plainly
-rather than only reporting the numbers where this package wins by default.
+through its own codec layer, versus this package's single zero-copy FFI call plus a
+`DateTimeImmutable` built from exact integers (`createFromTimestamp`/`setMicrosecond` on PHP
+8.4+; a `createFromFormat` fallback keeps older PHP correct).
 
-Reproduce: `composer require --dev phpbench/phpbench ramsey/uuid && vendor/bin/phpbench run --report=aggregate`.
+Reproduce: `composer require --dev phpbench/phpbench ramsey/uuid && XDEBUG_MODE=off vendor/bin/phpbench run --report=aggregate`.
 
 ## Install
 

@@ -1,0 +1,16 @@
+[package]
+name = "hyperuuid-ruby-native"
+version = "0.1.0"
+edition = "2024"
+description = "Ruby native-extension backend for hyperuuid — the Rust core linked directly into a Ruby extension (Magnus), bypassing Fiddle's measured per-call marshalling floor. The pure-Fiddle gem remains the universal zero-compile fallback."
+license = "MIT"
+repository = "https://github.com/SkunkWerkx/HyperUuid"
+publish = false
+
+[lib]
+name = "hyperuuid_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+hyperuuid = { path = "../../rust" }
+magnus = { version = "0.8", features = ["rb-sys"] }

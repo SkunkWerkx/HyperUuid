@@ -37,14 +37,14 @@ module HyperUuid
   # are randomly generated on every call — unlike version 7, there is no monotonic counter, so
   # calls within the same millisecond are not guaranteed to sort in creation order.
   def self.new_v6(unix_millis = nil)
-    unix_millis ||= (Time.now.to_r * 1000).to_i
+    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
     Uuid.new(Runtime.new_v6(unix_millis))
   end
 
   # Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI call
   # and one random-bytes fetch instead of `count` of each. Defaults to the current time.
   def self.new_v6_batch(count, unix_millis = nil)
-    unix_millis ||= (Time.now.to_r * 1000).to_i
+    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
     bytes = Runtime.new_v6_batch(count, unix_millis)
     Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
   end
@@ -53,7 +53,7 @@ module HyperUuid
   # an explicit Unix-epoch millisecond timestamp (non-negative, fitting in 48 bits) to embed a
   # specific time instead.
   def self.new_v7(unix_millis = nil)
-    unix_millis ||= (Time.now.to_r * 1000).to_i
+    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
     Uuid.new(Runtime.new_v7(unix_millis))
   end
 
@@ -61,8 +61,27 @@ module HyperUuid
   # contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
   # instead of `count` of each. Defaults to the current time.
   def self.new_v7_batch(count, unix_millis = nil)
-    unix_millis ||= (Time.now.to_r * 1000).to_i
+    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
     bytes = Runtime.new_v7_batch(count, unix_millis)
     Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
   end
 end
+
+# --- backend selection: the Magnus extension, when present, replaces the Runtime methods
+# above in place (no delegation layer) — Fiddle's measured per-call marshalling floor drops
+# to an ordinary extension call, while everything above Runtime (Uuid, the module doors,
+# batch slicing) stays shared byte-for-byte between backends. The pure-Fiddle definitions
+# remain the universal zero-compile fallback; precompiled platform gems are how the
+# extension ships without ever making a consumer compile anything. Set HYPERUUID_PURE=1 to
+# force Fiddle.
+HyperUuid::BACKEND =
+  if ENV["HYPERUUID_PURE"]
+    :fiddle
+  else
+    begin
+      require "hyperuuid_native"
+      :native
+    rescue LoadError
+      :fiddle
+    end
+  end
