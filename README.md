@@ -42,6 +42,7 @@ Cutting to the chase, by language — real numbers, no adjustment for story, ful
 - **[Java](java/)** — 5-9x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5, v6, or v7. Proven under GraalVM Native Image too, not just the JVM.
 - **[Rust](rust/)** — this *is* the engine. 13-16x faster than the `uuid` crate on v6/v7, allocation-free, asserted by a real counting-allocator test, not just claimed.
 - **[Swift](swift/)** — every call beats `Foundation.UUID()` outright, while also being the only way to get v5/v6/v7 in Swift at all — Foundation only ever does v4.
+- **[Python](python/)** — a clean sweep since the PyO3 native backend (the Rust core linked directly into a CPython extension module, auto-selected when importable; pure ctypes remains the zero-compile fallback and the Pyodide path): 1.6x faster than `uuid.uuid4()`, 2.5x faster than `uuid.uuid5()`, **4.2x faster than 3.14's own `uuid.uuid6()`/`uuid.uuid7()`**, and timestamp extraction — previously an outright loss — now 2.5-2.8x faster than `UUID.time`. Every asterisk this section used to carry is gone; on 3.9-3.13, where stdlib has no v6/v7 at all, it's not even a comparison.
 
 **Real value, honest asterisk — the win is architectural, not a clean speed win:**
 
@@ -51,7 +52,6 @@ Cutting to the chase, by language — real numbers, no adjustment for story, ful
 **Bottom of the list, still worth knowing about — perf loses to what's already there, but the capability doesn't otherwise exist:**
 
 - **[Ruby](ruby/)** — single-call generation is 1.3-2.7x slower than `SecureRandom.uuid`, full stop. But `SecureRandom.uuid` only ever gives you random v4 — if you need v5/v6/v7 in Ruby, or you're generating in bulk (11x faster batched), this is the only gem doing it with zero native-extension compile step.
-- **[Python](python/)** — a narrow win on v6/v7 generation against Python 3.14's new stdlib implementation, a real loss on v4/v5 and on timestamp extraction. The actual case for this package is Python 3.9-3.13, where stdlib has no v6/v7 at all; if you're already on 3.14+ in a Python-only codebase, stdlib's `uuid` module is genuinely the simpler choice.
 
 **Regardless of where your language lands above:** if SQL Server is your RDBMS, [SQL Server ordering](#sql-server-ordering) below might be reason enough to reach for this on its own — the only practical way to mint a client-side ID on a frontier device and have it arrive already sorted for clustering, something `NEWSEQUENTIALID()` structurally can't do (server-side only) and something `IDENTITY(1,1)` can't do at all for a value — a many-to-many bridge table's composite key, most concretely — that needs to exist before the row does.
 

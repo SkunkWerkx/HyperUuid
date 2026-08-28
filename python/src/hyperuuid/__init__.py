@@ -200,3 +200,37 @@ def v6_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     """Inverse of :func:`v6_to_sql_order` — convert a SQL-Server-ordered version 6 UUID back
     to RFC 9562 order."""
     return _uuid.UUID(bytes=_runtime.v6_to_rfc_order(uuid_value.bytes))
+
+
+# --- backend selection: HyperCast's dual-backend pattern, ported home ---------------------
+# The PyO3 extension (hyperuuid_native) links the Rust core straight into a CPython
+# extension module — no ctypes marshalling, roughly an order of magnitude per call — and
+# constructs stdlib uuid.UUID objects through the pinned fast path (UUID.__new__ +
+# object.__setattr__, the fastuuid technique; see tests for the invariant pin). When
+# importable it replaces the functions above; the pure-ctypes definitions stay the
+# universal fallback and the Pyodide/wasm path. Set HYPERUUID_PURE=1 to force ctypes.
+
+BACKEND = "ctypes"
+
+import os as _os
+
+if not _os.environ.get("HYPERUUID_PURE"):
+    try:
+        import hyperuuid_native as _native
+    except ImportError:
+        _native = None
+    if _native is not None:
+        _native._bind()
+        new_v4 = _native.new_v4  # noqa: F811
+        new_v5 = _native.new_v5  # noqa: F811
+        new_v6 = _native.new_v6  # noqa: F811
+        new_v7 = _native.new_v7  # noqa: F811
+        new_v6_batch = _native.new_v6_batch  # noqa: F811
+        new_v7_batch = _native.new_v7_batch  # noqa: F811
+        v6_timestamp = _native.v6_timestamp  # noqa: F811
+        v7_timestamp = _native.v7_timestamp  # noqa: F811
+        v6_to_sql_order = _native.v6_to_sql_order  # noqa: F811
+        v6_from_sql_order = _native.v6_from_sql_order  # noqa: F811
+        v7_to_sql_order = _native.v7_to_sql_order  # noqa: F811
+        v7_from_sql_order = _native.v7_from_sql_order  # noqa: F811
+        BACKEND = "native"

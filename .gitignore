@@ -77,3 +77,4 @@ php/.phpunit.result.cache
 # IDE
 .idea/
 .vs/
+python/src/hyperuuid_native.so

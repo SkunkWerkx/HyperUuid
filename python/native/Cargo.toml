@@ -1,0 +1,16 @@
+[package]
+name = "hyperuuid-native"
+version = "0.1.0"
+edition = "2024"
+description = "CPython extension backend for hyperuuid — the Rust core linked directly into an extension module (PyO3), no C-ABI hop, no ctypes marshalling. The pure-ctypes package remains the universal/Pyodide fallback."
+license = "MIT"
+repository = "https://github.com/SkunkWerkx/HyperUuid"
+publish = false
+
+[lib]
+name = "hyperuuid_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+hyperuuid = { path = "../../rust" }
+pyo3 = { version = "0.27", features = ["extension-module"] }
