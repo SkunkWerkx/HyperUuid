@@ -1,15 +1,15 @@
-name: CI — build native, test every binding, smoke-test packaging
+name: CI — build native, build wasm, test every binding
 
 # The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
 # pipeline — 6 real-hardware legs, the Rust core built fresh per leg, every binding's
 # suite run against it, and the Python/Ruby suites run twice (forced ctypes/Fiddle
 # fallback + PyO3/Magnus extension backends).
 #
-# PR -> ci, tag -> release: this file is routine validation only. It publishes to the
-# private GitHub Packages feeds as an additional smoke-test door (disposable
-# 0.1.0-ci.<run_number> versions, never collide with anything real) but structurally
-# cannot touch a public registry — no job here is capable of it, not just guarded against
-# it. Real, public, permanent publishing lives in release.yml, tag-triggered only.
+# PR -> ci, tag -> release: this file is routine validation only, nothing published
+# anywhere, not even to the private GitHub Packages feeds — no packing step here at all,
+# no compute/storage spent on artifacts nobody was using. build-native's own per-binding
+# test suite is the real validation; real, public, permanent publishing lives in
+# release.yml, tag-triggered only.
 
 on:
   pull_request:
@@ -32,124 +32,9 @@ jobs:
       python_editable: true
       # go_windows stays default-true: the purego fallback carries the Windows legs.
 
-  pack-nuget:
-    needs: build-native
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: native-*
-          path: artifacts
-
-      # actions/download-artifact@v8 lands each artifact under artifacts/<artifact-name>/<file>.
-      # Fan each one out into the csproj's runtimes/**/native/ Pack item so `dotnet pack` picks
-      # them all up via the existing wildcard — no csproj changes needed per RID.
-      - name: Arrange runtimes/{rid}/native/ layout
-        shell: bash
-        run: |
-          set -euo pipefail
-          declare -A LIB_NAMES=(
-            [linux-x64]=libhyperuuid.so
-            [linux-arm64]=libhyperuuid.so
-            [osx-x64]=libhyperuuid.dylib
-            [osx-arm64]=libhyperuuid.dylib
-            [win-x64]=hyperuuid.dll
-            [win-arm64]=hyperuuid.dll
-          )
-          for rid in "${!LIB_NAMES[@]}"; do
-            dest="csharp/HyperUuid/runtimes/$rid/native"
-            mkdir -p "$dest"
-            cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
-          done
-
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: "8.0.x"
-
-      # CI-only prerelease version so repeated manual (workflow_dispatch) runs during testing
-      # don't collide with an already-pushed version on the GitHub Packages feed, which
-      # doesn't allow overwriting an existing version. Real releases (tag push) still need
-      # a deliberate version bump in the csproj before tagging.
-      - name: Pack
-        run: >
-          dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o nupkg
-          -p:PackageVersion=0.1.0-ci.${{ github.run_number }}
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: nuget-package
-          path: nupkg/*.nupkg
-
-      # Publishes to this repo's GitHub Packages NuGet feed (private by default, scoped to
-      # this repo/org — not nuget.org). Proves the whole pipeline for real: if a consumer can
-      # `dotnet add package HyperUuid --source https://nuget.pkg.github.com/SkunkWerkx/index.json`
-      # and it works, that's stronger evidence than just inspecting the .nupkg's file listing.
-      - name: Publish to GitHub Packages
-        run: |
-          dotnet nuget add source \
-            --username ${{ github.actor }} \
-            --password ${{ secrets.GITHUB_TOKEN }} \
-            --store-password-in-clear-text \
-            --name github \
-            "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
-          dotnet nuget push "nupkg/*.nupkg" --source github --skip-duplicate
-
-  pack-maven:
-    needs: build-native
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: native-*
-          path: artifacts
-
-      # Unlike NuGet's per-RID pack-nuget job, this jar bundles every platform's native lib —
-      # a .jar has no package-manager-level platform selection, so NativePlatform.java picks
-      # the right one at runtime instead. All 6 go into the same jar.
-      - name: Arrange native/{rid}/ layout for the jar
-        shell: bash
-        run: |
-          set -euo pipefail
-          declare -A LIB_NAMES=(
-            [linux-x64]=libhyperuuid.so
-            [linux-arm64]=libhyperuuid.so
-            [osx-x64]=libhyperuuid.dylib
-            [osx-arm64]=libhyperuuid.dylib
-            [win-x64]=hyperuuid.dll
-            [win-arm64]=hyperuuid.dll
-          )
-          for rid in "${!LIB_NAMES[@]}"; do
-            dest="java/src/main/resources/native/$rid"
-            mkdir -p "$dest"
-            cp "artifacts/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
-          done
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: "temurin"
-          java-version: "23"
-
-      # Publishes to this repo's GitHub Packages Maven registry (private by default, repo-
-      # scoped — different URL shape than NuGet's org-scoped feed, confirmed against GitHub's
-      # docs before writing this rather than assumed to match). If a consumer can add this as
-      # a Maven/Gradle repository and pull io.github.buvinghausen:hyperuuid, that's the real
-      # proof, not just an artifact listing.
-      - name: Publish to GitHub Packages
-        working-directory: java
-        env:
-          HYPERUUID_VERSION: 0.1.0-ci.${{ github.run_number }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          chmod +x gradlew
-          ./gradlew publish --console=plain
+  # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
+  # Architecture), so it's built on every PR too, not just at release time.
+  build-wasm:
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
+    with:
+      crate: hyperuuid

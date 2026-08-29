@@ -45,11 +45,21 @@ jobs:
       java_resources_dir: java/src/main/resources/native
       python_editable: true
 
+  # Same fail-fast reasoning as build-native above — the Emscripten SDK install is genuinely
+  # slow, no reason to pay for it if the login canary already says publish is going to fail.
+  # Runs in parallel with build-native (neither depends on the other, both just need the
+  # canary to have passed).
+  build-wasm:
+    needs: nuget-org-login
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
+    with:
+      crate: hyperuuid
+
   # Packing has no repo-identity constraint of its own — only the login does — so this part
   # stays shared in HyperForge. Produces a plain build artifact, not a secret and not a job
   # output, so neither of the two restrictions above applies to it.
   nuget-org-pack:
-    needs: build-native
+    needs: [build-native, build-wasm]
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
     with:
       crate: hyperuuid

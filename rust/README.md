@@ -69,6 +69,25 @@ The two APIs return different shapes — this crate hands back a plain `u64` mil
 
 Allocation-free claim: `cargo test --release --test allocation_free`.
 
+## WebAssembly
+
+This crate ships source only (crates.io has no compiled-artifact concept), so there's
+nothing to package per wasm target the way the compiled-binary bindings in this repo need —
+whether and how to target wasm is entirely your call as the consumer, via ordinary
+`cargo build --target wasm32-...`. The one thing worth knowing before you do: this crate's
+only source of entropy is [`getrandom`](https://docs.rs/getrandom), and `getrandom`'s wasm
+support is target-specific, not universal —
+
+- `wasm32-unknown-emscripten` and `wasm32-wasip1`/`wasip2` work with zero extra
+  configuration (real OS-level randomness syscalls exist under both).
+- `wasm32-unknown-unknown` — the target `wasm-pack`/`wasm-bindgen` workflows typically use,
+  since it has no OS underneath at all — does **not** work out of the box. Add
+  `getrandom = { version = "0.4", features = ["wasm_js"] }` to *your own* `Cargo.toml` to
+  pull in the `Crypto.getRandomValues` JS backend. This crate deliberately doesn't enable
+  that feature itself — `getrandom`'s own guidance is that libraries shouldn't, since it
+  bloats every consumer's `Cargo.lock` and can break non-web wasm targets that happen to
+  share this dependency — so it's a decision left where it belongs, on your side.
+
 ## Install
 
 ```toml
@@ -76,7 +95,7 @@ Allocation-free claim: `cargo test --release --test allocation_free`.
 hyperuuid = "0.0.1"
 ```
 
-Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs (`.github/workflows/build-packages.yml`) plus the full `cargo test`/`cargo bench` suite before every release.
+Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs (`.github/workflows/ci.yml`, `release.yml`) plus the full `cargo test`/`cargo bench` suite before every release.
 
 ## License
 

@@ -6,11 +6,12 @@
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
     <!-- The real, committed version — same story as rust/Cargo.toml's manual bump: 0.0.1
-         proves the nuget.org Trusted Publishing leg for real (no local test path exists
-         for it), ahead of the coordinated v0.1.0 release. pack-nuget-org packs this as-is,
-         no CI-side override; pack-nuget's own GitHub Packages job still overrides it with
-         a disposable 0.1.0-ci.<run_number> regardless of what's set here. -->
-    <Version>0.0.1</Version>
+         proved the nuget.org Trusted Publishing leg for real (no local test path exists for
+         it); 0.0.2 re-proves it with the Source Link / Deterministic / symbol-package health
+         fixes applied, ahead of the coordinated v0.1.0 release. pack-nuget-org packs this
+         as-is, no CI-side override; pack-nuget's own GitHub Packages job still overrides it
+         with a disposable 0.1.0-ci.<run_number> regardless of what's set here. -->
+    <Version>0.0.2</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
@@ -29,6 +30,18 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>uuid;guid;rfc9562;identifier;pinvoke;native-aot</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- NuGet Package Explorer's "Health" checks (Source Link, Deterministic, Compiler
+         Flags). No Microsoft.SourceLink.GitHub PackageReference needed — confirmed (not
+         assumed) that the .NET 8 SDK bundles Source Link support for GitHub and every other
+         major provider by default; referencing the package explicitly would only override
+         the SDK's own bundled version. ContinuousIntegrationBuild is gated on GITHUB_ACTIONS
+         so it only kicks in for real CI builds — a local build still gets local-path debug
+         info, which is actively useful when developing. -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Source-generated LibraryImport P/Invoke only, no reflection anywhere in this assembly:
          opts into (and fails the build on) the trim and Native AOT analyzers. -->
@@ -36,18 +49,22 @@
   </PropertyGroup>
 
   <!-- Second build of this exact source, invoked separately (e.g. `dotnet build
-       -p:HyperUuidBrowserBuild=true -p:BaseOutputPath=bin-browser/`) to produce the
+       -p:RuntimeIdentifier=browser-wasm -p:BaseOutputPath=bin-browser/`) to produce the
        browser-wasm-specific assembly variant: UuidGenerator.cs's BROWSER-gated
        NativeLibraryName switches from "hyperuuid" (dlopen — every real native platform) to
        "*" (resolve against the current module — the only thing that works for a
        statically-linked WASM native, which has no separate module to dlopen). This output
        gets copied to runtimes/browser-wasm/lib/net8.0/ before packing (see
-       build-packages.yml) — NuGet's own asset selection picks it automatically for any
+       hyper-pack-nuget.yml) — NuGet's own asset selection picks it automatically for any
        consumer building with RuntimeIdentifier=browser-wasm, falling back to the default
        build under plain lib/net8.0/ for every other RID, with zero action needed from a
-       consumer either way. See UuidGenerator.cs's own remarks and the README's WebAssembly
-       (Blazor) section for the full story. -->
-  <PropertyGroup Condition="'$(HyperUuidBrowserBuild)' == 'true'">
+       consumer either way. Keyed off the real, standard RuntimeIdentifier property (the
+       same pattern used for wasi-wasm elsewhere in the .NET ecosystem), not a bespoke
+       project-specific property — this repo doesn't treat WASM as optional or spike-only
+       for C# anymore, so there's no reason for the toggle to be project-specific either.
+       See UuidGenerator.cs's own remarks and the README's WebAssembly (Blazor) section for
+       the full story. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <DefineConstants>$(DefineConstants);BROWSER</DefineConstants>
   </PropertyGroup>
 
@@ -70,7 +87,7 @@
          including runtimes/browser-wasm/lib/net8.0/ (the BROWSER-defined build of this same
          assembly) and runtimes/browser-wasm/nativeassets/net8.0/ (the Rust core's
          wasm32-unknown-emscripten staticlib) placed there before packing — see
-         build-packages.yml. -->
+         hyper-pack-nuget.yml. -->
     <None Include="runtimes/**" Pack="true" PackagePath="runtimes" CopyToOutputDirectory="PreserveNewest" />
     <!-- Every native file also copied straight to the output root, flattened: a plain in-repo
          ProjectReference (as used by HyperUuid.Tests) doesn't get the deps.json-driven

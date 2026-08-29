@@ -4,6 +4,9 @@
 # .NET
 **/bin/
 **/obj/
+# -p:BaseOutputPath=bin-browser/ for the browser-wasm build (see hyper-pack-nuget.yml) —
+# **/bin/ above doesn't match this, different directory name.
+**/bin-browser/
 # CI (build-nuget.yml) builds and packs these per-RID at pack time; the C# project no longer
 # carries a committed placeholder — keep a local one here for dev/test if you want (see the
 # csproj's runtimes/**/native/* wildcard item), but it's regenerable via `cargo build --release`.
