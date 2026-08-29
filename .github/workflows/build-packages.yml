@@ -104,6 +104,15 @@ jobs:
   # before composing every binding together under a real v0.1.0 tag.
   pack-nuget-org:
     needs: build-native
+    # id-token isn't inherited from repo defaults the way contents/packages is — a reusable
+    # workflow requesting it (see hyper-publish-nuget.yml) can't be granted more than the
+    # caller explicitly passes down, and GitHub validates this at parse time, before any
+    # job runs, causing a whole-workflow startup_failure (not a single failed job) if it's
+    # missing. Confirmed by bisection: github.com/SkunkWerkx/HyperUuid/actions/runs/33266418235
+    # (fails) vs. .../runs/33266675651 (this fix, succeeds).
+    permissions:
+      contents: read
+      id-token: write
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-nuget.yml@master
     with:
       crate: hyperuuid
