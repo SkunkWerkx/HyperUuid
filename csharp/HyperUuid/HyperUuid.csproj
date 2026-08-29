@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
+    <!-- The real, committed version — same story as rust/Cargo.toml's manual bump: 0.0.1
+         proves the nuget.org Trusted Publishing leg for real (no local test path exists
+         for it), ahead of the coordinated v0.1.0 release. pack-nuget-org packs this as-is,
+         no CI-side override; pack-nuget's own GitHub Packages job still overrides it with
+         a disposable 0.1.0-ci.<run_number> regardless of what's set here. -->
+    <Version>0.0.1</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
@@ -18,7 +24,10 @@
     <Description>RFC 9562 UUID v4/v5/v6/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
     <Authors>Brian Buvinghausen</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/SkunkWerkx/HyperUuid</PackageProjectUrl>
     <RepositoryUrl>https://github.com/SkunkWerkx/HyperUuid</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>uuid;guid;rfc9562;identifier;pinvoke;native-aot</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Source-generated LibraryImport P/Invoke only, no reflection anywhere in this assembly:

@@ -73,10 +73,10 @@ Allocation-free claim: `cargo test --release --test allocation_free`.
 
 ```toml
 [dependencies]
-hyperuuid = "0.1"
+hyperuuid = "0.0.1"
 ```
 
-Not yet published to crates.io — proven for now by CI building and testing this crate fresh on 6 real-hardware platform legs (`.github/workflows/build-packages.yml`) plus the full `cargo test`/`cargo bench` suite.
+Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs (`.github/workflows/build-packages.yml`) plus the full `cargo test`/`cargo bench` suite before every release.
 
 ## License
 
