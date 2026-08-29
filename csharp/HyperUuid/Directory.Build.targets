@@ -1,0 +1,31 @@
+<Project>
+
+  <!-- Scoped to this directory only (HyperUuid.csproj alone lives here, no sibling
+       projects) — Directory.Build.targets is imported by the SDK after the project file's
+       own content AND after the SDK's own trailing Sdk.targets import, specifically as the
+       final override point. That's required here, not optional: the wasm-tools workload's
+       own targets default OutputType to Exe once RuntimeIdentifier=browser-wasm is set
+       (confirmed via `dotnet build -getProperty:OutputType` — Exe, not Library, even with
+       a PropertyGroup override inline in the csproj itself), and an ordinary PropertyGroup
+       inside HyperUuid.csproj evaluates too early in the import order to win against that.
+       Unconditional, no RuntimeIdentifier check needed: this project is always a library,
+       for every RID. -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <!-- The wasm-tools workload's WasmBuildApp target hooks itself to AfterTargets="Build"
+         automatically once RuntimeIdentifier=browser-wasm is set (WasmApp.targets sets
+         WasmBuildAppAfterThisTarget="Build" unless already set) — it then fails with
+         "WasmAssembliesToBundle item is empty" because it's building an app bundle (a
+         deployable wasm application), which a plain library has no use for; the compiled
+         assembly itself already comes out of the ordinary Build target regardless.
+         DisableAutoWasmBuildApp (the SDK's own documented opt-out) does NOT work here —
+         verified with -getProperty that it reads back true but WasmBuildAppAfterThisTarget
+         stays "Build" anyway, meaning WasmApp.targets' own conditional assignment runs
+         before this file does. Overriding WasmBuildAppAfterThisTarget directly, to a
+         target name that doesn't exist, does work — confirmed with a real build, not
+         assumed — since it's a plain (unconditioned) property value at the point
+         WasmBuildApp's AfterTargets is actually read. -->
+    <WasmBuildAppAfterThisTarget>_NoOpWasmBuildAppHook</WasmBuildAppAfterThisTarget>
+  </PropertyGroup>
+
+</Project>
