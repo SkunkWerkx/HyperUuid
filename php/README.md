@@ -114,6 +114,37 @@ through its own codec layer, versus this package's single zero-copy FFI call plu
 
 Reproduce: `composer require --dev phpbench/phpbench ramsey/uuid && XDEBUG_MODE=off vendor/bin/phpbench run --report=aggregate`.
 
+### ext-php-rs spike (not shipped)
+
+The numbers above establish PHP's `ext-ffi` crossing as cheap (~105ns) relative to
+ctypes/Fiddle — the reason the Python and Ruby bindings got a second, native-extension
+backend (PyO3, Magnus) and PHP didn't. That reasoning was asserted, not measured, so
+[`native/`](native/) spikes the same move for PHP — the Rust core linked straight into a
+Zend extension via [`ext-php-rs`](https://ext-php.rs) — and measures it against `Runtime.php`
+at the same layer (raw 16-byte strings, no `Uuid` value-object construction on either side).
+
+Measured on linux-arm64, PHP 8.5, `XDEBUG_MODE=off`, same 5-iterations × 1000-revs shape as
+the table above (min of the 5 iteration means; see [`native/bench_compare.php`](native/bench_compare.php)):
+
+| Call | `ext-ffi` (`Runtime.php`) | `ext-php-rs` native | Speedup |
+| --- | ---: | ---: | ---: |
+| `newV4` | 223ns | 135ns | **1.65x** |
+| `newV5` | 244ns | 175ns | 1.40x |
+| `newV6` | 207ns | 113ns | **1.83x** |
+| `newV7` | 210ns | 107ns | **1.98x** |
+| `newV6Batch(1000)` | 19.6µs | 19.3µs | 1.02x |
+| `newV7Batch(1000)` | 16.0µs | 15.8µs | 1.02x |
+
+So the answer turns out to be: worth it for single-item calls (the ~105ns FFI floor is real,
+but so is a further ~100ns of PHP-level `Runtime::` call overhead around it that a native
+extension skips entirely — nearly 2x on `newV6`/`newV7`), and not worth it for batch calls,
+where 1000 UUIDs' worth of native computation dwarfs the one-time crossing cost either way.
+
+Kept as a working reference for whoever wants to chase the last bit of single-call
+performance, not folded into `skunkwerkx/hyperuuid` — see [`native/README.md`](native/README.md)
+for why (Composer has no way to deliver a compiled Zend extension the way it delivers the
+FFI `.so`; this would need real platform/ABI packaging work to ship for real).
+
 ## Install
 
 Not yet published to Packagist under a registered `skunkwerkx` presence — for now this is

@@ -2,7 +2,7 @@
 name = "hyperuuid"
 version = "0.1.0"
 edition = "2024"
-description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — a high-performance, allocation-free core, wrapped as a native library (libhyperuuid) for direct FFI from every host language."
+description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/SkunkWerkx/HyperUuid"
