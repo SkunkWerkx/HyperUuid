@@ -15,26 +15,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Fail-fast canary, not the real login — its output is deliberately unused. Exists purely
-  # so build-native (below) doesn't start at all if Trusted Publishing is going to fail;
-  # ~25 seconds to find out vs. burning the entire 6-platform matrix on a package that was
-  # never going to publish anyway, with no manual cancellation needed either — build-native
-  # simply never starts. The *real* login happens again, fresh, in nuget-org-publish below,
-  # right before the actual push — a pre-obtained key can't be handed down as a job output
-  # (GitHub redacts any output the runner has flagged as a secret before sending it to
-  # another job at all — confirmed, not assumed), so there's no way to reuse this one.
-  nuget-org-login:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - name: NuGet login (OIDC -> temp API key)
-        uses: NuGet/login@v1
-        with:
-          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
-
   build-native:
-    needs: nuget-org-login
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
     with:
       project: HyperUuid
@@ -45,20 +26,31 @@ jobs:
       java_resources_dir: java/src/main/resources/native
       python_editable: true
 
-  # Same fail-fast reasoning as build-native above — the Emscripten SDK install is genuinely
-  # slow, no reason to pay for it if the login canary already says publish is going to fail.
-  # Runs in parallel with build-native (neither depends on the other, both just need the
-  # canary to have passed).
+  # NuGet leg paused while PyPI gets built out — nuget.info flagged a real, unresolved
+  # question about whether Deterministic/Compiler Flags survive building HyperUuid.csproj
+  # twice (normal + browser-wasm) in the same job sharing one obj/ directory, worth digging
+  # into properly rather than half-attention alongside PyPI work. v0.0.2 is already live and
+  # unaffected by this pause. Un-gating: flip every if: false below back on together, since
+  # they're a connected chain (login -> pack -> publish).
+  nuget-org-login:
+    if: false
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
+
   build-wasm:
-    needs: nuget-org-login
+    if: false
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
     with:
       crate: hyperuuid
 
-  # Packing has no repo-identity constraint of its own — only the login does — so this part
-  # stays shared in HyperForge. Produces a plain build artifact, not a secret and not a job
-  # output, so neither of the two restrictions above applies to it.
   nuget-org-pack:
+    if: false
     needs: [build-native, build-wasm]
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
     with:
@@ -66,10 +58,8 @@ jobs:
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
       runtimes_dir: csharp/HyperUuid/runtimes
 
-  # The real login + push, local for the same job_workflow_ref reason as nuget-org-login
-  # above. No checkout needed — just the packed artifact from nuget-org-pack, a fresh login,
-  # and the push.
   nuget-org-publish:
+    if: false
     needs: nuget-org-pack
     runs-on: ubuntu-latest
     permissions:
