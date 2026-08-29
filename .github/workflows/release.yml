@@ -1,0 +1,102 @@
+name: Release — publish to real, public registries
+
+# PR -> ci (see ci.yml), tag -> release: this file is the only place a real, permanent,
+# public publish can happen. workflow_dispatch stays enabled for now specifically because
+# Trusted Publishing has no local test path at all (the OIDC exchange only exists inside an
+# Actions runner) — it's the only way to prove a leg works before composing every binding
+# together under a real v0.1.0 tag. Once every leg is proven, workflow_dispatch comes off
+# this file entirely so a public publish can only ever happen from a deliberate tag push,
+# never a manual button press — see the pack-crates comment below for why that matters.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  # Fail-fast canary, not the real login — its output is deliberately unused. Exists purely
+  # so build-native (below) doesn't start at all if Trusted Publishing is going to fail;
+  # ~25 seconds to find out vs. burning the entire 6-platform matrix on a package that was
+  # never going to publish anyway, with no manual cancellation needed either — build-native
+  # simply never starts. The *real* login happens again, fresh, in nuget-org-publish below,
+  # right before the actual push — a pre-obtained key can't be handed down as a job output
+  # (GitHub redacts any output the runner has flagged as a secret before sending it to
+  # another job at all — confirmed, not assumed), so there's no way to reuse this one.
+  nuget-org-login:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
+
+  build-native:
+    needs: nuget-org-login
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
+    with:
+      project: HyperUuid
+      crate: hyperuuid
+      pure_env: HYPERUUID_PURE
+      csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
+      csharp_runtimes_dir: csharp/HyperUuid/runtimes
+      java_resources_dir: java/src/main/resources/native
+      python_editable: true
+
+  # Packing has no repo-identity constraint of its own — only the login does — so this part
+  # stays shared in HyperForge. Produces a plain build artifact, not a secret and not a job
+  # output, so neither of the two restrictions above applies to it.
+  nuget-org-pack:
+    needs: build-native
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
+    with:
+      crate: hyperuuid
+      csproj_path: csharp/HyperUuid/HyperUuid.csproj
+      runtimes_dir: csharp/HyperUuid/runtimes
+
+  # The real login + push, local for the same job_workflow_ref reason as nuget-org-login
+  # above. No checkout needed — just the packed artifact from nuget-org-pack, a fresh login,
+  # and the push.
+  nuget-org-publish:
+    needs: nuget-org-pack
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nuget-org-package
+          path: nupkg-org
+
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
+
+      - name: Publish to nuget.org
+        run: >
+          dotnet nuget push "nupkg-org/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+  # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
+  # so this doesn't depend on build-native the way pack-nuget-org does.
+  # Disabled: rust/Cargo.toml is still pinned at 0.0.1, already published — a run right now
+  # would just burn a job on a guaranteed duplicate-version rejection. Flip back to true
+  # once Cargo.toml is bumped past 0.0.1 (its own CI-proving run) or at the real v0.1.0 cut.
+  # This is exactly the kind of accidental-trigger this file's workflow_dispatch note above
+  # is about: once every leg is proven, removing workflow_dispatch here means a stray manual
+  # run can never accidentally attempt this (or any other real publish) at all.
+  pack-crates:
+    if: false
+    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
+    secrets:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -1,16 +1,19 @@
-name: Build native libraries and pack NuGet + Maven
+name: CI — build native, test every binding, smoke-test packaging
 
 # The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
 # pipeline — 6 real-hardware legs, the Rust core built fresh per leg, every binding's
 # suite run against it, and the Python/Ruby suites run twice (forced ctypes/Fiddle
-# fallback + PyO3/Magnus extension backends). This file states what's specific to
-# HyperUuid, plus the packaging jobs that consume the pipeline's native-{rid} artifacts.
+# fallback + PyO3/Magnus extension backends).
+#
+# PR -> ci, tag -> release: this file is routine validation only. It publishes to the
+# private GitHub Packages feeds as an additional smoke-test door (disposable
+# 0.1.0-ci.<run_number> versions, never collide with anything real) but structurally
+# cannot touch a public registry — no job here is capable of it, not just guarded against
+# it. Real, public, permanent publishing lives in release.yml, tag-triggered only.
 
 on:
+  pull_request:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 jobs:
   build-native:
@@ -96,40 +99,6 @@ jobs:
             "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
           dotnet nuget push "nupkg/*.nupkg" --source github --skip-duplicate
 
-  # nuget.org Trusted Publishing's OIDC exchange has to happen from a workflow file that
-  # physically lives in this repo — confirmed the hard way with a real 401 ("job_workflow_ref
-  # ... does not start with SkunkWerkx/HyperUuid/.github/workflows/") when this login lived
-  # in the shared hyper-publish-nuget.yml instead. So just the login stays local: it needs
-  # no build-native artifacts, so it runs in parallel with that matrix rather than waiting
-  # on it. The resulting key is short-lived (1 hour, per nuget.org's own docs) — comfortably
-  # inside how long build-native takes, but not something to let sit around.
-  nuget-org-login:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    outputs:
-      api_key: ${{ steps.login.outputs.NUGET_API_KEY }}
-    steps:
-      - name: NuGet login (OIDC -> temp API key)
-        uses: NuGet/login@v1
-        id: login
-        with:
-          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
-
-  # The actual pack/push logic is shared in HyperForge — it has no repo-identity constraint
-  # of its own, only the login above does. Runs on workflow_dispatch too: Trusted Publishing
-  # has no local test path at all, so a manual dispatch run is the only way to prove this leg
-  # works before composing every binding together under a real v0.1.0 tag.
-  pack-nuget-org:
-    needs: [build-native, nuget-org-login]
-    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-nuget.yml@master
-    with:
-      crate: hyperuuid
-      csproj_path: csharp/HyperUuid/HyperUuid.csproj
-      runtimes_dir: csharp/HyperUuid/runtimes
-    secrets:
-      NUGET_API_KEY: ${{ needs.nuget-org-login.outputs.api_key }}
-
   pack-maven:
     needs: build-native
     runs-on: ubuntu-latest
@@ -184,14 +153,3 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew publish --console=plain
-
-  # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
-  # so this doesn't depend on build-native the way pack-nuget/pack-maven do.
-  # Disabled: rust/Cargo.toml is still pinned at 0.0.1, already published — a run right now
-  # would just burn a job on a guaranteed duplicate-version rejection. Flip back to true
-  # once Cargo.toml is bumped past 0.0.1 (its own CI-proving run) or at the real v0.1.0 cut.
-  pack-crates:
-    if: false
-    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
-    secrets:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
