@@ -167,7 +167,11 @@ jobs:
 
   # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
   # so this doesn't depend on build-native the way pack-nuget/pack-maven do.
+  # Disabled: rust/Cargo.toml is still pinned at 0.0.1, already published — a run right now
+  # would just burn a job on a guaranteed duplicate-version rejection. Flip back to true
+  # once Cargo.toml is bumped past 0.0.1 (its own CI-proving run) or at the real v0.1.0 cut.
   pack-crates:
+    if: false
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
