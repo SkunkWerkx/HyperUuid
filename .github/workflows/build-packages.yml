@@ -96,28 +96,39 @@ jobs:
             "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
           dotnet nuget push "nupkg/*.nupkg" --source github --skip-duplicate
 
-  # Publishes the real, public nuget.org package via Trusted Publishing (no long-lived API
-  # key). The csproj's own <Version> is the source of truth (same story as rust/Cargo.toml's
-  # manual bump) — no CI-side version derivation yet. Runs on workflow_dispatch too:
-  # Trusted Publishing has no local test path at all (the OIDC exchange only exists inside
-  # an Actions runner), so a manual dispatch run is the only way to prove this leg works
-  # before composing every binding together under a real v0.1.0 tag.
-  pack-nuget-org:
-    needs: build-native
-    # id-token isn't inherited from repo defaults the way contents/packages is — a reusable
-    # workflow requesting it (see hyper-publish-nuget.yml) can't be granted more than the
-    # caller explicitly passes down, and GitHub validates this at parse time, before any
-    # job runs, causing a whole-workflow startup_failure (not a single failed job) if it's
-    # missing. Confirmed by bisection: github.com/SkunkWerkx/HyperUuid/actions/runs/33266418235
-    # (fails) vs. .../runs/33266675651 (this fix, succeeds).
+  # nuget.org Trusted Publishing's OIDC exchange has to happen from a workflow file that
+  # physically lives in this repo — confirmed the hard way with a real 401 ("job_workflow_ref
+  # ... does not start with SkunkWerkx/HyperUuid/.github/workflows/") when this login lived
+  # in the shared hyper-publish-nuget.yml instead. So just the login stays local: it needs
+  # no build-native artifacts, so it runs in parallel with that matrix rather than waiting
+  # on it. The resulting key is short-lived (1 hour, per nuget.org's own docs) — comfortably
+  # inside how long build-native takes, but not something to let sit around.
+  nuget-org-login:
+    runs-on: ubuntu-latest
     permissions:
-      contents: read
       id-token: write
+    outputs:
+      api_key: ${{ steps.login.outputs.NUGET_API_KEY }}
+    steps:
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
+
+  # The actual pack/push logic is shared in HyperForge — it has no repo-identity constraint
+  # of its own, only the login above does. Runs on workflow_dispatch too: Trusted Publishing
+  # has no local test path at all, so a manual dispatch run is the only way to prove this leg
+  # works before composing every binding together under a real v0.1.0 tag.
+  pack-nuget-org:
+    needs: [build-native, nuget-org-login]
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-nuget.yml@master
     with:
       crate: hyperuuid
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
       runtimes_dir: csharp/HyperUuid/runtimes
+    secrets:
+      NUGET_API_KEY: ${{ needs.nuget-org-login.outputs.api_key }}
 
   pack-maven:
     needs: build-native
