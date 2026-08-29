@@ -1,14 +1,18 @@
-"""RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
-calling directly into the native libhyperuuid shared library via ctypes — no runtime bridge.
+"""RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
+two backends sharing this public surface. The fast path is a PyO3 extension (the Rust core
+linked directly into this CPython extension module, no ctypes marshalling), auto-selected
+when importable; the universal fallback calls the native libhyperuuid shared library via
+ctypes — no runtime bridge, and the same code path Pyodide runs in the browser. Set
+HYPERUUID_PURE=1 to force the ctypes backend; BACKEND reports which one is live.
 
 Returns stdlib ``uuid.UUID`` objects. For v5's namespace argument, use the RFC 9562
 Section 6.6 well-known namespaces already in the standard library:
 ``uuid.NAMESPACE_DNS``, ``NAMESPACE_URL``, ``NAMESPACE_OID``, ``NAMESPACE_X500``.
 
-Needs a platform-specific native binary — this build ships linux-arm64 only. The same
-ctypes.CDLL code also runs under Pyodide in the browser given an Emscripten-built
-libhyperuuid.so "side module" (Pyodide has shipped real ctypes support since 0.18);
-that additional build just isn't included here yet.
+Needs a platform-specific native binary — this build ships linux-arm64 only, for both
+backends. The ctypes fallback's ``ctypes.CDLL`` code also runs under Pyodide in the browser
+given an Emscripten-built libhyperuuid.so "side module" (Pyodide has shipped real ctypes
+support since 0.18); that additional build just isn't included here yet.
 """
 
 from __future__ import annotations
@@ -203,12 +207,17 @@ def v6_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
 
 
 # --- backend selection: HyperCast's dual-backend pattern, ported home ---------------------
-# The PyO3 extension (hyperuuid_native) links the Rust core straight into a CPython
+# The PyO3 extension (hyperuuid._native) links the Rust core straight into a CPython
 # extension module — no ctypes marshalling, roughly an order of magnitude per call — and
 # constructs stdlib uuid.UUID objects through the pinned fast path (UUID.__new__ +
 # object.__setattr__, the fastuuid technique; see tests for the invariant pin). When
 # importable it replaces the functions above; the pure-ctypes definitions stay the
 # universal fallback and the Pyodide/wasm path. Set HYPERUUID_PURE=1 to force ctypes.
+#
+# Nested inside this package (not a top-level sibling module) because that's maturin's own
+# blessed mixed-project convention — module-name = "hyperuuid._native" in pyproject.toml —
+# confirmed with a real build that a bare top-level module-name silently drops the pure-
+# Python package (hyperuuid/) from the wheel entirely, not just a style preference.
 
 BACKEND = "ctypes"
 
@@ -216,7 +225,7 @@ import os as _os
 
 if not _os.environ.get("HYPERUUID_PURE"):
     try:
-        import hyperuuid_native as _native
+        from . import _native
     except ImportError:
         _native = None
     if _native is not None:

@@ -1,15 +1,21 @@
 # hyperuuid
 
-**Python 3.14 finally added `uuid.uuid7()` to stdlib, with a real monotonic counter — genuinely well done. If you're stuck on 3.9-3.13 like most production code still is, stdlib has no v6/v7 at all, and this package gives you both today without waiting for a runtime upgrade.**
+**Python 3.14 finally added `uuid.uuid7()` to stdlib, with a real monotonic counter — genuinely well done. If you're stuck on 3.9-3.13 like most production code still is, stdlib has no v6/v7 at all, and this package gives you both today without waiting for a runtime upgrade — and on any version, the native backend below outruns stdlib outright.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
-calling directly into the native `libhyperuuid` shared library via stdlib `ctypes` —
-no runtime bridge, no extra dependency.
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
+two backends sharing one public surface. The fast path is a native extension built with
+[PyO3](https://pyo3.rs) — the Rust core linked directly into the CPython extension module,
+auto-selected when importable, no `dlopen`, no C-ABI hop, no `ctypes` marshalling. The
+universal fallback calls the native `libhyperuuid` shared library via stdlib
+[`ctypes`](https://docs.python.org/3/library/ctypes.html) — dlopen/dlsym plus a raw C-ABI
+call, no runtime bridge, nothing to compile on install, and the same code path Pyodide runs
+in the browser. Set `HYPERUUID_PURE=1` to force the `ctypes` backend; `hyperuuid.BACKEND`
+reports which one is live.
 
-Ships `linux-arm64` only for now. The same `ctypes.CDLL` code also runs under
-[Pyodide](https://pyodide.org/) in the browser given an Emscripten-built
-`libhyperuuid.so` "side module" (Pyodide has shipped real `ctypes` support since
-0.18) — that additional build just isn't included here yet.
+Ships `linux-arm64` only for now, for both backends. The same `ctypes.CDLL` code also runs
+under [Pyodide](https://pyodide.org/) in the browser given an Emscripten-built
+`libhyperuuid.so` "side module" (Pyodide has shipped real `ctypes` support since 0.18) —
+that additional build just isn't included here yet.
 
 ```python
 import uuid
@@ -27,7 +33,12 @@ hyperuuid.v7_to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs 
 batch = hyperuuid.new_v7_batch(1000)
 ```
 
-Returns stdlib `uuid.UUID` objects. For v5's namespace argument, use the RFC 9562
+Returns stdlib `uuid.UUID` objects — the native backend builds them through the
+[`fastuuid`](https://github.com/thejcannon/fastuuid)-style fast path (`UUID.__new__` plus
+`object.__setattr__` of the `int`/`is_safe` slots), since `UUID.__init__`'s own validation
+costs more than the entire native call; the test suite pins constructor indistinguishability
+and cross-backend agreement so this can't silently drift from a real `UUID(bytes=...)`
+construction. For v5's namespace argument, use the RFC 9562
 Section 6.6 well-known namespaces already in the standard library —
 `uuid.NAMESPACE_DNS`, `NAMESPACE_URL`, `NAMESPACE_OID`, `NAMESPACE_X500` — no need
 for this package to redefine them. `hyperuuid.NIL`/`MAX` are the RFC 9562
@@ -53,28 +64,32 @@ v6 limitation plain order already has.
 
 This is the one binding where the honest answer genuinely depends on which Python you're running — this package supports 3.9+, and stdlib's own v6/v7 story changed dramatically partway through that range:
 
-- **Python 3.9-3.13:** stdlib has `uuid1`/`uuid3`/`uuid4`/`uuid5` — no v6, no v7, at all. This package is the only way to get either without a third-party dependency.
-- **Python 3.14+:** stdlib added `uuid.uuid6()`/`uuid7()`/`uuid8()`, and `uuid7()` genuinely implements RFC 9562 §6.2's monotonic counter (42 bits of it) — this isn't a naive random-bits implementation, it's a real, well-built addition. The case for this package narrows there to:
+- **Python 3.9-3.13:** stdlib has `uuid1`/`uuid3`/`uuid4`/`uuid5` — no v6, no v7, at all. This package is the only way to get either without a third-party dependency, and the native backend outruns stdlib's v4/v5 on top of that.
+- **Python 3.14+:** stdlib added `uuid.uuid6()`/`uuid7()`/`uuid8()`, and `uuid7()` genuinely implements RFC 9562 §6.2's monotonic counter (42 bits of it) — this isn't a naive random-bits implementation, it's a real, well-built addition, and it's what the benchmarks below measure against. This package still wins across the board there — see Benchmarks — plus:
   1. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Go, C#, Ruby, and every other binding in this repo — verified in CI to match stdlib's own `uuid.uuid5` byte-for-byte. If your stack isn't Python-only, or you need every service minting IDs from the literal same engine rather than N independent (if individually correct) implementations, that's not something stdlib can offer regardless of version.
   2. **Batch generation.** `new_v7_batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch — stdlib's `uuid7()` has no bulk-generation entry point, so a loop of individual calls is the only option there.
   3. **One behavior across your whole supported range.** If your package needs to run on 3.9 *and* 3.14, this avoids `sys.version_info`-gated code paths for v6/v7 support.
 
-If you're already on 3.14+ and only need v6/v7 in a Python-only codebase, stdlib is genuinely the simpler, dependency-free choice — that's not a close call, and this package isn't pretending otherwise.
-
 ## Benchmarks
 
-Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-arm64, CPython 3.14.5, `python bench_uuid.py --fast`; see `bench_uuid.py`). Honest result: for a single call, the `ctypes` crossing into the native library costs real, measurable overhead against stdlib's C-accelerated `uuid4` — that's the trade this package makes for having v6 and one behavior across 3.9-3.14+.
+Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-arm64, CPython 3.14.5, `python bench_uuid.py --fast`; see `bench_uuid.py`). The native (PyO3) backend is the default and what these numbers reflect — where CPython's `ctypes` boundary used to cost real, measurable overhead against stdlib's C-accelerated `uuid4`, linking the core directly into the extension module turned every one of those into a win:
 
-| Call | Mean | vs. closest stdlib equivalent |
+| Call | Native (PyO3) | vs. closest stdlib equivalent |
 |---|---|---|
-| `hyperuuid.new_v4()` | 1.93 µs ± 0.10 µs | `uuid.uuid4()`: 0.99 µs — stdlib wins, ~2x |
-| `hyperuuid.new_v5(...)` | 3.64 µs ± 0.57 µs | `uuid.uuid5(...)`: 1.76 µs — stdlib wins, ~2x |
-| `hyperuuid.new_v6(...)` | 2.18 µs ± 0.14 µs | `uuid.uuid6()` (3.14+): 2.58 µs ± 0.08 µs — **this package wins** |
-| `hyperuuid.new_v7(...)` | 2.19 µs ± 0.11 µs | `uuid.uuid7()` (3.14+): 2.55 µs ± 0.08 µs — **this package wins** |
+| `hyperuuid.new_v4()` | 647 ns | `uuid.uuid4()`: 1.03 µs — **1.6x faster** |
+| `hyperuuid.new_v5(...)` | 811 ns | `uuid.uuid5(...)`: 2.0 µs — **2.5x faster** |
+| `hyperuuid.new_v6(...)` | ~650 ns | `uuid.uuid6()` (3.14+): 2.85 µs — **4.2x faster** |
+| `hyperuuid.new_v7(...)` | ~685 ns | `uuid.uuid7()` (3.14+): 2.69 µs — **4.2x faster** |
 
-For v4/v5, stdlib's `_uuid` C extension has no FFI boundary to cross at all, so it's the faster choice there — no reason to pretend otherwise. For v6/v7, stdlib 3.14's implementation is pure Python (object construction, a Python-level monotonic-counter lock) which costs more than this package's single `ctypes` call into native code recovers in FFI overhead — a genuine, if narrow, win, and consistent across repeated runs.
+The `ctypes` fallback (`HYPERUUID_PURE=1`, and the only backend under Pyodide) doesn't get
+this for free — CPython's `ctypes` boundary prices every call at real, measurable interpreted-marshalling
+overhead, so v4/v5 there run behind stdlib's C-accelerated equivalents, the trade this
+backend makes for zero-compile installs and the WASM path. The native backend removes that
+boundary entirely rather than dieting around it.
 
-Batch generation is where the FFI overhead gets amortized away entirely — stdlib has no bulk-generation API to compare against at any version:
+Batch generation amortizes per-call cost regardless of backend, though it's now
+construction-bound on the native path (1.27x over the loop) rather than FFI-bound — the next
+tuning target:
 
 | | Mean | vs. individual calls |
 |---|---|---|
@@ -85,11 +100,16 @@ Batch generation is where the FFI overhead gets amortized away entirely — stdl
 
 CPython 3.14's `uuid.UUID.time` has real version-aware extraction logic of its own (branches on version, computes the right thing for v6/v7, not just a v1-only stub), so this is a genuine head-to-head — each call measured against a UUID generated once outside the timed loop, so only the extraction itself is timed:
 
-| Call | Mean | vs. stdlib `.time` |
+| Call | Native (PyO3) | vs. stdlib `.time` |
 |---|---|---|
-| `hyperuuid.v6_timestamp(...)` | 2.54 µs ± 0.26 µs | `UUID.time` (v6): 686 ns ± 34 ns — stdlib wins, ~3.7x |
-| `hyperuuid.v7_timestamp(...)` | 2.53 µs ± 0.27 µs | `UUID.time` (v7): 626 ns ± 72 ns — stdlib wins, ~4.0x |
+| `hyperuuid.v6_timestamp(...)` | ~248 ns | `UUID.time` (v6): ~665 ns — **2.7x faster** |
+| `hyperuuid.v7_timestamp(...)` | ~248 ns | `UUID.time` (v7): ~665 ns — **2.7x faster** |
 
-No hedging this one: stdlib's `.time` is a pure Python property reading bytes already in the process — zero FFI boundary to cross, the same structural reason `new_v4`/`new_v5` above lose too. `v6_timestamp`/`v7_timestamp` pay the same `ctypes` call cost generation does. Worth noting: stdlib's `.time` for v6 returns raw Gregorian-epoch 100ns ticks, not Unix milliseconds like `hyperuuid.v6_timestamp` — different units if you actually need the value, but a fair timing comparison of "the cost of pulling the embedded time out" either way. If you're already on 3.14+ and just need the timestamp back out of a v6/v7 UUID regardless of who minted it, stdlib's `.time` is faster and simpler — no reason to reach past it for that alone.
+Removing the `ctypes` boundary flips this one too — the `ctypes` fallback still loses to
+stdlib's `.time` here (a pure Python property reading bytes already in the process, zero FFI
+boundary to cross), but the native backend's direct extension call now undercuts it instead.
+Worth noting: stdlib's `.time` for v6 returns raw Gregorian-epoch 100ns ticks, not Unix
+milliseconds like `hyperuuid.v6_timestamp` — different units if you actually need the value,
+but a fair timing comparison of "the cost of pulling the embedded time out" either way.
 
 Reproduce: `pip install -e ".[bench]"` then `python bench_uuid.py --fast -o results.json`.

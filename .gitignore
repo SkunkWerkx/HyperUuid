@@ -80,8 +80,15 @@ php/.phpunit.result.cache
 # IDE
 .idea/
 .vs/
+# Stale paths from before the maturin restructure (top-level sibling module, not nested) —
+# harmless to keep matching in case any local checkout still has one lying around.
 python/src/hyperuuid_native.so
 python/src/hyperuuid_native.pyd
+# maturin develop's own local-dev-install output — nested at hyperuuid._native now, not a
+# top-level sibling. abi3 wheels carry one build per platform regardless of Python version
+# (hence just *.abi3.so, not a per-version-tagged glob), but .pyd covers Windows either way.
+python/src/hyperuuid/_native.abi3.so
+python/src/hyperuuid/_native.pyd
 # Staged Magnus extension for local dev/test (built from ruby/native/, staged the same way
 # as the Python line above; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so

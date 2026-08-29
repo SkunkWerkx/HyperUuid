@@ -87,6 +87,34 @@ jobs:
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
+  # PyPI leg: real multi-platform PyO3 native wheels from day one, no throwaway single-wheel
+  # version. abi3-py39 collapses the matrix to one wheel per platform (not per Python version),
+  # so 6 legs covers every supported CPython 3.9+ on every platform. Deliberately independent
+  # of the paused NuGet chain above — only needs build-native's per-platform artifacts.
+  pypi-build-wheels:
+    needs: build-native
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
+    with:
+      crate: hyperuuid
+      python_source_dir: python
+
+  pypi-publish:
+    needs: pypi-build-wheels
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pypi-wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
   # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
   # so this doesn't depend on build-native the way pack-nuget-org does.
   # Disabled: rust/Cargo.toml is still pinned at 0.0.1, already published — a run right now

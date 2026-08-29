@@ -74,8 +74,15 @@ enum Name<'py> {
 #[pyfunction]
 fn new_v5(py: Python<'_>, namespace: Bound<'_, PyAny>, name: Name<'_>) -> PyResult<Py<PyAny>> {
     let namespace = Uuid::from_bytes(uuid_bytes(&namespace)?);
-    let name_bytes = match &name {
-        Name::Str(text) => text.to_str()?.as_bytes(),
+    // to_str() needs non-limited-API access, unavailable under abi3-py39; to_cow() is the
+    // abi3-safe equivalent, but returns an owned Cow rather than borrowing directly from
+    // `text` the way to_str() did, so the Cow needs its own binding to outlive the match.
+    let name_owned;
+    let name_bytes: &[u8] = match &name {
+        Name::Str(text) => {
+            name_owned = text.to_cow()?;
+            name_owned.as_bytes()
+        }
         Name::Bytes(bytes) => bytes.as_bytes(),
     };
     make_uuid(py, *v5::new_v5(namespace, name_bytes).as_bytes())
@@ -229,8 +236,12 @@ fn _bind(py: Python<'_>) -> PyResult<()> {
     Ok(())
 }
 
+// Name must match module-name's last segment in pyproject.toml ("hyperuuid._native") —
+// PyO3 generates a PyInit_<name> symbol from this function's own name, and maturin/Python's
+// import machinery look for PyInit__native specifically (confirmed via a real build warning,
+// not assumed).
 #[pymodule]
-fn hyperuuid_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(new_v4, m)?)?;
     m.add_function(wrap_pyfunction!(new_v5, m)?)?;
     m.add_function(wrap_pyfunction!(new_v6, m)?)?;
