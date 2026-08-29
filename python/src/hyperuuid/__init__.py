@@ -1,27 +1,23 @@
-"""RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
-two backends sharing this public surface. The fast path is a PyO3 extension (the Rust core
-linked directly into this CPython extension module, no ctypes marshalling), auto-selected
-when importable; the universal fallback calls the native libhyperuuid shared library via
-ctypes — no runtime bridge, and the same code path Pyodide runs in the browser. Set
-HYPERUUID_PURE=1 to force the ctypes backend; BACKEND reports which one is live.
+"""RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. A
+PyO3 extension (``hyperuuid._native``) links the Rust core directly into this CPython
+extension module — no ctypes marshalling, no runtime bridge.
 
 Returns stdlib ``uuid.UUID`` objects. For v5's namespace argument, use the RFC 9562
 Section 6.6 well-known namespaces already in the standard library:
 ``uuid.NAMESPACE_DNS``, ``NAMESPACE_URL``, ``NAMESPACE_OID``, ``NAMESPACE_X500``.
 
-Needs a platform-specific native binary — this build ships linux-arm64 only, for both
-backends. The ctypes fallback's ``ctypes.CDLL`` code also runs under Pyodide in the browser
-given an Emscripten-built libhyperuuid.so "side module" (Pyodide has shipped real ctypes
-support since 0.18); that additional build just isn't included here yet.
+Ships as real platform-specific wheels (linux/macOS/Windows, x64/arm64) built by
+``maturin`` — no compiler needed to install.
 """
 
 from __future__ import annotations
 
 import datetime
-import time
 import uuid as _uuid
 
-from . import _runtime
+from . import _native
+
+_native._bind()
 
 __all__ = [
     "new_v4",
@@ -49,7 +45,7 @@ MAX = _uuid.UUID(bytes=b"\xff" * 16)
 
 def new_v4() -> _uuid.UUID:
     """Create a random UUID version 4 (RFC 9562 §5.4)."""
-    return _uuid.UUID(bytes=_runtime.new_v4())
+    return _native.new_v4()
 
 
 def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
@@ -58,8 +54,7 @@ def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
     The same ``(namespace, name)`` pair always produces the same UUID. ``name`` may
     be ``str`` (encoded as UTF-8) or raw ``bytes``.
     """
-    name_bytes = name.encode("utf-8") if isinstance(name, str) else bytes(name)
-    return _uuid.UUID(bytes=_runtime.new_v5(namespace.bytes, name_bytes))
+    return _native.new_v5(namespace, name)
 
 
 def new_v6(unix_millis: int | None = None) -> _uuid.UUID:
@@ -71,9 +66,7 @@ def new_v6(unix_millis: int | None = None) -> _uuid.UUID:
     — unlike version 7, there is no monotonic counter, so calls within the same millisecond
     are not guaranteed to sort in creation order.
     """
-    if unix_millis is None:
-        unix_millis = int(time.time() * 1000)
-    return _uuid.UUID(bytes=_runtime.new_v6(unix_millis))
+    return _native.new_v6(unix_millis)
 
 
 def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
@@ -86,9 +79,7 @@ def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     epoch rather than 1970, tops out around the year 5236 — well short of ``datetime``'s own
     year-9999 ceiling.
     """
-    millis = _runtime.v6_unix_millis(uuid_value.bytes)
-    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-    return epoch + datetime.timedelta(milliseconds=millis)
+    return _native.v6_timestamp(uuid_value)
 
 
 def new_v6_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]:
@@ -97,10 +88,7 @@ def new_v6_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]
 
     Defaults to the current time.
     """
-    if unix_millis is None:
-        unix_millis = int(time.time() * 1000)
-    raw = _runtime.new_v6_batch(count, unix_millis)
-    return [_uuid.UUID(bytes=raw[i * 16 : i * 16 + 16]) for i in range(count)]
+    return _native.new_v6_batch(count, unix_millis)
 
 
 def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
@@ -109,9 +97,7 @@ def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
     Defaults to the current time; pass an explicit Unix-epoch millisecond timestamp
     (non-negative, fitting in 48 bits) to embed a specific time instead.
     """
-    if unix_millis is None:
-        unix_millis = int(time.time() * 1000)
-    return _uuid.UUID(bytes=_runtime.new_v7(unix_millis))
+    return _native.new_v7(unix_millis)
 
 
 def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
@@ -123,14 +109,9 @@ def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
 
     Raises ``OverflowError`` for a (spec-valid) embedded timestamp past year 9999 — the RFC's
     48-bit millisecond field holds values up to the year 10889, but ``datetime.datetime``
-    cannot represent a year beyond 9999. Built from ``timedelta`` arithmetic on the epoch
-    rather than ``fromtimestamp()``, which delegates to the platform C library and — on
-    Windows specifically — raises ``OSError`` well before year 9999 rather than reaching
-    datetime's own year-9999 ceiling (confirmed on a real windows-11-arm CI runner).
+    cannot represent a year beyond 9999.
     """
-    millis = _runtime.v7_unix_millis(uuid_value.bytes)
-    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
-    return epoch + datetime.timedelta(milliseconds=millis)
+    return _native.v7_timestamp(uuid_value)
 
 
 def new_v7_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]:
@@ -140,10 +121,7 @@ def new_v7_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]
 
     Defaults to the current time.
     """
-    if unix_millis is None:
-        unix_millis = int(time.time() * 1000)
-    raw = _runtime.new_v7_batch(count, unix_millis)
-    return [_uuid.UUID(bytes=raw[i * 16 : i * 16 + 16]) for i in range(count)]
+    return _native.new_v7_batch(count, unix_millis)
 
 
 def v7_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
@@ -163,13 +141,13 @@ def v7_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
 
     Meaningful only for a genuine version 7 UUID; see :func:`v6_to_sql_order` for v6.
     """
-    return _uuid.UUID(bytes=_runtime.v7_to_sql_order(uuid_value.bytes))
+    return _native.v7_to_sql_order(uuid_value)
 
 
 def v7_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     """Inverse of :func:`v7_to_sql_order` — convert a SQL-Server-ordered version 7 UUID back
     to RFC 9562 order."""
-    return _uuid.UUID(bytes=_runtime.v7_to_rfc_order(uuid_value.bytes))
+    return _native.v7_from_sql_order(uuid_value)
 
 
 def v6_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
@@ -197,49 +175,10 @@ def v6_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
 
     Meaningful only for a genuine version 6 UUID.
     """
-    return _uuid.UUID(bytes=_runtime.v6_to_sql_order(uuid_value.bytes))
+    return _native.v6_to_sql_order(uuid_value)
 
 
 def v6_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     """Inverse of :func:`v6_to_sql_order` — convert a SQL-Server-ordered version 6 UUID back
     to RFC 9562 order."""
-    return _uuid.UUID(bytes=_runtime.v6_to_rfc_order(uuid_value.bytes))
-
-
-# --- backend selection: HyperCast's dual-backend pattern, ported home ---------------------
-# The PyO3 extension (hyperuuid._native) links the Rust core straight into a CPython
-# extension module — no ctypes marshalling, roughly an order of magnitude per call — and
-# constructs stdlib uuid.UUID objects through the pinned fast path (UUID.__new__ +
-# object.__setattr__, the fastuuid technique; see tests for the invariant pin). When
-# importable it replaces the functions above; the pure-ctypes definitions stay the
-# universal fallback and the Pyodide/wasm path. Set HYPERUUID_PURE=1 to force ctypes.
-#
-# Nested inside this package (not a top-level sibling module) because that's maturin's own
-# blessed mixed-project convention — module-name = "hyperuuid._native" in pyproject.toml —
-# confirmed with a real build that a bare top-level module-name silently drops the pure-
-# Python package (hyperuuid/) from the wheel entirely, not just a style preference.
-
-BACKEND = "ctypes"
-
-import os as _os
-
-if not _os.environ.get("HYPERUUID_PURE"):
-    try:
-        from . import _native
-    except ImportError:
-        _native = None
-    if _native is not None:
-        _native._bind()
-        new_v4 = _native.new_v4  # noqa: F811
-        new_v5 = _native.new_v5  # noqa: F811
-        new_v6 = _native.new_v6  # noqa: F811
-        new_v7 = _native.new_v7  # noqa: F811
-        new_v6_batch = _native.new_v6_batch  # noqa: F811
-        new_v7_batch = _native.new_v7_batch  # noqa: F811
-        v6_timestamp = _native.v6_timestamp  # noqa: F811
-        v7_timestamp = _native.v7_timestamp  # noqa: F811
-        v6_to_sql_order = _native.v6_to_sql_order  # noqa: F811
-        v6_from_sql_order = _native.v6_from_sql_order  # noqa: F811
-        v7_to_sql_order = _native.v7_to_sql_order  # noqa: F811
-        v7_from_sql_order = _native.v7_from_sql_order  # noqa: F811
-        BACKEND = "native"
+    return _native.v6_from_sql_order(uuid_value)

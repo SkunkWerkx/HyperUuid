@@ -5,13 +5,13 @@ build-backend = "maturin"
 [project]
 name = "hyperuuid"
 version = "0.0.1"
-description = "RFC 9562 UUID v4/v5/v6/v7 generation — a PyO3 native extension (auto-selected) linking a Rust core directly into CPython, with a zero-compile ctypes fallback. No runtime bridge."
+description = "RFC 9562 UUID v4/v5/v6/v7 generation — a PyO3 native extension linking a Rust core directly into CPython. No runtime bridge, no compiler needed to install."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Brian Buvinghausen" }]
 requires-python = ">=3.9"
 dependencies = []
-keywords = ["uuid", "rfc9562", "guid", "identifier", "pyo3", "ctypes"]
+keywords = ["uuid", "rfc9562", "guid", "identifier", "pyo3"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

@@ -35,10 +35,6 @@ java/src/main/resources/native/
 **/.venv/
 **/dist/
 **/.pytest_cache/
-# Same story as csharp/HyperUuid/runtimes/ above: CI's "Place native lib for Python in-repo
-# testing" step copies this leg's native lib here for `pytest` at build-native time;
-# regenerable locally via `cargo build --release`.
-python/src/hyperuuid/libhyperuuid.so
 
 # Go
 # Same story as csharp/HyperUuid/runtimes/ above: CI places each leg's native lib here for

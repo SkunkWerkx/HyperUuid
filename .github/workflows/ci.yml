@@ -2,8 +2,8 @@ name: CI — build native, build wasm, test every binding
 
 # The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
 # pipeline — 6 real-hardware legs, the Rust core built fresh per leg, every binding's
-# suite run against it, and the Python/Ruby suites run twice (forced ctypes/Fiddle
-# fallback + PyO3/Magnus extension backends).
+# suite run against it. Ruby's suite runs twice (forced Fiddle fallback + Magnus extension
+# backend); Python has no fallback — PyO3 only, via maturin develop.
 #
 # PR -> ci, tag -> release: this file is routine validation only, nothing published
 # anywhere, not even to the private GitHub Packages feeds — no packing step here at all,
@@ -28,8 +28,6 @@ jobs:
       # the pipeline's explicit per-leg placement for in-repo testing.
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
-      # This repo packages its Python tests behind pip install -e ".[test]".
-      python_editable: true
       # go_windows stays default-true: the purego fallback carries the Windows legs.
 
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse

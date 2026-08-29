@@ -24,7 +24,6 @@ jobs:
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
-      python_editable: true
 
   # NuGet leg paused while PyPI gets built out — nuget.info flagged a real, unresolved
   # question about whether Deterministic/Compiler Flags survive building HyperUuid.csproj
@@ -87,15 +86,16 @@ jobs:
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
-  # PyPI leg: real multi-platform PyO3 native wheels from day one, no throwaway single-wheel
-  # version. abi3-py39 collapses the matrix to one wheel per platform (not per Python version),
-  # so 6 legs covers every supported CPython 3.9+ on every platform. Deliberately independent
-  # of the paused NuGet chain above — only needs build-native's per-platform artifacts.
+  # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
+  # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
+  # (not per Python version), so 6 legs covers every supported CPython 3.9+ on every
+  # platform. Source-only (maturin builds straight from python/native/Cargo.toml) —
+  # `needs: build-native` is a correctness gate (don't publish untested code), not an
+  # artifact dependency. Deliberately independent of the paused NuGet chain above.
   pypi-build-wheels:
     needs: build-native
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
     with:
-      crate: hyperuuid
       python_source_dir: python
 
   pypi-publish:

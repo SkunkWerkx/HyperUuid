@@ -1,12 +1,7 @@
-//! The fast Python backend: the hyperuuid core linked straight into a CPython extension
-//! module. Where the ctypes binding pays ~1 µs of interpreted marshalling per call (the
-//! mechanism floor HyperCast measured), a call here is an ordinary `METH_FASTCALL`
-//! extension call into a direct Rust call — no dlopen, no C-ABI hop, no per-call boxing.
-//! Ported from HyperCast's proven `hypercast_native` pattern.
-//!
-//! The package (`hyperuuid/__init__.py`) prefers this module when importable and falls
-//! back to pure ctypes otherwise (the Pyodide/wasm-compatible path). Both backends return
-//! stdlib `uuid.UUID` objects and raise the same exception types.
+//! The Python backend: the hyperuuid core linked straight into a CPython extension module
+//! via PyO3. A call here is an ordinary `METH_FASTCALL` extension call into a direct Rust
+//! call — no dlopen, no C-ABI hop, no per-call boxing, no ctypes marshalling. Ported from
+//! HyperCast's proven `hypercast_native` pattern.
 //!
 //! UUID construction uses the fastuuid-style fast path — `UUID.__new__` plus
 //! `object.__setattr__` of the `int` and `is_safe` slots — because `UUID.__init__`'s
@@ -151,7 +146,7 @@ fn new_v7_batch(py: Python<'_>, count: usize, unix_millis: Option<u64>) -> PyRes
 }
 
 /// Hinnant's civil_from_days — presenting embedded millis as a datetime without a
-/// strftime round trip, matching the ctypes backend's timedelta arithmetic exactly.
+/// strftime round trip.
 fn civil_from_days(days: i64) -> (i64, u8, u8) {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);
@@ -173,8 +168,8 @@ fn millis_datetime(py: Python<'_>, millis: u64) -> PyResult<Py<PyAny>> {
     let second_of_day = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
     if year > 9_999 {
-        // Matches the ctypes backend: datetime cannot represent year 10000+, and the
-        // RFC's 48-bit field legitimately reaches 10889.
+        // datetime cannot represent year 10000+, and the RFC's 48-bit field legitimately
+        // reaches 10889.
         return Err(PyOverflowError::new_err("embedded timestamp is past datetime's year-9999 ceiling"));
     }
     let (hour, rest) = (second_of_day / 3_600, second_of_day % 3_600);
