@@ -56,9 +56,9 @@ ruby/pkg/
 ruby/.yardoc/
 
 # PHP
-# Same story — CI places each leg's native lib here for `phpunit` at build-native time;
-# regenerable locally via `cargo build --release`.
-php/src/native/*/
+# Native libs under php/src/native/{rid}/ are committed, not ignored — see
+# php/src/native/README.md for why (Packagist has no packing step, unlike every other
+# registry this repo publishes to).
 php/vendor/
 php/composer.lock
 php/.phpunit.result.cache
