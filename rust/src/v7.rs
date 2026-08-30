@@ -11,10 +11,12 @@ pub const MAX_UNIX_MILLIS: u64 = 0x0000_FFFF_FFFF_FFFF;
 /// 26-bit counter mask (67,108,864 values) spanning `rand_a` and the top of `rand_b`.
 const COUNTER_MASK: u32 = 0x03FF_FFFF;
 
+/// An error returned when minting a version 7 UUID fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NewV7Error {
     /// `unix_millis` was negative-equivalent-out-of-range or exceeded [`MAX_UNIX_MILLIS`].
     TimestampOutOfRange,
+    /// The system's random source failed while generating `rand_a`/`rand_b`.
     Random(getrandom::Error),
 }
 

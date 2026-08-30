@@ -35,9 +35,13 @@ public final class UuidGenerator {
 
     /** Well-known namespace UUIDs defined in RFC 9562 Section 6.6. */
     public static final class Namespaces {
+        /** The DNS namespace UUID. */
         public static final UUID DNS = UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+        /** The URL namespace UUID. */
         public static final UUID URL = UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
+        /** The ISO OID namespace UUID. */
         public static final UUID OID = UUID.fromString("6ba7b812-9dad-11d1-80b4-00c04fd430c8");
+        /** The X.500 DN namespace UUID. */
         public static final UUID X500 = UUID.fromString("6ba7b814-9dad-11d1-80b4-00c04fd430c8");
 
         private Namespaces() {}
@@ -111,7 +115,11 @@ public final class UuidGenerator {
         }
     }
 
-    /** Creates a random UUID version 4 (RFC 9562 §5.4). */
+    /**
+     * Creates a random UUID version 4 (RFC 9562 §5.4).
+     *
+     * @return a new random version 4 UUID
+     */
     public static UUID newV4() {
         try (Arena local = Arena.ofConfined()) {
             MemorySegment out = local.allocate(16);
@@ -131,6 +139,10 @@ public final class UuidGenerator {
     /**
      * Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8
      * name. The same (namespace, name) pair always produces the same UUID.
+     *
+     * @param namespace the namespace UUID, e.g. one of {@link Namespaces}
+     * @param name the UTF-8-encoded name
+     * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, String name) {
         return newV5(namespace, name, StandardCharsets.UTF_8);
@@ -140,6 +152,11 @@ public final class UuidGenerator {
      * Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a name
      * encoded with {@code charset}. The same (namespace, name) pair always produces the same
      * UUID.
+     *
+     * @param namespace the namespace UUID, e.g. one of {@link Namespaces}
+     * @param name the name, encoded with {@code charset}
+     * @param charset the charset {@code name} is encoded with
+     * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, String name, Charset charset) {
         return newV5(namespace, name.getBytes(charset));
@@ -148,6 +165,10 @@ public final class UuidGenerator {
     /**
      * Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name
      * bytes. The same (namespace, name) pair always produces the same UUID.
+     *
+     * @param namespace the namespace UUID, e.g. one of {@link Namespaces}
+     * @param name the raw name bytes
+     * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, byte[] name) {
         try (Arena local = Arena.ofConfined()) {
@@ -179,6 +200,8 @@ public final class UuidGenerator {
     /**
      * Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
      * of version 1 for better sort/index locality, using the current time.
+     *
+     * @return a new version 6 UUID timestamped at the current time
      */
     public static UUID newV6() {
         return newV6(System.currentTimeMillis());
@@ -189,6 +212,11 @@ public final class UuidGenerator {
      * timestamp. {@code clock_seq} and {@code node} are randomly generated on every call —
      * unlike version 7, there is no monotonic counter, so calls within the same millisecond
      * are not guaranteed to sort in creation order.
+     *
+     * @param unixMillis the Unix-epoch millisecond timestamp to embed
+     * @return a new version 6 UUID timestamped at {@code unixMillis}
+     * @throws IllegalArgumentException if {@code unixMillis} doesn't fit the 60-bit v6
+     *     timestamp field
      */
     public static UUID newV6(long unixMillis) {
         try (Arena local = Arena.ofConfined()) {
@@ -214,6 +242,9 @@ public final class UuidGenerator {
      * field. Only meaningful when {@code uuid}'s version nibble is 6 — the RFC 9562 bit
      * layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp",
      * so the caller is responsible for checking that first if it matters.
+     *
+     * @param uuid a version 6 UUID
+     * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v6UnixMillis(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
@@ -231,6 +262,9 @@ public final class UuidGenerator {
      * Recovers the UTC timestamp embedded in a version 6 UUID as an {@link Instant}. Unlike
      * {@link #v7Timestamp}, this can never realistically overflow: v6's 60-bit tick count,
      * offset from the 1582 UUID epoch rather than 1970, tops out around the year 5236.
+     *
+     * @param uuid a version 6 UUID
+     * @return the embedded UTC timestamp
      */
     public static Instant v6Timestamp(UUID uuid) {
         return Instant.ofEpochMilli(v6UnixMillis(uuid));
@@ -240,6 +274,12 @@ public final class UuidGenerator {
      * Creates {@code count} time-sortable version 6 UUIDs sharing one timestamp capture —
      * one downcall and one random-bytes fetch instead of {@code count} of each. {@code
      * clock_seq} and {@code node} are independently random per item.
+     *
+     * @param count how many UUIDs to create
+     * @param unixMillis the shared Unix-epoch millisecond timestamp to embed in each
+     * @return {@code count} new version 6 UUIDs
+     * @throws IllegalArgumentException if {@code unixMillis} doesn't fit the 60-bit v6
+     *     timestamp field
      */
     public static UUID[] newV6Batch(int count, long unixMillis) {
         if (count == 0) {
@@ -264,12 +304,21 @@ public final class UuidGenerator {
         }
     }
 
-    /** Creates {@code count} time-sortable version 6 UUIDs sharing the current time. */
+    /**
+     * Creates {@code count} time-sortable version 6 UUIDs sharing the current time.
+     *
+     * @param count how many UUIDs to create
+     * @return {@code count} new version 6 UUIDs timestamped at the current time
+     */
     public static UUID[] newV6Batch(int count) {
         return newV6Batch(count, System.currentTimeMillis());
     }
 
-    /** Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time. */
+    /**
+     * Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.
+     *
+     * @return a new version 7 UUID timestamped at the current time
+     */
     public static UUID newV7() {
         return newV7(System.currentTimeMillis());
     }
@@ -277,6 +326,11 @@ public final class UuidGenerator {
     /**
      * Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond
      * timestamp.
+     *
+     * @param unixMillis the Unix-epoch millisecond timestamp to embed
+     * @return a new version 7 UUID timestamped at {@code unixMillis}
+     * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
+     *     within 48 bits
      */
     public static UUID newV7(long unixMillis) {
         try (Arena local = Arena.ofConfined()) {
@@ -302,6 +356,9 @@ public final class UuidGenerator {
      * {@code unix_ts_ms} field. Only meaningful when {@code uuid}'s version nibble is 7 — the
      * RFC 9562 bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
      * timestamp", so the caller is responsible for checking that first if it matters.
+     *
+     * @param uuid a version 7 UUID
+     * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v7UnixMillis(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
@@ -321,6 +378,9 @@ public final class UuidGenerator {
      * 999,999,999 — far beyond the RFC's own 48-bit ceiling (year 10889), so this is
      * unreachable in practice for any genuine version 7 UUID, unlike the corresponding
      * Python/C# bindings.
+     *
+     * @param uuid a version 7 UUID
+     * @return the embedded UTC timestamp
      */
     public static Instant v7Timestamp(UUID uuid) {
         return Instant.ofEpochMilli(v7UnixMillis(uuid));
@@ -350,6 +410,9 @@ public final class UuidGenerator {
      * bytes directly as a fallback that sidesteps the question entirely.
      *
      * <p>Meaningful only for a genuine version 7 UUID; see {@link #v6ToSqlOrder} for v6.
+     *
+     * @param uuid an RFC 9562-ordered version 7 UUID
+     * @return {@code uuid} reordered into SQL Server wire order
      */
     public static UUID v7ToSqlOrder(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
@@ -367,6 +430,9 @@ public final class UuidGenerator {
     /**
      * Inverse of {@link #v7ToSqlOrder} — converts a SQL-Server-ordered version 7 {@code uuid}
      * back to RFC 9562 order.
+     *
+     * @param uuid a SQL-Server-ordered version 7 UUID
+     * @return {@code uuid} reordered into RFC 9562 order
      */
     public static UUID v7FromSqlOrder(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
@@ -405,6 +471,9 @@ public final class UuidGenerator {
      * same-timestamp ties don't, by the RFC's own v6 design, not a limitation introduced here.
      *
      * <p>Meaningful only for a genuine version 6 UUID.
+     *
+     * @param uuid an RFC 9562-ordered version 6 UUID
+     * @return {@code uuid} reordered into SQL Server wire order
      */
     public static UUID v6ToSqlOrder(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
@@ -422,6 +491,9 @@ public final class UuidGenerator {
     /**
      * Inverse of {@link #v6ToSqlOrder} — converts a SQL-Server-ordered version 6 {@code uuid}
      * back to RFC 9562 order.
+     *
+     * @param uuid a SQL-Server-ordered version 6 UUID
+     * @return {@code uuid} reordered into RFC 9562 order
      */
     public static UUID v6FromSqlOrder(UUID uuid) {
         try (Arena local = Arena.ofConfined()) {
@@ -440,6 +512,12 @@ public final class UuidGenerator {
      * Creates {@code count} time-sortable version 7 UUIDs sharing one timestamp capture and
      * one contiguous block of the monotonic counter — one downcall and one random-bytes
      * fetch instead of {@code count} of each.
+     *
+     * @param count how many UUIDs to create
+     * @param unixMillis the shared Unix-epoch millisecond timestamp to embed in each
+     * @return {@code count} new version 7 UUIDs
+     * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
+     *     within 48 bits
      */
     public static UUID[] newV7Batch(int count, long unixMillis) {
         if (count == 0) {
@@ -464,7 +542,12 @@ public final class UuidGenerator {
         }
     }
 
-    /** Creates {@code count} time-sortable version 7 UUIDs sharing the current time. */
+    /**
+     * Creates {@code count} time-sortable version 7 UUIDs sharing the current time.
+     *
+     * @param count how many UUIDs to create
+     * @return {@code count} new version 7 UUIDs timestamped at the current time
+     */
     public static UUID[] newV7Batch(int count) {
         return newV7Batch(count, System.currentTimeMillis());
     }

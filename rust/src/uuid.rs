@@ -16,14 +16,17 @@ impl Uuid {
     /// The RFC 9562 §5.10 Max UUID — all 128 bits one.
     pub const MAX: Uuid = Uuid([0xFFu8; 16]);
 
+    /// Builds a UUID directly from its 16 raw bytes in RFC 9562 (big-endian) order.
     pub const fn from_bytes(bytes: [u8; 16]) -> Self {
         Self(bytes)
     }
 
+    /// Borrows the UUID's 16 raw bytes in RFC 9562 (big-endian) order.
     pub const fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
 
+    /// Consumes the UUID, returning its 16 raw bytes in RFC 9562 (big-endian) order.
     pub const fn into_bytes(self) -> [u8; 16] {
         self.0
     }
@@ -70,6 +73,7 @@ impl fmt::Debug for Uuid {
     }
 }
 
+/// The input string wasn't a valid 8-4-4-4-12 hyphenated hex UUID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseUuidError;
 

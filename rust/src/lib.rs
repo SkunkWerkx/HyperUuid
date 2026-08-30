@@ -12,6 +12,8 @@
 //!   `uniqueidentifier` needs to sort a version 7 UUID by creation order, and back
 //! - [`Uuid::NIL`] / [`Uuid::MAX`] — the all-zero and all-one special values (RFC 9562 §5.9/§5.10)
 
+#![deny(missing_docs)]
+
 mod ffi;
 mod uuid;
 pub mod v4;

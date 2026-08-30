@@ -149,9 +149,13 @@ public static partial class UuidGenerator
     /// <summary>Well-known namespace UUIDs defined in RFC 9562 Section 6.6.</summary>
     public static class Namespaces
     {
+        /// <summary>The DNS namespace UUID.</summary>
         public static readonly Guid Dns = new("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+        /// <summary>The URL namespace UUID.</summary>
         public static readonly Guid Url = new("6ba7b811-9dad-11d1-80b4-00c04fd430c8");
+        /// <summary>The ISO OID namespace UUID.</summary>
         public static readonly Guid Oid = new("6ba7b812-9dad-11d1-80b4-00c04fd430c8");
+        /// <summary>The X.500 DN namespace UUID.</summary>
         public static readonly Guid X500 = new("6ba7b814-9dad-11d1-80b4-00c04fd430c8");
     }
 

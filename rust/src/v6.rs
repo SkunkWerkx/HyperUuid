@@ -12,11 +12,13 @@ const GREGORIAN_OFFSET_100NS: u64 = 0x01B2_1DD2_1381_4000;
 /// can hold.
 const MAX_60_BIT: u64 = 0x0FFF_FFFF_FFFF_FFFF;
 
+/// An error returned when minting a version 6 UUID fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NewV6Error {
     /// `unix_millis`, converted to 100-nanosecond Gregorian-epoch ticks, doesn't fit the
     /// 60-bit timestamp field.
     TimestampOutOfRange,
+    /// The system's random source failed while generating `clock_seq`/`node`.
     Random(getrandom::Error),
 }
 

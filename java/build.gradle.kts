@@ -1,3 +1,5 @@
+import org.gradle.external.javadoc.StandardJavadocDocletOptions
+
 plugins {
     `java-library`
     `maven-publish`
@@ -40,6 +42,16 @@ java {
     sourceCompatibility = JavaVersion.VERSION_22
     targetCompatibility = JavaVersion.VERSION_22
     withSourcesJar()
+}
+
+// javadoc's own doclint already flags a missing comment/@param/@return as a WARNING by
+// default (that's how the 47 gaps that used to exist on this class's public surface were
+// found) — -Xwerror promotes those warnings to build-failing errors, so an undocumented
+// public member can't ship again silently. Central Portal requires a javadoc jar for every
+// artifact anyway (see mavenPublishing below), so this is enforcing a real publish
+// prerequisite, not just style.
+tasks.javadoc {
+    (options as StandardJavadocDocletOptions).addBooleanOption("Xwerror", true)
 }
 
 // mavenPublishing {} (com.vanniktech.maven.publish) owns the "maven" publication itself —

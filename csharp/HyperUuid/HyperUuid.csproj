@@ -47,6 +47,14 @@
     <!-- Source-generated LibraryImport P/Invoke only, no reflection anywhere in this assembly:
          opts into (and fails the build on) the trim and Native AOT analyzers. -->
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- Ships the .xml doc file inside the .nupkg (NuGet's own PackageId.xml convention) so
+         IntelliSense/Rider/etc. show every method's real doc comment for a consumer, not just
+         its signature. Every P/Invoke declaration below is private, so CS1591 (missing XML
+         comment on a publicly visible member) only ever fires on this binding's real public
+         surface — which is exactly what TreatWarningsAsErrors is here to enforce: an
+         undocumented public member fails the build instead of silently shipping undocumented. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
