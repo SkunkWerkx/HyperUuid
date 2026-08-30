@@ -39,8 +39,24 @@ public final class Main {
         require(v7Batch.length == 10, "expected 10 batch v7 UUIDs, got " + v7Batch.length);
         require(v7Batch[0].version() == 7, "expected batch v7 version 7, got " + v7Batch[0].version());
 
+        UUID[] v6Batch = UuidGenerator.newV6Batch(10, rfcTestVectorMs);
+        require(v6Batch.length == 10, "expected 10 batch v6 UUIDs, got " + v6Batch.length);
+        require(v6Batch[0].version() == 6, "expected batch v6 version 6, got " + v6Batch[0].version());
+
+        // The four order-conversion downcalls share a distinct native signature
+        // ((ADDRESS)void) that none of the calls above exercise — GraalVM's FFM reachability
+        // metadata is per-signature, not per-function, but a native-image build only
+        // registers what its static analysis actually observes being called, so these have
+        // to be exercised for real or this smoke test can silently miss exactly the gap it
+        // exists to catch.
+        UUID v7Sql = UuidGenerator.v7ToSqlOrder(v7);
+        require(UuidGenerator.v7FromSqlOrder(v7Sql).equals(v7), "v7 SQL-order round-trip failed");
+        UUID v6Sql = UuidGenerator.v6ToSqlOrder(v6);
+        require(UuidGenerator.v6FromSqlOrder(v6Sql).equals(v6), "v6 SQL-order round-trip failed");
+
         System.out.println("hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v6=" + v6 + " v7="
-                + v7 + " v7Batch[0]=" + v7Batch[0]);
+                + v7 + " v7Batch[0]=" + v7Batch[0] + " v6Batch[0]=" + v6Batch[0] + " v7Sql=" + v7Sql
+                + " v6Sql=" + v6Sql);
     }
 
     private static void require(boolean condition, String message) {
