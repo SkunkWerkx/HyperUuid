@@ -16,12 +16,18 @@ on:
 
 jobs:
   # This job is the only "build" this file does at all. ci.yml already built and packed
-  # everything real (native legs, wasm, PyPI wheels, the NuGet .nupkg) when this commit
-  # landed on master (ci.yml runs on push to master, not just pull_request, for precisely
-  # this reason) — a tag push just needs to find that run. Every job below this one is
-  # authenticate -> download that run's already-packed artifact -> publish, nothing more.
-  # Also the correctness gate the old per-leg `needs:` comments used to describe: no
-  # successful ci.yml run for this SHA means nothing downstream proceeds.
+  # everything real (native legs, wasm, PyPI wheels, the NuGet .nupkg) — a tag push just
+  # needs to find that run. Every job below this one is authenticate -> download that run's
+  # already-packed artifact -> publish, nothing more. Also the correctness gate the old
+  # per-leg `needs:` comments used to describe: no successful ci.yml run for this SHA means
+  # nothing downstream proceeds.
+  #
+  # ci.yml has no push trigger (master is branch-protected, and a stray push-to-master run
+  # rebuilding/repacking on every trivial change, docs included, wasn't worth it) — so
+  # before tagging, dispatch it by hand against master's HEAD:
+  #   gh workflow run ci.yml --repo SkunkWerkx/HyperUuid --ref master
+  # then wait for it to go green before pushing the tag. Skip that and this job fails fast
+  # below rather than silently rebuilding.
   find-ci-run:
     runs-on: ubuntu-latest
     outputs:
@@ -36,7 +42,7 @@ jobs:
           run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
             --commit "$GITHUB_SHA" --status success --json databaseId --jq '.[0].databaseId')
           if [ -z "$run_id" ]; then
-            echo "::error::No successful ci.yml run found for $GITHUB_SHA — tag a commit that has already landed on master and gone green in ci.yml." >&2
+            echo "::error::No successful ci.yml run found for $GITHUB_SHA — dispatch ci.yml by hand against master's HEAD (gh workflow run ci.yml --ref master) and let it go green before tagging." >&2
             exit 1
           fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
