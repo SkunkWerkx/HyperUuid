@@ -119,7 +119,7 @@ $ GOOS=windows go env CGO_ENABLED   # cross, different OS
 A consumer cross-compiling this module — `GOOS=linux GOARCH=arm64 go build` from an
 amd64 CI runner, a multi-arch Docker build, whatever — lands on `backend_purego.go`
 automatically, with zero action on their part; cgo only activates on a genuine
-native darwin/linux build. This repo's own CI (`build-packages.yml`) already runs
+native darwin/linux build. This repo's own CI (`ci.yml`) already runs
 `go test ./...` natively on every leg (real ubuntu/macOS/Windows runners per
 architecture, never cross-compiled), so it exercises the cgo backend for real on
 4 of 6 legs, not just purego via Windows — and both GitHub's `ubuntu-latest` and

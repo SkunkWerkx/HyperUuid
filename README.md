@@ -1,18 +1,24 @@
 # HyperUuid
 
-[![Build native libraries and pack NuGet + Maven](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/build-packages.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/build-packages.yml)
+[![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/hyperuuid.svg)](https://crates.io/crates/hyperuuid)
+[![NuGet](https://img.shields.io/nuget/v/HyperUuid.svg)](https://www.nuget.org/packages/HyperUuid)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.skunkwerkx/hyperuuid.svg)](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid)
+[![PyPI](https://img.shields.io/pypi/v/hyperuuid.svg)](https://pypi.org/project/hyperuuid/)
+[![RubyGems](https://img.shields.io/gem/v/hyperuuid.svg)](https://rubygems.org/gems/hyperuuid)
+[![Packagist](https://img.shields.io/packagist/v/skunkwerkx/hyperuuid.svg)](https://packagist.org/packages/skunkwerkx/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **One [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html)-compliant UUID engine, written once in Rust, called directly — not wrapped, not shimmed — from C#, Java, Go, Swift, Ruby, PHP, and Python.**
 
-Every other polyglot ID library either reimplements the same generation logic per language (drift risk: seven codebases that can each get the bit-twiddling subtly wrong in different ways) or ships a server/sidecar process to generate IDs centrally (a network round-trip for something that should cost nanoseconds). HyperUuid does neither: a single Rust core is compiled once and reached from inside each language's own process — over a plain C ABI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP's `FFI`, `ctypes`) or linked directly into the language VM as a native extension (PyO3 for CPython, Magnus for CRuby) — sharing the *same* address space, the *same* generation logic, the *same* test vectors, on every platform. No runtime bridge, no serialization layer, no embedded interpreter.
+Every other polyglot ID library either reimplements the same generation logic per language (drift risk: seven codebases that can each get the bit-twiddling subtly wrong in different ways) or ships a server/sidecar process to generate IDs centrally (a network round-trip for something that should cost nanoseconds). HyperUuid does neither: a single Rust core is compiled once and reached from inside each language's own process — over a plain C ABI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP's `FFI`) or linked directly into the language VM as a native extension (PyO3 for CPython, Magnus for CRuby) — sharing the *same* address space, the *same* generation logic, the *same* test vectors, on every platform. No runtime bridge, no serialization layer, no embedded interpreter.
 
 And the scoreboard, measured rather than asserted: **every language in this roster except Go generates UUIDs faster through HyperUuid than through its own platform's built-in facility** — 5.7x faster than `Guid.NewGuid()`, 2.8x faster than `SecureRandom.uuid`, 4.2x faster than CPython 3.14's own `uuid.uuid7()`, faster in PHP than a naive inline `random_bytes` v4 that validates nothing. Go is the one honest exception, and it's the exception that proves the measurements are real — see [the control group](#the-control-group-go) below for exactly why, because the reason is interesting.
 
 ## Quick start
 
 ```csharp
-// C# — package "HyperUuid" on this repo's GitHub Packages feed (see "Published" below)
+// C# — dotnet add package HyperUuid (nuget.org)
 var id = UuidGenerator.NewV7();                     // time-sortable, RFC 9562 §6.2
 var ts = UuidGenerator.V7Timestamp(id);              // recover the embedded timestamp
 var batch = UuidGenerator.NewV7Batch(1000);          // 1000 IDs, one native call
@@ -25,7 +31,7 @@ ts, err := hyperuuid.V7Timestamp(id)
 ```
 
 ```ruby
-# Ruby — gem "hyperuuid", git: "https://github.com/SkunkWerkx/HyperUuid", glob: "ruby/*.gemspec"
+# Ruby — gem "hyperuuid" (rubygems.org)
 id = HyperUuid.new_v7
 id.timestamp
 ```
@@ -63,7 +69,7 @@ The scoreboard above wasn't free, and the mechanism behind it is the actual find
 
 **Direct FFI, where the crossing floor is already nanoseconds.** C#'s `P/Invoke` and Java's FFM cost single-digit nanoseconds per call; PHP's built-in `ext-ffi` measures ~105ns. At those floors the engine's own speed dominates, so those bindings call the C ABI directly — and any remaining slowness is *wrapper*, which gets dieted, not excused. PHP is the proof: its per-call cost dropped from ~570ns to ~305ns purely by deleting wrapper (static scratch reused across calls, inputs crossing as zero-copy `const char *` strings) — no mechanism change at all, and that diet alone is what pushed it past the naive inline v4.
 
-**A native extension, where the FFI mechanism itself was the cost.** CPython's `ctypes` prices every call at ~1µs of interpreted marshalling; Ruby's `Fiddle` at ~1.6µs. No diet fixes that — the mechanism is the bill. So those two bindings link the Rust core *directly into the language VM* as an ordinary native extension (PyO3, Magnus), auto-selected when loadable, which turns the crossing into a plain C function call. Crucially, the pure `ctypes`/`Fiddle` implementations remain fully supported fallbacks — zero-compile installs, and the Pyodide/WASM path — with the same test suite running green against both backends, and cross-backend agreement pinned by tests, so the fast path is never a second implementation that can drift.
+**A native extension, where the FFI mechanism itself was the cost.** CPython's `ctypes` used to price every call at ~1µs of interpreted marshalling; Ruby's `Fiddle` still does, at ~1.6µs. No diet fixes that — the mechanism is the bill. So those two bindings link the Rust core *directly into the language VM* as an ordinary native extension (PyO3, Magnus), turning the crossing into a plain C function call. The two bindings part ways from there: PyO3 ships one `abi3` wheel per platform that covers every CPython 3.9+ on that platform, so `pip` always resolves a native wheel and the `ctypes` fallback was dropped entirely — nothing left for it to buy. Magnus has no stable-ABI story across Ruby versions the way `abi3` gives PyO3 (a precompiled platform gem is tied to one Ruby minor version), so Ruby keeps a real `Fiddle` fallback — auto-selected on any platform/Ruby combination without a prebuilt Magnus gem, all of Windows included — with the same test suite running green against both backends and cross-backend agreement pinned by tests, so the fallback is never a second implementation that can drift.
 
 Which leaves exactly one language where neither strategy applies — and that's not an accident.
 
@@ -91,13 +97,13 @@ v1 (classic time-based, leaks a MAC-derived node ID) and v3 (MD5 name-based) are
 
 ## State of the union
 
-Every language, on every platform, proven for real: `.github/workflows/build-packages.yml`'s `build-native` matrix builds the Rust core fresh on each of 6 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library — not just that it compiles.
+Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s `build-native` matrix builds the Rust core fresh on each of 6 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library — not just that it compiles.
 
 | Language | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | --- |
 | [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [crates.io](https://crates.io/crates/hyperuuid) |
-| [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://github.com/SkunkWerkx/HyperUuid/packages) |
-| [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven](https://github.com/SkunkWerkx/HyperUuid/packages) |
+| [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://www.nuget.org/packages/HyperUuid) |
+| [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven Central](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid) |
 | [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `go get` (git tag) |
 | [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `.package(url:)` (git tag) |
 | [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [RubyGems](https://rubygems.org/gems/hyperuuid) |
@@ -108,15 +114,14 @@ PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 b
 
 **Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64 and osx-x64/arm64) with an automatic fallback to a universal, zero-compile pure-Fiddle gem everywhere else, including Windows. Go's embedded native libraries and Swift's `NativeLibs` are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
 
-**Proven, not yet published:** Go, Swift, Ruby, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, PyPI) — see each language's own README for how to consume it directly (a git dependency, VCS repository, etc.) in the meantime. The Python and Ruby native-extension fast paths add a packaging note of their own: they ship as prebuilt wheels/platform gems when publishing lands, with the ctypes/Fiddle fallbacks guaranteeing the pure zero-compile install path either way. Swift's `Package.swift` has the same repo-root requirement as PHP's `composer.json` — a [root-level manifest](Package.swift) points its targets at the real sources under `swift/`.
-
 ## WebAssembly
 
-**3 of 8 targets proven, live today:**
+**2 of 8 targets proven, live today:**
 
 - **Rust** — the core crate itself runs correctly under `wasm32-wasip1` via [`wasmtime`](https://wasmtime.dev/): real WASI randomness (`random_get`) and a real wall clock (`clock_time_get`), not just "compiles for the target."
 - **C#** — genuinely turnkey. `dotnet add package HyperUuid` into a Blazor WebAssembly project is enough; no `<NativeFileReference>`, no hand-written P/Invoke. See [`csharp/README.md`](csharp/README.md)'s WebAssembly (Blazor) section for exactly how (two builds of the same assembly, an auto-imported `.targets` file supplying the native reference) and the one real caveat that survives it — a `wasm-opt`/rustc version-skew bug in every current `wasm-tools` SDK band, filed upstream as [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858) with a verified workaround.
-- **Python** — proof-of-concept, verified in a real [Pyodide](https://pyodide.org/) (CPython-to-WASM) session: the Rust core built as a genuine Emscripten *side module* (`-sSIDE_MODULE=2`, a third distinct artifact shape from the other two), loaded at runtime via plain `ctypes.CDLL` — this is exactly why the ctypes fallback backend stays fully supported alongside PyO3: it *is* the WASM path. See [`python/wasm-smoke-test/`](python/wasm-smoke-test/). Not yet packaged as something `pip install`-and-go picks up automatically.
+
+**1 of 8 proven once, then deliberately dropped:** Python's Pyodide path worked — the Rust core built as a genuine Emscripten *side module*, loaded at runtime in a real [Pyodide](https://pyodide.org/) session via plain `ctypes.CDLL` — but that proof-of-concept existed specifically to justify keeping the `ctypes` fallback backend alive. Once PyO3's `abi3` wheels made `ctypes` unnecessary for every real install (see [State of the union](#state-of-the-union)), the fallback — and the smoke test that proved it — was removed with it, nothing structural stops resurrecting it if a real Pyodide use case shows up.
 
 **5 of 8 investigated and currently blocked** — not from a lack of trying, from real gaps checked directly against each ecosystem's own tooling:
 
@@ -182,7 +187,7 @@ The headline single-call numbers from the [Ruby](ruby/) and [PHP](php/) READMEs,
 | PHP `HyperUuid::newV4()` | 308 ns | naive inline `random_bytes` v4 595 ns — **1.9x faster** |
 | PHP `->timestamp()` (v7) | 380 ns | `ramsey/uuid` `getDateTime()` 18.3 µs — **48x faster** |
 
-The zero-compile fallbacks (`HYPERUUID_PURE=1` Fiddle, ctypes) keep their own honest numbers in each binding's README — slower, mechanism-bound, and still fully supported, because they're also the WASM story.
+The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any platform without a prebuilt Magnus gem) keeps its own honest numbers in the [Ruby README](ruby/) — slower, mechanism-bound, and still fully supported. Python's own `ctypes` fallback is gone entirely; PyO3's `abi3` wheels made it redundant.
 
 ### Batch generation vs. an equivalent loop
 
@@ -211,14 +216,14 @@ Rust's own allocation-free claim isn't just asserted either — `rust/tests/allo
 - **Monotonically increasing v7** — a process-global counter (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls
 - **Batch generation** — `*Batch`/`*_batch` for v6/v7 amortizes timestamp capture, counter reservation, and the random-bytes fetch across the whole batch
 - **SQL Server byte ordering** — `*ToSqlOrder`/`*_to_sql_order` for both v6 and v7, computed once in the Rust core and exported to every binding, verified against the real `System.Data.SqlTypes.SqlGuid` comparator
-- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`, `ctypes`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol or an embedded interpreter — with the zero-compile FFI fallbacks kept fully supported and test-verified against the fast paths
+- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol or an embedded interpreter — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path
 - **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
 - **AOT-friendly** — C# publishes cleanly under `PublishAot`; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
 - **CI-proven, not CI-claimed** — 6 real-hardware platforms × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch
 
 ## Contributing
 
-Pull requests and issues are welcome. `.github/workflows/build-packages.yml` builds and tests every binding on every platform — a PR should stay green there before merging.
+Pull requests and issues are welcome. `.github/workflows/ci.yml` builds and tests every binding on every platform — a PR should stay green there before merging.
 
 ## License
 
