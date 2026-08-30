@@ -187,4 +187,16 @@ every platform leg. Consume via a direct
 `"repositories": [{"type": "vcs", "url": "https://github.com/SkunkWerkx/HyperUuid"}]` VCS
 Composer repository in the meantime.
 
+There are two `composer.json` files in this repo: this directory's own (what CI actually
+`composer install`s/tests against) and a second one at [the repo root](../composer.json),
+which exists purely because Packagist requires `composer.json` at the top of the git
+repository it's watching, with no subdirectory support — confirmed against Packagist's own
+submission docs, not assumed. Its `autoload` PSR-4 mapping points into `php/src/` (verified
+end to end with a real `composer install` from a separate scratch consumer project — real
+classes autoload, real UUIDs generate). A symlink from the root to this file was tried first
+and rejected: Composer resolves a symlinked `composer.json`'s relative autoload paths against
+where the symlink itself sits, not the real file's directory, so `"src/"` silently resolved to
+a nonexistent `<repo-root>/src/` instead of `php/src/` — confirmed with the same scratch-project
+test, not assumed either. Keep both in sync by hand when `require`/`autoload` change here.
+
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.

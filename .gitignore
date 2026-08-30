@@ -62,6 +62,11 @@ php/src/native/*/
 php/vendor/
 php/composer.lock
 php/.phpunit.result.cache
+# Root-level composer.json exists only for Packagist (see php/README.md's Install section) —
+# nothing actually runs `composer install` from the repo root except a consumer's own build,
+# but a stray local one shouldn't get committed either.
+/vendor/
+/composer.lock
 
 # Node (python/wasm-smoke-test's own package.json — a real npm project, package-lock.json
 # stays committed for reproducibility)
