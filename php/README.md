@@ -181,22 +181,29 @@ spike rather than a second shipped backend. CI compile-checks the `php` feature 
 
 ## Install
 
-Not yet published to Packagist under a registered `skunkwerkx` presence — for now this is
-proven by CI building and testing the native core plus this package on real hardware for
-every platform leg. Consume via a direct
-`"repositories": [{"type": "vcs", "url": "https://github.com/SkunkWerkx/HyperUuid"}]` VCS
-Composer repository in the meantime.
+```sh
+composer require skunkwerkx/hyperuuid
+```
+
+Published to [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid) — no extra
+repository configuration needed.
 
 There are two `composer.json` files in this repo: this directory's own (what CI actually
 `composer install`s/tests against) and a second one at [the repo root](../composer.json),
 which exists purely because Packagist requires `composer.json` at the top of the git
 repository it's watching, with no subdirectory support — confirmed against Packagist's own
-submission docs, not assumed. Its `autoload` PSR-4 mapping points into `php/src/` (verified
-end to end with a real `composer install` from a separate scratch consumer project — real
-classes autoload, real UUIDs generate). A symlink from the root to this file was tried first
-and rejected: Composer resolves a symlinked `composer.json`'s relative autoload paths against
-where the symlink itself sits, not the real file's directory, so `"src/"` silently resolved to
-a nonexistent `<repo-root>/src/` instead of `php/src/` — confirmed with the same scratch-project
-test, not assumed either. Keep both in sync by hand when `require`/`autoload` change here.
+submission docs, not assumed. Its `autoload` PSR-4 mapping points into `php/src/`. A symlink
+from the root to this file was tried first and rejected: Composer resolves a symlinked
+`composer.json`'s relative autoload paths against where the symlink itself sits, not the real
+file's directory, so `"src/"` silently resolved to a nonexistent `<repo-root>/src/` instead of
+`php/src/`. Keep both in sync by hand when `require`/`autoload` change here.
+
+The native libraries under `src/native/{rid}/` are committed to git, not built by Packagist —
+unlike NuGet/Maven Central/PyPI/crates.io, Packagist has no packing step of its own, so
+whatever's literally in the git tree at a tagged commit is what a real `composer require`
+ships. (Found the hard way: an earlier tag published cleanly but threw a real
+`RuntimeException` on install because the native lib wasn't actually in git — see
+`src/native/README.md`.) Verified for real end to end since the fix: a fresh scratch project's
+`composer require skunkwerkx/hyperuuid` pulling straight from Packagist, generating real UUIDs.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.

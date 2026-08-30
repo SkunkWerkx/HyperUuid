@@ -101,14 +101,14 @@ Every language, on every platform, proven for real: `.github/workflows/build-pac
 | [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
 | [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
 | [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
-| [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | — | proven, not yet published |
+| [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | — | [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid) |
 | [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
 
 PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 build, so it always runs under x64 emulation there regardless of host CPU — already exercised for real by the win-x64 leg.
 
-**Published:** C# and Java, both to this repo's GitHub Packages feed. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it.
+**Published:** C#, Java, and PHP. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support.
 
-**Proven, not yet published:** Go, Swift, Ruby, PHP, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, Packagist, PyPI) — see each language's own README for how to consume it directly (a git dependency, VCS repository, etc.) in the meantime. The Python and Ruby native-extension fast paths add a packaging note of their own: they ship as prebuilt wheels/platform gems when publishing lands, with the ctypes/Fiddle fallbacks guaranteeing the pure zero-compile install path either way.
+**Proven, not yet published:** Go, Swift, Ruby, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, PyPI) — see each language's own README for how to consume it directly (a git dependency, VCS repository, etc.) in the meantime. The Python and Ruby native-extension fast paths add a packaging note of their own: they ship as prebuilt wheels/platform gems when publishing lands, with the ctypes/Fiddle fallbacks guaranteeing the pure zero-compile install path either way. Swift's `Package.swift` has the same repo-root requirement as PHP's `composer.json` — a [root-level manifest](Package.swift) points its targets at the real sources under `swift/`.
 
 ## WebAssembly
 
