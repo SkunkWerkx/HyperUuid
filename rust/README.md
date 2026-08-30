@@ -97,16 +97,28 @@ path-depends back on this one. All three are `optional`, off by default, and add
 plain `cargo build` (or a `Cargo.toml` with no `features` line) pulls in nothing beyond
 `getrandom`/`sha1`, unchanged from the dependency set above. Only one is ever enabled per
 build invocation — each generates a different C entry point under the same crate, not
-meant to coexist in one binary.
+meant to coexist in one binary:
+
+```sh
+cargo build --release --features python  # -> PyInit__native
+cargo build --release --features ruby    # -> Init_hyperuuid_native
+cargo build --release --features php     # -> get_module
+```
+
+Each produces `target/release/libhyperuuid.{so,dylib}` (`hyperuuid.dll` on Windows) — the
+interpreter-specific loading/staging (module naming, `.pyd`/`.bundle` renaming, etc.) is this
+repo's Python/Ruby/PHP packages' job, not this crate's; verified to work from the published
+crate itself, not just an in-repo checkout — `cargo build --manifest-path` against a fresh
+`cargo download`/crates.io tarball of `hyperuuid` produces the same three symbols above.
 
 ## Install
 
 ```toml
 [dependencies]
-hyperuuid = "0.0.1"
+hyperuuid = "0.0.2"
 ```
 
-Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs (`.github/workflows/ci.yml`, `release.yml`) plus the full `cargo test`/`cargo bench` suite before every release.
+Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't rebuild or retest anything itself — it just finds that already-green run for the tagged commit and republishes what it produced.
 
 ## License
 
