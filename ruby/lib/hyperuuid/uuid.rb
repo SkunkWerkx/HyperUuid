@@ -5,8 +5,12 @@ module HyperUuid
   class Uuid
     include Comparable
 
+    # The UUID's 16 raw bytes in RFC 9562 (big-endian) order.
     attr_reader :bytes
 
+    # Wraps a raw 16-byte RFC 9562 (big-endian) UUID value.
+    #
+    # @raise [ArgumentError] if +bytes+ isn't exactly 16 bytes.
     def initialize(bytes)
       raise ArgumentError, "bytes must be exactly 16 bytes" unless bytes.bytesize == 16
       @bytes = bytes.dup.force_encoding(Encoding::BINARY).freeze
@@ -18,20 +22,26 @@ module HyperUuid
     # The RFC 9562 §5.10 Max UUID — all 128 bits one.
     MAX = new(("\xFF" * 16).b).freeze
 
+    # Parses an 8-4-4-4-12 hyphenated hex UUID string.
+    #
+    # @raise [ArgumentError] if +string+ isn't a valid UUID string.
     def self.parse(string)
       hex = string.delete("-")
       raise ArgumentError, "invalid UUID string: #{string.inspect}" unless hex.match?(/\A[0-9a-fA-F]{32}\z/)
       new([hex].pack("H*"))
     end
 
+    # The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6).
     def version
       (bytes.getbyte(6) >> 4) & 0x0F
     end
 
+    # The RFC 9562 variant bits (top two bits of octet 8). +0b10+ means RFC 9562/4122.
     def variant
       (bytes.getbyte(8) >> 6) & 0b11
     end
 
+    # The 8-4-4-4-12 hyphenated hex string representation.
     def to_s
       hex = bytes.unpack1("H*")
       "#{hex[0, 8]}-#{hex[8, 4]}-#{hex[12, 4]}-#{hex[16, 4]}-#{hex[20, 12]}"
@@ -118,20 +128,24 @@ module HyperUuid
       end
     end
 
+    # Whether +other+ wraps the same 16 raw bytes.
     def ==(other)
       other.is_a?(Uuid) && bytes == other.bytes
     end
     alias_method :eql?, :==
 
+    # Hash code consistent with #==, based on the raw bytes.
     def hash
       bytes.hash
     end
 
+    # Byte-order comparison against +other+, or +nil+ if +other+ isn't a Uuid.
     def <=>(other)
       return nil unless other.is_a?(Uuid)
       bytes <=> other.bytes
     end
 
+    # Debug representation, e.g. <tt>#<HyperUuid::Uuid ...></tt>.
     def inspect
       "#<HyperUuid::Uuid #{self}>"
     end

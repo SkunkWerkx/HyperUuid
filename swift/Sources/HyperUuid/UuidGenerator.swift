@@ -8,8 +8,11 @@ import Foundation
 /// This package bundles a native build for every platform (see `NativePlatform`) and picks
 /// the right one at compile time.
 public enum UuidGenerator {
+    /// An error returned when a native UUID generation call fails.
     public enum Error: Swift.Error, CustomStringConvertible {
+        /// The native random source failed; `code` is the native call's raw return code.
         case randomSourceFailure(code: Int32)
+        /// The Unix millisecond timestamp doesn't fit the timestamp field being generated.
         case timestampOutOfRange
 
         public var description: String {

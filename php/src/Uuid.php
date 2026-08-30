@@ -15,6 +15,11 @@ final class Uuid
 
     private static ?bool $fastInstants = null;
 
+    /**
+     * Wraps a raw 16-byte RFC 9562 (big-endian) UUID value.
+     *
+     * @throws \InvalidArgumentException if `$bytes` isn't exactly 16 bytes.
+     */
     public function __construct(string $bytes)
     {
         if (\strlen($bytes) !== 16) {
@@ -23,6 +28,11 @@ final class Uuid
         $this->bytes = $bytes;
     }
 
+    /**
+     * Parses an 8-4-4-4-12 hyphenated hex UUID string.
+     *
+     * @throws \InvalidArgumentException if `$string` isn't a valid UUID string.
+     */
     public static function parse(string $string): self
     {
         $hex = str_replace('-', '', $string);
@@ -32,21 +42,25 @@ final class Uuid
         return new self(hex2bin($hex));
     }
 
+    /** The UUID's 16 raw bytes in RFC 9562 (big-endian) order. */
     public function bytes(): string
     {
         return $this->bytes;
     }
 
+    /** The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6). */
     public function version(): int
     {
         return (\ord($this->bytes[6]) >> 4) & 0x0F;
     }
 
+    /** The RFC 9562 variant bits (top two bits of octet 8). `0b10` means RFC 9562/4122. */
     public function variant(): int
     {
         return (\ord($this->bytes[8]) >> 6) & 0b11;
     }
 
+    /** The 8-4-4-4-12 hyphenated hex string representation. */
     public function __toString(): string
     {
         $hex = bin2hex($this->bytes);
@@ -60,6 +74,7 @@ final class Uuid
         );
     }
 
+    /** Whether `$other` wraps the same 16 raw bytes. */
     public function equals(Uuid $other): bool
     {
         return $this->bytes === $other->bytes;
