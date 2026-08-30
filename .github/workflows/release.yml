@@ -136,7 +136,14 @@ jobs:
   # Java leg: build.gradle.kts bumped to the real 0.0.1 — proving the Maven Central Publisher
   # Portal token + in-memory GPG signing path for real, same as every other registry's own
   # first real publish, ahead of the coordinated v0.1.0 release.
+  #
+  # Paused for the same reason as the others: io.github.skunkwerkx:hyperuuid:0.0.1 already
+  # published for real at v0.0.8 — Maven Central rejects a duplicate-version republish outright
+  # (no --skip-duplicate the way nuget-org-publish has), so re-running this on a later tag would
+  # just fail. Un-pause alongside bumping java/build.gradle.kts's version whenever there's an
+  # actual reason to re-publish.
   maven-publish:
+    if: false
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@master
     with:
