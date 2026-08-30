@@ -114,17 +114,53 @@ through its own codec layer, versus this package's single zero-copy FFI call plu
 
 Reproduce: `composer require --dev phpbench/phpbench ramsey/uuid && XDEBUG_MODE=off vendor/bin/phpbench run --report=aggregate`.
 
-### ext-php-rs spike (not shipped)
+### Maximum performance: build the native extension yourself
 
-The numbers above establish PHP's `ext-ffi` crossing as cheap (~105ns) relative to
-ctypes/Fiddle — the reason the Python and Ruby bindings got a second, native-extension
-backend (PyO3, Magnus) and PHP didn't. That reasoning was asserted, not measured, so
-[`native/`](native/) spikes the same move for PHP — the Rust core linked straight into a
-Zend extension via [`ext-php-rs`](https://ext-php.rs) — and measures it against `Runtime.php`
-at the same layer (raw 16-byte strings, no `Uuid` value-object construction on either side).
+**The `skunkwerkx/hyperuuid` Composer package (see Install below) is `ext-ffi` only** —
+everything above (`HyperUuid`, `Uuid`, `Namespaces`) — chosen because it needs zero
+compilation to install and already benchmarks faster than a naive pure-PHP v4 (see above). It
+is not the fastest thing this repo can produce.
 
-Measured on linux-arm64, PHP 8.5, `XDEBUG_MODE=off`, same 5-iterations × 1000-revs shape as
-the table above (min of the 5 iteration means; see [`native/bench_compare.php`](native/bench_compare.php)):
+The same Rust core also links straight into a real Zend extension via
+[`ext-php-rs`](https://ext-php.rs) (`rust/src/php_ext.rs`, gated behind the crate's `php`
+Cargo feature) — the same move Python (PyO3) and Ruby (Magnus) get a shipped native backend
+for. PHP's didn't ship because the `ext-ffi` crossing measured cheap enough (~105ns) that a
+second backend wasn't obviously worth the packaging cost — but if you want to chase the last
+bit of single-call latency anyway, here's how to build and load it yourself:
+
+1. **Prerequisites:** a Rust toolchain ([rustup](https://rustup.rs)) and PHP's development
+   headers (the `php-dev` / `php8.5-dev` / `php-devel` package for your distro — `ext-php-rs`'s
+   build script needs these to link against `libphp`).
+2. **Build it**, with the `php` feature (not the plain default build — that produces the
+   `ext-ffi` binding's cdylib, a different entry point from the same crate; don't load both
+   at once):
+   ```sh
+   git clone https://github.com/SkunkWerkx/HyperUuid
+   cd HyperUuid/rust
+   cargo build --release --features php
+   ```
+   Produces `target/release/libhyperuuid.so` (`.dylib` on macOS; Windows isn't supported —
+   `ext-php-rs`'s Windows path needs a nightly-only Rust feature, confirmed via a real E0554
+   build failure on stable, so every CI leg here builds Linux/macOS only).
+3. **Load it** — either add `extension=/absolute/path/to/target/release/libhyperuuid.so` to
+   `php.ini`, or pass it ad hoc: `php -d extension=/absolute/path/to/target/release/libhyperuuid.so your_script.php`.
+   Verify with `php -m | grep hyperuuid`.
+4. **Call it.** This extension is a benchmark spike, not a polished second backend, so it
+   exposes flat functions taking/returning raw 16-byte binary strings — not this package's
+   `Uuid` value object. Wrap the bytes yourself if you want `->toString()`/`->timestamp()`/etc.:
+   ```php
+   $bytes = hyperuuid_native_new_v4();   // 16 raw RFC-9562-ordered bytes
+   $id = new \HyperUuid\Uuid($bytes);    // wrap it to get the Uuid API back
+   ```
+   See [`rust/src/php_ext.rs`](../rust/src/php_ext.rs) for the full function list —
+   `hyperuuid_native_new_v5`/`_new_v6`(`_batch`)/`_new_v7`(`_batch`)/`_v6_unix_millis`/
+   `_v7_unix_millis`, same signatures as `Runtime.php`'s own internal FFI calls.
+
+Last measured on linux-arm64, PHP 8.5, `XDEBUG_MODE=off`, same 5-iterations × 1000-revs shape
+as the table above (min of the 5 iteration means). The comparison script that produced these
+numbers (`php/native/bench_compare.php`) was removed when the three language extensions
+consolidated into one Rust crate — these are the last real measurement taken, not something
+you can currently re-run from this repo as-is:
 
 | Call | `ext-ffi` (`Runtime.php`) | `ext-php-rs` native | Speedup |
 | --- | ---: | ---: | ---: |
@@ -135,15 +171,13 @@ the table above (min of the 5 iteration means; see [`native/bench_compare.php`](
 | `newV6Batch(1000)` | 19.6µs | 19.3µs | 1.02x |
 | `newV7Batch(1000)` | 16.0µs | 15.8µs | 1.02x |
 
-So the answer turns out to be: worth it for single-item calls (the ~105ns FFI floor is real,
-but so is a further ~100ns of PHP-level `Runtime::` call overhead around it that a native
-extension skips entirely — nearly 2x on `newV6`/`newV7`), and not worth it for batch calls,
-where 1000 UUIDs' worth of native computation dwarfs the one-time crossing cost either way.
-
-Kept as a working reference for whoever wants to chase the last bit of single-call
-performance, not folded into `skunkwerkx/hyperuuid` — see [`native/README.md`](native/README.md)
-for why (Composer has no way to deliver a compiled Zend extension the way it delivers the
-FFI `.so`; this would need real platform/ABI packaging work to ship for real).
+Worth it for single-item calls (the ~105ns FFI floor is real, but so is a further ~100ns of
+PHP-level `Runtime::` call overhead around it that a native extension skips entirely — nearly
+2x on `newV6`/`newV7`); not worth it for batch calls, where 1000 UUIDs' worth of native
+computation dwarfs the one-time crossing cost either way — which is exactly why this stays a
+spike rather than a second shipped backend. CI compile-checks the `php` feature on every PR
+(Linux/macOS) so it can't silently bit-rot, but there's no `phpunit` run against it — see
+[`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning.
 
 ## Install
 
