@@ -149,12 +149,18 @@ jobs:
           set -euo pipefail
           # swiftlint's precompiled binary needs the installed toolchain's own
           # libsourcekitdInProc.so — its path isn't a fixed, documented convention across
-          # setup-swift installs (confirmed not even consistent with this repo's own local
-          # swiftly install, which fronts the real toolchain behind a shim binary), so locate
-          # it directly rather than assume a directory layout.
-          lib_path="$(find / -xdev -name libsourcekitdInProc.so 2>/dev/null | head -1)"
+          # setup-swift installs, so locate it relative to the swift binary SwiftyLab/setup-swift
+          # actually put on PATH (e.g. /opt/hostedtoolcache/swift-<ver>/<ver>/x86_64/usr/bin/swift,
+          # confirmed from a real run's log) rather than a blind whole-filesystem `find /`, which
+          # hung for minutes scanning a GH-hosted runner's huge preinstalled toolchain set.
+          swift_bin="$(command -v swift)"
+          echo "swift binary: $swift_bin"
+          toolchain_usr="$(dirname "$(dirname "$swift_bin")")"
+          echo "toolchain usr dir: $toolchain_usr"
+          lib_path="$(find "$toolchain_usr" -name libsourcekitdInProc.so 2>/dev/null | head -1)"
+          echo "libsourcekitdInProc.so: ${lib_path:-not found}"
           if [ -z "$lib_path" ]; then
-            echo "::error::libsourcekitdInProc.so not found under the installed Swift toolchain" >&2
+            echo "::error::libsourcekitdInProc.so not found under $toolchain_usr" >&2
             exit 1
           fi
           export LINUX_SOURCEKIT_LIB_PATH="$(dirname "$lib_path")"
