@@ -90,10 +90,15 @@ The batch multiplier shrank from 11x to ~3.8x for the best reason available: the
 
 ## Install
 
-Not yet published to RubyGems.org under a registered `SkunkWerkx`/`buvinghausen` presence —
-for now this is proven by CI building and testing the native core plus this gem on real
-hardware for every platform leg. Consume via a direct
-`gem "hyperuuid", git: "https://github.com/SkunkWerkx/HyperUuid", glob: "ruby/*.gemspec"` in
-the meantime.
+```sh
+gem install hyperuuid
+```
+
+Published to [RubyGems.org](https://rubygems.org/gems/hyperuuid) as real precompiled
+"platform gems" — `bundle`/`gem install` auto-selects the matching one for
+linux-x64/arm64 or osx-x64/arm64 (the compiled Magnus native extension, `backend: :native`),
+falling back automatically to the universal `ruby`-platform gem (pure Fiddle, zero compile,
+bundles all 6 platforms' native libs) everywhere else — Windows included, since Magnus
+doesn't target it. No extra configuration needed either way.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
