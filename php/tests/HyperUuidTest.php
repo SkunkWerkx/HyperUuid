@@ -14,6 +14,10 @@ final class HyperUuidTest extends TestCase
 {
     private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
 
+    // Same constant as rust/src/v6.rs's GREGORIAN_OFFSET_100NS: 100ns ticks between the UUID
+    // Gregorian epoch (1582-10-15) and the Unix epoch (1970-01-01).
+    private const GREGORIAN_OFFSET_100NS = 0x01B2_1DD2_1381_4000;
+
     public function testV4HasVersionAndVariantBits(): void
     {
         $id = HyperUuid::newV4();
@@ -313,14 +317,27 @@ final class HyperUuidTest extends TestCase
         self::assertSame(self::millis($ramsey->getDateTime()), self::millis($ours->timestamp()));
     }
 
-    /** Same proof as above, for version 6. */
+    /**
+     * Same proof as above, for version 6 -- but compared against Ramsey's own raw parsed
+     * timestamp field, not getDateTime(). v6's field is 100ns Gregorian-epoch ticks, finer
+     * than the millisecond this binding (and the RFC's own v6 sort guarantee) cares about;
+     * getDateTime()'s `new DateTimeImmutable('@seconds.microseconds')` string construction
+     * has its own sub-millisecond precision quirks right at that boundary, independent of
+     * whether the UUID bytes themselves agree -- confirmed by intermittent 1ms mismatches
+     * even though both getDateTime() and timestamp() decode the identical fixed byte array,
+     * which neither a race nor a bug in this binding's bit-layout extraction could explain.
+     * Flooring Ramsey's raw ticks with the same integer arithmetic v6.rs uses sidesteps that
+     * entirely, so this is still a real cross-implementation byte-compatibility proof.
+     */
     public function testTimestampExtractsFromRamseyUuidsNativeV6Generator(): void
     {
         $ramsey = \Ramsey\Uuid\Uuid::uuid6();
         $ours = new Uuid($ramsey->getBytes());
 
         self::assertSame(6, $ours->version());
-        self::assertSame(self::millis($ramsey->getDateTime()), self::millis($ours->timestamp()));
+        $ticks = hexdec($ramsey->getFields()->getTimestamp()->toString());
+        $expectedMillis = intdiv($ticks - self::GREGORIAN_OFFSET_100NS, 10_000);
+        self::assertSame($expectedMillis, self::millis($ours->timestamp()));
     }
 
     private static function millis(\DateTimeInterface $dt): int
