@@ -1,0 +1,87 @@
+name: Prepare release
+
+# Bumps the version everywhere it has to live as committed text — Rust, C#, Java, and Ruby
+# (both its gemspec and the drifted lib/hyperuuid.rb VERSION constant, together, so they
+# never disagree again) — and regenerates rust/Cargo.lock's own self-referential entry to
+# match (cargo publish --locked fails on a stale one). Python needs nothing here: pyproject.toml
+# declares its version dynamic, sourced straight from rust/Cargo.toml.
+#
+# PHP, Swift, and Go get nothing from this workflow — they have no version field of their
+# own (Packagist/SwiftPM/Go modules all resolve straight from the git tag), and their
+# committed native binaries are kept fresh independently by stage-native-binaries.yml on
+# every rust/-touching merge, unrelated to a version bump.
+#
+# Deliberately a direct push straight to master, not a PR: same reasoning as
+# stage-native-binaries.yml — the diff here is mechanical, not something a review
+# meaningfully improves, and this exists specifically to avoid paying for another full
+# ci.yml matrix run over a version-string change (see release.yml's own find-ci-run, which
+# is built to walk back past exactly this kind of commit to the last real ci.yml run). This
+# workflow does not tag anything — that's a deliberate, separate, human action once
+# master's state looks right.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Target version, e.g. "0.1.0" (no leading "v" — that belongs on the git tag, not in any manifest)'
+        required: true
+        type: string
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate the version string
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$VERSION" == v* ]]; then
+            echo "::error::Pass the bare version (e.g. 0.1.0), not a tag name — got '$VERSION'." >&2
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$VERSION' doesn't look like a plain X.Y.Z semver version." >&2
+            exit 1
+          fi
+
+      - name: Bump every committed manifest to $VERSION
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" rust/Cargo.toml
+          sed -i "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" csharp/HyperUuid/HyperUuid.csproj
+          sed -i "s/^version = System.getenv(\"HYPERUUID_VERSION\") ?: \".*\"/version = System.getenv(\"HYPERUUID_VERSION\") ?: \"$VERSION\"/" java/build.gradle.kts
+          sed -i "s/spec\.version = \".*\"/spec.version = \"$VERSION\"/" ruby/hyperuuid.gemspec
+          sed -i "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" ruby/lib/hyperuuid.rb
+
+          # Regenerates Cargo.lock's own self-referential package entry to match the bump
+          # above — cargo publish --locked (pack-crates in release.yml) fails on a mismatch.
+          cargo check --manifest-path rust/Cargo.toml
+
+      - name: Show what changed
+        run: git diff --stat
+
+      - name: Commit and push if anything actually changed
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/Cargo.toml rust/Cargo.lock csharp/HyperUuid/HyperUuid.csproj \
+            java/build.gradle.kts ruby/hyperuuid.gemspec ruby/lib/hyperuuid.rb
+          if git diff --cached --quiet; then
+            echo "::notice::Every manifest already says $VERSION — nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore: prepare v$VERSION"
+          git push origin HEAD:master
