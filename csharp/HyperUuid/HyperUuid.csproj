@@ -9,11 +9,20 @@
          proved the nuget.org Trusted Publishing leg for real (no local test path exists for
          it); 0.0.2 re-proved it with Source Link / Deterministic / symbol-package health
          fixes applied; 0.0.3 was the first tag-triggered publish through the
-         publish-from-CI-artifacts pipeline (find-ci-run in release.yml); 0.0.4 re-proves the
+         publish-from-CI-artifacts pipeline (find-ci-run in release.yml); 0.0.4 re-proved the
          whole chain again against the net10.0 floor (see the WASM section of this project's
-         own README.md for why net8.0 doesn't work). nuget-org-pack packs this as-is, no
-         CI-side override, ahead of the coordinated v0.1.0 release. -->
-    <Version>0.0.4</Version>
+         own README.md for why net8.0 doesn't work) — but shipped a broken build/net10.0/
+         HyperUuid.targets: its own comment quoted a wasm-opt flag containing two adjacent
+         hyphens, which an XML comment can never contain anywhere in its body, so every real
+         WASM consumer's build failed with MSB4024 before even reaching the
+         DllNotFoundException/EmccExportedFunction fix that version existed to ship. Only
+         caught by actually pulling 0.0.4 from live nuget.org into a fresh scratch project —
+         the local test package built earlier in the same session predated that comment edit,
+         so it never exercised the broken text. 0.0.5 re-verifies the exact same way (fresh
+         scratch project, real headless-Chromium session) before tagging.
+         nuget-org-pack packs this as-is, no CI-side override, ahead of the coordinated
+         v0.1.0 release. -->
+    <Version>0.0.5</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by

@@ -39,8 +39,8 @@
        test) and it's fixed there: pinvoke-table.h correctly scans the browser-wasm assembly and
        generates a "*"-module entry with real function pointers, and the app runs correctly end
        to end. (.NET 11 preview still carries the separate, unrelated wasm-opt
-       --enable-bulk-memory-opt issue noted in the README — that one needs the wasm-opt swap
-       workaround regardless of TFM.) -->
+       "enable bulk memory opt" flag issue noted in the README — that one needs the wasm-opt
+       swap workaround regardless of TFM.) -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <NativeFileReference Include="$(MSBuildThisFileDirectory)../../runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a" />
     <EmccExportedFunction Include="_uuid_new_v4" />
