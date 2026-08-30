@@ -11,6 +11,16 @@ Ships as real platform-specific wheels — linux/macOS/Windows, x64/arm64, six i
 `abi3` build covering every supported CPython 3.9+ — so `pip install hyperuuid` lands at
 native speed with nothing to compile, the same way numpy or cryptography does.
 
+**Not yet covered: free-threaded (no-GIL) CPython (`3.13t`/`3.14t`).** `pip install
+hyperuuid` currently fails outright there (`No matching distribution found`) — an `abi3`
+wheel is ignored by a free-threaded interpreter (it's a genuinely separate ABI, not a
+compatibility flag), so closing this gap means building and shipping additional
+version-specific `cp313t`/`cp314t` wheels alongside the existing six, not just a build-flag
+change. PyO3 itself has supported free-threading (opt-in, `gil_used = false`) since 0.23; the
+cleaner long-term fix — [PEP 803](https://peps.python.org/pep-0803/)'s `abi3t` stable ABI,
+one build covering both GIL and no-GIL — needs Python 3.15+, not yet released. Revisiting
+once that lands or free-threaded adoption justifies the extra wheel legs.
+
 ```python
 import uuid
 import hyperuuid
