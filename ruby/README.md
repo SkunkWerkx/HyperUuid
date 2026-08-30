@@ -23,6 +23,7 @@ id3 = HyperUuid.new_v6
 id4 = HyperUuid.new_v7
 
 id4.timestamp # recover the embedded UTC Time
+id4.timestamp(raise_on_mismatch: false) # nil instead of raising if id4 isn't v6/v7
 id4.to_sql_order # byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
@@ -32,7 +33,9 @@ batch = HyperUuid.new_v7_batch(1000)
 Returns `HyperUuid::Uuid`, a minimal value object (`#bytes`, `#to_s`, `#version`, `#variant`,
 comparable/hashable) — this gem has no runtime dependency on the `uuid` gem.
 `HyperUuid::Namespaces::DNS`/`URL`/`OID`/`X500` are RFC 9562 Section 6.6's well-known
-namespaces. `#timestamp` recovers the embedded UTC `Time` from a version 6 or 7 UUID.
+namespaces. `#timestamp` recovers the embedded UTC `Time` from a version 6 or 7 UUID; pass
+`raise_on_mismatch: false` to get `nil` back for any other version instead of raising.
+`.new_v6`/`.new_v7` also accept a `Time` directly in place of a raw millisecond count.
 `#to_sql_order`/`#from_sql_order` convert a version 6 or 7 UUID to and from the byte order SQL
 Server's `uniqueidentifier` needs on the wire to sort by creation order (`#to_sql_order`
 dispatches on the UUID's own version, matching `#timestamp`'s convention) — computed once in

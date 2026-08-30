@@ -33,38 +33,49 @@ module HyperUuid
     Uuid.new(Runtime.new_v5(namespace.bytes, name_bytes))
   end
 
+  # Converts +value+ to a Unix-epoch millisecond integer: +nil+ becomes the current time, a
+  # +Time+ is converted exactly (via its own Rational seconds, avoiding float rounding), and
+  # anything else (an Integer millisecond count) passes through unchanged. Shared by every
+  # `new_v6`/`new_v7`/batch door below so a caller can pass either a `Time` or a raw
+  # millisecond count interchangeably.
+  private_class_method def self.unix_millis_from(value)
+    case value
+    when nil then Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
+    when Time then (value.to_r * 1000).to_i
+    else value
+    end
+  end
+
   # Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering of
   # version 1 for better sort/index locality. Defaults to the current time; pass an explicit
-  # Unix-epoch millisecond timestamp to embed a specific time instead. `clock_seq` and `node`
-  # are randomly generated on every call — unlike version 7, there is no monotonic counter, so
-  # calls within the same millisecond are not guaranteed to sort in creation order.
+  # `Time` or Unix-epoch millisecond integer to embed a specific time instead. `clock_seq` and
+  # `node` are randomly generated on every call — unlike version 7, there is no monotonic
+  # counter, so calls within the same millisecond are not guaranteed to sort in creation order.
   def self.new_v6(unix_millis = nil)
-    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
-    Uuid.new(Runtime.new_v6(unix_millis))
+    Uuid.new(Runtime.new_v6(unix_millis_from(unix_millis)))
   end
 
   # Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI call
-  # and one random-bytes fetch instead of `count` of each. Defaults to the current time.
+  # and one random-bytes fetch instead of `count` of each. Defaults to the current time; pass
+  # an explicit `Time` or Unix-epoch millisecond integer to embed a specific time instead.
   def self.new_v6_batch(count, unix_millis = nil)
-    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
-    bytes = Runtime.new_v6_batch(count, unix_millis)
+    bytes = Runtime.new_v6_batch(count, unix_millis_from(unix_millis))
     Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
   end
 
   # Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time; pass
-  # an explicit Unix-epoch millisecond timestamp (non-negative, fitting in 48 bits) to embed a
-  # specific time instead.
+  # an explicit `Time` or Unix-epoch millisecond integer (non-negative, fitting in 48 bits) to
+  # embed a specific time instead.
   def self.new_v7(unix_millis = nil)
-    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
-    Uuid.new(Runtime.new_v7(unix_millis))
+    Uuid.new(Runtime.new_v7(unix_millis_from(unix_millis)))
   end
 
   # Creates `count` time-sortable version 7 UUIDs sharing one timestamp capture and one
   # contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
-  # instead of `count` of each. Defaults to the current time.
+  # instead of `count` of each. Defaults to the current time; pass an explicit `Time` or
+  # Unix-epoch millisecond integer to embed a specific time instead.
   def self.new_v7_batch(count, unix_millis = nil)
-    unix_millis ||= Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
-    bytes = Runtime.new_v7_batch(count, unix_millis)
+    bytes = Runtime.new_v7_batch(count, unix_millis_from(unix_millis))
     Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
   end
 end

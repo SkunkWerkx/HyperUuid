@@ -31,6 +31,7 @@ hyperuuid.new_v6()
 id4 = hyperuuid.new_v7()
 
 hyperuuid.v7_timestamp(id4) # recover the embedded UTC datetime.datetime
+hyperuuid.get_timestamp(id4) # None instead of assuming id4 is v6/v7
 hyperuuid.v7_to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
@@ -51,7 +52,11 @@ UTC `datetime.datetime` from a version 7 UUID (raises `OverflowError` past year
 9999 — the RFC's 48-bit field holds values up to year 10889, but
 `datetime.datetime` cannot); `hyperuuid.v6_timestamp(id)` does the same for version
 6, and can never raise that way — v6's 60-bit tick count, offset from the 1582 UUID
-epoch, tops out around the year 5236. `hyperuuid.new_v6_batch(count)`/
+epoch, tops out around the year 5236. `new_v6`/`new_v7` also accept a
+`datetime.datetime` directly in place of a raw millisecond count. `get_timestamp(id)`
+is the version-agnostic counterpart to `v6_timestamp`/`v7_timestamp` — it checks
+`id.version` itself and returns `None` for anything but a genuine v6/v7 UUID, instead
+of assuming the caller already knows. `hyperuuid.new_v6_batch(count)`/
 `new_v7_batch(count)` generate `count` UUIDs sharing one timestamp capture and one
 native call, instead of `count` of each. `hyperuuid.v7_to_sql_order(id)`/
 `v7_from_sql_order(id)` convert a version 7 UUID to and from the byte order SQL

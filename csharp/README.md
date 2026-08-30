@@ -15,6 +15,9 @@ var id4 = UuidGenerator.NewV7();
 // Time-sortable versions round-trip their embedded timestamp:
 DateTimeOffset created = UuidGenerator.V7Timestamp(id4);
 
+// Version-agnostic: null instead of assuming id4 is v6/v7:
+DateTimeOffset? maybeCreated = UuidGenerator.GetTimestamp(id4);
+
 // Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
 Guid sqlOrdered = UuidGenerator.V7ToSqlOrder(id4);
 
@@ -23,7 +26,7 @@ Guid sqlOrdered = UuidGenerator.V7ToSqlOrder(id4);
 Guid[] batch = UuidGenerator.NewV7Batch(1000);
 ```
 
-Returns plain `System.Guid` — this binding does no byte-order conversion of its own beyond the `bigEndian: true` `Guid` constructor overload (.NET 8+), since that's already the correct, direct RFC 9562 mapping. `UuidGenerator.Namespaces.Dns`/`Url`/`Oid`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.Nil`/`Max` are the §5.9/§5.10 special values (`Nil` is literally `Guid.Empty`).
+Returns plain `System.Guid` — this binding does no byte-order conversion of its own beyond the `bigEndian: true` `Guid` constructor overload (.NET 8+), since that's already the correct, direct RFC 9562 mapping. `UuidGenerator.Namespaces.Dns`/`Url`/`Oid`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.Nil`/`Max` are the §5.9/§5.10 special values (`Nil` is literally `Guid.Empty`). `NewV6`/`NewV7` also accept a `DateTimeOffset` directly (`NewV6(DateTimeOffset)`), not just a raw millisecond count; `GetTimestamp` is the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — it checks the version nibble itself and returns `null` for anything but a genuine v6/v7 `Guid`, instead of assuming the caller already knows.
 
 ## Why not `Guid.NewGuid()` / `Guid.CreateVersion7()`?
 

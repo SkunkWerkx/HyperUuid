@@ -188,6 +188,33 @@ def test_v7_timestamp_extracts_from_the_stdlib_native_generator():
     assert before - 0.001 <= got.timestamp() <= after + 0.001
 
 
+def test_new_v6_accepts_a_datetime_in_place_of_a_millisecond_int():
+    dt = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
+    id_ = hyperuuid.new_v6(dt)
+    assert hyperuuid.v6_timestamp(id_) == dt
+
+
+def test_new_v7_accepts_a_datetime_in_place_of_a_millisecond_int():
+    dt = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
+    id_ = hyperuuid.new_v7(dt)
+    assert hyperuuid.v7_timestamp(id_) == dt
+
+
+def test_get_timestamp_returns_none_for_non_time_based_versions():
+    assert hyperuuid.get_timestamp(hyperuuid.new_v4()) is None
+    assert hyperuuid.get_timestamp(hyperuuid.new_v5(uuid.NAMESPACE_DNS, "test")) is None
+
+
+def test_get_timestamp_matches_v6_timestamp():
+    id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
+    assert hyperuuid.get_timestamp(id_) == hyperuuid.v6_timestamp(id_)
+
+
+def test_get_timestamp_matches_v7_timestamp():
+    id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    assert hyperuuid.get_timestamp(id_) == hyperuuid.v7_timestamp(id_)
+
+
 def test_v7_batch_returns_count_uuids_sorted_and_sharing_the_timestamp():
     ids = hyperuuid.new_v7_batch(1000, RFC_TEST_VECTOR_MS)
     assert len(ids) == 1000

@@ -214,6 +214,27 @@ public sealed class UuidGeneratorTests
     }
 
     [Fact]
+    public void GetTimestamp_ReturnsNullForNonTimeBasedVersions()
+    {
+        UuidGenerator.GetTimestamp(UuidGenerator.NewV4()).ShouldBeNull();
+        UuidGenerator.GetTimestamp(UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "test")).ShouldBeNull();
+    }
+
+    [Fact]
+    public void GetTimestamp_MatchesV6Timestamp()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+        UuidGenerator.GetTimestamp(id).ShouldBe(UuidGenerator.V6Timestamp(id));
+    }
+
+    [Fact]
+    public void GetTimestamp_MatchesV7Timestamp()
+    {
+        var id = UuidGenerator.NewV7(RfcTestVectorMs);
+        UuidGenerator.GetTimestamp(id).ShouldBe(UuidGenerator.V7Timestamp(id));
+    }
+
+    [Fact]
     public void V7Batch_ReturnsCountUuidsSortedAndSharingTheTimestamp()
     {
         var ids = UuidGenerator.NewV7Batch(1000, RfcTestVectorMs);

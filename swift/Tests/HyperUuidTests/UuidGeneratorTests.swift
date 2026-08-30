@@ -163,6 +163,35 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), maxMs)
     }
 
+    func testNewV6FromDateMatchesNewV6FromTheEquivalentMillis() throws {
+        let date = Date(timeIntervalSince1970: Double(rfcTestVectorMs) / 1000)
+        let id = try UuidGenerator.newV6(date)
+        XCTAssertEqual(try UuidGenerator.v6UnixMillis(id), rfcTestVectorMs)
+    }
+
+    func testNewV7FromDateMatchesNewV7FromTheEquivalentMillis() throws {
+        let date = Date(timeIntervalSince1970: Double(rfcTestVectorMs) / 1000)
+        let id = try UuidGenerator.newV7(date)
+        XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), rfcTestVectorMs)
+    }
+
+    func testGetTimestampReturnsNilForNonTimeBasedVersions() throws {
+        let v4 = try UuidGenerator.newV4()
+        XCTAssertNil(try UuidGenerator.getTimestamp(v4))
+        let v5 = try UuidGenerator.newV5(namespace: Namespaces.dns, name: "test")
+        XCTAssertNil(try UuidGenerator.getTimestamp(v5))
+    }
+
+    func testGetTimestampMatchesV6Timestamp() throws {
+        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
+        XCTAssertEqual(try UuidGenerator.getTimestamp(id), try UuidGenerator.v6Timestamp(id))
+    }
+
+    func testGetTimestampMatchesV7Timestamp() throws {
+        let id = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+        XCTAssertEqual(try UuidGenerator.getTimestamp(id), try UuidGenerator.v7Timestamp(id))
+    }
+
     func testV7BatchReturnsCountUuidsSortedAndSharingTheTimestamp() throws {
         let ids = try UuidGenerator.newV7Batch(count: 1000, unixMillis: rfcTestVectorMs)
         XCTAssertEqual(ids.count, 1000)

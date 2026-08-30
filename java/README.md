@@ -15,6 +15,9 @@ UUID id4 = UuidGenerator.newV7();
 
 Instant created = UuidGenerator.v7Timestamp(id4);
 
+// Version-agnostic: Optional.empty() instead of assuming id4 is v6/v7:
+Optional<Instant> maybeCreated = UuidGenerator.getTimestamp(id4);
+
 // Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
 UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id4);
 
@@ -22,7 +25,7 @@ UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id4);
 UUID[] batch = UuidGenerator.newV7Batch(1000);
 ```
 
-Returns plain `java.util.UUID` — no wrapper type, so it works everywhere a `UUID` already does (equality, hashing, `Comparable`, JPA/Hibernate entity IDs, `toString()`). `UuidGenerator.Namespaces.DNS`/`URL`/`OID`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.NIL`/`MAX` are the §5.9/§5.10 special values.
+Returns plain `java.util.UUID` — no wrapper type, so it works everywhere a `UUID` already does (equality, hashing, `Comparable`, JPA/Hibernate entity IDs, `toString()`). `UuidGenerator.Namespaces.DNS`/`URL`/`OID`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.NIL`/`MAX` are the §5.9/§5.10 special values. `newV6`/`newV7` also accept an `Instant` directly (`newV6(Instant)`), not just a raw millisecond count; `getTimestamp` is the version-agnostic counterpart to `v6Timestamp`/`v7Timestamp` — it checks `uuid.version()` itself and returns `Optional.empty()` for anything but a genuine v6/v7 `UUID`, instead of assuming the caller already knows.
 
 ## Why not `java.util.UUID`?
 

@@ -110,17 +110,27 @@ final class Uuid
      * time-based UUID" from "time-based UUID with a very early timestamp", so the caller is
      * responsible for checking `version()` first if that matters.
      *
-     * @return \DateTimeImmutable the embedded UTC timestamp
+     * Throws by default for any other version; pass `throwOnMismatch: false` to get `null`
+     * back instead — for a caller that doesn't already know (or want to separately check)
+     * whether this UUID is time-based.
+     *
+     * @param bool $throwOnMismatch whether to throw (the default) or return null when
+     *     `version()` isn't 6 or 7
+     * @return \DateTimeImmutable|null the embedded UTC timestamp, or null if $throwOnMismatch
+     *     is false and this isn't a version 6 or 7 UUID
      */
-    public function timestamp(): \DateTimeImmutable
+    public function timestamp(bool $throwOnMismatch = true): ?\DateTimeImmutable
     {
         $millis = match ($this->version()) {
             6 => Runtime::v6UnixMillis($this->bytes),
             7 => Runtime::v7UnixMillis($this->bytes),
-            default => throw new \InvalidArgumentException(
+            default => $throwOnMismatch ? throw new \InvalidArgumentException(
                 "timestamp() is only defined for version 6 or 7 UUIDs, got version {$this->version()}"
-            ),
+            ) : null,
         };
+        if ($millis === null) {
+            return null;
+        }
         // PHP 8.4+: build from exact integers instead of a date-string format parse (the
         // HyperCast instant lesson); older PHP keeps the createFromFormat path.
         self::$fastInstants ??= method_exists(\DateTimeImmutable::class, 'createFromTimestamp')

@@ -42,21 +42,42 @@ final class HyperUuid
     }
 
     /**
+     * Converts $value to a Unix-epoch millisecond integer: null becomes the current time, a
+     * DateTimeInterface is converted exactly (whole seconds plus microseconds, no float
+     * rounding), and an int (a raw millisecond count) passes through unchanged. Shared by
+     * every newV6/newV7/batch door below so a caller can pass either a DateTimeInterface or a
+     * raw millisecond count interchangeably.
+     *
+     * @param \DateTimeInterface|int|null $value the timestamp to convert, or null for the
+     *     current time
+     * @return int the equivalent Unix-epoch millisecond count
+     */
+    private static function unixMillisFrom(\DateTimeInterface|int|null $value): int
+    {
+        if ($value === null) {
+            return (int) round(microtime(true) * 1000);
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->getTimestamp() * 1000 + intdiv((int) $value->format('u'), 1000);
+        }
+        return $value;
+    }
+
+    /**
      * Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
      * of version 1 for better sort/index locality. Defaults to the current time; pass an
-     * explicit Unix-epoch millisecond timestamp to embed a specific time instead. `clock_seq`
-     * and `node` are randomly generated on every call — unlike version 7, there is no
-     * monotonic counter, so calls within the same millisecond are not guaranteed to sort in
-     * creation order.
+     * explicit DateTimeInterface or Unix-epoch millisecond timestamp to embed a specific time
+     * instead. `clock_seq` and `node` are randomly generated on every call — unlike version 7,
+     * there is no monotonic counter, so calls within the same millisecond are not guaranteed
+     * to sort in creation order.
      *
-     * @param int|null $unixMillis the Unix-epoch millisecond timestamp to embed, or null for
-     *     the current time
+     * @param \DateTimeInterface|int|null $unixMillis the timestamp to embed, or null for the
+     *     current time
      * @return Uuid a new version 6 UUID
      */
-    public static function newV6(?int $unixMillis = null): Uuid
+    public static function newV6(\DateTimeInterface|int|null $unixMillis = null): Uuid
     {
-        $unixMillis ??= (int) round(microtime(true) * 1000);
-        return new Uuid(Runtime::newV6($unixMillis));
+        return new Uuid(Runtime::newV6(self::unixMillisFrom($unixMillis)));
     }
 
     /**
@@ -64,14 +85,13 @@ final class HyperUuid
      * call and one random-bytes fetch instead of `count` of each. Defaults to the current time.
      *
      * @param int $count how many UUIDs to create
-     * @param int|null $unixMillis the shared Unix-epoch millisecond timestamp to embed in
-     *     each, or null for the current time
+     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
+     *     null for the current time
      * @return list<Uuid> `count` new version 6 UUIDs
      */
-    public static function newV6Batch(int $count, ?int $unixMillis = null): array
+    public static function newV6Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
-        $unixMillis ??= (int) round(microtime(true) * 1000);
-        $bytes = Runtime::newV6Batch($count, $unixMillis);
+        $bytes = Runtime::newV6Batch($count, self::unixMillisFrom($unixMillis));
         $ids = [];
         for ($i = 0; $i < $count; $i++) {
             $ids[] = new Uuid(substr($bytes, $i * 16, 16));
@@ -81,17 +101,16 @@ final class HyperUuid
 
     /**
      * Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time;
-     * pass an explicit Unix-epoch millisecond timestamp (non-negative, fitting in 48 bits)
-     * to embed a specific time instead.
+     * pass an explicit DateTimeInterface or Unix-epoch millisecond timestamp (non-negative,
+     * fitting in 48 bits) to embed a specific time instead.
      *
-     * @param int|null $unixMillis the Unix-epoch millisecond timestamp to embed, or null for
-     *     the current time
+     * @param \DateTimeInterface|int|null $unixMillis the timestamp to embed, or null for the
+     *     current time
      * @return Uuid a new version 7 UUID
      */
-    public static function newV7(?int $unixMillis = null): Uuid
+    public static function newV7(\DateTimeInterface|int|null $unixMillis = null): Uuid
     {
-        $unixMillis ??= (int) round(microtime(true) * 1000);
-        return new Uuid(Runtime::newV7($unixMillis));
+        return new Uuid(Runtime::newV7(self::unixMillisFrom($unixMillis)));
     }
 
     /**
@@ -100,14 +119,13 @@ final class HyperUuid
      * instead of `count` of each. Defaults to the current time.
      *
      * @param int $count how many UUIDs to create
-     * @param int|null $unixMillis the shared Unix-epoch millisecond timestamp to embed in
-     *     each, or null for the current time
+     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
+     *     null for the current time
      * @return list<Uuid> `count` new version 7 UUIDs
      */
-    public static function newV7Batch(int $count, ?int $unixMillis = null): array
+    public static function newV7Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
-        $unixMillis ??= (int) round(microtime(true) * 1000);
-        $bytes = Runtime::newV7Batch($count, $unixMillis);
+        $bytes = Runtime::newV7Batch($count, self::unixMillisFrom($unixMillis));
         $ids = [];
         for ($i = 0; $i < $count; $i++) {
             $ids[] = new Uuid(substr($bytes, $i * 16, 16));
