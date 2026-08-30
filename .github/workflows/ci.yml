@@ -31,6 +31,11 @@ jobs:
       project: HyperUuid
       crate: hyperuuid
       pure_env: HYPERUUID_PURE
+      # HyperForge's own default (8.0.x) stays put for other repos — HyperUuid.csproj's floor
+      # is net10.0 specifically because net8.0's WASM P/Invoke-table generator scans the wrong
+      # (non-browser) copy of a multi-RID-asset package, an upstream bug fixed in .NET 10 (see
+      # HyperUuid.targets' own comment for the full real-headless-Chromium-verified story).
+      dotnet_version: "10.0.x"
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
       # A jar has no per-platform package selection like NuGet's RID folders, and the
       # csproj's runtimes/**/native wildcard stages at pack time — so both bindings take

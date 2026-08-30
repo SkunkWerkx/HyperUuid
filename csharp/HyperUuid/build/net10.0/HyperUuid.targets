@@ -1,0 +1,59 @@
+<Project>
+  <!-- Auto-imported into every consuming project via NuGet's build/{tfm}/{PackageId}.targets
+       convention — a .targets file (not .props) specifically because it needs
+       $(RuntimeIdentifier) already resolved, which for a Blazor WebAssembly project only
+       happens after that project's own Sdk.targets import; a .props file (imported before the
+       project body) would run too early to see it.
+
+       This is the piece that makes WASM support genuinely zero-effort for a consumer: without
+       it, NuGet's runtimes/browser-wasm/nativeassets/{tfm}/ package convention is real (see
+       NuGet.Client's ManagedCodeConventions.cs — the "NativeLibraries" PatternSet), and the
+       WASM SDK's own WasmApp.Common.targets really does auto-promote any @(NativeLibrary) item
+       into @(NativeFileReference) — but restore doesn't actually populate @(NativeLibrary) from
+       a plain PackageReference's nativeassets folder the way it does runtimes/{rid}/native/ for
+       ordinary P/Invoke. Without this file, the browser-wasm build succeeds but throws
+       DllNotFoundException("*") at runtime because the native code never got linked in at all.
+
+       NativeFileReference alone isn't the whole story, though — confirmed the hard way with a
+       real PackageReference-only consumer in a real headless-Chromium session, not assumed:
+       linking libhyperuuid.a in (which the above accomplishes) does NOT make its functions
+       resolvable via LibraryImport("*") at runtime. The WASM SDK's emcc invocation only
+       exports the runtime's own baseline functions (malloc, free, math intrinsics, ...) via
+       @(EmccExportedFunction) — it does not scan P/Invoke declarations in the app's own
+       assembly OR any referenced assembly/package to discover what else needs exporting
+       (see dotnet/runtime's WasmApp.Common.targets: EmccExportedFunction's defaults come from
+       wasm-props.json, not from a P/Invoke scan). So every native function UuidGenerator.cs
+       P/Invokes has to be listed explicitly here too, Emscripten-style with a leading
+       underscore, or it links in but stays invisible to "*" resolution.
+
+       Why this package's floor is net10.0, not net8.0: even with the above two fixes, net8.0's
+       WASM P/Invoke-table generator (ManagedToNativeGenerator, dotnet/runtime) scans the wrong
+       copy of a multi-RID-asset package for pinvoke declarations — the default lib/{tfm}/
+       assembly, not the runtimes/browser-wasm/lib/{tfm}/ one that actually ships and runs
+       (confirmed by inspecting the generated pinvoke-table.h: it registered our functions
+       under module "hyperuuid", never "*", even though the correct browser-built assembly with
+       "*" was verified byte-for-byte identical to what got deployed). Result: DllNotFoundException
+       at runtime, unconditionally, on net8.0, no workaround found on the package side — not
+       even redeclaring the P/Invoke directly in the consuming app's own entry assembly avoids
+       it. Re-ran the identical repro against .NET 10 (same nupkg, same real headless-Chromium
+       test) and it's fixed there: pinvoke-table.h correctly scans the browser-wasm assembly and
+       generates a "*"-module entry with real function pointers, and the app runs correctly end
+       to end. (.NET 11 preview still carries the separate, unrelated wasm-opt
+       --enable-bulk-memory-opt issue noted in the README — that one needs the wasm-opt swap
+       workaround regardless of TFM.) -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <NativeFileReference Include="$(MSBuildThisFileDirectory)../../runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a" />
+    <EmccExportedFunction Include="_uuid_new_v4" />
+    <EmccExportedFunction Include="_uuid_new_v5" />
+    <EmccExportedFunction Include="_uuid_new_v6" />
+    <EmccExportedFunction Include="_uuid_v6_unix_millis" />
+    <EmccExportedFunction Include="_uuid_new_v6_batch" />
+    <EmccExportedFunction Include="_uuid_new_v7" />
+    <EmccExportedFunction Include="_uuid_v7_unix_millis" />
+    <EmccExportedFunction Include="_uuid_new_v7_batch" />
+    <EmccExportedFunction Include="_uuid_v7_to_sql_order" />
+    <EmccExportedFunction Include="_uuid_v7_to_rfc_order" />
+    <EmccExportedFunction Include="_uuid_v6_to_sql_order" />
+    <EmccExportedFunction Include="_uuid_v6_to_rfc_order" />
+  </ItemGroup>
+</Project>

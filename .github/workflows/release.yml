@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - uses: actions/download-artifact@v8
         with:
@@ -86,8 +86,15 @@ jobs:
   # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
   # (not per Python version), so 6 legs covers every supported CPython 3.9+ on every
   # platform. Built in ci.yml's own push-to-master run, not here — this job is purely
-  # auth -> download -> publish. Deliberately independent of the paused NuGet chain above.
+  # auth -> download -> publish.
+  #
+  # Paused: python/pyproject.toml is still pinned at 0.0.2, already published and we're happy
+  # with that output — nothing changed on the Python side this release, so running this again
+  # would just be a guaranteed duplicate-version rejection (PyPI has no --skip-duplicate the
+  # way nuget-org-publish does). This tag is a NuGet-only release. Un-pause alongside bumping
+  # pyproject.toml's version whenever there's an actual reason to re-publish.
   pypi-publish:
+    if: false
     needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
@@ -108,7 +115,13 @@ jobs:
 
   # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
   # so this doesn't depend on find-ci-run the way nuget-org-pack does.
+  #
+  # Paused for the same reason as pypi-publish above: rust/Cargo.toml is still pinned at
+  # 0.0.2, already published, nothing changed there this release — cargo publish has no
+  # duplicate-version skip either, it's a hard failure. Un-pause alongside bumping
+  # Cargo.toml's version whenever there's an actual reason to re-publish.
   pack-crates:
+    if: false
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
