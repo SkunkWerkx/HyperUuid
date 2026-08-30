@@ -11,7 +11,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("io.github.buvinghausen.hyperuuid.aotsmoketest.Main")
+    mainClass.set("io.github.skunkwerkx.hyperuuid.aotsmoketest.Main")
 }
 
 java {

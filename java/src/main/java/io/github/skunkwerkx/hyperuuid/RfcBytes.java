@@ -1,4 +1,4 @@
-package io.github.buvinghausen.hyperuuid;
+package io.github.skunkwerkx.hyperuuid;
 
 import java.util.UUID;
 

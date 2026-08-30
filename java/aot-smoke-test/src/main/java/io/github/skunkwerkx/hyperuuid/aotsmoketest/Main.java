@@ -1,6 +1,6 @@
-package io.github.buvinghausen.hyperuuid.aotsmoketest;
+package io.github.skunkwerkx.hyperuuid.aotsmoketest;
 
-import io.github.buvinghausen.hyperuuid.UuidGenerator;
+import io.github.skunkwerkx.hyperuuid.UuidGenerator;
 import java.util.UUID;
 
 /**

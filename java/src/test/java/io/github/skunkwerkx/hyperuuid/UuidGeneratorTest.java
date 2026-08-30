@@ -1,4 +1,4 @@
-package io.github.buvinghausen.hyperuuid;
+package io.github.skunkwerkx.hyperuuid;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;

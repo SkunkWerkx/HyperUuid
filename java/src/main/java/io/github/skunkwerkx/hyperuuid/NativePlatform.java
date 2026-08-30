@@ -1,4 +1,4 @@
-package io.github.buvinghausen.hyperuuid;
+package io.github.skunkwerkx.hyperuuid;
 
 /**
  * Maps the running JVM's OS/arch to the RID-style directory (matching the C# wrapper's

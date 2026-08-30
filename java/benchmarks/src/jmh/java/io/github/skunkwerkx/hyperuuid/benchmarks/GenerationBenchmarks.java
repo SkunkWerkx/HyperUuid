@@ -1,6 +1,6 @@
-package io.github.buvinghausen.hyperuuid.benchmarks;
+package io.github.skunkwerkx.hyperuuid.benchmarks;
 
-import io.github.buvinghausen.hyperuuid.UuidGenerator;
+import io.github.skunkwerkx.hyperuuid.UuidGenerator;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;

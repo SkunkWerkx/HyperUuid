@@ -6,15 +6,19 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
-group = "io.github.buvinghausen"
+// io.github.skunkwerkx — the SkunkWerkx org's own auto-verified Central Portal namespace
+// (approved by Central Support after an email request; io.github.buvinghausen was the interim
+// personal-account namespace used for the very first real Maven Central publish, proving the
+// token auth + GPG signing path end to end — that coordinate stays live on Central permanently
+// (no delete), this is where every publish from here on happens).
+group = "io.github.skunkwerkx"
 // The real, committed version — same story as every other binding's manual bump: 0.0.1
-// proves the real Maven Central Publisher Portal leg for real (no local test path exists for
-// OIDC-less token auth + GPG signing the way there's none for NuGet/PyPI Trusted Publishing
-// either), ahead of the coordinated v0.1.0 release. CI overrides this (0.1.0-ci.<run_number>)
-// via HYPERUUID_VERSION for repeated manual workflow_dispatch runs against the GitHub
-// Packages feed during testing, so those don't collide with an already-published version —
-// the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so it
-// always uses this committed version as-is.
+// proves this coordinate's own first real Maven Central publish, ahead of the coordinated
+// v0.1.0 release. CI overrides this (0.1.0-ci.<run_number>) via HYPERUUID_VERSION for repeated
+// manual workflow_dispatch runs against the GitHub Packages feed during testing, so those
+// don't collide with an already-published version — the real Maven Central publish
+// (release.yml, tag-triggered) never sets that env var, so it always uses this committed
+// version as-is.
 version = System.getenv("HYPERUUID_VERSION") ?: "0.0.1"
 
 repositories {
@@ -58,9 +62,10 @@ tasks.javadoc {
 // sources/javadoc jars, POM, and the Central Portal repository target all come from here, not
 // from a manually created MavenPublication (that would collide: the plugin creates one named
 // "maven" too). publishToMavenCentral() targets the new Central Publisher Portal, not the
-// dead OSSRH/Nexus staging API — see the CI workflow's own comment for the account-side
-// namespace-verification story (io.github.buvinghausen auto-verifies; the io.github.skunkwerkx
-// org name does not, without an email to Central Support). Credentials
+// dead OSSRH/Nexus staging API — io.github.skunkwerkx is now an approved, Central-Support-
+// verified org namespace (io.github.buvinghausen was the interim personal-account namespace
+// that auto-verified on its own, used only for this package's very first real publish).
+// Credentials
 // (mavenCentralUsername/mavenCentralPassword, from the Central Portal's own token generator —
 // not a raw Sonatype account password) and the signing key come from
 // ORG_GRADLE_PROJECT_-prefixed env vars in CI, ~/.gradle/gradle.properties locally; neither

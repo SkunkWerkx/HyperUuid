@@ -5,7 +5,7 @@
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via the Java Foreign Function & Memory API (stable since JDK 22 / JEP 454) — no runtime bridge, no reflection, no extra runtime dependency (plain Java, not Kotlin: see the root README for why that matters). This jar bundles a native build for every supported platform and picks the right one at runtime.
 
 ```java
-import io.github.buvinghausen.hyperuuid.UuidGenerator;
+import io.github.skunkwerkx.hyperuuid.UuidGenerator;
 import java.util.UUID;
 
 UUID id = UuidGenerator.newV4();
@@ -66,11 +66,11 @@ Verified against a real GraalVM Native Image build, not just claimed compatible 
 
 ## Install
 
-Published to [Maven Central](https://central.sonatype.com/artifact/io.github.buvinghausen/hyperuuid) — no extra repository configuration needed, `mavenCentral()` is virtually every Gradle/Maven project's default already:
+Published to [Maven Central](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid) — no extra repository configuration needed, `mavenCentral()` is virtually every Gradle/Maven project's default already:
 
 ```kotlin
 dependencies {
-    implementation("io.github.buvinghausen:hyperuuid:<version>")
+    implementation("io.github.skunkwerkx:hyperuuid:<version>")
 }
 ```
 
