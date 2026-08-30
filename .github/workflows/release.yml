@@ -52,7 +52,14 @@ jobs:
   # nuget-org-login job here too, but nothing ever depended on it — this job's own login
   # step below already does a fresh OIDC exchange, so the extra job was dead weight and got
   # removed rather than un-paused into a no-op.)
+  #
+  # Paused for the same reason as pypi-publish/pack-crates below: HyperUuid.csproj is still
+  # pinned at the already-published 0.0.6, nothing changed on the NuGet side this release —
+  # this tag is a Maven-Central-under-the-new-io.github.skunkwerkx-namespace-only release.
+  # Un-pause alongside bumping HyperUuid.csproj's version whenever there's an actual reason
+  # to re-publish.
   nuget-org-publish:
+    if: false
     needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
