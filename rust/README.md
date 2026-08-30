@@ -88,6 +88,17 @@ support is target-specific, not universal —
   bloats every consumer's `Cargo.lock` and can break non-web wasm targets that happen to
   share this dependency — so it's a decision left where it belongs, on your side.
 
+## Optional native-extension features
+
+This crate also carries the native-extension entry points for this repo's Python, Ruby, and
+PHP bindings — `python` (PyO3), `ruby` (Magnus), and `php` (ext-php-rs, a benchmark spike,
+not the shipped PHP backend) — instead of each living in a satellite crate that
+path-depends back on this one. All three are `optional`, off by default, and additive: a
+plain `cargo build` (or a `Cargo.toml` with no `features` line) pulls in nothing beyond
+`getrandom`/`sha1`, unchanged from the dependency set above. Only one is ever enabled per
+build invocation — each generates a different C entry point under the same crate, not
+meant to coexist in one binary.
+
 ## Install
 
 ```toml

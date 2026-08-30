@@ -1,8 +1,8 @@
-//! The fast Ruby backend: the hyperuuid core linked straight into a Ruby native extension
-//! via Magnus — the PyO3 play (already run for this repo's Python binding), run for Ruby.
-//! Fiddle's per-call marshalling floor is ~1.6 µs of interpreted argument packing; an
-//! extension method is an ordinary C-function call, so generation drops to the cost of the
-//! core call plus building one 16-byte Ruby String.
+//! The Ruby backend: this crate linked straight into a Ruby native extension via Magnus —
+//! the PyO3 play (already run for this repo's Python binding), run for Ruby. Fiddle's
+//! per-call marshalling floor is ~1.6 µs of interpreted argument packing; an extension
+//! method is an ordinary C-function call, so generation drops to the cost of the core call
+//! plus building one 16-byte Ruby String.
 //!
 //! On require (after `lib/hyperuuid.rb` has defined the pure-Fiddle module), this extension
 //! redefines the `HyperUuid::Runtime` singleton methods **in place** — no delegation layer,
@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 use magnus::value::Opaque;
 use magnus::{function, prelude::*, Error, ExceptionClass, RModule, RString, Ruby};
 
-use hyperuuid as core;
+use crate as core;
 
 /// Constant-referenced classes are anchored by Ruby constants and never collected, so
 /// caching them is GC-safe.

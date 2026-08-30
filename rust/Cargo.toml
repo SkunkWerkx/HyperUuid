@@ -15,6 +15,20 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 getrandom = { version = "0.4.3", default-features = false, features = ["std"] }
 sha1 = { version = "0.11.0", default-features = false }
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py39"], optional = true }
+magnus = { version = "0.8", features = ["rb-sys"], optional = true }
+ext-php-rs = { version = "0.15", optional = true }
+
+# One crate, three optional native-extension entry points instead of three satellite
+# crates each path-depending back on this one. Nothing in a plain `cargo build` (the
+# ctypes/Fiddle/ext-ffi-consumed cdylib every non-extension binding dlopens) changes —
+# these are additive, off by default, and only one is ever enabled per build invocation
+# (each produces a different C entry point — PyInit__native, Init_hyperuuid_native, PHP's
+# module struct — under the same crate, not meant to coexist in one binary).
+[features]
+python = ["dep:pyo3"]
+ruby = ["dep:magnus"]
+php = ["dep:ext-php-rs"]
 
 [dev-dependencies]
 criterion = "0.8.2"

@@ -89,7 +89,7 @@ jobs:
   # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
   # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
   # (not per Python version), so 6 legs covers every supported CPython 3.9+ on every
-  # platform. Source-only (maturin builds straight from python/native/Cargo.toml) —
+  # platform. Source-only (maturin builds straight from rust/Cargo.toml's python feature) —
   # `needs: build-native` is a correctness gate (don't publish untested code), not an
   # artifact dependency. Deliberately independent of the paused NuGet chain above.
   pypi-build-wheels:

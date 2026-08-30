@@ -31,6 +31,7 @@ test = ["pytest>=8.0"]
 bench = ["pyperf>=2.6"]
 
 [tool.maturin]
-manifest-path = "native/Cargo.toml"
+manifest-path = "../rust/Cargo.toml"
 python-source = "src"
 module-name = "hyperuuid._native"
+features = ["python"]

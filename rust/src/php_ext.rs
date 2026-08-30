@@ -1,10 +1,10 @@
-//! Benchmark spike: the hyperuuid core linked straight into a Zend extension via
-//! `ext-php-rs`, mirroring the Python (PyO3) / Ruby (Magnus) native-backend pattern, to
-//! measure it against PHP's `ext-ffi` path (`../src/Runtime.php`). `Runtime.php` already
-//! measured the raw `ext-ffi` crossing at ~105ns — "already extension-class" — unlike
-//! ctypes (~1µs) and Fiddle (~1.6µs), which is *why* Python and Ruby got a native backend
-//! and PHP didn't. This crate exists to check that reasoning against real numbers rather
-//! than leave it asserted.
+//! Benchmark spike: this crate linked straight into a Zend extension via `ext-php-rs`,
+//! mirroring the Python (PyO3) / Ruby (Magnus) native-backend pattern, to measure it
+//! against PHP's `ext-ffi` path (`../src/Runtime.php`). `Runtime.php` already measured the
+//! raw `ext-ffi` crossing at ~105ns — "already extension-class" — unlike ctypes (~1µs) and
+//! Fiddle (~1.6µs), which is *why* Python and Ruby got a native backend and PHP didn't.
+//! This module exists to check that reasoning against real numbers rather than leave it
+//! asserted.
 //!
 //! Deliberately not wired into the `hyperuuid/hyperuuid` Composer package: this is a
 //! benchmark-only spike, not a second production backend. Functions mirror
@@ -14,7 +14,7 @@
 use ext_php_rs::binary::Binary;
 use ext_php_rs::prelude::*;
 
-use hyperuuid::{v4, v5, v6, v7, Uuid};
+use crate::{v4, v5, v6, v7, Uuid};
 
 fn uuid_arg(bytes: &Binary<u8>) -> PhpResult<Uuid> {
     let array: [u8; 16] = bytes

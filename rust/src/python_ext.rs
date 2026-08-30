@@ -1,5 +1,5 @@
-//! The Python backend: the hyperuuid core linked straight into a CPython extension module
-//! via PyO3. A call here is an ordinary `METH_FASTCALL` extension call into a direct Rust
+//! The Python backend: this crate linked straight into a CPython extension module via
+//! PyO3. A call here is an ordinary `METH_FASTCALL` extension call into a direct Rust
 //! call — no dlopen, no C-ABI hop, no per-call boxing, no ctypes marshalling. Ported from
 //! HyperCast's proven `hypercast_native` pattern.
 //!
@@ -17,7 +17,7 @@ use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDateTime, PyList};
 
-use hyperuuid::{v4, v5, v6, v7, Uuid};
+use crate::{v4, v5, v6, v7, Uuid};
 
 static UUID_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
 static UUID_NEW: OnceLock<Py<PyAny>> = OnceLock::new();

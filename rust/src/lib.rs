@@ -19,6 +19,13 @@ pub mod v5;
 pub mod v6;
 pub mod v7;
 
+#[cfg(feature = "python")]
+mod python_ext;
+#[cfg(feature = "ruby")]
+mod ruby_ext;
+#[cfg(feature = "php")]
+mod php_ext;
+
 pub use uuid::{ParseUuidError, Uuid};
 
 #[cfg(test)]

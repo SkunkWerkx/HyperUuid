@@ -1,0 +1,15 @@
+# macOS: a Python/Ruby/PHP extension module must not link the host runtime (libpython,
+# libruby, libphp) — the Py*/rb_*/php* symbols resolve from the host process when the
+# extension loads, so the linker has to be told to leave them undefined
+# (`dynamic_lookup`). maturin arranges this itself for the python feature's release
+# wheel build; a plain `cargo build` (this repo's dev loop, CI, and the ruby/php
+# features, which have no maturin-equivalent wrapper) does not, so it's declared here.
+# Harmless for the default (no extension feature) build too — a cdylib with no
+# undefined symbols is unaffected by the flag either way. Linux permits undefined
+# symbols in shared libraries by default, which is why only the Darwin targets need
+# this. (Learned the hard way in HyperCast's CI bring-up; pre-applied here.)
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
