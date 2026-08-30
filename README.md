@@ -95,18 +95,18 @@ Every language, on every platform, proven for real: `.github/workflows/build-pac
 
 | Language | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | --- |
-| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
+| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [crates.io](https://crates.io/crates/hyperuuid) |
 | [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://github.com/SkunkWerkx/HyperUuid/packages) |
 | [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven](https://github.com/SkunkWerkx/HyperUuid/packages) |
-| [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
-| [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
+| [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `go get` (git tag) |
+| [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `.package(url:)` (git tag) |
 | [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [RubyGems](https://rubygems.org/gems/hyperuuid) |
 | [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | — | [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid) |
-| [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | proven, not yet published |
+| [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [PyPI](https://pypi.org/project/hyperuuid/) |
 
 PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 build, so it always runs under x64 emulation there regardless of host CPU — already exercised for real by the win-x64 leg.
 
-**Published:** C#, Java, PHP, and Ruby. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64 and osx-x64/arm64) with an automatic fallback to a universal, zero-compile pure-Fiddle gem everywhere else, including Windows.
+**Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64 and osx-x64/arm64) with an automatic fallback to a universal, zero-compile pure-Fiddle gem everywhere else, including Windows. Go's embedded native libraries and Swift's `NativeLibs` are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
 
 **Proven, not yet published:** Go, Swift, Ruby, and Python are all CI-green on every platform above but don't have a registered `SkunkWerkx`/`buvinghausen` presence on their respective registries yet (pkg.go.dev, Swift Package Registry, RubyGems, PyPI) — see each language's own README for how to consume it directly (a git dependency, VCS repository, etc.) in the meantime. The Python and Ruby native-extension fast paths add a packaging note of their own: they ship as prebuilt wheels/platform gems when publishing lands, with the ctypes/Fiddle fallbacks guaranteeing the pure zero-compile install path either way. Swift's `Package.swift` has the same repo-root requirement as PHP's `composer.json` — a [root-level manifest](Package.swift) points its targets at the real sources under `swift/`.
 

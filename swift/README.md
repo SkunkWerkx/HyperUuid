@@ -79,10 +79,20 @@ Batch generation amortizes both the native call and that allocation over the who
 
 ## Install
 
-Not yet published to the Swift Package Registry under a registered `SkunkWerkx`
-presence — for now this is proven by CI building and testing the native core plus
-this package on real hardware for every platform leg. Consume via a direct
-`.package(url: "https://github.com/SkunkWerkx/HyperUuid", branch: "...")` (scoped to
-this `swift/` subdirectory) in the meantime.
+```swift
+.package(url: "https://github.com/SkunkWerkx/HyperUuid", from: "0.0.10")
+```
+
+Swift Package Manager has no separate registry to publish to — `.package(url:, from:)`
+resolves straight from a git tag, which *is* the real, complete publish story here, not a
+placeholder for one (Swift Package Index, a discovery/documentation site rather than a
+functional registry, is a separate, optional listing — not needed for this to work). SPM
+requires `Package.swift` at the repository root with no monorepo subdirectory support, same
+constraint Packagist has for `composer.json` — [the repo root's own `Package.swift`](../Package.swift)
+exists for that reason, with its targets pointed at the real sources under `swift/` via
+`path:` rather than duplicating them. The native libraries under
+`Sources/HyperUuid/NativeLibs/{rid}/` are committed straight into git: unlike a real package
+registry, SwiftPM has no packing step of its own — whatever's literally in the git tree at
+the resolved tag is what a consumer's build bundles as resources.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.

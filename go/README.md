@@ -74,10 +74,17 @@ UUIDs; picking one over the other for v6/v7 generation is about these two
 properties and, if your other services are in a different language, using the one
 engine that's byte-for-byte identical everywhere.
 
-Not yet published to a module proxy under a registered `SkunkWerkx` presence — for
-now this is proven by CI building and testing the native core plus this binding on
-real hardware for every platform leg. Consume via a direct `go get
-github.com/SkunkWerkx/HyperUuid/go@<tag>` in the meantime.
+```sh
+go get github.com/SkunkWerkx/HyperUuid/go
+```
+
+Go modules have no separate registry to publish to — `go get` resolves straight from a git
+tag, which *is* the real, complete publish story here, not a placeholder for one. This
+module lives in a subdirectory of the monorepo, so its own semver tags are prefixed
+(`go/v0.0.1`, not a bare `v0.0.1` — those track this repo's other bindings' own release
+events instead). The native libraries under `native/{rid}/` are committed straight into git:
+unlike a real package registry, `go get`/`go build` has no packing step of its own — whatever
+`go:embed` finds in the git tree at the resolved module version is what a consumer gets.
 
 ## cgo on darwin/linux, purego everywhere else
 
