@@ -11,7 +11,7 @@
          fixes applied, ahead of the coordinated v0.1.0 release. pack-nuget-org packs this
          as-is, no CI-side override; pack-nuget's own GitHub Packages job still overrides it
          with a disposable 0.1.0-ci.<run_number> regardless of what's set here. -->
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by

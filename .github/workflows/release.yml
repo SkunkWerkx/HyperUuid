@@ -15,51 +15,39 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-native:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
-    with:
-      project: HyperUuid
-      crate: hyperuuid
-      pure_env: HYPERUUID_PURE
-      csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
-      csharp_runtimes_dir: csharp/HyperUuid/runtimes
-      java_resources_dir: java/src/main/resources/native
-
-  # NuGet leg paused while PyPI gets built out — nuget.info flagged a real, unresolved
-  # question about whether Deterministic/Compiler Flags survive building HyperUuid.csproj
-  # twice (normal + browser-wasm) in the same job sharing one obj/ directory, worth digging
-  # into properly rather than half-attention alongside PyPI work. v0.0.2 is already live and
-  # unaffected by this pause. Un-gating: flip every if: false below back on together, since
-  # they're a connected chain (login -> pack -> publish).
-  nuget-org-login:
-    if: false
+  # This job is the only "build" this file does at all. ci.yml already built and packed
+  # everything real (native legs, wasm, PyPI wheels, the NuGet .nupkg) when this commit
+  # landed on master (ci.yml runs on push to master, not just pull_request, for precisely
+  # this reason) — a tag push just needs to find that run. Every job below this one is
+  # authenticate -> download that run's already-packed artifact -> publish, nothing more.
+  # Also the correctness gate the old per-leg `needs:` comments used to describe: no
+  # successful ci.yml run for this SHA means nothing downstream proceeds.
+  find-ci-run:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
+    outputs:
+      run_id: ${{ steps.find.outputs.run_id }}
     steps:
-      - name: NuGet login (OIDC -> temp API key)
-        uses: NuGet/login@v1
-        with:
-          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
+      - name: Find ci.yml's run for this commit
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --commit "$GITHUB_SHA" --status success --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful ci.yml run found for $GITHUB_SHA — tag a commit that has already landed on master and gone green in ci.yml." >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
-  build-wasm:
-    if: false
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
-    with:
-      crate: hyperuuid
-
-  nuget-org-pack:
-    if: false
-    needs: [build-native, build-wasm]
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
-    with:
-      crate: hyperuuid
-      csproj_path: csharp/HyperUuid/HyperUuid.csproj
-      runtimes_dir: csharp/HyperUuid/runtimes
-
+  # No pack job here at all — ci.yml already packed the .nupkg. This job is purely
+  # auth -> download that artifact -> push. (There was previously a standalone
+  # nuget-org-login job here too, but nothing ever depended on it — this job's own login
+  # step below already does a fresh OIDC exchange, so the extra job was dead weight and got
+  # removed rather than un-paused into a no-op.)
   nuget-org-publish:
-    if: false
-    needs: nuget-org-pack
+    needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -72,6 +60,8 @@ jobs:
         with:
           name: nuget-org-package
           path: nupkg-org
+          run-id: ${{ needs.find-ci-run.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1
@@ -89,17 +79,10 @@ jobs:
   # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
   # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
   # (not per Python version), so 6 legs covers every supported CPython 3.9+ on every
-  # platform. Source-only (maturin builds straight from rust/Cargo.toml's python feature) —
-  # `needs: build-native` is a correctness gate (don't publish untested code), not an
-  # artifact dependency. Deliberately independent of the paused NuGet chain above.
-  pypi-build-wheels:
-    needs: build-native
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
-    with:
-      python_source_dir: python
-
+  # platform. Built in ci.yml's own push-to-master run, not here — this job is purely
+  # auth -> download -> publish. Deliberately independent of the paused NuGet chain above.
   pypi-publish:
-    needs: pypi-build-wheels
+    needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -109,6 +92,8 @@ jobs:
           pattern: pypi-wheels-*
           path: dist
           merge-multiple: true
+          run-id: ${{ needs.find-ci-run.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -116,15 +101,8 @@ jobs:
           packages-dir: dist
 
   # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
-  # so this doesn't depend on build-native the way pack-nuget-org does.
-  # Disabled: rust/Cargo.toml is still pinned at 0.0.1, already published — a run right now
-  # would just burn a job on a guaranteed duplicate-version rejection. Flip back to true
-  # once Cargo.toml is bumped past 0.0.1 (its own CI-proving run) or at the real v0.1.0 cut.
-  # This is exactly the kind of accidental-trigger this file's workflow_dispatch note above
-  # is about: once every leg is proven, removing workflow_dispatch here means a stray manual
-  # run can never accidentally attempt this (or any other real publish) at all.
+  # so this doesn't depend on find-ci-run the way nuget-org-pack does.
   pack-crates:
-    if: false
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

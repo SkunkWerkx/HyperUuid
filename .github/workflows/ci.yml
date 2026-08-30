@@ -5,14 +5,23 @@ name: CI — build native, build wasm, test every binding
 # suite run against it. Ruby's suite runs twice (forced Fiddle fallback + Magnus extension
 # backend); Python has no fallback — PyO3 only, via maturin develop.
 #
-# PR -> ci, tag -> release: this file is routine validation only, nothing published
-# anywhere, not even to the private GitHub Packages feeds — no packing step here at all,
-# no compute/storage spent on artifacts nobody was using. build-native's own per-binding
-# test suite is the real validation; real, public, permanent publishing lives in
-# release.yml, tag-triggered only.
+# PR -> ci, tag -> release: this file is where every real build happens — the native legs,
+# wasm, and (on push to master only) every registry's actual shippable, packed artifact
+# (PyPI wheels, the NuGet .nupkg). release.yml never builds or packs anything itself: a tag
+# push just finds this file's already-green run for that commit, authenticates to each
+# registry, downloads the artifact this file already produced, and publishes it — see
+# find-ci-run in release.yml. That split is also why packing only happens on push to master,
+# not on every PR: a PR's packed artifact would never be tagged, so building it there is
+# compute spent on nothing.
+#
+# Runs on push to master, not just pull_request, specifically so the commit that actually
+# gets tagged has its own CI run and artifacts under its own SHA — a PR run validates the
+# PR's head SHA (or an ephemeral merge ref), never the SHA that lands on master.
 
 on:
   pull_request:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -36,3 +45,23 @@ jobs:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
     with:
       crate: hyperuuid
+
+  # Real multi-platform PyO3 wheels, built here (not release.yml) so release.yml never runs
+  # maturin itself — it just finds this run and downloads what's already built. Gated to
+  # push-to-master: a PR's wheels would never get published, so building them there is
+  # wasted wall clock, not extra validation (build-native's own PyO3 leg already proves the
+  # extension compiles and passes its tests on every PR).
+  pypi-build-wheels:
+    if: github.event_name == 'push'
+    needs: build-native
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
+    with:
+      python_source_dir: python
+
+  nuget-org-pack:
+    needs: [build-native, build-wasm]
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
+    with:
+      crate: hyperuuid
+      csproj_path: csharp/HyperUuid/HyperUuid.csproj
+      runtimes_dir: csharp/HyperUuid/runtimes
