@@ -74,13 +74,13 @@ jobs:
   # step below already does a fresh OIDC exchange, so the extra job was dead weight and got
   # removed rather than un-paused into a no-op.)
   #
-  # Paused for the same reason as pypi-publish/pack-crates below: HyperUuid.csproj is still
-  # pinned at the already-published 0.0.6, nothing changed on the NuGet side this release —
-  # this tag is a Maven-Central-under-the-new-io.github.skunkwerkx-namespace-only release.
-  # Un-pause alongside bumping HyperUuid.csproj's version whenever there's an actual reason
-  # to re-publish.
+  # Live again for the coordinated v0.1.0 release. NuGet rejects a duplicate-version
+  # republish outright (no --skip-duplicate flag on nuget-org-publish's own push step below
+  # would save it — that only covers a race against itself, not an already-published
+  # version), so this only actually works once HyperUuid.csproj's <Version> is bumped past
+  # the already-published 0.0.6 — a real prerequisite, not automatic just because this gate
+  # is gone.
   nuget-org-publish:
-    if: false
     needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
@@ -151,13 +151,11 @@ jobs:
   # platform. Built in ci.yml's own push-to-master run, not here — this job is purely
   # auth -> download -> publish.
   #
-  # Paused: python/pyproject.toml is still pinned at 0.0.2, already published and we're happy
-  # with that output — nothing changed on the Python side this release, so running this again
-  # would just be a guaranteed duplicate-version rejection (PyPI has no --skip-duplicate the
-  # way nuget-org-publish does). This tag is a NuGet-only release. Un-pause alongside bumping
-  # pyproject.toml's version whenever there's an actual reason to re-publish.
+  # Live again for the coordinated v0.1.0 release. PyPI has no --skip-duplicate — a
+  # duplicate-version push is a guaranteed hard rejection — so this only actually works once
+  # python/pyproject.toml's version is bumped past the already-published 0.0.2, a real
+  # prerequisite, not automatic just because this gate is gone.
   pypi-publish:
-    if: false
     needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
@@ -179,12 +177,12 @@ jobs:
   # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
   # so this doesn't depend on find-ci-run the way nuget-org-pack does.
   #
-  # Paused for the same reason as pypi-publish above: rust/Cargo.toml is still pinned at
-  # 0.0.2, already published, nothing changed there this release — cargo publish has no
-  # duplicate-version skip either, it's a hard failure. Un-pause alongside bumping
-  # Cargo.toml's version whenever there's an actual reason to re-publish.
+  # Live again for the coordinated v0.1.0 release. cargo publish has no duplicate-version
+  # skip either — a hard failure — so this only actually works once rust/Cargo.toml's
+  # version is bumped past the already-published 0.0.2 (and Cargo.lock regenerated to match
+  # — cargo publish --locked fails on a stale self-referential lock entry), a real
+  # prerequisite, not automatic just because this gate is gone.
   pack-crates:
-    if: false
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -193,13 +191,12 @@ jobs:
   # Portal token + in-memory GPG signing path for real, same as every other registry's own
   # first real publish, ahead of the coordinated v0.1.0 release.
   #
-  # Paused for the same reason as the others: io.github.skunkwerkx:hyperuuid:0.0.1 already
-  # published for real at v0.0.8 — Maven Central rejects a duplicate-version republish outright
-  # (no --skip-duplicate the way nuget-org-publish has), so re-running this on a later tag would
-  # just fail. Un-pause alongside bumping java/build.gradle.kts's version whenever there's an
-  # actual reason to re-publish.
+  # Live again for the coordinated v0.1.0 release. Maven Central rejects a duplicate-version
+  # republish outright (no --skip-duplicate), so this only actually works once
+  # java/build.gradle.kts's committed version is bumped past the already-published
+  # io.github.skunkwerkx:hyperuuid:0.0.1, a real prerequisite, not automatic just because
+  # this gate is gone.
   maven-publish:
-    if: false
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@master
     with:
