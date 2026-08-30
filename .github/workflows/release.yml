@@ -126,13 +126,10 @@ jobs:
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  # Java leg: newly wired, never actually tested against real Maven Central yet, and
-  # java/build.gradle.kts's own version is still hardcoded 0.1.0 (waiting on the coordinated
-  # v0.1.0 release, not meant to fire on an interim tag like this NuGet-only one). Paused
-  # until deliberately un-paused for a real first attempt — same discipline every other leg
-  # in this file went through before its own first real publish.
+  # Java leg: build.gradle.kts bumped to the real 0.0.1 — proving the Maven Central Publisher
+  # Portal token + in-memory GPG signing path for real, same as every other registry's own
+  # first real publish, ahead of the coordinated v0.1.0 release.
   maven-publish:
-    if: false
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@master
     with:

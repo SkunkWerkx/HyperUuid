@@ -5,10 +5,15 @@ plugins {
 }
 
 group = "io.github.buvinghausen"
-// CI overrides this (0.1.0-ci.<run_number>) via HYPERUUID_VERSION so repeated manual
-// workflow_dispatch runs during testing don't collide with an already-published version on
-// the GitHub Packages feed. Real releases (tag push) still need a deliberate bump here.
-version = System.getenv("HYPERUUID_VERSION") ?: "0.1.0"
+// The real, committed version — same story as every other binding's manual bump: 0.0.1
+// proves the real Maven Central Publisher Portal leg for real (no local test path exists for
+// OIDC-less token auth + GPG signing the way there's none for NuGet/PyPI Trusted Publishing
+// either), ahead of the coordinated v0.1.0 release. CI overrides this (0.1.0-ci.<run_number>)
+// via HYPERUUID_VERSION for repeated manual workflow_dispatch runs against the GitHub
+// Packages feed during testing, so those don't collide with an already-published version —
+// the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so it
+// always uses this committed version as-is.
+version = System.getenv("HYPERUUID_VERSION") ?: "0.0.1"
 
 repositories {
     mavenCentral()

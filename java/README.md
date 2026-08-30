@@ -62,16 +62,13 @@ Reproduce: `./gradlew :benchmarks:jmh`.
 
 ## AOT
 
-Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary exercising v4/v5/v6/v7 generation and batch, no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register the FFM downcall shapes ahead of time — already shipped in this jar, so a consumer's own `native-image` build picks it up automatically.
+Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary exercising every function in this binding, including the SQL/RFC byte-order conversions, no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime) — already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config.
 
 ## Install
 
-Published to this repo's GitHub Packages Maven registry:
+Published to [Maven Central](https://central.sonatype.com/artifact/io.github.buvinghausen/hyperuuid) — no extra repository configuration needed, `mavenCentral()` is virtually every Gradle/Maven project's default already:
 
 ```kotlin
-repositories {
-    maven { url = uri("https://maven.pkg.github.com/SkunkWerkx/HyperUuid") }
-}
 dependencies {
     implementation("io.github.buvinghausen:hyperuuid:<version>")
 }

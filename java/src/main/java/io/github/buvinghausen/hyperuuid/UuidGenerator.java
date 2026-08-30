@@ -20,7 +20,7 @@ import java.util.UUID;
 
 /**
  * RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7 time-sortable) calling directly
- * into the native {@code libhyperuuid} shared library via the Java Foreign Function & Memory
+ * into the native {@code libhyperuuid} shared library via the Java Foreign Function &amp; Memory
  * API (stable since JDK 22 / JEP 454) — no runtime bridge, no reflection, no extra runtime
  * dependency (plain Java rather than Kotlin: {@code kotlin-stdlib} would otherwise be a real
  * transitive dependency for every consumer, unlike every other binding in this repo).
