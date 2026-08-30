@@ -25,30 +25,33 @@ on:
         type: string
 
 jobs:
-  # This job is the only "build" this file does at all. ci.yml already built and packed
-  # everything real (native legs, wasm, PyPI wheels, the NuGet .nupkg) — a tag push just
-  # needs to find that run. Every job below this one is authenticate -> download that run's
-  # already-packed artifact -> publish, nothing more. Also the correctness gate the old
-  # per-leg `needs:` comments used to describe: no successful ci.yml run for this SHA means
-  # nothing downstream proceeds.
+  # ci.yml builds and tests every native leg and uploads the reusable, version-agnostic
+  # outputs (plain FFI libs, the Magnus extension) — but never anything that bakes a version
+  # into itself (a .nupkg, a .gem, a wheel). This job locates that ci.yml run so every
+  # publish job below can pull those reusable artifacts from it; the actual version-sensitive
+  # packing (NuGet, RubyGems, PyPI) happens fresh, later in this same file, once the tag
+  # makes the real version knowable.
   #
-  # ci.yml packs every real artifact (PyPI wheels, the NuGet .nupkg, the RubyGems platform
-  # gems) on every run it does, PR included — so the commit being tagged just needs its own
-  # prior green ci.yml run, which its own pull_request run already is in the normal case; no
-  # separate pre-release dispatch step. ci.yml has no push trigger of its own (master is
-  # branch-protected, and a stray push-to-master run rebuilding/repacking on every trivial
-  # change, docs included, wasn't worth it) — if the commit being tagged genuinely has no
-  # green ci.yml run yet (e.g. tagging straight off master after a squash-merge changed the
-  # SHA), dispatch one by hand first:
-  #   gh workflow run ci.yml --repo SkunkWerkx/HyperUuid --ref <branch-or-sha>
-  # then wait for it to go green before pushing the tag. Skip that and this job fails fast
-  # below rather than silently rebuilding.
+  # The tagged commit is essentially never the exact commit ci.yml last ran against — a
+  # "prepare release" version-bump commit and/or stage-native-binaries.yml's own binary-
+  # refresh commit typically sit on top of it, both deliberately silent direct pushes with
+  # no ci.yml run of their own (ci.yml has no push trigger at all). Neither commit changes
+  # anything a registry publish reads from a *built* artifact — a version bump changes
+  # manifest text a fresh `cargo publish`/`gradlew publish`/`dotnet pack`/`gem build`/
+  # `maturin build` call reads directly from the tagged checkout, not from ci.yml's own
+  # (unavoidably pre-bump) build; a binary-refresh commit only touches php/swift/go, which
+  # no registry job below even looks at. So walking back a bounded number of ancestor
+  # commits looking for ci.yml's real run is correct here, not a compromise.
   find-ci-run:
     runs-on: ubuntu-latest
     outputs:
       run_id: ${{ steps.find.outputs.run_id }}
     steps:
-      - name: Find ci.yml's run for this commit
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 10
+
+      - name: Find ci.yml's run for this commit or a recent ancestor
         id: find
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,28 +63,50 @@ jobs:
             echo "run_id=$CI_RUN_ID_OVERRIDE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --commit "$GITHUB_SHA" --status success --json databaseId --jq '.[0].databaseId')
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful ci.yml run found for $GITHUB_SHA — normally the commit's own PR already has one; if not, dispatch ci.yml by hand against the ref you're tagging (gh workflow run ci.yml --ref <branch-or-sha>) and let it go green before tagging." >&2
-            exit 1
-          fi
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          for sha in $(git log --format=%H -n 10 "$GITHUB_SHA"); do
+            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')
+            if [ -n "$run_id" ]; then
+              if [ "$sha" = "$GITHUB_SHA" ]; then
+                echo "::notice::Using ci.yml run $run_id from the tagged commit itself." >&2
+              else
+                echo "::notice::Using ci.yml run $run_id from $sha, an ancestor of the tagged commit." >&2
+              fi
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No successful ci.yml run found for $GITHUB_SHA or its last 10 ancestors — dispatch ci.yml by hand against the ref you're tagging (gh workflow run ci.yml --ref <branch-or-sha>) and let it go green before tagging." >&2
+          exit 1
 
-  # No pack job here at all — ci.yml already packed the .nupkg. This job is purely
-  # auth -> download that artifact -> push. (There was previously a standalone
-  # nuget-org-login job here too, but nothing ever depended on it — this job's own login
-  # step below already does a fresh OIDC exchange, so the extra job was dead weight and got
-  # removed rather than un-paused into a no-op.)
+  # Packs the .nupkg fresh, right now — deliberately not in ci.yml. A .nupkg bakes its
+  # version into its own filename/metadata at pack time, and ci.yml runs before any tag
+  # exists, so packing there would always mean a wrong version. This reuses find-ci-run's
+  # located run purely for the version-agnostic native binaries + wasm staticlib; the
+  # HyperUuid.csproj version it actually packs comes from this tagged checkout directly.
   #
-  # Live again for the coordinated v0.1.0 release. NuGet rejects a duplicate-version
-  # republish outright (no --skip-duplicate flag on nuget-org-publish's own push step below
-  # would save it — that only covers a race against itself, not an already-published
-  # version), so this only actually works once HyperUuid.csproj's <Version> is bumped past
-  # the already-published 0.0.6 — a real prerequisite, not automatic just because this gate
-  # is gone.
-  nuget-org-publish:
+  # NuGet rejects a duplicate-version republish outright (no --skip-duplicate flag on
+  # nuget-org-publish's own push step below would save it — that only covers a race against
+  # itself, not an already-published version), so this only actually works once
+  # HyperUuid.csproj's <Version> is bumped past whatever's already published — a real
+  # prerequisite "prepare release" is responsible for, not automatic just because this job
+  # runs.
+  nuget-org-pack:
     needs: find-ci-run
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
+    with:
+      crate: hyperuuid
+      csproj_path: csharp/HyperUuid/HyperUuid.csproj
+      runtimes_dir: csharp/HyperUuid/runtimes
+      source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+
+  # No pack step here — nuget-org-pack (above) already produced the .nupkg, in this same
+  # release.yml run. This job is purely auth -> download that artifact -> push. (There was
+  # previously a standalone nuget-org-login job here too, but nothing ever depended on it —
+  # this job's own login step below already does a fresh OIDC exchange, so the extra job was
+  # dead weight and got removed rather than un-paused into a no-op.)
+  nuget-org-publish:
+    needs: nuget-org-pack
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -94,8 +119,6 @@ jobs:
         with:
           name: nuget-org-package
           path: nupkg-org
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1
@@ -109,36 +132,93 @@ jobs:
           --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
 
-  # Ruby leg: hyperuuid.gemspec bumped to the real 0.0.1 — proving RubyGems Trusted
-  # Publishing (OIDC) for real, same as every other registry's own first real publish, ahead
-  # of the coordinated v0.1.0 release. No pack job here either — ci.yml's ruby-pack-gems
-  # already built the real universal ("ruby" platform, pure Fiddle) gem plus 4 precompiled
-  # Magnus platform gems (linux-x64/arm64, osx-x64/arm64); this job is purely auth -> download
-  # -> push all 5. Deliberately NOT rubygems/release-gem@v1 — that action always builds (and
-  # pushes) exactly one gem itself via `bundle exec rake release`, which doesn't fit "publish
-  # 5 already-built gem files from a separate job"; configure-rubygems-credentials is the same
-  # OIDC exchange release-gem uses internally, called directly so a plain `gem push` per file
+  # Ruby leg: builds the gems fresh, right here — deliberately not in ci.yml. A .gem bakes
+  # its version into its own filename/metadata at build time, and ci.yml runs before any tag
+  # exists, so building it there would always mean a wrong version. Reuses find-ci-run's
+  # located run purely for the version-agnostic native binaries (Fiddle fallback) + Magnus
+  # extension; the gemspec version it actually builds against comes from this tagged
+  # checkout directly. Deliberately NOT rubygems/release-gem@v1 — that action always builds
+  # (and pushes) exactly one gem itself via `bundle exec rake release`, which doesn't fit
+  # "build and publish 5 gems in one job"; configure-rubygems-credentials is the same OIDC
+  # exchange release-gem uses internally, called directly so a plain `gem push` per file
   # picks up the resulting credentials.
+  #
+  # RubyGems rejects a duplicate-version republish outright (no --skip-duplicate on `gem
+  # push`), so this only actually works once hyperuuid.gemspec's version is bumped past
+  # whatever's already published — a real prerequisite "prepare release" is responsible for.
   rubygems-publish:
     needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
       id-token: write
     steps:
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.4"
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v8
         with:
-          name: rubygems-packages
-          path: pkg
+          pattern: native-*
+          path: artifacts/native
+          merge-multiple: false
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ruby-native-*
+          path: artifacts/ruby-native
+          merge-multiple: false
+          run-id: ${{ needs.find-ci-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: ruby
+
+      - name: Build the universal "ruby" platform gem (pure Fiddle, all 6 platforms bundled)
+        working-directory: ruby
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A LIB_NAMES=(
+            [linux-x64]=libhyperuuid.so
+            [linux-arm64]=libhyperuuid.so
+            [osx-x64]=libhyperuuid.dylib
+            [osx-arm64]=libhyperuuid.dylib
+            [win-x64]=hyperuuid.dll
+            [win-arm64]=hyperuuid.dll
+          )
+          for rid in "${!LIB_NAMES[@]}"; do
+            dest="lib/hyperuuid/native/$rid"
+            mkdir -p "$dest"
+            cp "../artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
+          done
+          bundle exec rake build
+
+      - name: Build precompiled platform gems (Magnus)
+        working-directory: ruby
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A PLATFORMS=(
+            [linux-x64]=x86_64-linux
+            [linux-arm64]=aarch64-linux
+            [osx-x64]=x86_64-darwin
+            [osx-arm64]=arm64-darwin
+          )
+          for rid in "${!PLATFORMS[@]}"; do
+            ext=so
+            [[ "$rid" == osx-* ]] && ext=bundle
+            cp "../artifacts/ruby-native/ruby-native-$rid/hyperuuid_native.$ext" "lib/hyperuuid_native.$ext"
+            bundle exec rake "native:gem[${PLATFORMS[$rid]}]"
+            rm "lib/hyperuuid_native.$ext"
+          done
 
       - uses: rubygems/configure-rubygems-credentials@main
 
       - name: Publish to rubygems.org
+        working-directory: ruby
         run: |
           set -euo pipefail
           for gem in pkg/*.gem; do
@@ -148,15 +228,72 @@ jobs:
   # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
   # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
   # (not per Python version), so 6 legs covers every supported CPython 3.9+ on every
-  # platform. Built in ci.yml's own push-to-master run, not here — this job is purely
-  # auth -> download -> publish.
+  # platform. Built fresh, right here — deliberately not in ci.yml, and unlike every other
+  # registry in this file, not reusable from ci.yml's run either: a wheel bakes its version
+  # into its own filename and metadata at build time (confirmed directly, not assumed —
+  # maturin has no version-override flag), and maturin's PyO3-bindings mode *is* the compile
+  # step, there's no "pack an already-built .so into a wheel" mode the way NuGet/RubyGems
+  # have. So this is the one registry that pays for a second, small compile — same 6
+  # real-hardware legs build-native already uses, just for a wheel instead of a plain test
+  # build, and only at actual release time, not on every PR.
   #
-  # Live again for the coordinated v0.1.0 release. PyPI has no --skip-duplicate — a
-  # duplicate-version push is a guaranteed hard rejection — so this only actually works once
-  # python/pyproject.toml's version is bumped past the already-published 0.0.2, a real
-  # prerequisite, not automatic just because this gate is gone.
+  # PyPI has no --skip-duplicate — a duplicate-version push is a guaranteed hard rejection —
+  # so this only actually works once python/pyproject.toml's version (dynamic, sourced from
+  # rust/Cargo.toml) is bumped past whatever's already published, a real prerequisite
+  # "prepare release" is responsible for.
+  pypi-build-wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2_28"
+          - os: macos-26-intel
+            rid: osx-x64
+            target: x86_64-apple-darwin
+            manylinux: ""
+          - os: macos-latest
+            rid: osx-arm64
+            target: aarch64-apple-darwin
+            manylinux: ""
+          - os: windows-latest
+            rid: win-x64
+            target: x86_64-pc-windows-msvc
+            manylinux: ""
+          - os: windows-11-arm
+            rid: win-arm64
+            target: aarch64-pc-windows-msvc
+            manylinux: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux != '' && matrix.manylinux || 'off' }}
+          args: --release --out dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pypi-wheels-${{ matrix.rid }}
+          path: python/dist/*.whl
+
   pypi-publish:
-    needs: find-ci-run
+    needs: pypi-build-wheels
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -166,8 +303,6 @@ jobs:
           pattern: pypi-wheels-*
           path: dist
           merge-multiple: true
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1

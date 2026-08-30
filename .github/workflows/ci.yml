@@ -5,21 +5,21 @@ name: CI — build native, build wasm, test every binding
 # suite run against it. Ruby's suite runs twice (forced Fiddle fallback + Magnus extension
 # backend); Python has no fallback — PyO3 only, via maturin develop.
 #
-# PR -> ci, tag -> release: this file is where every real build happens — the native legs,
-# wasm, and every registry's actual shippable, packed artifact (PyPI wheels, the NuGet
-# .nupkg, the RubyGems platform gems), on every run, PR included. release.yml never builds
-# or packs anything itself: a tag push just finds this file's already-green run for that
-# exact commit, authenticates to each registry, downloads the artifact this file already
-# produced, and publishes it — see find-ci-run in release.yml. Tagging a PR branch's own
-# HEAD commit directly (no merge to master needed first) works precisely because that
-# commit already has its own real, fully-packed pull_request run to find — no separate
-# "about to release" workflow_dispatch step in between. workflow_dispatch stays wired up
-# only as a manual way to force a fresh run (e.g. to retry after a flaky failure); it isn't
-# part of the normal release path.
+# CI's job is build, test, and upload reusable artifacts — nothing version-specific. Every
+# native leg builds+tests fresh, and the raw, version-agnostic outputs (the plain FFI
+# libhyperuuid.so/.dylib/.dll, the compiled Ruby Magnus extension) get uploaded here for
+# later reuse. What deliberately does NOT happen here: anything that bakes a version number
+# into a shippable package (a PyPI wheel's own filename/metadata, a .nupkg, a .gem) — CI runs
+# long before any release tag exists, so there's no correct version to bake in yet. That
+# packing happens once, for real, in release.yml, at actual tag time, when the version is
+# genuinely known — see release.yml's own header for the full shape (find-ci-run reuses this
+# file's version-agnostic artifacts; the version-sensitive packing happens fresh there).
 #
-# No push trigger — master is branch-protected (no direct pushes), so there's no commit
-# landing there outside a PR merge to key a run off of; a release tag points at the PR
-# branch commit itself (or workflow_dispatch's manual run), not a master-only push event.
+# No push trigger, deliberately (not because master is branch-protected — checked via
+# `gh api repos/.../branches/master/protection`, it isn't, despite this having been assumed
+# here before): a stray run rebuilding/retesting on every trivial direct push (stage-native-
+# binaries.yml's own binary-refresh commits included) would just be wasted compute for a
+# result nobody's waiting on.
 
 on:
   pull_request:
@@ -44,12 +44,6 @@ jobs:
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
       # go_windows stays default-true: the purego fallback carries the Windows legs.
-      # Always on: the real PyO3 wheel (maturin, manylinux-compliant) and the compiled Ruby
-      # Magnus extension get built+uploaded on every run, PR included — release.yml's
-      # find-ci-run tags and ships straight from whichever commit's own CI run already
-      # produced these, no separate "about to release" workflow_dispatch step first. A
-      # PR's own run is exactly the run that gets tagged here, not a discarded one.
-      release_artifacts: true
 
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
   # Architecture), so it's built on every PR too, not just at release time.
@@ -57,92 +51,6 @@ jobs:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
     with:
       crate: hyperuuid
-
-  # Always on, same as build-native's own release_artifacts above — see that comment.
-  nuget-org-pack:
-    needs: [build-native, build-wasm]
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
-    with:
-      crate: hyperuuid
-      csproj_path: csharp/HyperUuid/HyperUuid.csproj
-      runtimes_dir: csharp/HyperUuid/runtimes
-
-  # Packages the real RubyGems artifacts: one universal "ruby" platform gem (pure Fiddle,
-  # bundles all 6 platforms' native libs, zero compile needed — the same shape as every other
-  # binding's own "works everywhere" install) plus one precompiled platform-tagged gem per
-  # Magnus-supported platform (linux-x64/arm64, osx-x64/arm64 — not Windows, Magnus doesn't
-  # target it, the universal gem's Fiddle path already covers it). Pure packaging, no
-  # compilation happens here — build-native's own job already built every native lib this
-  # needs (release_artifacts: true) — so unlike the C#/Java/Go legs this doesn't need a native
-  # runner per platform, one ubuntu-latest job staging everything is enough, the same reasoning
-  # nuget-org-pack above already uses for its own RID staging.
-  ruby-pack-gems:
-    needs: build-native
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: native-*
-          path: artifacts/native
-          merge-multiple: false
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: ruby-native-*
-          path: artifacts/ruby-native
-          merge-multiple: false
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.4"
-          bundler-cache: true
-          working-directory: ruby
-
-      - name: Build the universal "ruby" platform gem (pure Fiddle, all 6 platforms bundled)
-        working-directory: ruby
-        shell: bash
-        run: |
-          set -euo pipefail
-          declare -A LIB_NAMES=(
-            [linux-x64]=libhyperuuid.so
-            [linux-arm64]=libhyperuuid.so
-            [osx-x64]=libhyperuuid.dylib
-            [osx-arm64]=libhyperuuid.dylib
-            [win-x64]=hyperuuid.dll
-            [win-arm64]=hyperuuid.dll
-          )
-          for rid in "${!LIB_NAMES[@]}"; do
-            dest="lib/hyperuuid/native/$rid"
-            mkdir -p "$dest"
-            cp "../artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
-          done
-          bundle exec rake build
-
-      - name: Build precompiled platform gems (Magnus)
-        working-directory: ruby
-        shell: bash
-        run: |
-          set -euo pipefail
-          declare -A PLATFORMS=(
-            [linux-x64]=x86_64-linux
-            [linux-arm64]=aarch64-linux
-            [osx-x64]=x86_64-darwin
-            [osx-arm64]=arm64-darwin
-          )
-          for rid in "${!PLATFORMS[@]}"; do
-            ext=so
-            [[ "$rid" == osx-* ]] && ext=bundle
-            cp "../artifacts/ruby-native/ruby-native-$rid/hyperuuid_native.$ext" "lib/hyperuuid_native.$ext"
-            bundle exec rake "native:gem[${PLATFORMS[$rid]}]"
-            rm "lib/hyperuuid_native.$ext"
-          done
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: rubygems-packages
-          path: ruby/pkg/*.gem
 
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
