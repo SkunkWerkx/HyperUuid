@@ -139,7 +139,6 @@ jobs:
           for gem in pkg/*.gem; do
             gem push "$gem"
           done
-          --skip-duplicate
 
   # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
   # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
