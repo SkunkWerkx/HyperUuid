@@ -74,3 +74,88 @@ jobs:
       crate: hyperuuid
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
       runtimes_dir: csharp/HyperUuid/runtimes
+
+  # Doc-comment coverage on every real public API surface, every PR — the same bar
+  # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
+  # #![deny(missing_docs)]), applied here with the closest per-language equivalent. Each is
+  # scoped to the language's own actual public surface, excluding internal FFI plumbing
+  # (Runtime/NativePlatform-style helpers) that isn't part of the documented API — the same
+  # public/internal boundary those three languages get for free from the compiler. Static
+  # analysis only, no native build needed, so these don't depend on build-native.
+  lint-docs-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+      - run: go install github.com/mgechev/revive@v1.16.0
+      - working-directory: go
+        run: revive -config revive.toml ./...
+
+  lint-docs-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install ruff==0.16.5
+      - working-directory: python
+        run: ruff check src
+
+  lint-docs-php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: ffi
+      - working-directory: php
+        run: composer install --no-progress --prefer-dist
+      - working-directory: php
+        run: vendor/bin/phpcs
+
+  lint-docs-ruby:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: ruby
+      - working-directory: ruby
+        run: bundle exec rake docs:check
+
+  lint-docs-swift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: SwiftyLab/setup-swift@v1.14.0
+        with:
+          swift-version: "6.3"
+      - name: Install SwiftLint
+        run: |
+          set -euo pipefail
+          curl -sL -o swiftlint.zip \
+            https://github.com/realm/SwiftLint/releases/download/0.65.1/swiftlint_linux_amd64.zip
+          mkdir swiftlint_bin
+          unzip -q swiftlint.zip -d swiftlint_bin
+      - name: Lint
+        working-directory: swift
+        run: |
+          set -euo pipefail
+          # swiftlint's precompiled binary needs the installed toolchain's own
+          # libsourcekitdInProc.so — its path isn't a fixed, documented convention across
+          # setup-swift installs (confirmed not even consistent with this repo's own local
+          # swiftly install, which fronts the real toolchain behind a shim binary), so locate
+          # it directly rather than assume a directory layout.
+          lib_path="$(find / -xdev -name libsourcekitdInProc.so 2>/dev/null | head -1)"
+          if [ -z "$lib_path" ]; then
+            echo "::error::libsourcekitdInProc.so not found under the installed Swift toolchain" >&2
+            exit 1
+          fi
+          export LINUX_SOURCEKIT_LIB_PATH="$(dirname "$lib_path")"
+          ../swiftlint_bin/swiftlint lint --strict Sources

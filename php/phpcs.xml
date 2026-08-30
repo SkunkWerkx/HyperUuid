@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<ruleset name="HyperUuid-docs">
+    <description>Doc-comment enforcement for HyperUuid's real public API surface — not a
+        general style linter. Runtime.php and NativePlatform.php are internal FFI plumbing
+        (PHP has no package-private visibility, so they're excluded by path here instead),
+        matching the same public/internal boundary the Java binding gets from language-level
+        package-private.</description>
+
+    <file>src/HyperUuid.php</file>
+    <file>src/Uuid.php</file>
+    <file>src/Namespaces.php</file>
+    <file>src/RandomSourceException.php</file>
+    <file>src/TimestampOutOfRangeException.php</file>
+
+    <rule ref="Squiz.Commenting.ClassComment"/>
+    <rule ref="Squiz.Commenting.FunctionComment">
+        <!-- Doc-comment presence and @param/@return/@throws accuracy only — not full Squiz
+             formatting (alignment, blank-line placement, etc.), which isn't this project's
+             existing comment style and isn't what "force documentation" is asking for. -->
+        <exclude name="Squiz.Commenting.FunctionComment.SpacingAfter"/>
+        <exclude name="Squiz.Commenting.FunctionComment.SpacingAfterParamType"/>
+        <exclude name="Squiz.Commenting.FunctionComment.SpacingAfterParamName"/>
+        <exclude name="Squiz.Commenting.FunctionComment.ParamCommentAlignment"/>
+        <!-- "integer"/"boolean" instead of "int"/"bool" is Squiz's pre-PHP7-scalar-type-hint
+             convention — this codebase's real type hints already say int/bool, so its
+             docblocks should match them, not a dated spelling this project never followed. -->
+        <exclude name="Squiz.Commenting.FunctionComment.IncorrectParamVarName"/>
+        <exclude name="Squiz.Commenting.FunctionComment.InvalidReturn"/>
+        <!-- Requiring every @param description to start capitalized and end with a full stop
+             is pedantry beyond "must be documented" — this project's own doc style uses
+             short lowercase phrases throughout every other binding. -->
+        <exclude name="Squiz.Commenting.FunctionComment.ParamCommentFullStop"/>
+        <exclude name="Squiz.Commenting.FunctionComment.ParamCommentNotCapital"/>
+    </rule>
+</ruleset>

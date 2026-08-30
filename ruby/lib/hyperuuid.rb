@@ -1,8 +1,3 @@
-# RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling
-# directly into the native libhyperuuid shared library via Fiddle — no runtime bridge, no
-# extra gem dependency. Bundles a native build for every supported platform (see
-# HyperUuid::NativePlatform) and picks the right one at runtime, the same trick the Go/
-# Java bindings use since RubyGems has no per-platform native selection wired up here.
 require "time"
 
 require_relative "hyperuuid/uuid"
@@ -10,7 +5,14 @@ require_relative "hyperuuid/namespaces"
 require_relative "hyperuuid/native_platform"
 require_relative "hyperuuid/runtime"
 
+# RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling
+# directly into the native libhyperuuid shared library via Fiddle — no runtime bridge, no
+# extra gem dependency. Bundles a native build for every supported platform (see
+# HyperUuid::NativePlatform) and picks the right one at runtime, the same trick the Go/
+# Java bindings use since RubyGems has no per-platform native selection wired up here.
 module HyperUuid
+  # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v6/v7) the
+  # rest of this module generates.
   VERSION = "0.1.0"
 
   # Creates a random UUID version 4 (RFC 9562 §5.4).

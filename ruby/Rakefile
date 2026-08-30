@@ -1,0 +1,22 @@
+require "yard"
+
+# Doc-comment enforcement for the real public API surface (hyperuuid.rb, uuid.rb,
+# namespaces.rb) — native_platform.rb and runtime.rb are internal FFI plumbing, the same
+# public/internal boundary the Java binding gets from language-level package-private. `yard
+# stats`/`YARD::CLI::Stats` always rediscovers files from lib/**/*.rb on its own regardless of
+# what's parsed into the registry beforehand, so this walks the registry directly instead of
+# going through that CLI, and exits non-zero on any undocumented object.
+task :"docs:check" do
+  YARD::Registry.clear
+  YARD.parse(["lib/hyperuuid.rb", "lib/hyperuuid/uuid.rb", "lib/hyperuuid/namespaces.rb"])
+
+  undocumented = YARD::Registry.all.select { |obj| obj.docstring.nil? || obj.docstring.empty? }
+  total = YARD::Registry.all.size
+  puts "#{total - undocumented.size}/#{total} documented"
+
+  unless undocumented.empty?
+    warn "\nUndocumented objects:"
+    undocumented.each { |obj| warn "  #{obj.path}" }
+    exit 1
+  end
+end

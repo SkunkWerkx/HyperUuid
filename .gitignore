@@ -53,6 +53,7 @@ swift/Sources/HyperUuid/NativeLibs/*/
 ruby/lib/hyperuuid/native/*/
 ruby/Gemfile.lock
 ruby/pkg/
+ruby/.yardoc/
 
 # PHP
 # Same story — CI places each leg's native lib here for `phpunit` at build-native time;

@@ -1,0 +1,13 @@
+# Doc-comment enforcement only — not a general style linter. `exported` is revive's modern
+# replacement for the deprecated golint's check: every exported identifier (func/type/const/
+# var, and every exported method) must have a doc comment starting with its own name, and the
+# package itself needs a "Package hyperuuid ..." comment. Every other default rule (naming
+# conventions, etc.) is deliberately left off so this stays scoped to what CI actually enforces
+# — not a drive-by API rename.
+ignoreGeneratedHeader = false
+severity = "error"
+confidence = 0.8
+errorCode = 1
+warningCode = 0
+
+[rule.exported]

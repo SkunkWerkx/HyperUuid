@@ -13,11 +13,16 @@ namespace HyperUuid;
  */
 final class HyperUuid
 {
+    /** Non-instantiable — static factory methods only. */
     private function __construct()
     {
     }
 
-    /** Creates a random UUID version 4 (RFC 9562 §5.4). */
+    /**
+     * Creates a random UUID version 4 (RFC 9562 §5.4).
+     *
+     * @return Uuid a new random version 4 UUID
+     */
     public static function newV4(): Uuid
     {
         return new Uuid(Runtime::newV4());
@@ -26,6 +31,10 @@ final class HyperUuid
     /**
      * Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8
      * name. The same (namespace, name) pair always produces the same UUID.
+     *
+     * @param Uuid $namespace the namespace UUID, e.g. one of {@see Namespaces}
+     * @param string $name the UTF-8-encoded name
+     * @return Uuid the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static function newV5(Uuid $namespace, string $name): Uuid
     {
@@ -39,6 +48,10 @@ final class HyperUuid
      * and `node` are randomly generated on every call — unlike version 7, there is no
      * monotonic counter, so calls within the same millisecond are not guaranteed to sort in
      * creation order.
+     *
+     * @param int|null $unixMillis the Unix-epoch millisecond timestamp to embed, or null for
+     *     the current time
+     * @return Uuid a new version 6 UUID
      */
     public static function newV6(?int $unixMillis = null): Uuid
     {
@@ -50,7 +63,10 @@ final class HyperUuid
      * Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI
      * call and one random-bytes fetch instead of `count` of each. Defaults to the current time.
      *
-     * @return list<Uuid>
+     * @param int $count how many UUIDs to create
+     * @param int|null $unixMillis the shared Unix-epoch millisecond timestamp to embed in
+     *     each, or null for the current time
+     * @return list<Uuid> `count` new version 6 UUIDs
      */
     public static function newV6Batch(int $count, ?int $unixMillis = null): array
     {
@@ -67,6 +83,10 @@ final class HyperUuid
      * Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time;
      * pass an explicit Unix-epoch millisecond timestamp (non-negative, fitting in 48 bits)
      * to embed a specific time instead.
+     *
+     * @param int|null $unixMillis the Unix-epoch millisecond timestamp to embed, or null for
+     *     the current time
+     * @return Uuid a new version 7 UUID
      */
     public static function newV7(?int $unixMillis = null): Uuid
     {
@@ -79,7 +99,10 @@ final class HyperUuid
      * contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
      * instead of `count` of each. Defaults to the current time.
      *
-     * @return list<Uuid>
+     * @param int $count how many UUIDs to create
+     * @param int|null $unixMillis the shared Unix-epoch millisecond timestamp to embed in
+     *     each, or null for the current time
+     * @return list<Uuid> `count` new version 7 UUIDs
      */
     public static function newV7Batch(int $count, ?int $unixMillis = null): array
     {

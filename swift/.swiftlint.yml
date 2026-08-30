@@ -1,0 +1,10 @@
+only_rules:
+  - missing_docs
+
+missing_docs:
+  # public/open only — Swift's own `internal` (the default access level) is the real
+  # public/private boundary here (NativePlatform.swift, DynamicLibrary.swift, RfcBytes.swift
+  # are internal implementation, unreachable from outside the module), so scoping any lower
+  # would flag files that were never meant to be documented API in the first place. `error`
+  # (not `warning`) so this fails a plain `swiftlint lint` too, not just `--strict`.
+  error: [public, open]

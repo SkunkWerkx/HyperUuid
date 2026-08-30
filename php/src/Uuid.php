@@ -18,7 +18,8 @@ final class Uuid
     /**
      * Wraps a raw 16-byte RFC 9562 (big-endian) UUID value.
      *
-     * @throws \InvalidArgumentException if `$bytes` isn't exactly 16 bytes.
+     * @param string $bytes the raw 16-byte value
+     * @throws \InvalidArgumentException If `$bytes` isn't exactly 16 bytes.
      */
     public function __construct(string $bytes)
     {
@@ -31,7 +32,9 @@ final class Uuid
     /**
      * Parses an 8-4-4-4-12 hyphenated hex UUID string.
      *
-     * @throws \InvalidArgumentException if `$string` isn't a valid UUID string.
+     * @param string $string the UUID string to parse
+     * @return self the parsed UUID
+     * @throws \InvalidArgumentException If `$string` isn't a valid UUID string.
      */
     public static function parse(string $string): self
     {
@@ -42,25 +45,41 @@ final class Uuid
         return new self(hex2bin($hex));
     }
 
-    /** The UUID's 16 raw bytes in RFC 9562 (big-endian) order. */
+    /**
+     * The UUID's 16 raw bytes in RFC 9562 (big-endian) order.
+     *
+     * @return string the raw 16-byte value
+     */
     public function bytes(): string
     {
         return $this->bytes;
     }
 
-    /** The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6). */
+    /**
+     * The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6).
+     *
+     * @return int the version nibble
+     */
     public function version(): int
     {
         return (\ord($this->bytes[6]) >> 4) & 0x0F;
     }
 
-    /** The RFC 9562 variant bits (top two bits of octet 8). `0b10` means RFC 9562/4122. */
+    /**
+     * The RFC 9562 variant bits (top two bits of octet 8). `0b10` means RFC 9562/4122.
+     *
+     * @return int the variant bits
+     */
     public function variant(): int
     {
         return (\ord($this->bytes[8]) >> 6) & 0b11;
     }
 
-    /** The 8-4-4-4-12 hyphenated hex string representation. */
+    /**
+     * The 8-4-4-4-12 hyphenated hex string representation.
+     *
+     * @return string the hyphenated hex string
+     */
     public function __toString(): string
     {
         $hex = bin2hex($this->bytes);
@@ -74,7 +93,12 @@ final class Uuid
         );
     }
 
-    /** Whether `$other` wraps the same 16 raw bytes. */
+    /**
+     * Whether `$other` wraps the same 16 raw bytes.
+     *
+     * @param Uuid $other the UUID to compare against
+     * @return bool true if both wrap the same 16 raw bytes
+     */
     public function equals(Uuid $other): bool
     {
         return $this->bytes === $other->bytes;
@@ -85,6 +109,8 @@ final class Uuid
      * when `version()` is 6 or 7 — the RFC 9562 bit layout doesn't distinguish "not a
      * time-based UUID" from "time-based UUID with a very early timestamp", so the caller is
      * responsible for checking `version()` first if that matters.
+     *
+     * @return \DateTimeImmutable the embedded UTC timestamp
      */
     public function timestamp(): \DateTimeImmutable
     {
@@ -149,6 +175,8 @@ final class Uuid
      * order already has for v6, not something this transform introduces.
      *
      * Meaningful only for a genuine version 6 or 7 UUID — same convention as {@see timestamp()}.
+     *
+     * @return self this UUID reordered into SQL Server wire order
      */
     public function toSqlOrder(): self
     {
@@ -177,7 +205,9 @@ final class Uuid
      * binding's own `toSqlOrder()` produced, but not a cryptographic guarantee against
      * adversarial input, so prefer the explicit form where correctness matters most.
      *
-     * @throws \InvalidArgumentException if `$version` isn't 6 or 7, or (when null)
+     * @param int|null $version 6 or 7, or null to auto-detect
+     * @return self this UUID reordered into RFC 9562 order
+     * @throws \InvalidArgumentException If `$version` isn't 6 or 7, or (when null)
      *     neither inverse's result decodes to a valid version 6 or 7 UUID.
      */
     public function fromSqlOrder(?int $version = null): self
@@ -206,14 +236,22 @@ final class Uuid
         );
     }
 
-    /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
+    /**
+     * The RFC 9562 §5.9 Nil UUID — all 128 bits zero.
+     *
+     * @return self the Nil UUID
+     */
     public static function nil(): self
     {
         static $v = null;
         return $v ??= new self(str_repeat("\x00", 16));
     }
 
-    /** The RFC 9562 §5.10 Max UUID — all 128 bits one. */
+    /**
+     * The RFC 9562 §5.10 Max UUID — all 128 bits one.
+     *
+     * @return self the Max UUID
+     */
     public static function max(): self
     {
         static $v = null;

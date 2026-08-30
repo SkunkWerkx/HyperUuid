@@ -35,3 +35,10 @@ manifest-path = "../rust/Cargo.toml"
 python-source = "src"
 module-name = "hyperuuid._native"
 features = ["python"]
+
+[tool.ruff.lint]
+# Doc-comment enforcement only — the "missing docstring" family of pydocstyle rules
+# (D100-D107), not the full pydocstyle convention (imperative mood, blank-line placement,
+# etc.), which isn't this project's existing comment style and isn't what "force
+# documentation" is asking for.
+select = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]

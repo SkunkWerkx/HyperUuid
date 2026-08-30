@@ -23,6 +23,8 @@ Gem::Specification.new do |spec|
   # longer implicitly on the load path.
   spec.add_dependency "fiddle"
   spec.add_development_dependency "benchmark-ips", "~> 2.15"
+  spec.add_development_dependency "rake", "~> 13.0"
+  spec.add_development_dependency "yard", "~> 0.9"
 
   spec.metadata["source_code_uri"] = spec.homepage
 end
