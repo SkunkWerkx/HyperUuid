@@ -247,6 +247,37 @@ final class HyperUuidTest extends TestCase
         self::assertSame($maxMs, $recovered->getTimestamp() * 1000 + (int) $recovered->format('v'));
     }
 
+    public function testTimestampThrowsForNonTimeBasedVersionByDefault(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        HyperUuid::newV4()->timestamp();
+    }
+
+    public function testTimestampReturnsNullForNonTimeBasedVersionWhenThrowOnMismatchIsFalse(): void
+    {
+        self::assertNull(HyperUuid::newV4()->timestamp(throwOnMismatch: false));
+    }
+
+    public function testTimestampStillReturnsTheRealTimestampWhenThrowOnMismatchIsFalse(): void
+    {
+        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        self::assertEquals($id->timestamp(), $id->timestamp(throwOnMismatch: false));
+    }
+
+    public function testNewV6AcceptsADateTimeInterfaceInPlaceOfAMillisecondInt(): void
+    {
+        $dt = \DateTimeImmutable::createFromFormat('U', (string) intdiv(self::RFC_TEST_VECTOR_MS, 1000));
+        $id = HyperUuid::newV6($dt);
+        self::assertSame(intdiv(self::RFC_TEST_VECTOR_MS, 1000) * 1000, self::millis($id->timestamp()));
+    }
+
+    public function testNewV7AcceptsADateTimeInterfaceInPlaceOfAMillisecondInt(): void
+    {
+        $dt = \DateTimeImmutable::createFromFormat('U', (string) intdiv(self::RFC_TEST_VECTOR_MS, 1000));
+        $id = HyperUuid::newV7($dt);
+        self::assertSame(intdiv(self::RFC_TEST_VECTOR_MS, 1000) * 1000, self::millis($id->timestamp()));
+    }
+
     public function testV7ToSqlOrderRoundTripsThroughFromSqlOrder(): void
     {
         $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);

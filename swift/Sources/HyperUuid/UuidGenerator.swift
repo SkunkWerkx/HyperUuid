@@ -183,6 +183,12 @@ public enum UuidGenerator {
         try newV6(unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
     }
 
+    /// Creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a `Date` — pulls the
+    /// Unix-epoch milliseconds off `date` and mints it through `newV6(unixMillis:)`.
+    public static func newV6(_ date: Date) throws -> UUID {
+        try newV6(unixMillis: UInt64(date.timeIntervalSince1970 * 1000))
+    }
+
     /// Recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's
     /// timestamp field. Only meaningful when `uuid`'s version nibble is 6 — the RFC 9562 bit
     /// layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp",
@@ -240,6 +246,12 @@ public enum UuidGenerator {
         try newV7(unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
     }
 
+    /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a `Date` — pulls the
+    /// Unix-epoch milliseconds off `date` and mints it through `newV7(unixMillis:)`.
+    public static func newV7(_ date: Date) throws -> UUID {
+        try newV7(unixMillis: UInt64(date.timeIntervalSince1970 * 1000))
+    }
+
     /// Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
     /// `unix_ts_ms` field. Only meaningful when `uuid`'s version nibble is 7 — the RFC 9562
     /// bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
@@ -253,6 +265,20 @@ public enum UuidGenerator {
     /// Recovers the UTC timestamp embedded in a version 7 UUID as a `Date`.
     public static func v7Timestamp(_ uuid: UUID) throws -> Date {
         Date(timeIntervalSince1970: Double(try v7UnixMillis(uuid)) / 1000)
+    }
+
+    /// Recovers the UTC timestamp embedded in `uuid` as a `Date`, or `nil` if it isn't a
+    /// version 6 or 7 UUID. Unlike `v6Timestamp`/`v7Timestamp`, this reads the version nibble
+    /// itself first, so a caller doesn't need to already know (or separately check) which
+    /// version `uuid` is before asking — delegates straight to whichever of those two methods
+    /// applies, no bit-layout logic duplicated here. Still `throws` for a real native-load
+    /// failure, same as every other call in this type.
+    public static func getTimestamp(_ uuid: UUID) throws -> Date? {
+        switch uuid.rfcBytes[6] >> 4 {
+        case 6: return try v6Timestamp(uuid)
+        case 7: return try v7Timestamp(uuid)
+        default: return nil
+        }
     }
 
     /// Creates `count` time-sortable version 7 UUIDs sharing one Unix-epoch millisecond

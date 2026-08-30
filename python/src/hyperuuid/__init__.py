@@ -28,6 +28,7 @@ __all__ = [
     "new_v7_batch",
     "v6_timestamp",
     "v7_timestamp",
+    "get_timestamp",
     "v6_to_sql_order",
     "v6_from_sql_order",
     "v7_to_sql_order",
@@ -41,6 +42,19 @@ NIL = _uuid.UUID(bytes=bytes(16))
 
 #: The RFC 9562 §5.10 Max UUID — all 128 bits one.
 MAX = _uuid.UUID(bytes=b"\xff" * 16)
+
+
+def _unix_millis_from(value: int | datetime.datetime | None) -> int | None:
+    """Convert ``value`` to a Unix-epoch millisecond int: ``None`` passes through (``_native``
+    itself defaults that to the current time), a ``datetime.datetime`` is converted exactly
+    via ``timestamp()`` (no float rounding — multiplied and rounded in one step), and an
+    ``int`` (a raw millisecond count) passes through unchanged. Shared by every
+    ``new_v6``/``new_v7``/batch door below so a caller can pass either a ``datetime.datetime``
+    or a raw millisecond count interchangeably.
+    """
+    if isinstance(value, datetime.datetime):
+        return round(value.timestamp() * 1000)
+    return value
 
 
 def new_v4() -> _uuid.UUID:
@@ -57,16 +71,16 @@ def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
     return _native.new_v5(namespace, name)
 
 
-def new_v6(unix_millis: int | None = None) -> _uuid.UUID:
+def new_v6(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     """Create a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
     of version 1 for better sort/index locality.
 
-    Defaults to the current time; pass an explicit Unix-epoch millisecond timestamp to embed
-    a specific time instead. ``clock_seq`` and ``node`` are randomly generated on every call
-    — unlike version 7, there is no monotonic counter, so calls within the same millisecond
-    are not guaranteed to sort in creation order.
+    Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
+    millisecond timestamp to embed a specific time instead. ``clock_seq`` and ``node`` are
+    randomly generated on every call — unlike version 7, there is no monotonic counter, so
+    calls within the same millisecond are not guaranteed to sort in creation order.
     """
-    return _native.new_v6(unix_millis)
+    return _native.new_v6(_unix_millis_from(unix_millis))
 
 
 def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
@@ -82,22 +96,23 @@ def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     return _native.v6_timestamp(uuid_value)
 
 
-def new_v6_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]:
+def new_v6_batch(count: int, unix_millis: int | datetime.datetime | None = None) -> list[_uuid.UUID]:
     """Create ``count`` time-sortable version 6 UUIDs sharing one timestamp capture — one
     native call and one random-bytes fetch instead of ``count`` of each.
 
-    Defaults to the current time.
+    Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
+    millisecond timestamp to embed a specific time instead.
     """
-    return _native.new_v6_batch(count, unix_millis)
+    return _native.new_v6_batch(count, _unix_millis_from(unix_millis))
 
 
-def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
+def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     """Create a time-sortable UUID version 7 (RFC 9562 §6.2).
 
-    Defaults to the current time; pass an explicit Unix-epoch millisecond timestamp
-    (non-negative, fitting in 48 bits) to embed a specific time instead.
+    Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
+    millisecond timestamp (non-negative, fitting in 48 bits) to embed a specific time instead.
     """
-    return _native.new_v7(unix_millis)
+    return _native.new_v7(_unix_millis_from(unix_millis))
 
 
 def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
@@ -114,14 +129,31 @@ def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     return _native.v7_timestamp(uuid_value)
 
 
-def new_v7_batch(count: int, unix_millis: int | None = None) -> list[_uuid.UUID]:
+def get_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime | None:
+    """Recover the UTC timestamp embedded in ``uuid_value``, or ``None`` if it isn't a
+    version 6 or 7 UUID.
+
+    Unlike :func:`v6_timestamp`/:func:`v7_timestamp`, this checks ``uuid_value.version``
+    itself first, so a caller doesn't need to already know (or separately check) which
+    version ``uuid_value`` is before asking — delegates straight to whichever of those two
+    functions applies, no bit-layout logic duplicated here.
+    """
+    if uuid_value.version == 6:
+        return v6_timestamp(uuid_value)
+    if uuid_value.version == 7:
+        return v7_timestamp(uuid_value)
+    return None
+
+
+def new_v7_batch(count: int, unix_millis: int | datetime.datetime | None = None) -> list[_uuid.UUID]:
     """Create ``count`` time-sortable version 7 UUIDs sharing one timestamp capture and one
     contiguous block of the monotonic counter — one native call and one random-bytes fetch
     instead of ``count`` of each.
 
-    Defaults to the current time.
+    Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
+    millisecond timestamp to embed a specific time instead.
     """
-    return _native.new_v7_batch(count, unix_millis)
+    return _native.new_v7_batch(count, _unix_millis_from(unix_millis))
 
 
 def v7_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:

@@ -32,10 +32,15 @@ jobs:
   # per-leg `needs:` comments used to describe: no successful ci.yml run for this SHA means
   # nothing downstream proceeds.
   #
-  # ci.yml has no push trigger (master is branch-protected, and a stray push-to-master run
-  # rebuilding/repacking on every trivial change, docs included, wasn't worth it) — so
-  # before tagging, dispatch it by hand against master's HEAD:
-  #   gh workflow run ci.yml --repo SkunkWerkx/HyperUuid --ref master
+  # ci.yml packs every real artifact (PyPI wheels, the NuGet .nupkg, the RubyGems platform
+  # gems) on every run it does, PR included — so the commit being tagged just needs its own
+  # prior green ci.yml run, which its own pull_request run already is in the normal case; no
+  # separate pre-release dispatch step. ci.yml has no push trigger of its own (master is
+  # branch-protected, and a stray push-to-master run rebuilding/repacking on every trivial
+  # change, docs included, wasn't worth it) — if the commit being tagged genuinely has no
+  # green ci.yml run yet (e.g. tagging straight off master after a squash-merge changed the
+  # SHA), dispatch one by hand first:
+  #   gh workflow run ci.yml --repo SkunkWerkx/HyperUuid --ref <branch-or-sha>
   # then wait for it to go green before pushing the tag. Skip that and this job fails fast
   # below rather than silently rebuilding.
   find-ci-run:
@@ -58,7 +63,7 @@ jobs:
           run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
             --commit "$GITHUB_SHA" --status success --json databaseId --jq '.[0].databaseId')
           if [ -z "$run_id" ]; then
-            echo "::error::No successful ci.yml run found for $GITHUB_SHA — dispatch ci.yml by hand against master's HEAD (gh workflow run ci.yml --ref master) and let it go green before tagging." >&2
+            echo "::error::No successful ci.yml run found for $GITHUB_SHA — normally the commit's own PR already has one; if not, dispatch ci.yml by hand against the ref you're tagging (gh workflow run ci.yml --ref <branch-or-sha>) and let it go green before tagging." >&2
             exit 1
           fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"

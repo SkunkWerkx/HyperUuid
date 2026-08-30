@@ -52,12 +52,18 @@ module HyperUuid
     # when `version` is 6 or 7 — the RFC 9562 bit layout doesn't distinguish "not a time-based
     # UUID" from "time-based UUID with a very early timestamp", so the caller is responsible
     # for checking `version` first if that matters.
-    def timestamp
+    #
+    # Raises by default for any other version; pass `raise_on_mismatch: false` to get `nil`
+    # back instead — for a caller that doesn't already know (or want to separately check)
+    # whether this UUID is time-based.
+    def timestamp(raise_on_mismatch: true)
       millis =
         case version
         when 6 then Runtime.v6_unix_millis(bytes)
         when 7 then Runtime.v7_unix_millis(bytes)
-        else raise ArgumentError, "timestamp is only defined for version 6 or 7 UUIDs, got version #{version}"
+        else
+          raise ArgumentError, "timestamp is only defined for version 6 or 7 UUIDs, got version #{version}" if raise_on_mismatch
+          return nil
         end
       Time.at(millis / 1000, millis % 1000, :millisecond).utc
     end

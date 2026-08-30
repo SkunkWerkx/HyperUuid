@@ -96,6 +96,12 @@ func NewV6At(unixMillis uint64) (uuid.UUID, error) {
 	}
 }
 
+// NewV6AtTime creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a time.Time — pulls
+// the Unix-epoch milliseconds off t and mints it through NewV6At.
+func NewV6AtTime(t time.Time) (uuid.UUID, error) {
+	return NewV6At(uint64(t.UnixMilli()))
+}
+
 // NewV6Batch creates count time-sortable version 6 UUIDs sharing one timestamp capture,
 // using the current time — one native call and one random-bytes fetch instead of count of
 // each.
@@ -188,6 +194,28 @@ func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v7 failed with code %d: %w", rc, ErrTimestampOutOfRange)
 	default:
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v7 failed with code %d: %w", rc, ErrRandomSource)
+	}
+}
+
+// NewV7AtTime creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a time.Time — pulls
+// the Unix-epoch milliseconds off t and mints it through NewV7At.
+func NewV7AtTime(t time.Time) (uuid.UUID, error) {
+	return NewV7At(uint64(t.UnixMilli()))
+}
+
+// GetTimestamp recovers the UTC timestamp embedded in id as a time.Time, or ErrNotTimeBased if
+// id isn't a version 6 or 7 UUID. Unlike V6Timestamp/V7Timestamp, this checks id.Version()
+// itself first, so a caller doesn't need to already know (or separately check) which version id
+// is before asking — delegates straight to whichever of those two functions applies, no
+// bit-layout logic duplicated here.
+func GetTimestamp(id uuid.UUID) (time.Time, error) {
+	switch id.Version() {
+	case 6:
+		return V6Timestamp(id)
+	case 7:
+		return V7Timestamp(id)
+	default:
+		return time.Time{}, ErrNotTimeBased
 	}
 }
 

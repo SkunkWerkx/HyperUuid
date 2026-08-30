@@ -25,6 +25,8 @@ id, err = hyperuuid.NewV6()
 id, err = hyperuuid.NewV7()
 batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
 sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // byte order SQL Server's uniqueidentifier needs to sort by creation order
+
+created, err := hyperuuid.GetTimestamp(id) // version-agnostic: ErrNotTimeBased instead of assuming id is v6/v7
 ```
 
 Returns [`github.com/google/uuid`](https://pkg.go.dev/github.com/google/uuid)'s
@@ -44,7 +46,11 @@ comparator in the C# binding's test suite) rather than reimplemented per binding
 `V6ToSqlOrder`/`V6FromSqlOrder` do the same for version 6, though same-millisecond
 v6 UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter, so
 `clock_seq`/`node` (not the timestamp) decide ties, the same pre-existing RFC 9562
-v6 limitation plain order already has.
+v6 limitation plain order already has. `NewV6AtTime`/`NewV7AtTime` accept a `time.Time`
+directly in place of `NewV6At`/`NewV7At`'s raw millisecond count. `GetTimestamp` is
+the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — it checks
+`id.Version()` itself and returns `ErrNotTimeBased` for anything but a genuine v6/v7
+`uuid.UUID`, instead of assuming the caller already knows.
 
 ## Why not `google/uuid`'s own `NewV6`/`NewV7`?
 

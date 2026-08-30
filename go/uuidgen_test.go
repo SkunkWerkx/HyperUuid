@@ -324,6 +324,80 @@ func TestV7TimestampRoundTripsZeroAndTheRfc48BitMax(t *testing.T) {
 	}
 }
 
+func TestNewV6AtTimeMatchesNewV6AtFromTheEquivalentMillis(t *testing.T) {
+	byTime, err := NewV6AtTime(time.UnixMilli(int64(rfcTestVectorMs)).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotMs, err := V6UnixMillis(byTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMs != rfcTestVectorMs {
+		t.Errorf("got %d ms, want %d", gotMs, rfcTestVectorMs)
+	}
+}
+
+func TestNewV7AtTimeMatchesNewV7AtFromTheEquivalentMillis(t *testing.T) {
+	byTime, err := NewV7AtTime(time.UnixMilli(int64(rfcTestVectorMs)).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotMs, err := V7UnixMillis(byTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMs != rfcTestVectorMs {
+		t.Errorf("got %d ms, want %d", gotMs, rfcTestVectorMs)
+	}
+}
+
+func TestGetTimestampReturnsErrNotTimeBasedForNonTimeBasedVersions(t *testing.T) {
+	id, err := NewV4()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetTimestamp(id); !errors.Is(err, ErrNotTimeBased) {
+		t.Errorf("got %v, want ErrNotTimeBased", err)
+	}
+}
+
+func TestGetTimestampMatchesV6Timestamp(t *testing.T) {
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := V6Timestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetTimestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestGetTimestampMatchesV7Timestamp(t *testing.T) {
+	id, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := V7Timestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetTimestamp(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestV7BatchReturnsCountUuidsSortedAndSharingTheTimestamp(t *testing.T) {
 	ids, err := NewV7BatchAt(1000, rfcTestVectorMs)
 	if err != nil {

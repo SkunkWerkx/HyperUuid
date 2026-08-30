@@ -11,10 +11,14 @@
 //! - [`v7::to_sql_order`] / [`v7::to_rfc_order`] — the byte order SQL Server's
 //!   `uniqueidentifier` needs to sort a version 7 UUID by creation order, and back
 //! - [`Uuid::NIL`] / [`Uuid::MAX`] — the all-zero and all-one special values (RFC 9562 §5.9/§5.10)
+//! - [`get_timestamp`] / [`v6::new_v6_at`] / [`v7::new_v7_at`] — [`Timestamp`]-based
+//!   convenience wrappers matching the `uuid` crate's own `get_timestamp`/`Timestamp` shape,
+//!   for callers who'd rather not pass a raw millisecond count around
 
 #![deny(missing_docs)]
 
 mod ffi;
+mod timestamp;
 mod uuid;
 pub mod v4;
 pub mod v5;
@@ -28,7 +32,22 @@ mod ruby_ext;
 #[cfg(feature = "php")]
 mod php_ext;
 
+pub use timestamp::Timestamp;
 pub use uuid::{ParseUuidError, Uuid};
+
+/// Returns the Unix-epoch [`Timestamp`] embedded in `uuid`, or `None` if it isn't a version 6
+/// or 7 UUID — the same `Option`-returning shape as the `uuid` crate's own
+/// `Uuid::get_timestamp`, so a caller doesn't need to already know (or separately check) the
+/// version before asking. Delegates straight to [`v6::unix_millis`]/[`v7::unix_millis`], the
+/// same extraction every binding's own timestamp getter already uses — no bit-layout logic
+/// duplicated here.
+pub fn get_timestamp(uuid: &Uuid) -> Option<Timestamp> {
+    match uuid.version() {
+        6 => Some(Timestamp::from_unix_millis(v6::unix_millis(uuid))),
+        7 => Some(Timestamp::from_unix_millis(v7::unix_millis(uuid))),
+        _ => None,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -417,6 +436,55 @@ mod tests {
         let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
         let round_tripped = v6::to_rfc_order(&v6::to_sql_order(&id));
         assert_eq!(v6::unix_millis(&round_tripped), RFC_TEST_VECTOR_MS);
+    }
+
+    #[test]
+    fn get_timestamp_returns_none_for_non_time_based_versions() {
+        assert_eq!(get_timestamp(&v4::new_v4().unwrap()), None);
+        assert_eq!(get_timestamp(&v5::new_v5(v5::namespace::DNS, b"test")), None);
+    }
+
+    #[test]
+    fn get_timestamp_matches_v6_unix_millis() {
+        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        assert_eq!(get_timestamp(&id), Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)));
+    }
+
+    #[test]
+    fn get_timestamp_matches_v7_unix_millis() {
+        let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        assert_eq!(get_timestamp(&id), Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)));
+    }
+
+    #[test]
+    fn timestamp_unix_millis_round_trips_through_from_unix() {
+        let ts = Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS);
+        let (secs, subsec_nanos) = ts.to_unix();
+        assert_eq!(Timestamp::from_unix(secs, subsec_nanos), ts);
+        assert_eq!(ts.to_unix_millis(), RFC_TEST_VECTOR_MS);
+    }
+
+    #[test]
+    fn timestamp_to_unix_millis_truncates_sub_millisecond_nanos() {
+        // 1500 subsec_nanos is a real, valid sub-millisecond value that isn't itself a whole
+        // millisecond — round-tripping through the millisecond-only creation/extraction API
+        // truncates it, not rounds it.
+        let ts = Timestamp::from_unix(1, 1_500);
+        assert_eq!(ts.to_unix_millis(), 1000);
+    }
+
+    #[test]
+    fn new_v6_at_matches_new_v6_from_the_same_timestamp() {
+        let by_millis = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        let by_timestamp = v6::new_v6_at(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)).unwrap();
+        assert_eq!(v6::unix_millis(&by_millis), v6::unix_millis(&by_timestamp));
+    }
+
+    #[test]
+    fn new_v7_at_matches_new_v7_from_the_same_timestamp() {
+        let by_millis = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let by_timestamp = v7::new_v7_at(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)).unwrap();
+        assert_eq!(v7::unix_millis(&by_millis), v7::unix_millis(&by_timestamp));
     }
 
     #[test]

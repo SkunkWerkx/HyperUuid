@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -238,6 +239,19 @@ public final class UuidGenerator {
     }
 
     /**
+     * Creates a time-sortable UUID version 6 (RFC 9562 §5.6) from an {@link Instant} — pulls
+     * the Unix-epoch milliseconds off {@code instant} and mints it through {@link #newV6(long)}.
+     *
+     * @param instant the timestamp to embed
+     * @return a new version 6 UUID timestamped at {@code instant}
+     * @throws IllegalArgumentException if {@code instant} doesn't fit the 60-bit v6 timestamp
+     *     field
+     */
+    public static UUID newV6(Instant instant) {
+        return newV6(instant.toEpochMilli());
+    }
+
+    /**
      * Recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's timestamp
      * field. Only meaningful when {@code uuid}'s version nibble is 6 — the RFC 9562 bit
      * layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp",
@@ -352,6 +366,19 @@ public final class UuidGenerator {
     }
 
     /**
+     * Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from an {@link Instant} — pulls
+     * the Unix-epoch milliseconds off {@code instant} and mints it through {@link #newV7(long)}.
+     *
+     * @param instant the timestamp to embed
+     * @return a new version 7 UUID timestamped at {@code instant}
+     * @throws IllegalArgumentException if {@code instant} is negative or doesn't fit within 48
+     *     bits
+     */
+    public static UUID newV7(Instant instant) {
+        return newV7(instant.toEpochMilli());
+    }
+
+    /**
      * Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
      * {@code unix_ts_ms} field. Only meaningful when {@code uuid}'s version nibble is 7 — the
      * RFC 9562 bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
@@ -384,6 +411,24 @@ public final class UuidGenerator {
      */
     public static Instant v7Timestamp(UUID uuid) {
         return Instant.ofEpochMilli(v7UnixMillis(uuid));
+    }
+
+    /**
+     * Recovers the UTC timestamp embedded in {@code uuid}, or {@link Optional#empty()} if it
+     * isn't a version 6 or 7 UUID. Unlike {@link #v6Timestamp}/{@link #v7Timestamp}, this checks
+     * {@code uuid.version()} itself first, so a caller doesn't need to already know (or
+     * separately check) which version {@code uuid} is before asking — delegates straight to
+     * whichever of those two methods applies, no bit-layout logic duplicated here.
+     *
+     * @param uuid any UUID
+     * @return the embedded UTC timestamp, or empty if {@code uuid} isn't version 6 or 7
+     */
+    public static Optional<Instant> getTimestamp(UUID uuid) {
+        return switch (uuid.version()) {
+            case 6 -> Optional.of(v6Timestamp(uuid));
+            case 7 -> Optional.of(v7Timestamp(uuid));
+            default -> Optional.empty();
+        };
     }
 
     /**

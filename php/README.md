@@ -20,6 +20,7 @@ $id3 = HyperUuid::newV6();
 $id4 = HyperUuid::newV7();
 
 $id4->timestamp(); // recover the embedded UTC DateTimeImmutable
+$id4->timestamp(throwOnMismatch: false); // null instead of throwing if $id4 isn't v6/v7
 $id4->toSqlOrder(); // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
@@ -30,7 +31,9 @@ Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
 `->version()`, `->variant()`, `->equals()`) — this package has no runtime dependency on
 `ramsey/uuid`. `Namespaces::dns()`/`url()`/`oid()`/`x500()` are RFC 9562 Section 6.6's
 well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from a
-version 6 or 7 UUID. `->toSqlOrder()`/`->fromSqlOrder()` convert a version 6 or 7 UUID to and
+version 6 or 7 UUID; pass `throwOnMismatch: false` to get `null` back for any other version
+instead of throwing. `newV6()`/`newV7()` also accept a `DateTimeInterface` directly in place
+of a raw millisecond count. `->toSqlOrder()`/`->fromSqlOrder()` convert a version 6 or 7 UUID to and
 from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation
 order (`toSqlOrder()` dispatches on the UUID's own version, matching `timestamp()`'s
 convention) — computed once in the native Rust core rather than reimplemented in PHP, and

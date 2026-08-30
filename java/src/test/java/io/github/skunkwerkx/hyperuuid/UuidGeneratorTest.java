@@ -2,6 +2,7 @@ package io.github.skunkwerkx.hyperuuid;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,6 +13,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -181,6 +183,38 @@ class UuidGeneratorTest {
 
         long maxMs = 0x0000_FFFF_FFFF_FFFFL;
         assertEquals(Instant.ofEpochMilli(maxMs), UuidGenerator.v7Timestamp(UuidGenerator.newV7(maxMs)));
+    }
+
+    @Test
+    void newV6FromInstantMatchesNewV6FromTheEquivalentMillis() {
+        Instant instant = Instant.ofEpochMilli(RFC_TEST_VECTOR_MS);
+        UUID byInstant = UuidGenerator.newV6(instant);
+        assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v6UnixMillis(byInstant));
+    }
+
+    @Test
+    void newV7FromInstantMatchesNewV7FromTheEquivalentMillis() {
+        Instant instant = Instant.ofEpochMilli(RFC_TEST_VECTOR_MS);
+        UUID byInstant = UuidGenerator.newV7(instant);
+        assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v7UnixMillis(byInstant));
+    }
+
+    @Test
+    void getTimestampReturnsEmptyForNonTimeBasedVersions() {
+        assertFalse(UuidGenerator.getTimestamp(UuidGenerator.newV4()).isPresent());
+        assertFalse(UuidGenerator.getTimestamp(UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, "test")).isPresent());
+    }
+
+    @Test
+    void getTimestampMatchesV6Timestamp() {
+        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
+        assertEquals(Optional.of(UuidGenerator.v6Timestamp(id)), UuidGenerator.getTimestamp(id));
+    }
+
+    @Test
+    void getTimestampMatchesV7Timestamp() {
+        UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+        assertEquals(Optional.of(UuidGenerator.v7Timestamp(id)), UuidGenerator.getTimestamp(id));
     }
 
     @Test

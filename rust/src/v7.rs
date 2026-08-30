@@ -1,6 +1,6 @@
 //! RFC 9562 Section 6.2 Method 1 — UUID version 7: time-ordered, monotonically increasing.
 
-use crate::Uuid;
+use crate::{Timestamp, Uuid};
 use core::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
 
@@ -83,6 +83,13 @@ pub fn new_v7(unix_millis: u64) -> Result<Uuid, NewV7Error> {
     uuid.set_version(7);
     uuid.set_variant();
     Ok(uuid)
+}
+
+/// Creates a new UUID version 7 from a [`Timestamp`] instead of a raw millisecond count —
+/// pulls the Unix-epoch milliseconds off `timestamp` and mints it through [`new_v7`], so it's
+/// the exact same UUID [`new_v7(timestamp.to_unix_millis())`](new_v7) would produce.
+pub fn new_v7_at(timestamp: Timestamp) -> Result<Uuid, NewV7Error> {
+    new_v7(timestamp.to_unix_millis())
 }
 
 /// Creates `count` time-sortable UUID version 7 values sharing one Unix-epoch millisecond

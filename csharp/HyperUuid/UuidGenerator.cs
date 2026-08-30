@@ -409,6 +409,25 @@ public static partial class UuidGenerator
         DateTimeOffset.FromUnixTimeMilliseconds(V7UnixMillis(uuid));
 
     /// <summary>
+    /// Recovers the UTC timestamp embedded in <paramref name="uuid"/>, or <see langword="null"/>
+    /// if it isn't a version 6 or 7 UUID. Unlike <see cref="V6Timestamp"/>/<see cref="V7Timestamp"/>,
+    /// this reads the version nibble itself first, so a caller doesn't need to already know (or
+    /// separately check) which version <paramref name="uuid"/> is before asking — delegates
+    /// straight to whichever of those two methods applies, no bit-layout logic duplicated here.
+    /// </summary>
+    public static unsafe DateTimeOffset? GetTimestamp(Guid uuid)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        uuid.TryWriteBytes(bytes, bigEndian: true, out _);
+        return (bytes[6] >> 4) switch
+        {
+            6 => V6Timestamp(uuid),
+            7 => V7Timestamp(uuid),
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Converts an RFC 9562-ordered version 7 <paramref name="uuid"/> to the byte order SQL
     /// Server's <c>uniqueidentifier</c> needs on the wire to sort by creation order.
     /// </summary>

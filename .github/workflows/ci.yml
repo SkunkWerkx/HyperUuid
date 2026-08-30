@@ -6,19 +6,20 @@ name: CI — build native, build wasm, test every binding
 # backend); Python has no fallback — PyO3 only, via maturin develop.
 #
 # PR -> ci, tag -> release: this file is where every real build happens — the native legs,
-# wasm, and (on workflow_dispatch only) every registry's actual shippable, packed artifact
-# (PyPI wheels, the NuGet .nupkg). release.yml never builds or packs anything itself: a tag
-# push just finds this file's already-green run for that commit, authenticates to each
-# registry, downloads the artifact this file already produced, and publishes it — see
-# find-ci-run in release.yml. That split is also why packing is gated off pull_request: a
-# PR's packed artifact would never be tagged, so building it there is compute spent on
-# nothing.
+# wasm, and every registry's actual shippable, packed artifact (PyPI wheels, the NuGet
+# .nupkg, the RubyGems platform gems), on every run, PR included. release.yml never builds
+# or packs anything itself: a tag push just finds this file's already-green run for that
+# exact commit, authenticates to each registry, downloads the artifact this file already
+# produced, and publishes it — see find-ci-run in release.yml. Tagging a PR branch's own
+# HEAD commit directly (no merge to master needed first) works precisely because that
+# commit already has its own real, fully-packed pull_request run to find — no separate
+# "about to release" workflow_dispatch step in between. workflow_dispatch stays wired up
+# only as a manual way to force a fresh run (e.g. to retry after a flaky failure); it isn't
+# part of the normal release path.
 #
 # No push trigger — master is branch-protected (no direct pushes), so there's no commit
-# landing there outside a PR merge to key a run off of. That means find-ci-run has nothing
-# to locate unless someone dispatches this workflow by hand against master's HEAD before
-# tagging a release — a deliberate manual step, not an oversight (a stray push-to-master run
-# building/packing on every trivial change, docs included, was worse).
+# landing there outside a PR merge to key a run off of; a release tag points at the PR
+# branch commit itself (or workflow_dispatch's manual run), not a master-only push event.
 
 on:
   pull_request:
@@ -43,12 +44,12 @@ jobs:
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
       # go_windows stays default-true: the purego fallback carries the Windows legs.
-      # The real PyO3 wheel (maturin, manylinux-compliant) and the compiled Ruby Magnus
-      # extension only get built+uploaded here on the manual "about to release" trigger — a
-      # PR's own wheel/gem would never get published, so building them there is wasted wall
-      # clock, not extra validation (the plain cargo build/test steps every PR already gets
-      # prove the extension compiles and passes its own tests regardless of this flag).
-      release_artifacts: ${{ github.event_name == 'workflow_dispatch' }}
+      # Always on: the real PyO3 wheel (maturin, manylinux-compliant) and the compiled Ruby
+      # Magnus extension get built+uploaded on every run, PR included — release.yml's
+      # find-ci-run tags and ships straight from whichever commit's own CI run already
+      # produced these, no separate "about to release" workflow_dispatch step first. A
+      # PR's own run is exactly the run that gets tagged here, not a discarded one.
+      release_artifacts: true
 
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
   # Architecture), so it's built on every PR too, not just at release time.
@@ -57,10 +58,8 @@ jobs:
     with:
       crate: hyperuuid
 
-  # Same workflow_dispatch-only gating as build-native's own release_artifacts, for the same
-  # reason — this one was missing it (ran on every PR) until caught.
+  # Always on, same as build-native's own release_artifacts above — see that comment.
   nuget-org-pack:
-    if: github.event_name == 'workflow_dispatch'
     needs: [build-native, build-wasm]
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
     with:
@@ -78,7 +77,6 @@ jobs:
   # runner per platform, one ubuntu-latest job staging everything is enough, the same reasoning
   # nuget-org-pack above already uses for its own RID staging.
   ruby-pack-gems:
-    if: github.event_name == 'workflow_dispatch'
     needs: build-native
     runs-on: ubuntu-latest
     steps:
@@ -160,6 +158,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
+          # go-version-file only tells setup-go where to read the Go version from — its
+          # built-in module cache separately needs cache-dependency-path pointed at go.sum,
+          # or it searches the repo root by default and finds nothing (go.mod/go.sum both
+          # live under go/, not the root) — real "Restore cache failed" warning otherwise.
+          cache-dependency-path: go/go.sum
       - run: go install github.com/mgechev/revive@v1.16.0
       - working-directory: go
         run: revive -config revive.toml ./...

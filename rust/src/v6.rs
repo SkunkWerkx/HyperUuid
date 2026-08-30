@@ -1,7 +1,7 @@
 //! RFC 9562 Section 5.6 — UUID version 6: a field-compatible reordering of version 1's
 //! time-based layout for better sort/index locality, without version 7's monotonic counter.
 
-use crate::Uuid;
+use crate::{Timestamp, Uuid};
 
 /// Number of 100-nanosecond intervals between the UUID Gregorian epoch (1582-10-15) and the
 /// Unix epoch (1970-01-01) — the same well-known constant every UUID v1/v6 implementation
@@ -72,6 +72,13 @@ pub fn new_v6(unix_millis: u64) -> Result<Uuid, NewV6Error> {
     uuid.set_version(6);
     uuid.set_variant();
     Ok(uuid)
+}
+
+/// Creates a new UUID version 6 from a [`Timestamp`] instead of a raw millisecond count —
+/// pulls the Unix-epoch milliseconds off `timestamp` and mints it through [`new_v6`], so it's
+/// the exact same UUID [`new_v6(timestamp.to_unix_millis())`](new_v6) would produce.
+pub fn new_v6_at(timestamp: Timestamp) -> Result<Uuid, NewV6Error> {
+    new_v6(timestamp.to_unix_millis())
 }
 
 /// Creates `count` time-sortable UUID version 6 values sharing one Unix-epoch millisecond

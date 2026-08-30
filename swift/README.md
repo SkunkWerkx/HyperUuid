@@ -19,6 +19,7 @@ let id3 = try UuidGenerator.newV6()
 let id4 = try UuidGenerator.newV7()
 
 let created = try UuidGenerator.v7Timestamp(id4) // recover the embedded UTC Date
+let maybeCreated = try UuidGenerator.getTimestamp(id4) // Date?, nil instead of assuming id4 is v6/v7
 let sqlOrdered = try UuidGenerator.v7ToSqlOrder(id4) // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
@@ -28,7 +29,11 @@ let batch = try UuidGenerator.newV7Batch(count: 1000)
 Returns Foundation's `UUID`. `Namespaces.dns`/`url`/`oid`/`x500` are RFC 9562
 Section 6.6's well-known namespaces; `WellKnownUuids.nilUUID`/`maxUUID` are the
 §5.9/§5.10 special values. `UuidGenerator.v6Timestamp(_:)`/`v7Timestamp(_:)` recover
-the embedded UTC `Date` from a version 6 or 7 UUID respectively.
+the embedded UTC `Date` from a version 6 or 7 UUID respectively; `newV6(_:)`/`newV7(_:)`
+accept a `Date` directly in place of `newV6(unixMillis:)`/`newV7(unixMillis:)`'s raw
+millisecond count, and `getTimestamp(_:)` is the version-agnostic counterpart to
+`v6Timestamp`/`v7Timestamp` — it checks the version nibble itself and returns `nil`
+for anything but a genuine v6/v7 UUID, instead of assuming the caller already knows.
 `UuidGenerator.newV6Batch(count:unixMillis:)`/`newV7Batch(count:unixMillis:)` generate
 `count` UUIDs sharing one timestamp capture and one native call, instead of `count`
 of each. `UuidGenerator.v7ToSqlOrder(_:)`/`v7FromSqlOrder(_:)` convert a version 7

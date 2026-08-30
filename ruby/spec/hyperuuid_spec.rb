@@ -194,6 +194,33 @@ RSpec.describe HyperUuid do
       id = described_class.new_v7(max_ms)
       expect((id.timestamp.to_r * 1000).to_i).to eq(max_ms)
     end
+
+    it "raises for a non-time-based version by default" do
+      expect { described_class.new_v4.timestamp }.to raise_error(ArgumentError)
+    end
+
+    it "returns nil for a non-time-based version when raise_on_mismatch is false" do
+      expect(described_class.new_v4.timestamp(raise_on_mismatch: false)).to be_nil
+    end
+
+    it "still returns the real timestamp for v6/v7 when raise_on_mismatch is false" do
+      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
+      expect(id.timestamp(raise_on_mismatch: false)).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
+    end
+  end
+
+  describe "creating from a Time" do
+    it ".new_v6 accepts a Time in place of a millisecond integer" do
+      time = Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc
+      id = described_class.new_v6(time)
+      expect((id.timestamp.to_r * 1000).to_i).to eq(RFC_TEST_VECTOR_MS)
+    end
+
+    it ".new_v7 accepts a Time in place of a millisecond integer" do
+      time = Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc
+      id = described_class.new_v7(time)
+      expect((id.timestamp.to_r * 1000).to_i).to eq(RFC_TEST_VECTOR_MS)
+    end
   end
 
   describe "Uuid#to_sql_order" do
