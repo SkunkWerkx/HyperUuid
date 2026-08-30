@@ -43,8 +43,9 @@ java/src/main/resources/native/
 go/native/*/
 
 # Swift
-# Same story — SPM resources, CI-populated per leg, regenerable via `cargo build --release`.
-swift/Sources/HyperUuid/NativeLibs/*/
+# Native libs under swift/Sources/HyperUuid/NativeLibs/{rid}/ are committed, not ignored —
+# see swift/Sources/HyperUuid/NativeLibs/README.md for why (SwiftPM has no packing step for a
+# git-URL dependency, unlike every other registry this repo publishes to).
 **/.build/
 
 # Ruby
