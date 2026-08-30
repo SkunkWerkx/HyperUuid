@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDateTime, PyList};
+use pyo3::types::{PyBytes, PyDateTime, PyList, PyTzInfo};
 
 use crate::{v4, v5, v6, v7, Uuid};
 
@@ -174,6 +174,7 @@ fn millis_datetime(py: Python<'_>, millis: u64) -> PyResult<Py<PyAny>> {
     }
     let (hour, rest) = (second_of_day / 3_600, second_of_day % 3_600);
     let (minute, second) = (rest / 60, rest % 60);
+    let utc = PyTzInfo::utc(py)?;
     Ok(PyDateTime::new(
         py,
         year as i32,
@@ -183,7 +184,7 @@ fn millis_datetime(py: Python<'_>, millis: u64) -> PyResult<Py<PyAny>> {
         minute as u8,
         second as u8,
         micros,
-        Some(&pyo3::types::timezone_utc(py)),
+        Some(&utc),
     )?
     .into_any()
     .unbind())
