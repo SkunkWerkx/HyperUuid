@@ -1,0 +1,108 @@
+name: Stage native binaries after merge
+
+# PHP/Swift/Go have no packing step of their own — whatever's literally in the git tree at a
+# tagged commit is what a consumer gets (see php/src/native/README.md for the full story).
+# That means the committed binaries under php/src/native/, swift/Sources/HyperUuid/NativeLibs/,
+# and go/native/ go stale the moment rust/ changes and nothing re-stages them. This closes that
+# loop automatically: the moment a PR touching rust/ merges to master, pull the exact binaries
+# that PR's own ci.yml run already built and tested, and commit them straight back — so master's
+# HEAD is always tag-ready, no separate "prepare release" step, no second CI cycle (ci.yml has
+# no push trigger, so this bot commit doesn't spawn another ~80-minute matrix run).
+#
+# Deliberately a direct push, not a bot-opened PR: a PR here would just be "review a diff of
+# binary files nobody can meaningfully read," and it re-adds the manual step this workflow
+# exists to remove. The one real assumption this leans on: the merged PR's head SHA's own
+# ci.yml run is still the right one to trust — true unless another already-merged PR touched
+# rust/ in the gap between "this PR went green" and "this PR got merged," a low-probability
+# race for how this repo actually moves, not a structural guarantee.
+#
+# workflow_dispatch exists purely to dry-run this against an arbitrary already-green commit
+# without needing a real PR merge — pass the exact SHA whose ci.yml run you want to pull from.
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - "rust/**"
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: "Commit SHA to pull native-* artifacts from (must have a successful ci.yml run) and to stage/commit onto master"
+        required: true
+        type: string
+
+jobs:
+  stage-native-binaries:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve the source commit
+        id: source
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "sha=${{ inputs.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.base.ref }}
+
+      - name: Find that commit's own ci.yml run
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --commit "${{ steps.source.outputs.sha }}" --status success --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful ci.yml run found for ${{ steps.source.outputs.sha }} — nothing to stage from." >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: artifacts/native
+          merge-multiple: false
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Stage into php/src/native, swift/.../NativeLibs, go/native
+        run: |
+          set -euo pipefail
+          declare -A LIB_NAMES=(
+            [linux-x64]=libhyperuuid.so
+            [linux-arm64]=libhyperuuid.so
+            [osx-x64]=libhyperuuid.dylib
+            [osx-arm64]=libhyperuuid.dylib
+            [win-x64]=hyperuuid.dll
+            [win-arm64]=hyperuuid.dll
+          )
+          for dest_root in php/src/native swift/Sources/HyperUuid/NativeLibs go/native; do
+            for rid in "${!LIB_NAMES[@]}"; do
+              mkdir -p "$dest_root/$rid"
+              cp "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest_root/$rid/"
+            done
+          done
+
+      - name: Commit and push if anything actually changed
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          RUN_ID: ${{ steps.find.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add php/src/native swift/Sources/HyperUuid/NativeLibs go/native
+          if git diff --cached --quiet; then
+            echo "::notice::Staged binaries are byte-identical to what's already committed — nothing to push."
+            exit 0
+          fi
+          git commit -m "chore: stage native binaries from ci.yml run $RUN_ID ($SOURCE_SHA)"
+          git push origin HEAD:${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.base.ref }}
