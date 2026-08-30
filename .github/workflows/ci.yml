@@ -43,6 +43,12 @@ jobs:
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
       # go_windows stays default-true: the purego fallback carries the Windows legs.
+      # The real PyO3 wheel (maturin, manylinux-compliant) and the compiled Ruby Magnus
+      # extension only get built+uploaded here on the manual "about to release" trigger — a
+      # PR's own wheel/gem would never get published, so building them there is wasted wall
+      # clock, not extra validation (the plain cargo build/test steps every PR already gets
+      # prove the extension compiles and passes its own tests regardless of this flag).
+      release_artifacts: ${{ github.event_name == 'workflow_dispatch' }}
 
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
   # Architecture), so it's built on every PR too, not just at release time.
@@ -51,21 +57,8 @@ jobs:
     with:
       crate: hyperuuid
 
-  # Real multi-platform PyO3 wheels, built here (not release.yml) so release.yml never runs
-  # maturin itself — it just finds this run and downloads what's already built. Gated to
-  # workflow_dispatch (the manual "about to release" trigger, see the header comment): a
-  # PR's wheels would never get published, so building them there is wasted wall clock, not
-  # extra validation (build-native's own PyO3 leg already proves the extension compiles and
-  # passes its tests on every PR).
-  pypi-build-wheels:
-    if: github.event_name == 'workflow_dispatch'
-    needs: build-native
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
-    with:
-      python_source_dir: python
-
-  # Same workflow_dispatch-only gating as pypi-build-wheels, for the same reason — this one
-  # was missing it (ran on every PR) until caught.
+  # Same workflow_dispatch-only gating as build-native's own release_artifacts, for the same
+  # reason — this one was missing it (ran on every PR) until caught.
   nuget-org-pack:
     if: github.event_name == 'workflow_dispatch'
     needs: [build-native, build-wasm]
@@ -74,6 +67,84 @@ jobs:
       crate: hyperuuid
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
       runtimes_dir: csharp/HyperUuid/runtimes
+
+  # Packages the real RubyGems artifacts: one universal "ruby" platform gem (pure Fiddle,
+  # bundles all 6 platforms' native libs, zero compile needed — the same shape as every other
+  # binding's own "works everywhere" install) plus one precompiled platform-tagged gem per
+  # Magnus-supported platform (linux-x64/arm64, osx-x64/arm64 — not Windows, Magnus doesn't
+  # target it, the universal gem's Fiddle path already covers it). Pure packaging, no
+  # compilation happens here — build-native's own job already built every native lib this
+  # needs (release_artifacts: true) — so unlike the C#/Java/Go legs this doesn't need a native
+  # runner per platform, one ubuntu-latest job staging everything is enough, the same reasoning
+  # nuget-org-pack above already uses for its own RID staging.
+  ruby-pack-gems:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: artifacts/native
+          merge-multiple: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ruby-native-*
+          path: artifacts/ruby-native
+          merge-multiple: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: ruby
+
+      - name: Build the universal "ruby" platform gem (pure Fiddle, all 6 platforms bundled)
+        working-directory: ruby
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A LIB_NAMES=(
+            [linux-x64]=libhyperuuid.so
+            [linux-arm64]=libhyperuuid.so
+            [osx-x64]=libhyperuuid.dylib
+            [osx-arm64]=libhyperuuid.dylib
+            [win-x64]=hyperuuid.dll
+            [win-arm64]=hyperuuid.dll
+          )
+          for rid in "${!LIB_NAMES[@]}"; do
+            dest="lib/hyperuuid/native/$rid"
+            mkdir -p "$dest"
+            cp "../artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
+          done
+          bundle exec rake build
+
+      - name: Build precompiled platform gems (Magnus)
+        working-directory: ruby
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A PLATFORMS=(
+            [linux-x64]=x86_64-linux
+            [linux-arm64]=aarch64-linux
+            [osx-x64]=x86_64-darwin
+            [osx-arm64]=arm64-darwin
+          )
+          for rid in "${!PLATFORMS[@]}"; do
+            ext=so
+            [[ "$rid" == osx-* ]] && ext=bundle
+            cp "../artifacts/ruby-native/ruby-native-$rid/hyperuuid_native.$ext" "lib/hyperuuid_native.$ext"
+            bundle exec rake "native:gem[${PLATFORMS[$rid]}]"
+            rm "lib/hyperuuid_native.$ext"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rubygems-packages
+          path: ruby/pkg/*.gem
 
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
