@@ -160,6 +160,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
+          # go-version-file only tells setup-go where to read the Go version from — its
+          # built-in module cache separately needs cache-dependency-path pointed at go.sum,
+          # or it searches the repo root by default and finds nothing (go.mod/go.sum both
+          # live under go/, not the root) — real "Restore cache failed" warning otherwise.
+          cache-dependency-path: go/go.sum
       - run: go install github.com/mgechev/revive@v1.16.0
       - working-directory: go
         run: revive -config revive.toml ./...
