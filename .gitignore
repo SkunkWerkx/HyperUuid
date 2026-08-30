@@ -37,10 +37,9 @@ java/src/main/resources/native/
 **/.pytest_cache/
 
 # Go
-# Same story as csharp/HyperUuid/runtimes/ above: CI places each leg's native lib here for
-# `go test` at build-native time; regenerable locally via `cargo build --release`. The
-# go:embed directive needs *something* tracked to match, hence the README.md carve-out.
-go/native/*/
+# Native libs under go/native/{rid}/ are committed, not ignored — see go/native/README.md
+# for why (a go:embed consumer has no packing step, unlike every other registry this repo
+# publishes to).
 
 # Swift
 # Native libs under swift/Sources/HyperUuid/NativeLibs/{rid}/ are committed, not ignored —
