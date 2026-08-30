@@ -5,24 +5,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
-    <!-- The real, committed version — same story as rust/Cargo.toml's manual bump: 0.0.1
-         proved the nuget.org Trusted Publishing leg for real (no local test path exists for
-         it); 0.0.2 re-proved it with Source Link / Deterministic / symbol-package health
-         fixes applied; 0.0.3 was the first tag-triggered publish through the
-         publish-from-CI-artifacts pipeline (find-ci-run in release.yml); 0.0.4 re-proved the
-         whole chain again against the net10.0 floor (see the WASM section of this project's
-         own README.md for why net8.0 doesn't work) — but shipped a broken build/net10.0/
-         HyperUuid.targets: its own comment quoted a wasm-opt flag containing two adjacent
-         hyphens, which an XML comment can never contain anywhere in its body, so every real
-         WASM consumer's build failed with MSB4024 before even reaching the
-         DllNotFoundException/EmccExportedFunction fix that version existed to ship. Only
-         caught by actually pulling 0.0.4 from live nuget.org into a fresh scratch project —
-         the local test package built earlier in the same session predated that comment edit,
-         so it never exercised the broken text. 0.0.5 re-verifies the exact same way (fresh
-         scratch project, real headless-Chromium session) before tagging.
-         nuget-org-pack packs this as-is, no CI-side override, ahead of the coordinated
-         v0.1.0 release. -->
-    <Version>0.0.5</Version>
+    <!-- The real, committed version, bumped and re-verified against a real scratch project
+         pulling straight from nuget.org before every tag — full history in git log for this
+         file. 0.0.6: eliminated the separate browser-wasm build entirely (see
+         UuidGenerator.cs's own remarks) — one compiled assembly for every platform now,
+         verified byte-identical across two independent from-scratch builds, the leading
+         suspect for every prior release's failing NuGet health checks. nuget-org-pack packs
+         this as-is, no CI-side override, ahead of the coordinated v0.1.0 release. -->
+    <Version>0.0.6</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
@@ -59,26 +49,6 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
-  <!-- Second build of this exact source, invoked separately (e.g. `dotnet build
-       -p:RuntimeIdentifier=browser-wasm -p:BaseOutputPath=bin-browser/`) to produce the
-       browser-wasm-specific assembly variant: UuidGenerator.cs's BROWSER-gated
-       NativeLibraryName switches from "hyperuuid" (dlopen — every real native platform) to
-       "*" (resolve against the current module — the only thing that works for a
-       statically-linked WASM native, which has no separate module to dlopen). This output
-       gets copied to runtimes/browser-wasm/lib/net10.0/ before packing (see
-       hyper-pack-nuget.yml) — NuGet's own asset selection picks it automatically for any
-       consumer building with RuntimeIdentifier=browser-wasm, falling back to the default
-       build under plain lib/net10.0/ for every other RID, with zero action needed from a
-       consumer either way. Keyed off the real, standard RuntimeIdentifier property (the
-       same pattern used for wasi-wasm elsewhere in the .NET ecosystem), not a bespoke
-       project-specific property — this repo doesn't treat WASM as optional or spike-only
-       for C# anymore, so there's no reason for the toggle to be project-specific either.
-       See UuidGenerator.cs's own remarks and the README's WebAssembly (Blazor) section for
-       the full story. -->
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
-    <DefineConstants>$(DefineConstants);BROWSER</DefineConstants>
-  </PropertyGroup>
-
   <ItemGroup>
     <!-- Tells the platform compatibility analyzer (CA1416 family) this project claims browser
          support, so it flags any BCL call this assembly makes that's marked
@@ -94,10 +64,12 @@
          that lives in the repo also ships inside the .nupkg. -->
     <None Include="../README.md" Pack="true" PackagePath="\" />
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
-         .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time,
-         including runtimes/browser-wasm/lib/net10.0/ (the BROWSER-defined build of this same
-         assembly) and runtimes/browser-wasm/nativeassets/net10.0/ (the Rust core's
-         wasm32-unknown-emscripten staticlib) placed there before packing — see
+         .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time.
+         No runtimes/browser-wasm/lib/ asset needed anymore: one compiled assembly now covers
+         every platform (see UuidGenerator.cs's own remarks), so NuGet's plain lib/net10.0/
+         fallback already is the browser-wasm build. Only
+         runtimes/browser-wasm/nativeassets/net10.0/ (the Rust core's wasm32-unknown-emscripten
+         staticlib) is RID-specific here, placed there before packing — see
          hyper-pack-nuget.yml. -->
     <None Include="runtimes/**" Pack="true" PackagePath="runtimes" CopyToOutputDirectory="PreserveNewest" />
     <!-- Every native file also copied straight to the output root, flattened: a plain in-repo
