@@ -86,9 +86,15 @@ Batch generation amortizes both the native call and that allocation over the who
 
 ## Install
 
-```swift
-.package(url: "https://github.com/SkunkWerkx/HyperUuid", from: "0.0.10")
+Add the package URL as a dependency:
+
 ```
+https://github.com/SkunkWerkx/HyperUuid
+```
+
+In Xcode that's File ▸ Add Package Dependencies; in a `Package.swift` it's a `.package(url:)`
+entry with whatever version requirement suits you. SwiftPM resolves the newest release that
+satisfies it, so there is no version to copy from here and none to go stale.
 
 Swift Package Manager has no separate registry to publish to — `.package(url:, from:)`
 resolves straight from a git tag, which *is* the real, complete publish story here, not a

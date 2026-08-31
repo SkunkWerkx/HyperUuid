@@ -16,6 +16,30 @@
 //!   for callers who'd rather not pass a raw millisecond count around
 
 #![deny(missing_docs)]
+// The crate publishes the `no-std` category, and until now that was an unverified claim: four
+// places genuinely reached for std. This makes it compiler-enforced instead — the two error
+// types implement `core::error::Error` (stable since 1.81), `getrandom`'s std-only error impl
+// rides the feature rather than being pinned on, `v7::now_v7` joins the `wasm32` gate it
+// already had (it's the one API needing an OS clock), and `v7`'s monotonic counter trades
+// std's `OnceLock` for a lock-free seed fold over `core::sync::atomic` — see `v7::counter`,
+// which carries the argument for why that keeps the ordering guarantee intact.
+//
+// Gated on the default-on `std` feature rather than unconditional, because this crate also
+// ships a `cdylib`. A final linked artifact needs things only std supplies; proven, not
+// assumed — `cargo build --no-default-features` fails with "no global memory allocator found
+// but one is required", "`#[panic_handler]` function required, but not found", and "unwinding
+// panics are not supported without std". So the shared library every binding dlopens builds
+// with std as it always has, while a bare-metal consumer takes the crate with
+// `default-features = false` and supplies those itself, plus a `getrandom` custom backend,
+// the way such a consumer must anyway. Verified against a real target rather than argued:
+//
+//     RUSTFLAGS='--cfg getrandom_backend="custom"' \
+//         cargo check --no-default-features --target thumbv7em-none-eabi
+#![cfg_attr(not(feature = "std"), no_std)]
+
+// The batch APIs size one scratch buffer by `count`; that's the crate's only allocation, and
+// `alloc` (not std) is all it needs.
+extern crate alloc;
 
 mod ffi;
 mod timestamp;

@@ -89,7 +89,7 @@ go get github.com/SkunkWerkx/HyperUuid/go
 Go modules have no separate registry to publish to — `go get` resolves straight from a git
 tag, which *is* the real, complete publish story here, not a placeholder for one. This
 module lives in a subdirectory of the monorepo, so its own semver tags are prefixed
-(`go/v0.0.1`, not a bare `v0.0.1` — those track this repo's other bindings' own release
+(`go/vX.Y.Z`, not a bare `vX.Y.Z` — those track this repo's other bindings' own release
 events instead). The native libraries under `native/{rid}/` are committed straight into git:
 unlike a real package registry, `go get`/`go build` has no packing step of its own — whatever
 `go:embed` finds in the git tree at the resolved module version is what a consumer gets.

@@ -1,8 +1,8 @@
 //! RFC 9562 Section 6.2 Method 1 — UUID version 7: time-ordered, monotonically increasing.
 
 use crate::{Timestamp, Uuid};
-use core::sync::atomic::{AtomicU32, Ordering};
-use std::sync::OnceLock;
+use alloc::vec;
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// Largest Unix-epoch millisecond timestamp that fits the 48-bit `unix_ts_ms` field
 /// (valid until the year 10889).
@@ -31,20 +31,49 @@ impl core::fmt::Display for NewV7Error {
     }
 }
 
-impl std::error::Error for NewV7Error {}
+impl core::error::Error for NewV7Error {}
 
 // Process-global monotonic counter (RFC 9562 §6.2 Method 1 — Fixed Bit-Length Dedicated
 // Counter), seeded randomly on first use and advanced with fetch_add. This guarantees sort
 // order for UUIDs minted within the same millisecond regardless of caller concurrency.
-static COUNTER: OnceLock<AtomicU32> = OnceLock::new();
+static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+// Whether the one-shot random seed has been claimed yet. A separate flag rather than testing
+// COUNTER against a sentinel, because 0 is a legitimate seed draw and the counter wraps back
+// through 0 on its own — neither would distinguish "unseeded" from "seeded".
+static SEED_CLAIMED: AtomicBool = AtomicBool::new(false);
+
+/// Returns the shared counter, folding in the one-shot random seed on the first call.
+///
+/// `OnceLock` is the obvious tool and is what this used, but it's std-only and this crate is
+/// `#![no_std]` without its default `std` feature. What replaces it has to preserve the one
+/// property the counter exists for: the values `fetch_add` hands out must never go backwards,
+/// including while a seeding race is in flight — a regression there is a silent ordering bug,
+/// not a build failure.
+///
+/// It holds because the winner of the `SEED_CLAIMED` race *adds* the seed instead of storing
+/// it. Addition commutes with the concurrent `fetch_add(1)` of a thread that read the flag
+/// before it flipped, so every increment already handed out survives and the running total
+/// only ever grows; a `store` would not be safe here, since it could roll the counter back
+/// over an increment another thread had already minted a UUID from. Exactly one thread ever
+/// draws a seed (`compare_exchange`), and a thread that loses simply proceeds — no spinning,
+/// nothing to block on, which is also what makes this usable on a bare-metal target.
+///
+/// The one visible difference from the blocking `OnceLock` version: a caller racing the very
+/// first seeding can draw a counter value from below the seed. That's harmless — the seed is
+/// wrap headroom, not a uniqueness or ordering input.
 fn counter() -> &'static AtomicU32 {
-    COUNTER.get_or_init(|| {
+    if !SEED_CLAIMED.load(Ordering::Relaxed)
+        && SEED_CLAIMED
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
         // Seed in [0, 512) to leave ample headroom before the 26-bit wrap, mirroring the
         // C# SequentialGuid implementation this is ported from.
         let seed = getrandom::u32().unwrap_or(0) & 0x1FF;
-        AtomicU32::new(seed)
-    })
+        COUNTER.fetch_add(seed, Ordering::Relaxed);
+    }
+    &COUNTER
 }
 
 /// Creates a new UUID version 7 from an explicit Unix-epoch millisecond timestamp.
@@ -147,9 +176,10 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
 
 /// Creates a new UUID version 7 using the current system time.
 ///
-/// Not available on `wasm32` targets, which have no OS clock — call [`new_v7`] there
-/// with a timestamp supplied by the host instead.
-#[cfg(not(target_arch = "wasm32"))]
+/// Not available on `wasm32` targets, which have no OS clock, nor without this crate's
+/// default `std` feature, which is the same situation one step further out — no OS at all to
+/// read a clock from. Call [`new_v7`] there with a timestamp supplied by the host instead.
+#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
 pub fn now_v7() -> Result<Uuid, NewV7Error> {
     use std::time::{SystemTime, UNIX_EPOCH};
 

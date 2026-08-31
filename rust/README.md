@@ -5,7 +5,7 @@
 
 **A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: up to 15.6x faster on v6/v7 generation, with a real batch API `uuid` doesn't have at all.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`), zero unsafe in the public API, and empirically zero-allocation per call — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`) — zero unsafe in the public API, and empirically zero-allocation per call — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
 
 ```rust
 use hyperuuid::{v4, v5, v6, v7};
@@ -96,6 +96,40 @@ support is target-specific, not universal —
   bloats every consumer's `Cargo.lock` and can break non-web wasm targets that happen to
   share this dependency — so it's a decision left where it belongs, on your side.
 
+## `no_std`
+
+The `no-std` category this crate publishes is compiler-enforced, not asserted: the library is
+`#![no_std]` whenever its default-on `std` feature is off.
+
+```sh
+cargo add hyperuuid --no-default-features
+```
+
+Default-on rather than unconditional because this crate also builds as a `cdylib` — the
+shared library every other binding in this repo dlopens — and a final linked artifact needs a
+`#[panic_handler]` and a `#[global_allocator]`, which only std supplies. So the cdylib builds
+exactly as it always has, and `default-features = false` yields a real bare-metal rlib,
+verified rather than argued:
+
+```sh
+cargo check --no-default-features --target thumbv7em-none-eabi
+```
+
+Three things that build leaves to you, all of them things such a consumer supplies anyway:
+
+- **An entropy backend.** Off std there's no OS for `getrandom` to read from, and it stops
+  compiling rather than guessing. Build with `RUSTFLAGS='--cfg getrandom_backend="custom"'`
+  and export a `__getrandom_v03_custom` symbol — see
+  [`getrandom`'s custom-backend docs](https://docs.rs/getrandom/0.4/getrandom/#custom-backend).
+  Left on your side for the same reason the `wasm_js` backend above is.
+- **A global allocator.** The two `*_batch` functions size one scratch buffer by `count` —
+  the crate's only allocation, as the zero-allocation note above already says — so the crate
+  links `alloc`. Every single-item generator stays allocation-free.
+- **A clock, where you need one.** `v7::now_v7` is the only API that reads the system clock,
+  and it's compiled out without `std` exactly as it already is on `wasm32`. Pass your own
+  timestamp to `v7::new_v7`/`v6::new_v6` instead; every other function in the crate is
+  already timestamp-in, bytes-out.
+
 ## Optional native-extension features
 
 This crate also carries the native-extension entry points for this repo's Python, Ruby, and
@@ -130,9 +164,8 @@ hits this — each leg builds in its own job.
 
 ## Install
 
-```toml
-[dependencies]
-hyperuuid = "0.0.2"
+```sh
+cargo add hyperuuid
 ```
 
 Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't rebuild or retest anything itself — it just finds that already-green run for the tagged commit and republishes what it produced.

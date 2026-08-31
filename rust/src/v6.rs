@@ -2,6 +2,7 @@
 //! time-based layout for better sort/index locality, without version 7's monotonic counter.
 
 use crate::{Timestamp, Uuid};
+use alloc::vec;
 
 /// Number of 100-nanosecond intervals between the UUID Gregorian epoch (1582-10-15) and the
 /// Unix epoch (1970-01-01) — the same well-known constant every UUID v1/v6 implementation
@@ -33,7 +34,7 @@ impl core::fmt::Display for NewV6Error {
     }
 }
 
-impl std::error::Error for NewV6Error {}
+impl core::error::Error for NewV6Error {}
 
 /// Creates a new UUID version 6 from an explicit Unix-epoch millisecond timestamp.
 ///
