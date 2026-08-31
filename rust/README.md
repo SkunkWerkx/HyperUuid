@@ -1,5 +1,8 @@
 # hyperuuid
 
+[![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/hyperuuid.svg)](https://crates.io/crates/hyperuuid)
+
 **A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: up to 15.6x faster on v6/v7 generation, with a real batch API `uuid` doesn't have at all.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`), zero unsafe in the public API, and empirically zero-allocation per call — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
