@@ -7,7 +7,7 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 0.1.1
+## [0.1.1] — 2026-08-31
 
 ### Added
 
@@ -96,5 +96,6 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v.0.1.1...HEAD
+[0.1.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...v.0.1.1
 [0.1.0]: https://github.com/SkunkWerkx/HyperUuid/releases/tag/v0.1.0
