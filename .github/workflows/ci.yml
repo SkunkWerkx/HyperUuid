@@ -52,6 +52,40 @@ jobs:
     with:
       crate: hyperuuid
 
+  # rust/Cargo.toml publishes categories = ["no-std"], and rust/src/lib.rs is #![no_std]
+  # whenever its default-on `std` feature is off. `default = ["std"]` means every other cargo
+  # invocation in this pipeline compiles the *std* configuration — HyperForge's
+  # `cargo build --release`, its `cargo test --release`, and all three `--features` extension
+  # builds. Not one of them would notice a `use std::` creeping back into the core (it compiles
+  # clean under std — at worst an unused-import warning nothing fails on), or a dependency
+  # feature that drags std in, which is the shape this crate was actually in before: it pinned
+  # `getrandom`'s `std` feature on unconditionally. Either way the published claim quietly
+  # stops being true with the whole matrix green. It was live and false once already, at
+  # v0.1.0, which is what this exists to keep from recurring. `--no-default-features` against
+  # a real bare-metal target is the only invocation that compiles the other configuration at
+  # all — see lib.rs's own comment for why the feature has to stay default-on (the cdylib
+  # every binding dlopens needs std's panic handler and allocator).
+  #
+  # RUSTFLAGS is the HyperUuid-specific part, and the reason this job lives here rather than
+  # in HyperForge alongside the shared build matrix: off std there's no OS for `getrandom` to
+  # read entropy from, so it compile_error!s unless pointed at a backend the consumer brings.
+  # `cargo check` doesn't link, so naming the custom backend is enough on its own — no dummy
+  # __getrandom_v03_custom symbol needed to satisfy it.
+  #
+  # Static analysis only, no native build needed, so this doesn't depend on build-native.
+  check-no-std:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabi
+      - name: cargo check (no_std, bare metal)
+        working-directory: rust
+        env:
+          RUSTFLAGS: --cfg getrandom_backend="custom"
+        run: cargo check --no-default-features --target thumbv7em-none-eabi
+
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
   # #![deny(missing_docs)]), applied here with the closest per-language equivalent. Each is

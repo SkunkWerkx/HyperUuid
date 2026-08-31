@@ -13,7 +13,7 @@ categories = ["data-structures", "no-std"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-getrandom = { version = "0.4.3", default-features = false, features = ["std"] }
+getrandom = { version = "0.4.3", default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py39"], optional = true }
 magnus = { version = "0.8", features = ["rb-sys"], optional = true }
@@ -26,9 +26,18 @@ ext-php-rs = { version = "0.15", optional = true }
 # (each produces a different C entry point — PyInit__native, Init_hyperuuid_native, PHP's
 # module struct — under the same crate, not meant to coexist in one binary).
 [features]
-python = ["dep:pyo3"]
-ruby = ["dep:magnus"]
-php = ["dep:ext-php-rs"]
+# On by default so `cargo build` keeps producing the ordinary cdylib every binding dlopens
+# (a linked artifact needs std's panic handler). `default-features = false` gives a genuine
+# `#![no_std]` rlib, which is what the crate's published `no-std` category means; see lib.rs.
+# getrandom's own `std` feature only adds `impl std::error::Error for getrandom::Error`, so
+# it rides along here rather than being pinned on unconditionally. The three extension
+# backends all require std through their own dependencies, so they name it explicitly rather
+# than relying on the default.
+default = ["std"]
+std = ["getrandom/std"]
+python = ["dep:pyo3", "std"]
+ruby = ["dep:magnus", "std"]
+php = ["dep:ext-php-rs", "std"]
 
 [dev-dependencies]
 criterion = "0.8.2"
