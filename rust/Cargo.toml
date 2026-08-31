@@ -1,6 +1,6 @@
 [package]
 name = "hyperuuid"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
 license = "MIT"
