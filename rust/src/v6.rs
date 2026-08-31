@@ -2,7 +2,6 @@
 //! time-based layout for better sort/index locality, without version 7's monotonic counter.
 
 use crate::{Timestamp, Uuid};
-use alloc::vec;
 
 /// Number of 100-nanosecond intervals between the UUID Gregorian epoch (1582-10-15) and the
 /// Unix epoch (1970-01-01) — the same well-known constant every UUID v1/v6 implementation
@@ -12,6 +11,10 @@ const GREGORIAN_OFFSET_100NS: u64 = 0x01B2_1DD2_1381_4000;
 /// Largest 60-bit Gregorian-epoch tick count the `time_high`/`time_mid`/`time_low` fields
 /// can hold.
 const MAX_60_BIT: u64 = 0x0FFF_FFFF_FFFF_FFFF;
+
+/// Random octets each version 6 UUID needs: `clock_seq` (2) plus `node` (6).
+const RAND_BYTES_PER_ITEM: usize = 8;
+
 
 /// An error returned when minting a version 6 UUID fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,12 +86,18 @@ pub fn new_v6_at(timestamp: Timestamp) -> Result<Uuid, NewV6Error> {
 }
 
 /// Creates `count` time-sortable UUID version 6 values sharing one Unix-epoch millisecond
-/// timestamp capture, writing 16 bytes each into consecutive slots of `out` (which must be
-/// exactly `count * 16` bytes long). `clock_seq` and `node` are independently random per
-/// item, same as [`new_v6`] — there's no shared counter state to batch here, just one
-/// `getrandom` call for the whole batch's random bytes instead of `count` separate ones,
-/// the only allocating path in this crate (the scratch buffer is sized by `count`). A
-/// `count` of 0 is a no-op success. Same errors as [`new_v6`].
+/// timestamp capture, writing 16 bytes each into consecutive slots of `out` (which must be at
+/// least `count * 16` bytes long; anything past that is left untouched). `clock_seq` and
+/// `node` are independently random per item, same as [`new_v6`] — there's no shared counter
+/// state to batch here, just one `getrandom` call for the whole batch's random bytes instead
+/// of `count` separate ones, drawn into the caller's own buffer with no scratch space at all
+/// — not on the heap and not on the stack. That is what lets this crate build with no
+/// allocator rather than merely without `std`.
+///
+/// A `count` of 0 is a no-op success. Same errors as [`new_v6`]. The entropy is drawn before
+/// any item is assembled, so on [`NewV6Error::Random`] no UUID has been written at all — but
+/// the front of `out` may hold partial entropy from the failed draw, so treat the buffer as
+/// clobbered rather than untouched.
 pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), NewV6Error> {
     let ticks_since_epoch = unix_millis
         .checked_mul(10_000)
@@ -99,27 +108,47 @@ pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
         return Ok(());
     }
 
+    // Narrowed once, up front, so the entropy fill and the per-item writes below both stay
+    // inside exactly the region this call owns. That matters more than it used to: the fill
+    // now writes through `out` itself, and a caller's oversized buffer must keep its tail
+    // untouched.
+    let out = &mut out[..count as usize * 16];
+
     let time_high = (ticks_since_epoch >> 28) as u32;
     let time_mid = ((ticks_since_epoch >> 12) & 0xFFFF) as u16;
     // Top nibble is always 0 (12-bit value in a 16-bit field), so `item[6] |= 0x60` below is
     // a safe way to write the version nibble without first masking it off.
     let time_low = (ticks_since_epoch & 0x0FFF) as u16;
 
-    let mut rand_bytes = vec![0u8; count as usize * 8];
-    getrandom::fill(&mut rand_bytes).map_err(NewV6Error::Random)?;
+    // One `getrandom` call for the whole batch, with no scratch buffer of any kind: not a heap
+    // one (this crate has no allocator to get it from) and not a fixed stack one either (a
+    // frame big enough to be worth the syscalls it saves is a poor thing to charge a
+    // microcontroller for, where an overflow corrupts silently). The entropy is drawn into the
+    // *front* of the caller's own `out`, packed 8 bytes per item, and each item's share is
+    // moved out to its final octets as that item is written.
+    //
+    // That works in place because the packed entropy always sits to the left of where it is
+    // going: item i's 8 bytes are at 8i but belong at 16i+8. So the 16 bytes written for item
+    // i can only ever land on entropy belonging to items at index >= i — anything from 16i
+    // onwards is item 2i's share or later. Walking the batch backwards therefore only
+    // overwrites entropy that has already been consumed, and item i's own share is moved
+    // before its own 16 bytes are written. Hence `.rev()`, which is load-bearing, not taste.
+    getrandom::fill(&mut out[..count as usize * RAND_BYTES_PER_ITEM])
+        .map_err(NewV6Error::Random)?;
 
-    for i in 0..count as usize {
+    for i in (0..count as usize).rev() {
+        let src = i * RAND_BYTES_PER_ITEM;
+        // clock_seq (14 bits, octets 8-9 alongside the variant) then node (48 bits, octets
+        // 10-15), both straight from the packed entropy above.
+        out.copy_within(src..src + RAND_BYTES_PER_ITEM, i * 16 + 8);
+
         let item = &mut out[i * 16..(i + 1) * 16];
-
         item[0..4].copy_from_slice(&time_high.to_be_bytes());
         item[4..6].copy_from_slice(&time_mid.to_be_bytes());
         item[6..8].copy_from_slice(&time_low.to_be_bytes());
         item[6] |= 0x60;
-
-        let r = &rand_bytes[i * 8..(i + 1) * 8];
-        item[8] = 0x80 | (r[0] & 0x3F);
-        item[9] = r[1];
-        item[10..16].copy_from_slice(&r[2..8]);
+        item[8] = 0x80 | (item[8] & 0x3F);
+        // Multicast bit, flagging the node ID as random rather than a real MAC.
         item[10] |= 0x01;
     }
 

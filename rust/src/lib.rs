@@ -16,30 +16,30 @@
 //!   for callers who'd rather not pass a raw millisecond count around
 
 #![deny(missing_docs)]
-// The crate publishes the `no-std` category, and until now that was an unverified claim: four
-// places genuinely reached for std. This makes it compiler-enforced instead — the two error
-// types implement `core::error::Error` (stable since 1.81), `getrandom`'s std-only error impl
-// rides the feature rather than being pinned on, `v7::now_v7` joins the `wasm32` gate it
-// already had (it's the one API needing an OS clock), and `v7`'s monotonic counter trades
-// std's `OnceLock` for a lock-free seed fold over `core::sync::atomic` — see `v7::counter`,
-// which carries the argument for why that keeps the ordering guarantee intact.
+// The crate publishes the `no-std` and `no-std::no-alloc` categories, and this is what makes
+// both compiler-enforced rather than claimed. Five things reached past `core` and none do
+// now: the two error types implement `core::error::Error` (stable since 1.81), `getrandom`'s
+// std-only error impl rides the feature rather than being pinned on, `v7::now_v7` joins the
+// `wasm32` gate it already had (it's the one API needing an OS clock), `v7`'s monotonic
+// counter trades std's `OnceLock` for a lock-free seed fold over `core::sync::atomic` (see
+// `v7::counter` for why that keeps the ordering guarantee intact), and the two `*_batch`
+// functions draw their entropy through the caller's own buffer instead of a `count`-sized
+// scratch buffer, which is what retires the crate's last allocation. There is no
+// `extern crate alloc` here on purpose: nothing needs it, and a consumer with no heap at all
+// is a consumer this crate can now serve.
 //
 // Gated on the default-on `std` feature rather than unconditional, because this crate also
 // ships a `cdylib`. A final linked artifact needs things only std supplies; proven, not
-// assumed — `cargo build --no-default-features` fails with "no global memory allocator found
-// but one is required", "`#[panic_handler]` function required, but not found", and "unwinding
-// panics are not supported without std". So the shared library every binding dlopens builds
-// with std as it always has, while a bare-metal consumer takes the crate with
-// `default-features = false` and supplies those itself, plus a `getrandom` custom backend,
-// the way such a consumer must anyway. Verified against a real target rather than argued:
+// assumed — `cargo build --no-default-features` fails with "`#[panic_handler]` function
+// required, but not found" and "unwinding panics are not supported without std". So the
+// shared library every binding dlopens builds with std as it always has, while a bare-metal
+// consumer takes the crate with `default-features = false` and supplies those itself, plus a
+// `getrandom` custom backend, the way such a consumer must anyway. Verified against a real
+// target rather than argued:
 //
 //     RUSTFLAGS='--cfg getrandom_backend="custom"' \
 //         cargo check --no-default-features --target thumbv7em-none-eabi
 #![cfg_attr(not(feature = "std"), no_std)]
-
-// The batch APIs size one scratch buffer by `count`; that's the crate's only allocation, and
-// `alloc` (not std) is all it needs.
-extern crate alloc;
 
 mod ffi;
 mod timestamp;
@@ -332,6 +332,50 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(ids, sorted);
+    }
+
+    /// Both batch functions draw the whole batch's entropy into the *front* of `out`, then move
+    /// each item's share rightwards into its final octets, walking the batch backwards so a
+    /// write never lands on entropy that hasn't been consumed yet. Reverse that walk and the
+    /// later items' tails get overwritten with timestamp/counter/version bytes, which are
+    /// identical or near-identical across a batch — so distinct tails are what actually proves
+    /// the placement correct.
+    ///
+    /// This checks the tails specifically rather than whole UUIDs because for v7 the monotonic
+    /// counter keeps the values distinct and ordered even when the entropy is wrecked: every
+    /// other v7 batch test here would still pass.
+    #[test]
+    fn v7_batch_trailing_entropy_is_distinct_per_item() {
+        const COUNT: usize = 500;
+        let mut out = vec![0u8; COUNT * 16];
+        v7::new_v7_batch(RFC_TEST_VECTOR_MS, COUNT as u32, &mut out).unwrap();
+
+        let tails: std::collections::HashSet<[u8; 6]> = out
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|item| item[10..16].try_into().unwrap())
+            .collect();
+        assert_eq!(tails.len(), COUNT, "rand_b tails repeated across the batch");
+    }
+
+    /// v6's counterpart to [`v7_batch_trailing_entropy_is_distinct_per_item`]. v6 has no
+    /// counter, so `clock_seq`/`node` are the only thing separating same-millisecond items and
+    /// a botched walk would show up as outright duplicate UUIDs too — but checking the node
+    /// field directly says which invariant broke rather than just that something did.
+    #[test]
+    fn v6_batch_node_entropy_is_distinct_per_item() {
+        const COUNT: usize = 500;
+        let mut out = vec![0u8; COUNT * 16];
+        v6::new_v6_batch(RFC_TEST_VECTOR_MS, COUNT as u32, &mut out).unwrap();
+
+        let nodes: std::collections::HashSet<[u8; 6]> = out
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|item| item[10..16].try_into().unwrap())
+            .collect();
+        assert_eq!(nodes.len(), COUNT, "node IDs repeated across the batch");
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 **A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: up to 15.6x faster on v6/v7 generation, with a real batch API `uuid` doesn't have at all.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`) — zero unsafe in the public API, and empirically zero-allocation per call — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`) — zero unsafe in the public API, and empirically zero-allocation across the whole public API, batch calls included — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
 
 ```rust
 use hyperuuid::{v4, v5, v6, v7};
@@ -29,7 +29,7 @@ let mut out = vec![0u8; 1000 * 16];
 v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 ```
 
-`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for any other version), and [`v6::new_v6_at`]/[`v7::new_v7_at`] accept one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v6`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed once here and verified against the real `System.Data.SqlTypes.SqlGuid` comparator. `v6::to_sql_order`/`v6::to_rfc_order` do the same for version 6 — a much simpler whole-byte-group relocation, since v6 has no counter to repack at the bit level, just its 60-bit timestamp; note that same-millisecond v6 UUIDs aren't guaranteed to sort in creation order even after this conversion, since `clock_seq`/`node` are random per call rather than a counter (a pre-existing RFC 9562 v6 limitation, not something this introduces). This crate's own test suite verifies that sort behavior against a comparator replicating `SqlGuid`'s documented byte order. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture and one counter reservation, instead of `count` of each — this is also the one deliberate exception to the zero-allocation claim: the scratch buffer itself allocates (or is caller-provided, as above), the generation loop inside it does not.
+`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for any other version), and [`v6::new_v6_at`]/[`v7::new_v7_at`] accept one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v6`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed once here and verified against the real `System.Data.SqlTypes.SqlGuid` comparator. `v6::to_sql_order`/`v6::to_rfc_order` do the same for version 6 — a much simpler whole-byte-group relocation, since v6 has no counter to repack at the bit level, just its 60-bit timestamp; note that same-millisecond v6 UUIDs aren't guaranteed to sort in creation order even after this conversion, since `clock_seq`/`node` are random per call rather than a counter (a pre-existing RFC 9562 v6 limitation, not something this introduces). This crate's own test suite verifies that sort behavior against a comparator replicating `SqlGuid`'s documented byte order. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one `getrandom` call, instead of `count` of each. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
 
 ## Why not the `uuid` crate?
 
@@ -38,7 +38,7 @@ v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 1. **No batch API.** `uuid` generates exactly one UUID per call, always. `new_v6_batch`/`new_v7_batch` here share one timestamp capture and one counter reservation across the whole batch — 2.5-3.6x faster than the equivalent loop of individual calls (real numbers below).
 2. **v6/v7 generation is substantially faster here** — `uuid_crate_v6` measured 838 ns/op vs this crate's 54 ns/op (~15.6x); `uuid_crate_v7` measured 905 ns/op vs 68 ns/op (~13.2x). One caveat for fairness: `uuid`'s `Uuid::now_v6`/`now_v7` capture the current time themselves (an internal clock read) inside the timed region, while this benchmark calls this crate's `new_v6`/`new_v7` with a pre-supplied timestamp, since this crate has no `now_v6` of its own (only `v7::now_v7` exists as a convenience wrapper). A clock read alone doesn't explain a gap this size — `uuid`'s v6/v7 paths route through a shared, lock-guarded `ClockSequence`/context abstraction — but the comparison isn't perfectly apples-to-apples and is reported that way rather than smoothed over.
 3. **v4/v5 are roughly a wash.** `uuid_crate_v4` (85.1 ns) vs this crate's `v4` (88.3 ns) — statistically close, no real win either way. v5: this crate at 81.1 ns vs `uuid`'s 135.3 ns (~1.7x) — a real but modest difference, most likely from `uuid`'s SHA-1 implementation and output-formatting path versus this crate's narrower one.
-4. **Verified zero-allocation.** `tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and asserts zero heap allocations, then asserts the batch functions' scratch buffer *does* allocate — confirming that's the one deliberate exception, not an oversight. `uuid`'s docs don't make an allocation claim either way.
+4. **Verified zero-allocation, with no exceptions.** `tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and both batch functions, and asserts zero heap allocations for all of them. The crate doesn't so much as link `alloc`, which is why it carries the `no-std::no-alloc` category and not merely `no-std`. `uuid`'s docs don't make an allocation claim either way.
 
 The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v8. If you need any of that, or you're not chasing v6/v7 throughput or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with.
 
@@ -98,33 +98,31 @@ support is target-specific, not universal —
 
 ## `no_std`
 
-The `no-std` category this crate publishes is compiler-enforced, not asserted: the library is
-`#![no_std]` whenever its default-on `std` feature is off.
+The `no-std` and `no-std::no-alloc` categories this crate publishes are compiler-enforced, not
+asserted: the library is `#![no_std]` whenever its default-on `std` feature is off, and it
+never links `alloc` in any configuration — there is no `extern crate alloc` in the crate, so a
+consumer with no heap at all is one this crate can serve.
 
 ```sh
 cargo add hyperuuid --no-default-features
 ```
 
-Default-on rather than unconditional because this crate also builds as a `cdylib` — the
-shared library every other binding in this repo dlopens — and a final linked artifact needs a
-`#[panic_handler]` and a `#[global_allocator]`, which only std supplies. So the cdylib builds
-exactly as it always has, and `default-features = false` yields a real bare-metal rlib,
-verified rather than argued:
+Default-on rather than unconditional because this crate also builds as a `cdylib` — the shared
+library every other binding in this repo dlopens — and a final linked artifact needs a
+`#[panic_handler]`, which only std supplies. So the cdylib builds exactly as it always has, and
+`default-features = false` yields a real bare-metal rlib, verified rather than argued:
 
 ```sh
 cargo check --no-default-features --target thumbv7em-none-eabi
 ```
 
-Three things that build leaves to you, all of them things such a consumer supplies anyway:
+Two things that build leaves to you, both of them things such a consumer supplies anyway:
 
 - **An entropy backend.** Off std there's no OS for `getrandom` to read from, and it stops
   compiling rather than guessing. Build with `RUSTFLAGS='--cfg getrandom_backend="custom"'`
   and export a `__getrandom_v03_custom` symbol — see
   [`getrandom`'s custom-backend docs](https://docs.rs/getrandom/0.4/getrandom/#custom-backend).
   Left on your side for the same reason the `wasm_js` backend above is.
-- **A global allocator.** The two `*_batch` functions size one scratch buffer by `count` —
-  the crate's only allocation, as the zero-allocation note above already says — so the crate
-  links `alloc`. Every single-item generator stays allocation-free.
 - **A clock, where you need one.** `v7::now_v7` is the only API that reads the system clock,
   and it's compiled out without `std` exactly as it already is on `wasm32`. Pass your own
   timestamp to `v7::new_v7`/`v6::new_v6` instead; every other function in the crate is
