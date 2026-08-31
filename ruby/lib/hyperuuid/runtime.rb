@@ -5,7 +5,7 @@ module HyperUuid
   # C-ABI call, no runtime bridge (the same "no shim" positioning as the Go/Swift bindings'
   # purego/dlopen approach). Fiddle ships with every Ruby install; it's a plain gem
   # dependency here (see hyperuuid.gemspec) rather than a third-party one — mirroring Go's
-  # "no cgo" and Python's ctypes-only stance.
+  # "no cgo" and Python's zero-dependency PyO3 wheels.
   #
   # Unlike the Go/Swift bindings, which embed their native builds inside a single compiled
   # archive and must extract to a temp file before dlopen can see a real path, a Ruby gem's

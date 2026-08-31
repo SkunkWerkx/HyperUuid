@@ -3,7 +3,7 @@
 // darwin/linux (backend_cgo.go), github.com/ebitengine/purego everywhere else, including
 // Windows unconditionally (backend_purego.go) — dlopen/dlsym plus either a real C call or
 // purego's per-arch call trampolines, no C compiler required to build or consume this module
-// on the purego path (the same "no runtime bridge" positioning as the Python/ctypes and
+// on the purego path (the same "no runtime bridge" positioning as the Python/PyO3 and
 // Java/FFM bindings).
 //
 // This module bundles a native build for every supported platform (see currentTarget) and

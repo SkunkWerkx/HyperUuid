@@ -1,7 +1,8 @@
 module HyperUuid
   # A parsed 16-byte RFC 9562 UUID value. Minimal by design — this gem has no runtime
   # dependency on the `uuid` gem, the same "no extra dependency" positioning as the Go
-  # binding's purego-only/no-cgo approach and the Python binding's stdlib-ctypes-only one.
+  # binding's purego-only/no-cgo approach and the Python binding's dependency-free PyO3
+  # wheels.
   class Uuid
     include Comparable
 

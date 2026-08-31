@@ -2,8 +2,9 @@ require "spec_helper"
 require "open3"
 
 # Cross-backend agreement: the Magnus extension and the pure-Fiddle fallback must be
-# indistinguishable through the public surface (the same contract the Python binding pins
-# between its PyO3 and ctypes backends). The whole main spec suite already runs under both
+# indistinguishable through the public surface. Ruby is the only binding that still needs
+# this contract — Python retired its second backend once abi3 wheels made ctypes redundant,
+# leaving nothing to disagree with. The whole main spec suite already runs under both
 # backends (HYPERUUID_PURE=1 forces Fiddle); this file pins the *agreement* between them by
 # comparing deterministic outputs across a subprocess boundary.
 RSpec.describe "native backend" do

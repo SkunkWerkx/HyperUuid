@@ -7,7 +7,7 @@ namespace HyperUuid;
 /**
  * A parsed 16-byte RFC 9562 UUID value. Minimal by design — this package has no runtime
  * dependency on ramsey/uuid, the same "no extra dependency" positioning as the Go binding's
- * purego-only/no-cgo approach and the Python binding's stdlib-ctypes-only one.
+ * purego-only/no-cgo approach and the Python binding's dependency-free PyO3 wheels.
  */
 final class Uuid
 {

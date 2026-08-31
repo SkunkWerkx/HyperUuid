@@ -68,8 +68,9 @@ php/.phpunit.result.cache
 /vendor/
 /composer.lock
 
-# Node (python/wasm-smoke-test's own package.json — a real npm project, package-lock.json
-# stays committed for reproducibility)
+# Node. The one npm project this repo had (python/wasm-smoke-test, which proved the Pyodide
+# path) went away with the ctypes fallback it existed to justify — nothing here builds
+# against node today. The rule stays so a stray local install can't get committed.
 **/node_modules/
 
 # BenchmarkDotNet
@@ -91,7 +92,8 @@ python/src/hyperuuid_native.pyd
 # (hence just *.abi3.so, not a per-version-tagged glob), but .pyd covers Windows either way.
 python/src/hyperuuid/_native.abi3.so
 python/src/hyperuuid/_native.pyd
-# Staged Magnus extension for local dev/test (built from ruby/native/, staged the same way
-# as the Python line above; platform gems carry the real artifact).
+# Staged Magnus extension for local dev/test (built from the core crate's `ruby` feature —
+# `cargo build --release --features ruby` — since the satellite crate that used to live in
+# ruby/native/ was folded into it; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so
 ruby/lib/hyperuuid_native.bundle

@@ -119,6 +119,15 @@ repo's Python/Ruby/PHP packages' job, not this crate's; verified to work from th
 crate itself, not just an in-repo checkout — `cargo build --manifest-path` against a fresh
 `cargo download`/crates.io tarball of `hyperuuid` produces the same three symbols above.
 
+**Local dev trap worth knowing:** "each produces `target/release/libhyperuuid.so`" means
+*the same file* — so a `--features python` build (or a `maturin build` in `python/`, which
+is one) silently replaces the plain cdylib that every other binding's dev loop loads. The
+extension build still exports the `hyperuuid_*` symbols, but it also carries undefined
+interpreter symbols that only resolve inside a CPython (or Ruby, or PHP) process, so the
+next `./gradlew test` or `dotnet test` fails at native load with something unhelpful about a
+missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. CI never
+hits this — each leg builds in its own job.
+
 ## Install
 
 ```toml
