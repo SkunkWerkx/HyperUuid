@@ -71,7 +71,7 @@ Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmar
 | `UuidGenerator.newV6()` | 1,700 ns | 1 |
 | `UuidGenerator.newV7()` | 2,201 ns | 1 |
 
-Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the `dlopen`/`@convention(c)` call path is cheap. The honest asterisk: unlike the Rust core, the C# binding, and `UUID()` itself, these calls aren't allocation-free — each one heap-allocates the fixed-size `[UInt8]` marshaling buffers Swift's `Array` always backs with a heap allocation (Span-style stack buffers aren't available to Swift the way C#'s `stackalloc`/`ReadOnlySpan<byte>` are). 1-3 small, fixed-size allocations per call is cheap in absolute terms, but it's real, and worth saying plainly rather than claiming zero-alloc across every binding uniformly.
+Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the `dlopen`/`@convention(c)` call path is cheap. The honest asterisk: unlike `Foundation.UUID()` itself, these calls aren't allocation-free — each one heap-allocates the fixed-size `[UInt8]` marshaling buffers Swift's `Array` always backs with a heap allocation (Swift has no Span-style stack buffer to reach for here). 1-3 small, fixed-size allocations per call is cheap in absolute terms, but it's real, and worth saying plainly rather than inheriting a zero-alloc claim that doesn't hold on this side of the boundary.
 
 Batch generation amortizes both the native call and that allocation over the whole batch:
 

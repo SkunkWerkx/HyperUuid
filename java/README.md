@@ -55,7 +55,7 @@ Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`
 | `UuidGenerator.newV6()` | 118.49 ns | **9.38x faster** |
 | `UuidGenerator.newV7()` | 136.37 ns | **8.15x faster** |
 
-Unlike the Ruby/PHP bindings in this repo, the FFM downcall here doesn't lose to the JDK's own generator — `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default, not because the comparison is unfair to it. Reported as measured, not adjusted to make the story better.
+The FFM downcall doesn't lose to the JDK's own generator, and the reason is worth stating so the win isn't mistaken for a rigged comparison: `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default. Reported as measured, not adjusted to make the story better.
 
 Batch generation vs. an equivalent loop:
 

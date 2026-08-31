@@ -12,8 +12,8 @@ automatically by build tag, same public API either way: real cgo on darwin/linux
 plus per-arch call trampolines, no cgo and no C compiler required — everywhere else,
 including Windows unconditionally and any darwin/linux build with `CGO_ENABLED=0`.
 Bundles a native build for every supported platform (linux/darwin/windows ×
-amd64/arm64) and picks the right one at runtime, the same trick the Java binding
-uses.
+amd64/arm64) via `go:embed` and picks the right one at runtime, so `go get` is the whole
+install.
 
 ```go
 import (

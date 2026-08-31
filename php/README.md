@@ -10,8 +10,8 @@ directly into the native `libhyperuuid` shared library via PHP's built-in
 [`FFI`](https://www.php.net/manual/en/book.ffi.php) extension — dlopen/dlsym plus a raw C-ABI
 call, no runtime bridge, no Composer dependency beyond `ext-ffi` itself. Bundles a native
 build for every supported platform (linux/darwin/windows × x64/arm64) and picks the right one
-at runtime, the same trick the Go/Java bindings use since Composer has no per-platform
-native selection.
+at runtime — Composer has no per-platform native selection, so the package carries them all
+and resolves at load.
 
 ```php
 use HyperUuid\HyperUuid;
