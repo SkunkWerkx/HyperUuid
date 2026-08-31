@@ -1,7 +1,6 @@
 //! RFC 9562 Section 6.2 Method 1 — UUID version 7: time-ordered, monotonically increasing.
 
 use crate::{Timestamp, Uuid};
-use alloc::vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// Largest Unix-epoch millisecond timestamp that fits the 48-bit `unix_ts_ms` field
@@ -10,6 +9,10 @@ pub const MAX_UNIX_MILLIS: u64 = 0x0000_FFFF_FFFF_FFFF;
 
 /// 26-bit counter mask (67,108,864 values) spanning `rand_a` and the top of `rand_b`.
 const COUNTER_MASK: u32 = 0x03FF_FFFF;
+
+/// Random octets each version 7 UUID needs: `rand_b`'s trailing 48 bits (octets 10-15).
+const RAND_BYTES_PER_ITEM: usize = 6;
+
 
 /// An error returned when minting a version 7 UUID fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,14 +125,18 @@ pub fn new_v7_at(timestamp: Timestamp) -> Result<Uuid, NewV7Error> {
 }
 
 /// Creates `count` time-sortable UUID version 7 values sharing one Unix-epoch millisecond
-/// timestamp capture, writing 16 bytes each into consecutive slots of `out` (which must be
-/// exactly `count * 16` bytes long).
+/// timestamp capture, writing 16 bytes each into consecutive slots of `out` (which must be at
+/// least `count * 16` bytes long; anything past that is left untouched).
 ///
 /// Reserves one contiguous block of `count` counter slots up front (one atomic op instead of
-/// `count`) and fills every UUID's random tail from a single `getrandom` call — unlike
-/// calling [`new_v7`] `count` times, this is the only allocating path in this crate, since
-/// the scratch buffer for that call is sized by `count`. A `count` of 0 is a no-op success.
-/// Same errors as [`new_v7`]; a very large `count` can still wrap the 26-bit counter
+/// `count`) and draws every UUID's random tail from a single `getrandom` call, into the
+/// caller's own buffer with no scratch space at all — not on the heap and not on the stack.
+/// That is what lets this crate build with no allocator rather than merely without `std`.
+///
+/// A `count` of 0 is a no-op success. Same errors as [`new_v7`]. The entropy is drawn before
+/// any item is assembled, so on [`NewV7Error::Random`] no UUID has been written at all — but
+/// the front of `out` may hold partial entropy from the failed draw, so treat the buffer as
+/// clobbered rather than untouched. A very large `count` can still wrap the 26-bit counter
 /// mid-batch, the same wrap-boundary caveat individual calls already carry.
 pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), NewV7Error> {
     if unix_millis > MAX_UNIX_MILLIS {
@@ -139,15 +146,38 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
         return Ok(());
     }
 
+    // Narrowed once, up front, so the entropy fill and the per-item writes below both stay
+    // inside exactly the region this call owns. That matters more than it used to: the fill
+    // now writes through `out` itself, and a caller's oversized buffer must keep its tail
+    // untouched.
+    let out = &mut out[..count as usize * 16];
+
     // Reserves [base+1, base+count] in this one call, continuing the same global sequence a
     // series of individual fetch_add(1) calls would have produced (matching new_v7's own
     // base.wrapping_add(1) convention below).
     let base = counter().fetch_add(count, Ordering::Relaxed);
 
-    let mut rand_bytes = vec![0u8; count as usize * 6];
-    getrandom::fill(&mut rand_bytes).map_err(NewV7Error::Random)?;
+    // One `getrandom` call for the whole batch, with no scratch buffer of any kind: not a heap
+    // one (this crate has no allocator to get it from) and not a fixed stack one either (a
+    // frame big enough to be worth the syscalls it saves is a poor thing to charge a
+    // microcontroller for, where an overflow corrupts silently). The entropy is drawn into the
+    // *front* of the caller's own `out`, packed 6 bytes per item, and each item's share is
+    // moved out to its final octets as that item is written.
+    //
+    // That works in place because the packed entropy always sits to the left of where it is
+    // going: item i's 6 bytes are at 6i but belong at 16i+10. So the 16 bytes written for item
+    // i can only ever land on entropy belonging to items at index >= i — anything from 16i
+    // onwards is item 2i's share or later. Walking the batch backwards therefore only
+    // overwrites entropy that has already been consumed, and item i's own share is moved
+    // before its own 16 bytes are written. Hence `.rev()`, which is load-bearing, not taste.
+    getrandom::fill(&mut out[..count as usize * RAND_BYTES_PER_ITEM])
+        .map_err(NewV7Error::Random)?;
 
-    for i in 0..count as usize {
+    for i in (0..count as usize).rev() {
+        let src = i * RAND_BYTES_PER_ITEM;
+        // rand_b's trailing 48 bits (octets 10-15), straight from the packed entropy above.
+        out.copy_within(src..src + RAND_BYTES_PER_ITEM, i * 16 + 10);
+
         let counter_val = base.wrapping_add(1 + i as u32) & COUNTER_MASK;
         let item = &mut out[i * 16..(i + 1) * 16];
 
@@ -167,8 +197,6 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
         // variant (10) + rand_b extension: lower 14 bits of the counter (octets 8-9).
         item[8] = 0x80 | ((counter_val >> 8) & 0x3F) as u8;
         item[9] = (counter_val & 0xFF) as u8;
-
-        item[10..16].copy_from_slice(&rand_bytes[i * 6..i * 6 + 6]);
     }
 
     Ok(())

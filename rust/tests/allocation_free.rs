@@ -4,9 +4,13 @@
 //! affects the library itself or its other consumers) and asserts zero allocations across
 //! 1000 calls to each single-item generator.
 //!
-//! The batch functions are the one deliberate exception — documented in v6.rs/v7.rs as the
-//! only allocating path in this crate — so this file also asserts they *do* allocate,
-//! turning that doc claim into an executable fact too.
+//! The batch functions used to be the one deliberate exception, and this file used to assert
+//! they *did* allocate. They don't any more: each one's single `getrandom` call now fills the
+//! caller's own output buffer and the deterministic octets get written over the top, so there
+//! is no `count`-sized scratch buffer left to allocate. That's what lets the crate compile
+//! without `alloc` at all, not just without `std` — so the assertions below cover the whole
+//! public API with no exception, and this test is what would catch a scratch buffer creeping
+//! back in on a target where `cargo check` alone would never notice.
 //!
 //! Deliberately one `#[test]` function, not five: `ALLOC_COUNT` is one process-wide counter,
 //! and `cargo test` spawns a real OS thread per test function by default — thread *creation*
@@ -79,11 +83,14 @@ fn allocation_free() {
         assert_eq!(allocs, 0, "v7::new_v7 allocated {allocs} time(s) in one call");
     }
 
+    // The caller's `out` is allocated outside the measured region on purpose — it's the
+    // caller's buffer by contract, and the claim under test is that the batch call itself adds
+    // nothing on top of it.
     let mut v6_out = vec![0u8; 100 * 16];
-    let (v6_batch_allocs, _) = allocs_during(|| v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut v6_out).unwrap());
-    assert!(v6_batch_allocs > 0, "expected v6::new_v6_batch's scratch buffer to allocate, it didn't");
+    let (allocs, _) = allocs_during(|| v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut v6_out).unwrap());
+    assert_eq!(allocs, 0, "v6::new_v6_batch allocated {allocs} time(s) in one call");
 
     let mut v7_out = vec![0u8; 100 * 16];
-    let (v7_batch_allocs, _) = allocs_during(|| v7::new_v7_batch(RFC_TEST_VECTOR_MS, 100, &mut v7_out).unwrap());
-    assert!(v7_batch_allocs > 0, "expected v7::new_v7_batch's scratch buffer to allocate, it didn't");
+    let (allocs, _) = allocs_during(|| v7::new_v7_batch(RFC_TEST_VECTOR_MS, 100, &mut v7_out).unwrap());
+    assert_eq!(allocs, 0, "v7::new_v7_batch allocated {allocs} time(s) in one call");
 }
