@@ -71,6 +71,12 @@
          csharp/README.md (this project's own, not the repo root's) so the exact same content
          that lives in the repo also ships inside the .nupkg. -->
     <None Include="../README.md" Pack="true" PackagePath="\" />
+    <!-- MSBuild item globs reach outside the project directory freely, so this one takes the
+         repo root's LICENSE directly — no local copy needed, unlike the gem and the wheel,
+         whose packers both refuse a parent path. PackageLicenseExpression above stays the
+         machine-readable license (nuget.org renders the page from it); this ships the actual
+         text alongside it, which the expression alone doesn't do. -->
+    <None Include="../../LICENSE" Pack="true" PackagePath="\" />
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
          .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time.
          No runtimes/browser-wasm/lib/ asset needed anymore: one compiled assembly now covers

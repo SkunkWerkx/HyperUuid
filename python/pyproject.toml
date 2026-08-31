@@ -8,6 +8,10 @@ dynamic = ["version"]
 description = "RFC 9562 UUID v4/v5/v6/v7 generation — a PyO3 native extension linking a Rust core directly into CPython. No runtime bridge, no compiler needed to install."
 readme = "README.md"
 license = "MIT"
+# A local copy, not a path up to the repo root: PEP 639 globs forbid `..` outright
+# ("the parent directory operator (`..`) at position 0 is not allowed"), and a symlink is
+# no better. Same reason rust/ carries its own — git stores one blob for all of them.
+license-files = ["LICENSE"]
 authors = [{ name = "Brian Buvinghausen" }]
 requires-python = ">=3.9"
 dependencies = []

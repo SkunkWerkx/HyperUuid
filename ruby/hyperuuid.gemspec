@@ -15,7 +15,11 @@ Gem::Specification.new do |spec|
   spec.homepage = "https://github.com/SkunkWerkx/HyperUuid"
   spec.required_ruby_version = ">= 3.2"
 
-  spec.files = Dir["lib/**/*.rb"] + Dir["lib/**/native/**/*"] + ["README.md"]
+  # LICENSE is a local copy of the repo root's, not a reference to it: RubyGems stores a
+  # "../LICENSE" entry with the `..` intact (a path-traversal entry no installer accepts),
+  # and a symlink is stored *as* a symlink — `gem build` warns, and it dangles once the gem
+  # is unpacked somewhere else entirely. Same reason rust/ and python/ carry their own.
+  spec.files = Dir["lib/**/*.rb"] + Dir["lib/**/native/**/*"] + ["README.md", "LICENSE"]
   spec.require_paths = ["lib"]
 
   # fiddle was a Ruby default gem (effectively stdlib, no declaration needed) through Ruby

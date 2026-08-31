@@ -31,6 +31,18 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Ships the license text and this binding's README inside the jar, under META-INF/ (the
+// conventional home for both). Gradle copies from anywhere on disk, so the repo root's
+// LICENSE is referenced directly — no local copy, unlike the gem and the wheel, whose
+// packers both reject a parent path outright. The POM's <licenses> block stays the
+// machine-readable declaration; this is the text itself, for consumers who vendor the jar.
+tasks.jar {
+    metaInf {
+        from("../LICENSE")
+        from("README.md")
+    }
+}
+
 tasks.test {
     useJUnitPlatform()
     // UuidGenerator's FFM downcalls are a "restricted method" — silences the runtime
