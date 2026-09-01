@@ -357,4 +357,151 @@ public sealed class UuidGeneratorTests
 
         sorted.ShouldBe(sqlOrdered);
     }
+
+    // ---- Non-throwing construction path -------------------------------------------------
+
+    [Fact]
+    public void TryNewV4_SucceedsAndMatchesThrowingOverloadShape()
+    {
+        UuidGenerator.TryNewV4(out var id).ShouldBeTrue();
+        id.ShouldNotBe(Guid.Empty);
+        id.ToString()[14].ShouldBe('4');
+    }
+
+    [Fact]
+    public void TryNewV7_SucceedsForAValidTimestamp()
+    {
+        UuidGenerator.TryNewV7(RfcTestVectorMs, out var id).ShouldBeTrue();
+        UuidGenerator.V7UnixMillis(id).ShouldBe(RfcTestVectorMs);
+    }
+
+    [Fact]
+    public void TryNewV6_SucceedsForAValidTimestamp()
+    {
+        UuidGenerator.TryNewV6(RfcTestVectorMs, out var id).ShouldBeTrue();
+        UuidGenerator.V6UnixMillis(id).ShouldBe(RfcTestVectorMs);
+    }
+
+    [Fact]
+    public void TryNewV7_ReturnsFalseWhereTheThrowingOverloadThrows()
+    {
+        // 2^48 ms doesn't fit v7's 48-bit unix_ts_ms field — the native layer reports rc 2,
+        // which NewV7 turns into an exception and TryNewV7 reports as a plain false.
+        const long outOfRange = 1L << 48;
+        Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7(outOfRange));
+        UuidGenerator.TryNewV7(outOfRange, out var id).ShouldBeFalse();
+        id.ShouldBe(Guid.Empty);
+    }
+
+    [Fact]
+    public void TryNewV7_NowOverloadSucceeds()
+    {
+        UuidGenerator.TryNewV7(out var id).ShouldBeTrue();
+        id.ShouldNotBe(Guid.Empty);
+    }
+
+    // ---- Raw-byte SQL-order transforms --------------------------------------------------
+
+    [Fact]
+    public void V7ToSqlOrder_ByteOverloadAgreesWithTheGuidOverload()
+    {
+        // The equivalence that lets a byte-level oracle (Svartalfheim's SequentialGuidBytes)
+        // validate this without modelling Guid's mixed-endian field layout: the Guid overload's
+        // result, viewed as bytes, IS the byte overload's result.
+        var id = UuidGenerator.NewV7(RfcTestVectorMs);
+
+        Span<byte> rfc = stackalloc byte[16];
+        id.TryWriteBytes(rfc, bigEndian: true, out _);
+        UuidGenerator.V7ToSqlOrder(rfc);
+
+        UuidGenerator.V7ToSqlOrder(id).ToByteArray().ShouldBe(rfc.ToArray());
+    }
+
+    [Fact]
+    public void V6ToSqlOrder_ByteOverloadAgreesWithTheGuidOverload()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+
+        Span<byte> rfc = stackalloc byte[16];
+        id.TryWriteBytes(rfc, bigEndian: true, out _);
+        UuidGenerator.V6ToSqlOrder(rfc);
+
+        UuidGenerator.V6ToSqlOrder(id).ToByteArray().ShouldBe(rfc.ToArray());
+    }
+
+    [Fact]
+    public void V7SqlOrder_ByteOverloadsRoundTrip()
+    {
+        var id = UuidGenerator.NewV7(RfcTestVectorMs);
+        var rfc = new byte[16];
+        id.TryWriteBytes(rfc, bigEndian: true, out _);
+        var original = rfc.ToArray();
+
+        UuidGenerator.V7ToSqlOrder(rfc);
+        rfc.ShouldNotBe(original);
+        UuidGenerator.V7FromSqlOrder(rfc);
+        rfc.ShouldBe(original);
+    }
+
+    [Fact]
+    public void V6SqlOrder_ByteOverloadsRoundTrip()
+    {
+        var id = UuidGenerator.NewV6(RfcTestVectorMs);
+        var rfc = new byte[16];
+        id.TryWriteBytes(rfc, bigEndian: true, out _);
+        var original = rfc.ToArray();
+
+        UuidGenerator.V6ToSqlOrder(rfc);
+        rfc.ShouldNotBe(original);
+        UuidGenerator.V6FromSqlOrder(rfc);
+        rfc.ShouldBe(original);
+    }
+
+    [Fact]
+    public void SqlOrder_ByteOverloadRejectsAWrongSizedBuffer()
+    {
+        Should.Throw<ArgumentException>(() => UuidGenerator.V7ToSqlOrder(new byte[15]));
+        Should.Throw<ArgumentException>(() => UuidGenerator.V6FromSqlOrder(new byte[17]));
+    }
+
+    // ---- Raw-byte batch fill ------------------------------------------------------------
+
+    [Fact]
+    public void FillV7_ByteOverloadMatchesTheGuidOverloadElementForElement()
+    {
+        const int count = 64;
+        var asGuids = new Guid[count];
+        UuidGenerator.FillV7(asGuids, RfcTestVectorMs);
+
+        var asBytes = new byte[count * 16];
+        UuidGenerator.FillV7(asBytes, RfcTestVectorMs);
+
+        // Not value-equal (each batch draws its own entropy), but structurally identical:
+        // every 16-byte chunk must decode to a v7 carrying the same timestamp.
+        for (var i = 0; i < count; i++)
+        {
+            var fromBytes = new Guid(asBytes.AsSpan(i * 16, 16), bigEndian: true);
+            UuidGenerator.V7UnixMillis(fromBytes).ShouldBe(RfcTestVectorMs);
+            UuidGenerator.V7UnixMillis(asGuids[i]).ShouldBe(RfcTestVectorMs);
+            fromBytes.ToString()[14].ShouldBe('7');
+        }
+        asBytes.Length.ShouldBe(asGuids.Length * 16);
+    }
+
+    [Fact]
+    public void FillV7_ByteOverloadRejectsANonMultipleOf16()
+    {
+        Should.Throw<ArgumentException>(() => UuidGenerator.FillV7(new byte[17], RfcTestVectorMs));
+        UuidGenerator.TryFillV7(new byte[17], RfcTestVectorMs).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void TryFillV7_ReturnsFalseWhereFillV7Throws()
+    {
+        const long outOfRange = 1L << 48;
+        var buf = new Guid[8];
+        Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV7(buf, outOfRange));
+        UuidGenerator.TryFillV7(buf, outOfRange).ShouldBeFalse();
+        UuidGenerator.TryFillV7(buf, RfcTestVectorMs).ShouldBeTrue();
+    }
 }
