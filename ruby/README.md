@@ -159,14 +159,27 @@ platform gem as every other leg. Measured on real Windows-on-ARM hardware, Ruby 
 Magnus backend does `new_v4` in 416ns against Fiddle's 2299ns (**5.5x**) and `new_v7` in 621ns
 against 2474ns (**4.0x**) — the same shape the x64 leg shows.
 
-Two things differ from the x64 build, both consequences of `gnullvm` being LLVM-based where
-`x86_64-pc-windows-gnu` is GCC-based. The linker is `aarch64-w64-mingw32-clang` from MSYS2's
-CLANGARM64 environment, which RubyInstaller's own ARM devkit installs — so there is no
-`link-self-contained=no` dance and no `BINDGEN_EXTRA_CLANG_ARGS`, because that clang already
-defaults to a MinGW target rather than the MSVC one that made bindgen fail on x64. And
-`libunwind` must be forced static with `-l static=unwind`: rustc emits its `-lunwind` in the
-linker's *dynamic* section, where CLANGARM64 offers both `libunwind.a` and `libunwind.dll.a`
-and lld prefers the latter — left alone, the extension acquires a runtime dependency on
-`libunwind.dll`, a file no consumer of the gem would have.
+What differs from the x64 build follows from `gnullvm` being LLVM-based where
+`x86_64-pc-windows-gnu` is GCC-based. The linker driver is `aarch64-w64-mingw32-clang` from
+MSYS2's CLANGARM64 environment — RubyInstaller's own ARM devkit installs it locally, and
+`ruby/setup-ruby` installs it on `windows-11-arm` — so there is no `link-self-contained=no`
+dance. Two flags are load-bearing:
+
+- **`-l static=unwind`.** rustc emits its `-lunwind` in the linker's *dynamic* section, where
+  CLANGARM64 offers both `libunwind.a` and `libunwind.dll.a` and lld prefers the latter. Left
+  alone, the extension acquires a runtime dependency on `libunwind.dll` — a file no consumer
+  of the gem would have.
+- **`BINDGEN_EXTRA_CLANG_ARGS=--target=aarch64-w64-mingw32`.** bindgen hands clang the *Rust*
+  target triple when cargo cross-compiles, and clang rejects `aarch64-pc-windows-gnullvm`
+  outright (`version 'llvm' in target triple ... is invalid`), then fails behind that on a
+  missing `stdalign.h` it never reached its own resource dir to find. `aarch64-w64-mingw32`
+  is the same ABI spelled the way clang accepts, exactly as x64 spells its gnu target
+  `x86_64-w64-mingw32`.
+
+That second one was briefly documented here as *unnecessary*, on the strength of a local
+build where it genuinely was: that build used a `gnullvm` **host** toolchain, so host equals
+target, cargo was not cross-compiling, and bindgen injected no `--target` at all. CI's host is
+MSVC, so it does. A local build says nothing about that step unless its host triple matches
+the runner's.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
