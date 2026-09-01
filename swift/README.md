@@ -70,6 +70,17 @@ try UuidGenerator.fillV7(into: &dst, unixMillis: ms)   // reuse dst; nothing all
 
 Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uuid_t` — 16 bytes already in RFC 9562 order — so the native core writes the whole batch straight into the array's storage with **no per-element conversion**. (C# and Java must rebuild every element, because their UUID types aren't RFC byte order.) That soundness condition is checked with a `precondition` on `MemoryLayout<UUID>`'s size and stride rather than assumed.
 
+`swift package benchmark`, p50 wall clock, 1000 UUIDs per op:
+
+| Benchmark | p50 µs |
+| --- | ---: |
+| `newV7` x1000 individually | 955.0 |
+| `newV7Batch(count: 1000)` | 77.0 |
+| `fillV7(into: [UUID])` | 19.0 |
+| `fillV7(into: raw bytes)` | **16.0** |
+
+Worth noting how large that gap is: `fillV7` is roughly **4x faster than `newV7Batch`**, not the marginal improvement the same change produces in C#. Swift was paying real time for the result array plus a per-element `UUID(rfcBytes:)` construction, and dropping both lands it at 16 µs — the same floor every other binding here reaches.
+
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
 
 ### Raw-byte SQL-order transforms

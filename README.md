@@ -217,12 +217,16 @@ The batch doors above still hand back a collection of the language's own UUID ty
 | PHP | 2260 µs | **21.9 µs** | **103x** | `newV7BatchBytes` |
 | Python | 650 µs | **18.5 µs** | **35x** | `fill_v7(bytearray)` |
 | Ruby | 370 µs | **24.1 µs** | **15x** | `new_v7_batch_bytes` |
+| Swift | 77.0 µs | **16.0 µs** | **4.8x** | `fillV7(into: raw bytes)` |
+| Java | 31.7 µs | **18.8 µs** | 1.7x | `fillV7(byte[])` |
 | Go | 23.0 µs | **17.6 µs** | 1.3x, and 0 allocs | `FillV7BytesAt` |
 | C# | 21.9 µs | **18.2 µs** | 1.2x, and 0 allocs | `FillV7(Span<byte>)` |
 
 Read the right-hand column, not the speedup column: **every binding converges on roughly 18–24 µs per 1000 UUIDs**, because that is what the work actually costs. The native call was never the bottleneck in any of them. What varied was the price each language charges to wrap those 16000 bytes in a thousand objects — 2.2 ms of it in PHP, essentially none in Go.
 
-That also explains why the compiled bindings barely move: they were already at the floor. Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
+Swift and Java are the instructive middle. Neither is an interpreted language, yet Swift gains 4.8x — it was paying for a result array plus a per-element `UUID(rfcBytes:)` construction, and dropping both matters. Java gains only 1.7x, and the reason is visible in its own numbers: filling a `UUID[]` measures 32.6 µs against `newV7Batch`'s 31.7 µs, statistically identical, because `java.util.UUID` is two `long`s and every element has to be rebuilt regardless of who allocated the array. Only its `byte[]` form escapes that. The dividing line is not compiled-versus-interpreted; it is whether the language's UUID type is already RFC-ordered bytes.
+
+That also explains why Go and C# barely move: they were already at the floor. Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
 
 **One caveat, and it inverts the advice** — documented on every method in the three dynamic bindings, because getting it wrong is a pessimization: this is only faster if bytes are the *destination*. In Python, filling a buffer and then building `uuid.UUID` objects from it measures ~1210 µs, roughly twice as slow as `new_v7_batch`, because the extension constructs them through a faster path internally than anything callable from Python. Use the byte forms for a bind parameter, a wire format, or a bulk `COPY` — not as a step on the way to objects.
 

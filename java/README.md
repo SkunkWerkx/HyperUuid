@@ -55,7 +55,18 @@ byte[] raw = new byte[1000 * 16];
 UuidGenerator.fillV7(raw);          // RFC-ordered bytes, no UUID objects at all
 ```
 
-Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID` is two `long`s rather than 16 RFC-ordered bytes, so the `UUID[]` form still rebuilds every element from the native output — it removes the allocation, not the conversion. **The `byte[]` form is the one that removes real work**, since the native core already writes RFC-ordered bytes contiguously. Prefer it when the destination is a wire buffer or a `BINARY(16)` parameter that wants bytes anyway.
+Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID` is two `long`s rather than 16 RFC-ordered bytes, so the `UUID[]` form still rebuilds every element from the native output — it removes the allocation, not the conversion. **The `byte[]` form is the one that removes real work**, since the native core already writes RFC-ordered bytes contiguously.
+
+`./gradlew :benchmarks:jmh`, JMH average time, 1000 UUIDs per op:
+
+| Benchmark | µs/op | error |
+| --- | ---: | ---: |
+| `newV7` x1000 individually | 120.979 | ±34.953 |
+| `newV7Batch(1000)` | 31.744 | ±12.984 |
+| `fillV7(UUID[])` into an existing array | 32.642 | ±6.512 |
+| `fillV7(byte[])` into an existing buffer | **18.827** | ±2.872 |
+
+The middle two rows are the point: filling a `UUID[]` measures the same as allocating a fresh one, within overlapping error. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it lands within a microsecond or two of what every other binding in this project reaches for the same work.
 
 A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`.
 
