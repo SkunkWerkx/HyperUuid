@@ -7,7 +7,7 @@ commit *is* what a real `.package(url:, from:)` consumer gets, so the native bin
 live here for real, not be staged in transiently by CI (the same real bug found and fixed for
 the PHP binding's Composer/Packagist package — see `php/src/native/README.md`). Regenerate
 locally with `cargo build --release` in `rust/` and copy the result in if you need to update
-one by hand; CI's own `test-swift` job does the same per-leg during in-repo testing,
+one by hand; CI's own `build-native` job does the same per-leg during in-repo testing,
 overwriting whichever platform's file matches that leg — harmless, since it's the same build
 either way.
 

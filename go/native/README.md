@@ -7,7 +7,7 @@ literally in the git tree at the resolved module version, so the native binaries
 here for real, not be staged in transiently by CI (the same real bug found and fixed for the
 PHP/Swift bindings' own package managers — see `php/src/native/README.md`). Regenerate
 locally with `cargo build --release` in `rust/` and copy the result in if you need to update
-one by hand; CI's own `test-go` job does the same per-leg during in-repo testing, overwriting
+one by hand; CI's own `build-native` job does the same per-leg during in-repo testing, overwriting
 whichever platform's file matches that leg — harmless, since it's the same build either way.
 
 ## Verifying provenance
