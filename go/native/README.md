@@ -32,7 +32,7 @@ once: that the artifact came from that repo, and that the workflow which signed 
 there. Only the first is true here — the signing step is in `hyper-build-native.yml`,
 which lives in the shared `SkunkWerkx/.github` forge repo, so that is what Fulcio records
 as the build signer. Omit the flag and verification fails with an unhelpful
-`verifying with issuer "sigstore.dev"`, which looks like a bad signature but is really a
+`verifying with issuer "sigstore.dev"`, which looks like a bad signature but is really an
 identity mismatch.
 
 That reports the exact commit and workflow run the binary was built from. Verification is by
