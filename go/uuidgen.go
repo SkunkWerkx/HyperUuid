@@ -13,6 +13,7 @@ package hyperuuid
 
 import (
 	"fmt"
+	"math"
 	"time"
 	"unsafe"
 
@@ -119,18 +120,12 @@ func NewV6BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if count == 0 {
 		return nil, nil
 	}
-	buf := make([]byte, count*16)
-	switch rc := uuidNewV6Batch(unixMillis, uint32(count), unsafe.Pointer(&buf[0])); rc {
-	case 0:
-		// fall through to conversion below
-	case 2:
-		return nil, fmt.Errorf("uuid_new_v6_batch failed with code %d: %w", rc, ErrTimestampOutOfRange)
-	default:
-		return nil, fmt.Errorf("uuid_new_v6_batch failed with code %d: %w", rc, ErrRandomSource)
-	}
+	// Delegates to FillV6At: because a []uuid.UUID is already contiguous 16-byte records,
+	// the native call writes straight into result. No scratch byte buffer and no
+	// per-element copy — this used to allocate both and then copy between them.
 	result := make([]uuid.UUID, count)
-	for i := range result {
-		copy(result[i][:], buf[i*16:(i+1)*16])
+	if err := FillV6At(result, unixMillis); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -235,18 +230,12 @@ func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if count == 0 {
 		return nil, nil
 	}
-	buf := make([]byte, count*16)
-	switch rc := uuidNewV7Batch(unixMillis, uint32(count), unsafe.Pointer(&buf[0])); rc {
-	case 0:
-		// fall through to conversion below
-	case 2:
-		return nil, fmt.Errorf("uuid_new_v7_batch failed with code %d: %w", rc, ErrTimestampOutOfRange)
-	default:
-		return nil, fmt.Errorf("uuid_new_v7_batch failed with code %d: %w", rc, ErrRandomSource)
-	}
+	// Delegates to FillV7At: because a []uuid.UUID is already contiguous 16-byte records,
+	// the native call writes straight into result. No scratch byte buffer and no
+	// per-element copy — this used to allocate both and then copy between them.
 	result := make([]uuid.UUID, count)
-	for i := range result {
-		copy(result[i][:], buf[i*16:(i+1)*16])
+	if err := FillV7At(result, unixMillis); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -323,4 +312,169 @@ func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	out := id
 	uuidV6ToRfcOrder(unsafe.Pointer(&out[0]))
 	return out, nil
+}
+
+// ---- Destination-buffer fills -------------------------------------------------------
+//
+// NewV6Batch/NewV7Batch above allocate a fresh slice per call. These write into one the
+// caller already owns, which is the shape that lets a hot path reuse a buffer instead of
+// handing the collector a new one every batch — the same reason io.Reader takes a
+// destination rather than returning a slice.
+//
+// A []uuid.UUID needs no intermediate byte buffer and no per-element conversion here:
+// uuid.UUID is [16]byte and a Go slice of it is contiguous 16-byte records with no padding
+// (asserted at the top of the fill, not assumed), which is exactly the layout the native
+// core writes. So the whole batch lands in the caller's slice in one native call. The C#
+// binding cannot do this — System.Guid's in-memory layout is mixed-endian and isn't RFC byte
+// order, so it has to convert every element — which is why the byte-slice variants below
+// exist there for performance but exist here only for callers who genuinely want raw bytes
+// (a wire buffer, a database parameter) rather than uuid.UUID values.
+
+// Each call below passes a closure rather than the backend func var directly: those vars are
+// nil until ensureLoaded() populates them, and a bare argument would be evaluated at the call
+// site, before the helper has had a chance to load the library. The closure defers the read
+// to invocation time, after ensureLoaded. (Caught by running a fill as the first native call
+// in a process -- the whole suite passed because earlier tests had already loaded it.)
+
+// errBatch maps a native batch return code onto this package's sentinel errors.
+func errBatch(fn string, rc int32) error {
+	switch rc {
+	case 0:
+		return nil
+	case 2:
+		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrTimestampOutOfRange)
+	default:
+		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrRandomSource)
+	}
+}
+
+// fillUUIDs writes len(dst) UUIDs straight into dst's backing array.
+func fillUUIDs(dst []uuid.UUID, unixMillis uint64, fn string,
+	call func(uint64, uint32, unsafe.Pointer) int32) error {
+	if err := ensureLoaded(); err != nil {
+		return err
+	}
+	if len(dst) == 0 {
+		return nil
+	}
+	if uint64(len(dst)) > math.MaxUint32 {
+		return fmt.Errorf("hyperuuid: batch of %d exceeds the native count limit", len(dst))
+	}
+	// uuid.UUID is [16]byte, so &dst[0] addresses one contiguous len(dst)*16 byte region.
+	return errBatch(fn, call(unixMillis, uint32(len(dst)), unsafe.Pointer(&dst[0])))
+}
+
+// fillBytes writes len(dst)/16 UUIDs straight into dst, which must be a whole number of them.
+func fillBytes(dst []byte, unixMillis uint64, fn string,
+	call func(uint64, uint32, unsafe.Pointer) int32) error {
+	if err := ensureLoaded(); err != nil {
+		return err
+	}
+	if len(dst)%16 != 0 {
+		return fmt.Errorf("%w: got %d", ErrBufferNotWholeUUIDs, len(dst))
+	}
+	if len(dst) == 0 {
+		return nil
+	}
+	count := len(dst) / 16
+	if uint64(count) > math.MaxUint32 {
+		return fmt.Errorf("hyperuuid: batch of %d exceeds the native count limit", count)
+	}
+	return errBatch(fn, call(unixMillis, uint32(count), unsafe.Pointer(&dst[0])))
+}
+
+// FillV6 fills dst with time-sortable version 6 UUIDs sharing one timestamp capture, using
+// the current time. clock_seq and node are independently random per item — unlike version 7
+// there is no monotonic counter, so items are not guaranteed to sort in creation order.
+func FillV6(dst []uuid.UUID) error {
+	return FillV6At(dst, uint64(time.Now().UnixMilli()))
+}
+
+// FillV6At fills dst with version 6 UUIDs sharing the given unixMillis timestamp capture.
+func FillV6At(dst []uuid.UUID, unixMillis uint64) error {
+	return fillUUIDs(dst, unixMillis, "uuid_new_v6_batch",
+		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV6Batch(ms, n, p) })
+}
+
+// FillV7 fills dst with time-sortable version 7 UUIDs sharing one timestamp capture and one
+// contiguous block of the monotonic counter, using the current time.
+func FillV7(dst []uuid.UUID) error {
+	return FillV7At(dst, uint64(time.Now().UnixMilli()))
+}
+
+// FillV7At fills dst with version 7 UUIDs sharing the given unixMillis timestamp capture and
+// one contiguous block of the monotonic counter.
+func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
+	return fillUUIDs(dst, unixMillis, "uuid_new_v7_batch",
+		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV7Batch(ms, n, p) })
+}
+
+// FillV6Bytes fills dst with raw RFC 9562-ordered version 6 UUID bytes, 16 per UUID, using
+// the current time. len(dst) must be a multiple of 16; anything else returns
+// ErrBufferNotWholeUUIDs.
+func FillV6Bytes(dst []byte) error {
+	return FillV6BytesAt(dst, uint64(time.Now().UnixMilli()))
+}
+
+// FillV6BytesAt fills dst with raw RFC 9562-ordered version 6 UUID bytes sharing the given
+// unixMillis timestamp capture.
+func FillV6BytesAt(dst []byte, unixMillis uint64) error {
+	return fillBytes(dst, unixMillis, "uuid_new_v6_batch",
+		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV6Batch(ms, n, p) })
+}
+
+// FillV7Bytes fills dst with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID, using
+// the current time. len(dst) must be a multiple of 16; anything else returns
+// ErrBufferNotWholeUUIDs.
+func FillV7Bytes(dst []byte) error {
+	return FillV7BytesAt(dst, uint64(time.Now().UnixMilli()))
+}
+
+// FillV7BytesAt fills dst with raw RFC 9562-ordered version 7 UUID bytes sharing the given
+// unixMillis timestamp capture and one contiguous block of the monotonic counter.
+func FillV7BytesAt(dst []byte, unixMillis uint64) error {
+	return fillBytes(dst, unixMillis, "uuid_new_v7_batch",
+		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV7Batch(ms, n, p) })
+}
+
+// ---- Raw-byte SQL-order transforms --------------------------------------------------
+//
+// The same native permutations as V6/V7To/FromSqlOrder above, rewriting a caller's own
+// 16-byte buffer in place instead of taking and returning a uuid.UUID. Useful when the value
+// is already bytes on its way to a wire format or a database parameter, and — because they
+// are pure byte-in/byte-out — they are the form a byte-level correctness oracle can be
+// pointed at directly, shared across every binding in this repo rather than re-expressed in
+// each language's own UUID type.
+
+func sqlOrderBytes(b []byte, call func(unsafe.Pointer)) error {
+	if err := ensureLoaded(); err != nil {
+		return err
+	}
+	if len(b) != 16 {
+		return fmt.Errorf("%w: got %d", ErrNotOneUUID, len(b))
+	}
+	call(unsafe.Pointer(&b[0]))
+	return nil
+}
+
+// V7ToSqlOrderBytes rewrites the 16 RFC 9562-ordered version 7 bytes in b into SQL Server
+// uniqueidentifier sort order, in place. See V7ToSqlOrder for the byte-level rationale.
+func V7ToSqlOrderBytes(b []byte) error {
+	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV7ToSqlOrder(p) })
+}
+
+// V7FromSqlOrderBytes is the inverse of V7ToSqlOrderBytes, in place.
+func V7FromSqlOrderBytes(b []byte) error {
+	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV7ToRfcOrder(p) })
+}
+
+// V6ToSqlOrderBytes rewrites the 16 RFC 9562-ordered version 6 bytes in b into SQL Server
+// uniqueidentifier sort order, in place. See V6ToSqlOrder for the byte-level rationale.
+func V6ToSqlOrderBytes(b []byte) error {
+	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV6ToSqlOrder(p) })
+}
+
+// V6FromSqlOrderBytes is the inverse of V6ToSqlOrderBytes, in place.
+func V6FromSqlOrderBytes(b []byte) error {
+	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV6ToRfcOrder(p) })
 }
