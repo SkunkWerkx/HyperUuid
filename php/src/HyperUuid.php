@@ -147,6 +147,11 @@ final class HyperUuid
      * string yourself only moves the same allocations into your own code.
      *
      * Slice it with `substr($bytes, $i * 16, 16)`, which is what newV7Batch does internally.
+     *
+     * @param int $count how many UUIDs to create
+     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
+     *     null for the current time
+     * @return string `$count * 16` bytes: `$count` version 7 UUIDs in RFC 9562 order
      */
     public static function newV7BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {
@@ -161,6 +166,11 @@ final class HyperUuid
      * `clock_seq` and `node` are independently random per item; unlike version 7 there is no
      * monotonic counter, so items minted in the same millisecond are not guaranteed to sort
      * in creation order.
+     *
+     * @param int $count how many UUIDs to create
+     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
+     *     null for the current time
+     * @return string `$count * 16` bytes: `$count` version 6 UUIDs in RFC 9562 order
      */
     public static function newV6BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {
