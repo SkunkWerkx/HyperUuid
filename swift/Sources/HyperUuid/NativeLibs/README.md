@@ -24,8 +24,17 @@ Verify any of them yourself, against GitHub's transparency log, without trusting
 repository or whoever handed you a copy:
 
 ```shell
-gh attestation verify linux-arm64/libhyperuuid.so --repo SkunkWerkx/HyperUuid
+gh attestation verify linux-arm64/libhyperuuid.so \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
+
+`--signer-repo` is required, not decoration. `--repo` on its own asserts two things at
+once: that the artifact came from that repo, and that the workflow which signed it lives
+there. Only the first is true here — the signing step is in `hyper-build-native.yml`,
+which lives in the shared `SkunkWerkx/.github` forge repo, so that is what Fulcio records
+as the build signer. Omit the flag and verification fails with an unhelpful
+`verifying with issuer "sigstore.dev"`, which looks like a bad signature but is really a
+identity mismatch.
 
 That reports the exact commit and workflow run the binary was built from. Verification is by
 content digest, so it holds for these committed copies even though they were produced as CI

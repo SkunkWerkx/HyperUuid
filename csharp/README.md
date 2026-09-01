@@ -148,24 +148,38 @@ Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's
 
 | Attested artifact | Where | How to verify |
 | --- | --- | --- |
-| Each native library, as built | `hyper-build-native.yml` | `gh attestation verify libhyperuuid.so --repo SkunkWerkx/HyperUuid` |
+| Each native library, as built | `hyper-build-native.yml` | `gh attestation verify libhyperuuid.so --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github` |
 | The `.nupkg` as packed, pre-push | `hyper-pack-nuget.yml` | strip the repo signature first (below) |
 | The `.nupkg` as published | `release.yml`, after the push | verify the downloaded file directly |
 
 The reason for the last two rows: **nuget.org adds its repository signature as a `.signature.p7s` entry inside the `.nupkg` zip during validation**, which changes the file's SHA-256. So the package you download is not the package that was built, and one attestation cannot cover both. Rather than pick, the pipeline takes both — and because the mutation is exactly one added zip entry, the pre-push attestation stays recoverable:
 
 ```shell
-# verify the published bytes directly — nothing to undo
+# verify the published bytes directly — nothing to undo.
+# Signed by release.yml, which lives in this repo, so no --signer-repo is needed.
 gh attestation verify HyperUuid.0.1.1.nupkg --repo SkunkWerkx/HyperUuid
 
-# or recover the as-built artifact and verify that instead
+# or recover the as-built artifact and verify that instead.
+# Signed by hyper-pack-nuget.yml over in the forge repo, so this half needs --signer-repo.
 zip -d HyperUuid.0.1.1.nupkg .signature.p7s
-gh attestation verify HyperUuid.0.1.1.nupkg --repo SkunkWerkx/HyperUuid
+gh attestation verify HyperUuid.0.1.1.nupkg \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
+
+**Why `--signer-repo` appears on some of these and not others.** `--repo X` asserts two
+separate things: that the artifact came from repo X, and that the workflow which signed it
+also lives in X. Everything CI builds here comes from this repo, so the first half always
+holds — but the signing step's location varies. Anything signed inside a reusable workflow
+(`hyper-build-native.yml`, `hyper-pack-nuget.yml`) is signed by a file that physically lives
+in `SkunkWerkx/.github`, and that is what Fulcio records as the build signer; anything signed
+directly by this repo's own `release.yml` is signed by this repo. Get it wrong and `gh`
+reports `verifying with issuer "sigstore.dev"` with no further detail, which reads like a bad
+signature but is only an identity mismatch. `--owner SkunkWerkx` works for every row above if
+you would rather not track which is which.
 
 The release run's job summary prints all three digests — as packed, as published, and as published-with-the-signature-removed — and asserts that the third equals the first. That claim is checked on every release rather than asserted here, so if nuget.org ever changes how it finalizes packages, the run says so instead of the README quietly going stale.
 
-Attestations are produced on real pushes and releases, not on pull requests — a fork's token can't sign — so a PR build legitimately has none. The post-publish half is non-blocking: the push is irreversible, so a slow nuget.org validation is never allowed to turn a successful publish into a failed release.
+Attestations are produced on pushes, releases, and same-repo pull requests. Only pull requests *from forks* go unattested, because a fork's token can't sign — so a fork PR legitimately has none, while a branch PR in this repo does. The post-publish half is non-blocking: the push is irreversible, so a slow nuget.org validation is never allowed to turn a successful publish into a failed release.
 
 **Not currently done: NuGet author signing.** The package carries nuget.org's repository signature but no author signature of our own, which would need an X.509 code-signing certificate registered to the account. It's complementary to the above rather than a substitute, and the difference is who does the checking: an author signature is verified automatically by every consumer's SDK at restore time, whereas an attestation is only checked by someone who deliberately runs `gh attestation verify`. Attestation ties an artifact to a commit and a build; an author signature ties it to an identity. If you want the automatic restore-time check, this is the gap.
 

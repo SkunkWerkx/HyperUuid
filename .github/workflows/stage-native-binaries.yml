@@ -105,7 +105,18 @@ jobs:
           for rid in "${!LIB_NAMES[@]}"; do
             src="artifacts/native/native-$rid/${LIB_NAMES[$rid]}"
             echo "::group::verify $rid"
-            if ! gh attestation verify "$src" --repo "$GITHUB_REPOSITORY"; then
+            # --signer-repo is not optional here. `--repo X` alone asserts BOTH that the
+            # artifact's source repo is X and that the workflow which signed it lives in X.
+            # The first is true (source is this repo); the second is not — the signing step
+            # is in hyper-build-native.yml, which physically lives in the shared
+            # SkunkWerkx/.github forge repo, so Fulcio records that as the build signer.
+            # Same job_workflow_ref reality that blocks nuget.org Trusted Publishing from
+            # the forge (see hyper-pack-nuget.yml's header). Without this flag every
+            # verification fails with a bare `verifying with issuer "sigstore.dev"` and
+            # this gate rejects six perfectly good binaries. Confirmed against all six
+            # artifacts of run 33518617482: FAIL with --repo alone, PASS with both.
+            if ! gh attestation verify "$src" \
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
               echo "::error::No valid build provenance for $rid — refusing to commit it."
               exit 1
             fi
