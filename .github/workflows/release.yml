@@ -265,7 +265,13 @@ jobs:
     needs: find-ci-run
     runs-on: ubuntu-latest
     permissions:
+      # Explicit, so checkout keeps working if this repo ever stops being public — a
+      # permissions block sets every unlisted scope to none.
+      contents: read
       id-token: write
+      # read: gh attestation verify checks every downloaded binary before it is packed.
+      # write: the gems built from them are themselves attested below.
+      attestations: write
     steps:
       - uses: actions/checkout@v7
 
@@ -284,6 +290,36 @@ jobs:
           merge-multiple: false
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
+
+      # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the six
+      # plain FFI libs go verbatim into the universal "ruby" platform gem and each Magnus
+      # extension goes verbatim into its own precompiled platform gem — so `gem push` is
+      # the last moment these bytes can still be rejected, and it is irreversible
+      # (RubyGems has no unpublish and no duplicate-version overwrite). ci.yml attested all
+      # ten at build time via hyper-build-native.yml; this is the gate that actually spends
+      # those attestations instead of just producing them.
+      #
+      # --signer-repo is not optional. `--repo X` alone asserts BOTH that the artifact's
+      # source repo is X and that the workflow which signed it lives in X. Only the first
+      # is true — the attest step is in hyper-build-native.yml, which physically lives in
+      # the shared SkunkWerkx/.github forge, and that job_workflow_ref is what Fulcio
+      # records as the build signer. Omit it and all ten fail with a bare `verifying with
+      # issuer "sigstore.dev"` that reads like a bad signature but is only an identity
+      # mismatch. Same flag, same reason as stage-native-binaries.yml's gate.
+      - name: Verify build provenance of every binary about to be packed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/*; do
+            echo "::group::verify $f"
+            if ! gh attestation verify "$f" \
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+              echo "::error::No valid build provenance for $f — refusing to publish a gem containing it."
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -330,6 +366,22 @@ jobs:
             rm "lib/hyperuuid_native.$ext"
           done
 
+
+      # Attested BEFORE the push, over ruby/pkg/*.gem — these exact files are what `gem
+      # push` uploads, with no repack in between, so the attested digest is the published
+      # digest. Ordering it first is the whole point: a failure here stops the release
+      # while it is still reversible, unlike NuGet, where nuget.org rewrites the package
+      # and forces a second attestation after an irreversible push.
+      #
+      # No --signer-repo when verifying: this signing step lives in this repo's own
+      # release.yml, so Fulcio records one identity for source and signer alike.
+      #
+      #     gh attestation verify <gem>-<version>[-<platform>].gem --repo <owner>/<repo>
+      - name: Attest the built gems
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ruby/pkg/*.gem
+
       - uses: rubygems/configure-rubygems-credentials@main
 
       - name: Publish to rubygems.org
@@ -339,6 +391,43 @@ jobs:
           for gem in pkg/*.gem; do
             gem push "$gem"
           done
+
+      # Turns "rubygems.org stores an uploaded .gem verbatim" from a reasonable belief into
+      # a per-release measurement: re-fetch each gem from the CDN and compare it to the
+      # bytes just attested. Non-fatal — the push above is irreversible, and a CDN that has
+      # not caught up yet must not turn a good release red — but a genuine mismatch would
+      # mean the attestation no longer describes what a consumer downloads, which is worth
+      # a loud warning rather than silence.
+      - name: Confirm rubygems.org serves the attested bytes
+        continue-on-error: true
+        working-directory: ruby
+        run: |
+          set -uo pipefail
+          {
+            echo "### RubyGems package attestations"
+            echo ""
+            echo "| gem | attested sha256 | served by rubygems.org |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for gem in pkg/*.gem; do
+            name=$(basename "$gem")
+            attested=$(sha256sum "$gem" | cut -d' ' -f1)
+            served="(not available within 150s)"
+            for attempt in $(seq 1 10); do
+              if curl -fsSL -o served.gem "https://rubygems.org/downloads/$name"; then
+                served=$(sha256sum served.gem | cut -d' ' -f1)
+                break
+              fi
+              sleep 15
+            done
+            if [ "$attested" = "$served" ]; then
+              echo "| \`$name\` | \`$attested\` | identical |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| \`$name\` | \`$attested\` | \`$served\` |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::rubygems.org is not serving the attested bytes for $name."
+            fi
+          done
+          rm -f served.gem
 
   # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
   # throwaway single-wheel version. abi3-py39 collapses the matrix to one wheel per platform
@@ -386,6 +475,13 @@ jobs:
             target: aarch64-pc-windows-msvc
             manylinux: ""
     runs-on: ${{ matrix.os }}
+    # attest-build-provenance mints an OIDC token to sign with and records the result.
+    # A permissions block sets every unlisted scope to none, so contents has to be spelled
+    # out too for checkout.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
 
@@ -401,6 +497,31 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux != '' && matrix.manylinux || 'off' }}
           args: --release --out dist
+
+      # Unlike every other artifact in this file, the wheel needs no verification gate
+      # anywhere downstream — it is built right here, in this workflow, from this tagged
+      # checkout, and pypi-publish consumes it directly. There is nothing to re-verify
+      # because nothing was inherited. What it does need is an attestation, for the
+      # consumer's sake: `pip download` hands over a wheel with a compiled extension module
+      # inside it, and this is the only compiled artifact in the repo that a consumer
+      # receives sealed inside the package rather than as a file of its own.
+      #
+      # This does not duplicate what pypi-publish already does. gh-action-pypi-publish
+      # emits PEP 740 attestations, which live on PyPI and are checked by PyPI-side
+      # tooling; this is a GitHub/Sigstore build-provenance attestation in the transparency
+      # log, checked with `gh attestation verify` — the same route every other artifact
+      # here uses, so one command covers the whole repo instead of two per ecosystem.
+      #
+      # Note the verifying command has no --signer-repo, and that is not an oversight. The
+      # signing step is right here in this repo's own release.yml, so Fulcio records this
+      # repo as both source and build signer — the two halves agree, unlike everything
+      # hyper-build-native.yml signs from the forge:
+      #
+      #     gh attestation verify <wheel> --repo <owner>/<repo>
+      - name: Attest wheel build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: python/dist/*.whl
 
       - uses: actions/upload-artifact@v7
         with:
@@ -434,6 +555,12 @@ jobs:
   # prerequisite, not automatic just because this gate is gone.
   pack-crates:
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
+    # Handed down to the reusable workflow, which attests what it publishes and cannot
+    # escalate past what this job was granted.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -449,6 +576,12 @@ jobs:
   maven-publish:
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@master
+    # Handed down to the reusable workflow, which attests what it publishes and cannot
+    # escalate past what this job was granted.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     with:
       crate: hyperuuid
       java_resources_dir: java/src/main/resources/native
