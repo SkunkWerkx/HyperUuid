@@ -97,3 +97,9 @@ python/src/hyperuuid/_native.pyd
 # ruby/native/ was folded into it; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so
 ruby/lib/hyperuuid_native.bundle
+# The per-ABI staging the fat platform gem is packed from (lib/hyperuuid/<minor>/), written
+# by release.yml from CI artifacts. Same story as the flat pair above: build output, never
+# committed. Scoped to the extension filename rather than the whole directory so it can't
+# swallow a real lib/hyperuuid/*.rb source file if a minor-version-shaped one ever appears.
+ruby/lib/hyperuuid/*/hyperuuid_native.so
+ruby/lib/hyperuuid/*/hyperuuid_native.bundle

@@ -323,7 +323,7 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4"
+          ruby-version: "4.0"
           bundler-cache: true
           working-directory: ruby
 
@@ -364,12 +364,21 @@ jobs:
             [osx-arm64]=arm64-darwin
             [win-x64]=x64-mingw-ucrt
           )
+          # One extension per Ruby ABI per platform — a Magnus extension is bound to a single
+          # Ruby minor, so a platform gem has to be "fat" to cover more than one. Keep this
+          # list in step with ruby/Rakefile's ABIS and the forge's per-ABI Ruby trios; the
+          # rake task aborts naming the missing file if they drift apart.
+          ABIS=(3.4 4.0)
           for rid in "${!PLATFORMS[@]}"; do
             ext=so
             [[ "$rid" == osx-* ]] && ext=bundle
-            cp "../artifacts/ruby-native/ruby-native-$rid/hyperuuid_native.$ext" "lib/hyperuuid_native.$ext"
+            for abi in "${ABIS[@]}"; do
+              mkdir -p "lib/hyperuuid/$abi"
+              cp "../artifacts/ruby-native/ruby-native-$rid-$abi/hyperuuid_native.$ext" \
+                 "lib/hyperuuid/$abi/hyperuuid_native.$ext"
+            done
             bundle exec rake "native:gem[${PLATFORMS[$rid]}]"
-            rm "lib/hyperuuid_native.$ext"
+            for abi in "${ABIS[@]}"; do rm -rf "lib/hyperuuid/$abi"; done
           done
 
 
@@ -495,7 +504,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - uses: PyO3/maturin-action@v1
         with:

@@ -36,15 +36,47 @@ end
 # step, or by hand locally) and packages a real platform gem around it directly via plain
 # RubyGems stdlib (Gem::Platform/Gem::Package), no extra build-tool dependency at all.
 namespace :native do
+  # The Ruby minor ABIs a platform gem ships, and the whole reason it's a "fat" gem: a
+  # Magnus extension is bound to one Ruby ABI, with no `abi3` equivalent to collapse the
+  # version axis the way PyO3 does for the Python binding. Covering two therefore means two
+  # compiled files per platform, under lib/hyperuuid/<minor>/, with lib/hyperuuid.rb picking
+  # at require time. This list must match what hyper-build-native.yml actually builds — the
+  # forge runs one setup-ruby/build/test trio per entry — or these gems start lying about
+  # what they contain.
+  #
+  # 4.0 is primary: the current release, what every other binding's leg runs against. 3.4 is
+  # the compatibility floor and leaves this list when it goes EOL on 2028-03-31, joining
+  # 3.2 (already EOL 2026-03-31) and 3.3 (2027-03-31) on the universal Fiddle gem. Dropping
+  # an ABI never strands a consumer — it only costs them the fast path.
+  ABIS = %w[3.4 4.0].freeze
+
+  # Exclusive upper bound for required_ruby_version: the next minor after ABIS.last, whose
+  # ABI these extensions do not cover. RubyGems requirements are AND-only with no OR, so the
+  # constraint has to be a range rather than the exact list above. That range is currently
+  # exact anyway — Ruby went 3.4 straight to 4.0, so there is no 3.5+ for it to over-claim.
+  ABI_CEILING = "4.1"
+
   task :gem, [:platform] do |_t, args|
     platform = args[:platform] or abort "usage: rake native:gem[<platform>], e.g. native:gem[aarch64-linux]"
     ext = platform.include?("darwin") ? "bundle" : "so"
-    native_lib = "lib/hyperuuid_native.#{ext}"
-    File.exist?(native_lib) or abort "#{native_lib} not found — stage the compiled Magnus extension there first"
+
+    libs = ABIS.map { |abi| "lib/hyperuuid/#{abi}/hyperuuid_native.#{ext}" }
+    missing = libs.reject { |f| File.exist?(f) }
+    missing.empty? or abort "not staged: #{missing.join(', ')} — stage each ABI's compiled Magnus extension there first"
 
     spec = GEMSPEC.dup
     spec.platform = Gem::Platform.new(platform)
-    spec.files = spec.files + [native_lib]
+    spec.files = spec.files + libs
+    # Narrower than the gemspec's own `>= 3.2`, deliberately: this gem is only correct on the
+    # ABIs actually in the box, and every other Ruby must resolve the universal
+    # "ruby"-platform gem and its Fiddle backend instead — which is exactly what RubyGems
+    # does when required_ruby_version excludes it. Leaving the gemspec's floor here would
+    # advertise these extensions to 3.2/3.3 consumers they cannot work on. Relying on
+    # lib/hyperuuid.rb's LoadError rescue to catch that is not enough: Windows fails the load
+    # cleanly (the extension imports x64-ucrt-ruby<minor>.dll by name), but Linux extensions
+    # don't link libruby at all — the symbols resolve from the host process, so a wrong-ABI
+    # .so can load successfully and misbehave later. This is the only guard that runs first.
+    spec.required_ruby_version = Gem::Requirement.new(">= #{ABIS.first}", "< #{ABI_CEILING}")
 
     require "rubygems/package"
     mkdir_p "pkg"

@@ -122,6 +122,26 @@ linux-x64/arm64, osx-x64/arm64 or x64-mingw-ucrt (the compiled Magnus native ext
 Fiddle, zero compile, bundles all 6 platforms' native libs) everywhere else. No extra
 configuration needed either way.
 
+Selection has **two** axes here, unlike every other binding in this repo. A Magnus extension
+is bound to one Ruby minor ABI — there's no `abi3` equivalent to collapse the version axis the
+way [the Python binding's](../python/) wheels do — so each platform gem is a "fat" gem
+carrying one compiled extension per supported Ruby, under `lib/hyperuuid/<minor>/`, and picks
+one at `require` time:
+
+| Ruby | linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt | anywhere else (musl/Alpine, win-arm64, …) |
+| --- | --- | --- |
+| 4.0 (primary) | Magnus, `backend: :native` | Fiddle |
+| 3.4 (floor, until its EOL 2028-03-31) | Magnus, `backend: :native` | Fiddle |
+| 3.2 / 3.3 | Fiddle | Fiddle |
+
+The platform gems declare `required_ruby_version >= 3.4, < 4.1` precisely so RubyGems
+*declines* them outside that range and resolves the universal gem instead — a wrong-ABI
+extension must never be installed in the first place. On Windows it would at least fail to
+load cleanly (the extension imports `x64-ucrt-ruby<minor>.dll` by name), but Linux extensions
+don't link libruby at all, so one can load successfully against the wrong ABI and misbehave
+later. When 3.4 goes EOL it simply leaves the matrix and its users fall back to Fiddle, which
+is exactly what the fallback is for.
+
 An earlier edition of this section said the fallback covered "Windows included, since Magnus
 doesn't target it." That was wrong in both halves. MinGW is the *only* Windows flavour
 `rb-sys` targets — its own `data/toolchains.json` maps `x64-mingw-ucrt` to the

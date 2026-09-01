@@ -46,6 +46,14 @@ jobs:
       # exercises the real surface — including the non-throwing Try* path and the raw-byte
       # span transforms — so this covers the AOT-sensitive parts, not just NewV4().
       csharp_aot_project: csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj
+      # The forge's ruby_version default (4.0, the current release) is the primary ABI; this
+      # adds a second Magnus build+suite against 3.4 so each platform gem can ship both. A
+      # Magnus extension is bound to one Ruby minor — unlike PyO3's abi3 wheels, which is why
+      # Python needs no equivalent input. Keep this in step with ruby/Rakefile's ABIS and
+      # release.yml's own ABIS list; the rake task aborts naming the missing file if they
+      # drift. Ruby 3.4 goes EOL 2028-03-31 — clear this line then and 3.4 consumers fall
+      # back to the universal Fiddle gem, which is exactly what it's there for.
+      ruby_compat_version: "3.4"
       # attest_native defaults to true in the forge — each native library gets SLSA
       # provenance tying it to this run and commit. It matters here specifically because the
       # Rust build is deterministic locally but NOT bit-reproducible across machines (a local
@@ -135,7 +143,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - run: pip install ruff==0.16.5
       - working-directory: python
         run: ruff check src
@@ -159,7 +167,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4"
+          ruby-version: "4.0"
           bundler-cache: true
           working-directory: ruby
       - working-directory: ruby
