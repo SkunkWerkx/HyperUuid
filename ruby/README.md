@@ -117,10 +117,10 @@ gem install hyperuuid
 
 Published to [RubyGems.org](https://rubygems.org/gems/hyperuuid) as real precompiled
 "platform gems" — `bundle`/`gem install` auto-selects the matching one for
-linux-x64/arm64, osx-x64/arm64 or x64-mingw-ucrt (the compiled Magnus native extension,
-`backend: :native`), falling back automatically to the universal `ruby`-platform gem (pure
-Fiddle, zero compile, bundles all 6 platforms' native libs) everywhere else. No extra
-configuration needed either way.
+linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt or aarch64-mingw-ucrt (the compiled Magnus
+native extension, `backend: :native`), falling back automatically to the universal
+`ruby`-platform gem (pure Fiddle, zero compile, bundles all 6 platforms' native libs)
+everywhere else. No extra configuration needed either way.
 
 Selection has **two** axes here, unlike every other binding in this repo. A Magnus extension
 is bound to one Ruby minor ABI — there's no `abi3` equivalent to collapse the version axis the
@@ -128,7 +128,7 @@ way [the Python binding's](../python/) wheels do — so each platform gem is a "
 carrying one compiled extension per supported Ruby, under `lib/hyperuuid/<minor>/`, and picks
 one at `require` time:
 
-| Ruby | linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt | anywhere else (musl/Alpine, win-arm64, …) |
+| Ruby | linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt, aarch64-mingw-ucrt | anywhere else (musl/Alpine, …) |
 | --- | --- | --- |
 | 4.0 (primary) | Magnus, `backend: :native` | Fiddle |
 | 3.4 (floor, until its EOL 2028-03-31) | Magnus, `backend: :native` | Fiddle |
@@ -137,7 +137,8 @@ one at `require` time:
 The platform gems declare `required_ruby_version >= 3.4, < 4.1` precisely so RubyGems
 *declines* them outside that range and resolves the universal gem instead — a wrong-ABI
 extension must never be installed in the first place. On Windows it would at least fail to
-load cleanly (the extension imports `x64-ucrt-ruby<minor>.dll` by name), but Linux extensions
+load cleanly (the extension imports `<arch>-ucrt-ruby<minor>.dll` by name —
+`x64-ucrt-ruby400.dll` on x64, `aarch64-ucrt-ruby400.dll` on ARM), but Linux extensions
 don't link libruby at all, so one can load successfully against the wrong ABI and misbehave
 later. When 3.4 goes EOL it simply leaves the matrix and its users fall back to Fiddle, which
 is exactly what the fallback is for.
@@ -149,8 +150,23 @@ doesn't target it." That was wrong in both halves. MinGW is the *only* Windows f
 `x86_64-pc-windows-msvc`. And Windows is where the Fiddle fallback cost the most: measured
 on win-x64, Ruby 3.4, the Magnus backend does `new_v4` in 406ns against Fiddle's 2407ns
 (**5.9x**) and `new_v7` in 595ns against 2759ns (**4.6x**) — a far wider gap than any Linux
-or macOS leg shows. Windows-on-ARM is the one platform still on the Fiddle path:
-RubyInstaller does ship `aarch64-mingw-ucrt` and `rb-sys` lists it supported, but this repo
-hasn't built or tested it yet.
+or macOS leg shows.
+
+Windows-on-ARM is no longer the exception it was. `rb-sys` maps `aarch64-mingw-ucrt` to the
+`aarch64-pc-windows-gnullvm` Rust target (`supported: true`), and RubyInstaller ships an
+`aarch64-mingw-ucrt` build of both ABIs in the table above, so win-arm64 now gets the same fat
+platform gem as every other leg. Measured on real Windows-on-ARM hardware, Ruby 4.0.6, the
+Magnus backend does `new_v4` in 416ns against Fiddle's 2299ns (**5.5x**) and `new_v7` in 621ns
+against 2474ns (**4.0x**) — the same shape the x64 leg shows.
+
+Two things differ from the x64 build, both consequences of `gnullvm` being LLVM-based where
+`x86_64-pc-windows-gnu` is GCC-based. The linker is `aarch64-w64-mingw32-clang` from MSYS2's
+CLANGARM64 environment, which RubyInstaller's own ARM devkit installs — so there is no
+`link-self-contained=no` dance and no `BINDGEN_EXTRA_CLANG_ARGS`, because that clang already
+defaults to a MinGW target rather than the MSVC one that made bindgen fail on x64. And
+`libunwind` must be forced static with `-l static=unwind`: rustc emits its `-lunwind` in the
+linker's *dynamic* section, where CLANGARM64 offers both `libunwind.a` and `libunwind.dll.a`
+and lld prefers the latter — left alone, the extension acquires a runtime dependency on
+`libunwind.dll`, a file no consumer of the gem would have.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.

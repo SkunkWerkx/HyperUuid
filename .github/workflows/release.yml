@@ -352,17 +352,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # win-x64 maps to x64-mingw-ucrt, RubyInstaller's own platform string — the
-          # `ext=so` default below is already right for it (mingw Ruby's DLEXT is `so`, not
-          # `dll`), so only this line was needed. No win-arm64 entry: the forge doesn't
-          # build a Magnus extension there yet, and naming a RID with no matching
-          # ruby-native-* artifact would fail this loop at the `cp`.
+          # Both Windows RIDs map to RubyInstaller's own platform strings, and the `ext=so`
+          # default below is already right for both — mingw Ruby's DLEXT is `so`, not `dll`,
+          # on either architecture. Every RID named here must have a matching ruby-native-*
+          # artifact from the forge or this loop fails at the `cp`, which is the intended
+          # failure: a missing extension should stop the release, not silently ship a gem
+          # that claims a platform it has no code for.
           declare -A PLATFORMS=(
             [linux-x64]=x86_64-linux
             [linux-arm64]=aarch64-linux
             [osx-x64]=x86_64-darwin
             [osx-arm64]=arm64-darwin
             [win-x64]=x64-mingw-ucrt
+            [win-arm64]=aarch64-mingw-ucrt
           )
           # One extension per Ruby ABI per platform — a Magnus extension is bound to a single
           # Ruby minor, so a platform gem has to be "fat" to cover more than one. Keep this
