@@ -94,6 +94,12 @@ jobs:
   nuget-org-pack:
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
+    # attest-build-provenance signs with an OIDC token and records the result; a reusable
+    # workflow can never escalate beyond what its caller granted, so these scopes come from here.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     with:
       crate: hyperuuid
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
@@ -109,7 +115,12 @@ jobs:
     needs: nuget-org-pack
     runs-on: ubuntu-latest
     permissions:
+      # id-token covers both OIDC exchanges this job makes: nuget.org Trusted Publishing for
+      # the push, and attest-build-provenance's signing identity for the post-publish
+      # attestation below. attestations lets that attestation actually be recorded.
+      contents: read
       id-token: write
+      attestations: write
     steps:
       - uses: actions/setup-dotnet@v6
         with:
@@ -131,6 +142,110 @@ jobs:
           dotnet nuget push "nupkg-org/*.nupkg"
           --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
+
+      # ---- Layer 2: attest the finalized package, after nuget.org has rewritten it ----
+      #
+      # This cannot happen at pack time. nuget.org applies its own repository signature during
+      # validation, which changes the .nupkg's bytes — so an attestation over the pre-push file
+      # would never match the copy a consumer downloads, and their `gh attestation verify` would
+      # fail in a way indistinguishable from tampering. The only package attestation worth
+      # publishing is one taken over the exact artifact the feed serves. (Layer 1 is each native
+      # library, attested unmodified as it is built, in hyper-build-native.yml.)
+      - name: Resolve package id and version from the pushed .nupkg
+        id: pkg
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          nupkg=$(ls nupkg-org/*.nupkg | head -1)
+          nuspec=$(unzip -Z1 "$nupkg" | grep -m1 '\.nuspec$')
+          unzip -p "$nupkg" "$nuspec" > pkg.nuspec
+          id=$(sed -n 's:.*<id>\(.*\)</id>.*:\1:p' pkg.nuspec | head -1)
+          ver=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' pkg.nuspec | head -1)
+          if [ -z "$id" ] || [ -z "$ver" ]; then
+            echo "::error::Could not read <id>/<version> out of $nuspec"
+            exit 1
+          fi
+          echo "id=$id"                                                   >> "$GITHUB_OUTPUT"
+          echo "version=$ver"                                             >> "$GITHUB_OUTPUT"
+          echo "lower_id=$(echo "$id" | tr '[:upper:]' '[:lower:]')"       >> "$GITHUB_OUTPUT"
+          echo "lower_version=$(echo "$ver" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "pre_push_sha256=$(sha256sum "$nupkg" | cut -d" " -f1)"     >> "$GITHUB_OUTPUT"
+
+      # Validation (including the repository signing that mutates the file) completes before
+      # the flat container will serve the package, so a 200 here means the finalized artifact.
+      # Non-fatal, all three: the push above is irreversible, and the pre-push attestation
+      # from hyper-pack-nuget.yml already gives consumers a working verification route. A slow
+      # nuget.org validation must not turn a successful publish into a red release.
+      - name: Download the finalized package back from nuget.org
+        continue-on-error: true
+        env:
+          LOWER_ID: ${{ steps.pkg.outputs.lower_id }}
+          LOWER_VERSION: ${{ steps.pkg.outputs.lower_version }}
+          FINAL_NAME: ${{ steps.pkg.outputs.id }}.${{ steps.pkg.outputs.version }}.nupkg
+        run: |
+          set -uo pipefail
+          url="https://api.nuget.org/v3-flatcontainer/$LOWER_ID/$LOWER_VERSION/$LOWER_ID.$LOWER_VERSION.nupkg"
+          echo "Polling $url"
+          for attempt in $(seq 1 60); do
+            code=$(curl -sS -o "$FINAL_NAME" -w '%{http_code}' -L "$url" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Finalized package available after $attempt attempt(s)."
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code — nuget.org validation still running, retrying in 20s"
+            sleep 20
+          done
+          echo "::error::$url never became available within 20 minutes; validation may still be in progress."
+          exit 1
+
+      # Prints both digests so the run itself records *why* layer 2 exists: these two values
+      # are expected to differ, and that difference is the repository signature.
+      - name: Show the pre-push vs published digests
+        continue-on-error: true
+        env:
+          FINAL_NAME: ${{ steps.pkg.outputs.id }}.${{ steps.pkg.outputs.version }}.nupkg
+          PRE_PUSH: ${{ steps.pkg.outputs.pre_push_sha256 }}
+        run: |
+          set -uo pipefail
+          published=$(sha256sum "$FINAL_NAME" | cut -d' ' -f1)
+
+          # nuget.org's repository signature is a single added zip entry (.signature.p7s).
+          # Stripping it should reproduce the pre-push digest exactly — which is what makes the
+          # pre-push attestation verifiable by a consumer. Prove that here rather than asserting
+          # it in a README, so a change in nuget.org's behaviour shows up as a failed claim.
+          cp "$FINAL_NAME" stripped.nupkg
+          zip -d stripped.nupkg .signature.p7s >/dev/null 2>&1 || true
+          stripped=$(sha256sum stripped.nupkg | cut -d' ' -f1)
+
+          {
+            echo "### NuGet package attestation"
+            echo ""
+            echo "| artifact | sha256 | attested by |"
+            echo "| --- | --- | --- |"
+            echo "| packed, pre-push | \`$PRE_PUSH\` | hyper-pack-nuget.yml |"
+            echo "| published (repository-signed) | \`$published\` | this job |"
+            echo "| published, .signature.p7s removed | \`$stripped\` | — |"
+            echo ""
+            if [ "$PRE_PUSH" = "$published" ]; then
+              echo "Published bytes are unchanged — nuget.org did not rewrite this package."
+            elif [ "$PRE_PUSH" = "$stripped" ]; then
+              echo "Confirmed: the only difference is nuget.org's added \`.signature.p7s\` entry."
+              echo "Both attestations are therefore usable —"
+              echo "verify the downloaded package directly, or \`zip -d <pkg> .signature.p7s\` first"
+              echo "to check it against the pre-push attestation."
+            else
+              echo "::warning::Stripping .signature.p7s did NOT reproduce the pre-push digest."
+              echo "nuget.org may have changed how it finalizes packages; the pre-push attestation"
+              echo "can no longer be recovered by removing that entry. The published-bytes"
+              echo "attestation from this job is unaffected."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the published package
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.pkg.outputs.id }}.${{ steps.pkg.outputs.version }}.nupkg
 
   # Ruby leg: builds the gems fresh, right here — deliberately not in ci.yml. A .gem bakes
   # its version into its own filename/metadata at build time, and ci.yml runs before any tag

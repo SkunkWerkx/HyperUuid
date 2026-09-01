@@ -28,10 +28,30 @@ on:
 jobs:
   build-native:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
+    # A reusable workflow can never escalate beyond what the calling job was granted, so the
+    # two scopes attest-build-provenance needs have to be handed down from here — id-token to
+    # mint the OIDC token it signs with, attestations to record the result. contents stays
+    # read: nothing in the called workflow writes to the repo.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     with:
       project: HyperUuid
       crate: hyperuuid
       pure_env: HYPERUUID_PURE
+      # Turns the package's Native AOT claim into a per-platform receipt: publish on all six
+      # legs, fail on any ILxxxx/AOTxxxx trim diagnostic, then actually run the produced
+      # binary and require exit 0. The log uploads as aot-report-{rid}. The smoke test
+      # exercises the real surface — including the non-throwing Try* path and the raw-byte
+      # span transforms — so this covers the AOT-sensitive parts, not just NewV4().
+      csharp_aot_project: csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj
+      # attest_native defaults to true in the forge — each native library gets SLSA
+      # provenance tying it to this run and commit. It matters here specifically because the
+      # Rust build is deterministic locally but NOT bit-reproducible across machines (a local
+      # rustc build and a runner's differ in hash and size), so rebuild-and-compare isn't a
+      # check a consumer can actually perform. The permissions block above is what makes it
+      # work; without those scopes the step fails rather than silently skipping.
       # HyperForge's own default (8.0.x) stays put for other repos — HyperUuid.csproj's floor
       # is net10.0 specifically because net8.0's WASM P/Invoke-table generator scans the wrong
       # (non-browser) copy of a multi-RID-asset package, an upstream bug fixed in .NET 10 (see

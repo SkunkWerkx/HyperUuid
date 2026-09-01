@@ -82,6 +82,34 @@ This is the one binding where the honest answer genuinely depends on which Pytho
   2. **Batch generation.** `new_v7_batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch — stdlib's `uuid7()` has no bulk-generation entry point, so a loop of individual calls is the only option there.
   3. **One behavior across your whole supported range.** If your package needs to run on 3.9 *and* 3.14, this avoids `sys.version_info`-gated code paths for v6/v7 support.
 
+## Bulk generation into a buffer
+
+`fill_v7(buffer)` and `fill_v6(buffer)` write raw RFC 9562-ordered bytes — 16 per UUID — straight into a `bytearray` you already own, in one native call, without constructing a single `uuid.UUID`:
+
+```python
+import hyperuuid
+
+buf = bytearray(1000 * 16)
+hyperuuid.fill_v7(buf)                      # 1000 v7 UUIDs, one timestamp capture
+first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifier parameter
+```
+
+**This is roughly 35x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
+
+| path | µs / 1000 UUIDs |
+| --- | ---: |
+| `new_v7_batch(1000)` → `list[UUID]` | 650 |
+| `fill_v7(bytearray)` | **18.5** |
+| `fill_v7`, then build `uuid.UUID` objects in Python | 1210 |
+
+`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 18.5 µs, which is the same native ceiling the Go (18.4 µs) and C# (18.2 µs) bindings hit for identical work.
+
+The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is about twice as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
+
+`len(buffer)` must be a multiple of 16, and a zero-length buffer is a no-op. Both functions take an optional `datetime` or Unix-epoch millisecond timestamp, same as the rest of the API.
+
+One deliberate limitation: these take a `bytearray`, not any writable buffer. Supporting `memoryview`, `mmap` or NumPy arrays needs `Py_buffer`, which only entered CPython's stable ABI in 3.11 — and this extension is built `abi3-py39`, so a single wheel serves every supported Python version. That tradeoff is revisitable if the floor ever moves to 3.11.
+
 ## Benchmarks
 
 Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-arm64, CPython 3.14.5, `python bench_uuid.py --fast`; see `bench_uuid.py`). Linking the core directly into the extension module — no `ctypes` boundary to cross — turns every one of these into a win against stdlib's own C-accelerated implementations:

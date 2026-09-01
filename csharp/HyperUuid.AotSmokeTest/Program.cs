@@ -26,9 +26,46 @@ if (ms != 1_645_557_742_000L)
     return 1;
 }
 
+// Non-throwing construction path — must be AOT-clean too, and must actually report failure
+// rather than throw (2^48 ms overflows v7's 48-bit unix_ts_ms field).
+if (!UuidGenerator.TryNewV7(1_645_557_742_000L, out var tryV7) || tryV7 == Guid.Empty)
+{
+    Console.WriteLine("FAIL: TryNewV7 rejected a valid timestamp");
+    return 1;
+}
+if (UuidGenerator.TryNewV7(1L << 48, out var overflowed) || overflowed != Guid.Empty)
+{
+    Console.WriteLine("FAIL: TryNewV7 accepted an out-of-range timestamp");
+    return 1;
+}
+
+// Raw-byte SQL-order transform — the byte overload must agree with the Guid overload.
+Span<byte> sqlBytes = stackalloc byte[16];
+v7.TryWriteBytes(sqlBytes, bigEndian: true, out _);
+UuidGenerator.V7ToSqlOrder(sqlBytes);
+if (!sqlBytes.SequenceEqual(UuidGenerator.V7ToSqlOrder(v7).ToByteArray()))
+{
+    Console.WriteLine("FAIL: V7ToSqlOrder byte overload disagrees with the Guid overload");
+    return 1;
+}
+
+// Destination-buffer batch fill, raw bytes: one native call, zero managed per-element work.
+Span<byte> batch = stackalloc byte[4 * 16];
+UuidGenerator.FillV7(batch, 1_645_557_742_000L);
+for (var i = 0; i < 4; i++)
+{
+    var item = new Guid(batch.Slice(i * 16, 16), bigEndian: true);
+    if (UuidGenerator.V7UnixMillis(item) != 1_645_557_742_000L)
+    {
+        Console.WriteLine($"FAIL: batch item {i} carried the wrong timestamp");
+        return 1;
+    }
+}
+
 Console.WriteLine($"v4: {a} {b}");
 Console.WriteLine($"v5: {v5} matches RFC 9562 Appendix A.4 vector");
 Console.WriteLine($"v7: {v7} embeds timestamp {ms}");
 Console.WriteLine();
+Console.WriteLine("try/span/batch surface verified under Native AOT");
 Console.WriteLine("ALL NATIVE AOT CHECKS PASSED");
 return 0;

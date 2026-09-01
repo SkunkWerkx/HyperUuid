@@ -59,6 +59,34 @@ There's no real comparison to make for v5/v6/v7 — Foundation's `UUID` type has
 
 The honest trade-off: this package bundles a native library per platform instead of being pure Swift, and every call is `throws` where `UUID()` never fails. If plain v4 randomness is all you need, `UUID()` is simpler, has no native dependency, and is already there — a completely reasonable choice.
 
+## Destination-buffer fills
+
+`fillV6`/`fillV7` write into storage you already own instead of allocating a fresh array per call, over either an `inout [UUID]` or an `UnsafeMutableRawBufferPointer`:
+
+```swift
+var dst = [UUID](repeating: UUID(), count: 1000)
+try UuidGenerator.fillV7(into: &dst, unixMillis: ms)   // reuse dst; nothing allocated
+```
+
+Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uuid_t` — 16 bytes already in RFC 9562 order — so the native core writes the whole batch straight into the array's storage with **no per-element conversion**. (C# and Java must rebuild every element, because their UUID types aren't RFC byte order.) That soundness condition is checked with a `precondition` on `MemoryLayout<UUID>`'s size and stride rather than assumed.
+
+`swift package benchmark`, p50 wall clock, 1000 UUIDs per op:
+
+| Benchmark | p50 µs |
+| --- | ---: |
+| `newV7` x1000 individually | 955.0 |
+| `newV7Batch(count: 1000)` | 77.0 |
+| `fillV7(into: [UUID])` | 19.0 |
+| `fillV7(into: raw bytes)` | **16.0** |
+
+Worth noting how large that gap is: `fillV7` is roughly **4x faster than `newV7Batch`**, not the marginal improvement the same change produces in C#. Swift was paying real time for the result array plus a per-element `UUID(rfcBytes:)` construction, and dropping both lands it at 16 µs — the same floor every other binding here reaches.
+
+The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
+
+### Raw-byte SQL-order transforms
+
+`v6/v7ToSqlOrder(bytes:)` and `v6/v7FromSqlOrder(bytes:)` apply the same native permutation in place on a caller's 16 bytes. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same cross-check every binding here now makes against the one native implementation.
+
 ## Benchmarks
 
 Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-arm64, p50 of 10,000 samples):

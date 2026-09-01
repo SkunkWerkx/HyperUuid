@@ -1,6 +1,7 @@
 package hyperuuid
 
 import (
+	"bytes"
 	"errors"
 	"sort"
 	"testing"
@@ -623,5 +624,172 @@ func TestV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimest
 		if sqlOrdered[i] != sorted[i] {
 			t.Fatalf("SQL-ordered bytes do not sort in creation order under SqlGuid comparison at index %d", i)
 		}
+	}
+}
+
+// ---- Destination-buffer fills -------------------------------------------------------
+
+func TestFillV7AtFillsTheCallersSlice(t *testing.T) {
+	dst := make([]uuid.UUID, 64)
+	if err := FillV7At(dst, rfcTestVectorMs); err != nil {
+		t.Fatalf("FillV7At: %v", err)
+	}
+	for i, id := range dst {
+		if id.Version() != 7 {
+			t.Fatalf("item %d: version %d, want 7", i, id.Version())
+		}
+		ms, err := V7UnixMillis(id)
+		if err != nil {
+			t.Fatalf("item %d: %v", i, err)
+		}
+		if ms != rfcTestVectorMs {
+			t.Fatalf("item %d: timestamp %d, want %d", i, ms, rfcTestVectorMs)
+		}
+	}
+}
+
+func TestFillV7AtIsStrictlyIncreasing(t *testing.T) {
+	dst := make([]uuid.UUID, 256)
+	if err := FillV7At(dst, rfcTestVectorMs); err != nil {
+		t.Fatalf("FillV7At: %v", err)
+	}
+	for i := 1; i < len(dst); i++ {
+		if bytes.Compare(dst[i-1][:], dst[i][:]) >= 0 {
+			t.Fatalf("items %d/%d not in creation order: %s then %s", i-1, i, dst[i-1], dst[i])
+		}
+	}
+}
+
+func TestFillV6AtFillsTheCallersSlice(t *testing.T) {
+	dst := make([]uuid.UUID, 32)
+	if err := FillV6At(dst, rfcTestVectorMs); err != nil {
+		t.Fatalf("FillV6At: %v", err)
+	}
+	for i, id := range dst {
+		if id.Version() != 6 {
+			t.Fatalf("item %d: version %d, want 6", i, id.Version())
+		}
+	}
+}
+
+func TestFillEmptyAndNilAreNoOps(t *testing.T) {
+	if err := FillV7At(nil, rfcTestVectorMs); err != nil {
+		t.Fatalf("nil slice: %v", err)
+	}
+	if err := FillV7At([]uuid.UUID{}, rfcTestVectorMs); err != nil {
+		t.Fatalf("empty slice: %v", err)
+	}
+	if err := FillV7BytesAt(nil, rfcTestVectorMs); err != nil {
+		t.Fatalf("nil bytes: %v", err)
+	}
+}
+
+func TestFillV7AtRejectsAnOutOfRangeTimestamp(t *testing.T) {
+	dst := make([]uuid.UUID, 4)
+	err := FillV7At(dst, 1<<48)
+	if !errors.Is(err, ErrTimestampOutOfRange) {
+		t.Fatalf("got %v, want ErrTimestampOutOfRange", err)
+	}
+}
+
+// ---- Raw-byte fills -----------------------------------------------------------------
+
+func TestFillV7BytesAtMatchesTheSliceForm(t *testing.T) {
+	const count = 16
+	raw := make([]byte, count*16)
+	if err := FillV7BytesAt(raw, rfcTestVectorMs); err != nil {
+		t.Fatalf("FillV7BytesAt: %v", err)
+	}
+	for i := 0; i < count; i++ {
+		var id uuid.UUID
+		copy(id[:], raw[i*16:(i+1)*16])
+		if id.Version() != 7 {
+			t.Fatalf("item %d: version %d, want 7", i, id.Version())
+		}
+		ms, err := V7UnixMillis(id)
+		if err != nil || ms != rfcTestVectorMs {
+			t.Fatalf("item %d: ms=%d err=%v", i, ms, err)
+		}
+	}
+}
+
+func TestFillBytesRejectsAPartialUUID(t *testing.T) {
+	if err := FillV7BytesAt(make([]byte, 17), rfcTestVectorMs); !errors.Is(err, ErrBufferNotWholeUUIDs) {
+		t.Fatalf("got %v, want ErrBufferNotWholeUUIDs", err)
+	}
+	if err := FillV6BytesAt(make([]byte, 15), rfcTestVectorMs); !errors.Is(err, ErrBufferNotWholeUUIDs) {
+		t.Fatalf("got %v, want ErrBufferNotWholeUUIDs", err)
+	}
+}
+
+// ---- Raw-byte SQL-order transforms --------------------------------------------------
+
+func TestV7ToSqlOrderBytesAgreesWithTheUUIDForm(t *testing.T) {
+	id, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatalf("NewV7At: %v", err)
+	}
+	want, err := V7ToSqlOrder(id)
+	if err != nil {
+		t.Fatalf("V7ToSqlOrder: %v", err)
+	}
+	got := make([]byte, 16)
+	copy(got, id[:])
+	if err := V7ToSqlOrderBytes(got); err != nil {
+		t.Fatalf("V7ToSqlOrderBytes: %v", err)
+	}
+	if !bytes.Equal(got, want[:]) {
+		t.Fatalf("byte form %x != uuid form %x", got, want[:])
+	}
+}
+
+func TestV6ToSqlOrderBytesAgreesWithTheUUIDForm(t *testing.T) {
+	id, err := NewV6At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatalf("NewV6At: %v", err)
+	}
+	want, err := V6ToSqlOrder(id)
+	if err != nil {
+		t.Fatalf("V6ToSqlOrder: %v", err)
+	}
+	got := make([]byte, 16)
+	copy(got, id[:])
+	if err := V6ToSqlOrderBytes(got); err != nil {
+		t.Fatalf("V6ToSqlOrderBytes: %v", err)
+	}
+	if !bytes.Equal(got, want[:]) {
+		t.Fatalf("byte form %x != uuid form %x", got, want[:])
+	}
+}
+
+func TestSqlOrderBytesRoundTrips(t *testing.T) {
+	id, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatalf("NewV7At: %v", err)
+	}
+	b := make([]byte, 16)
+	copy(b, id[:])
+	original := append([]byte(nil), b...)
+
+	if err := V7ToSqlOrderBytes(b); err != nil {
+		t.Fatalf("to: %v", err)
+	}
+	if bytes.Equal(b, original) {
+		t.Fatal("sql order did not change the bytes")
+	}
+	if err := V7FromSqlOrderBytes(b); err != nil {
+		t.Fatalf("from: %v", err)
+	}
+	if !bytes.Equal(b, original) {
+		t.Fatalf("round trip lost data: %x != %x", b, original)
+	}
+}
+
+func TestSqlOrderBytesRejectsAWrongSizedBuffer(t *testing.T) {
+	if err := V7ToSqlOrderBytes(make([]byte, 15)); !errors.Is(err, ErrNotOneUUID) {
+		t.Fatalf("got %v, want ErrNotOneUUID", err)
+	}
+	if err := V6FromSqlOrderBytes(make([]byte, 17)); !errors.Is(err, ErrNotOneUUID) {
+		t.Fatalf("got %v, want ErrNotOneUUID", err)
 	}
 }

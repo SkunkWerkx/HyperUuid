@@ -349,4 +349,97 @@ class UuidGeneratorTest {
             assertArrayEquals(sqlOrdered.get(i), sorted.get(i));
         }
     }
+
+    // ---- Destination-buffer fills ----------------------------------------------------
+
+    @Test
+    void fillV7FillsTheCallersArray() {
+        UUID[] dst = new UUID[64];
+        UuidGenerator.fillV7(dst, RFC_TEST_VECTOR_MS);
+        for (int i = 0; i < dst.length; i++) {
+            assertEquals(7, dst[i].version(), "item " + i + " version");
+            assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v7UnixMillis(dst[i]), "item " + i + " timestamp");
+        }
+    }
+
+    @Test
+    void fillV7IsStrictlyIncreasing() {
+        UUID[] dst = new UUID[256];
+        UuidGenerator.fillV7(dst, RFC_TEST_VECTOR_MS);
+        for (int i = 1; i < dst.length; i++) {
+            assertTrue(dst[i - 1].compareTo(dst[i]) < 0, "items " + (i - 1) + "/" + i + " out of order");
+        }
+    }
+
+    @Test
+    void fillV6FillsTheCallersArray() {
+        UUID[] dst = new UUID[32];
+        UuidGenerator.fillV6(dst, RFC_TEST_VECTOR_MS);
+        for (int i = 0; i < dst.length; i++) {
+            assertEquals(6, dst[i].version(), "item " + i + " version");
+        }
+    }
+
+    @Test
+    void fillV7BytesMatchesTheArrayForm() {
+        int count = 16;
+        byte[] raw = new byte[count * 16];
+        UuidGenerator.fillV7(raw, RFC_TEST_VECTOR_MS);
+        for (int i = 0; i < count; i++) {
+            byte[] one = Arrays.copyOfRange(raw, i * 16, i * 16 + 16);
+            UUID id = RfcBytes.fromRfcBytes(one);
+            assertEquals(7, id.version(), "item " + i + " version");
+            assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v7UnixMillis(id), "item " + i + " timestamp");
+        }
+    }
+
+    @Test
+    void fillBytesRejectsAPartialUuid() {
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(new byte[17], RFC_TEST_VECTOR_MS));
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV6(new byte[15], RFC_TEST_VECTOR_MS));
+    }
+
+    @Test
+    void fillEmptyIsANoOp() {
+        UuidGenerator.fillV7(new UUID[0], RFC_TEST_VECTOR_MS);
+        UuidGenerator.fillV7(new byte[0], RFC_TEST_VECTOR_MS);
+    }
+
+    // ---- Raw-byte SQL-order transforms -----------------------------------------------
+
+    @Test
+    void v7ToSqlOrderBytesAgreesWithTheUuidForm() {
+        UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+        byte[] want = RfcBytes.toRfcBytes(UuidGenerator.v7ToSqlOrder(id));
+        byte[] got = RfcBytes.toRfcBytes(id);
+        UuidGenerator.v7ToSqlOrder(got);
+        assertArrayEquals(want, got);
+    }
+
+    @Test
+    void v6ToSqlOrderBytesAgreesWithTheUuidForm() {
+        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
+        byte[] want = RfcBytes.toRfcBytes(UuidGenerator.v6ToSqlOrder(id));
+        byte[] got = RfcBytes.toRfcBytes(id);
+        UuidGenerator.v6ToSqlOrder(got);
+        assertArrayEquals(want, got);
+    }
+
+    @Test
+    void sqlOrderBytesRoundTrips() {
+        UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+        byte[] original = RfcBytes.toRfcBytes(id);
+        byte[] b = original.clone();
+        UuidGenerator.v7ToSqlOrder(b);
+        assertFalse(Arrays.equals(original, b), "sql order did not change the bytes");
+        UuidGenerator.v7FromSqlOrder(b);
+        assertArrayEquals(original, b);
+    }
+
+    @Test
+    void sqlOrderBytesRejectsAWrongSizedBuffer() {
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v7ToSqlOrder(new byte[15]));
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v6FromSqlOrder(new byte[17]));
+    }
+
 }

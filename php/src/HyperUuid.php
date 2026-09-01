@@ -132,4 +132,48 @@ final class HyperUuid
         }
         return $ids;
     }
+
+    /**
+     * Returns `$count` version 7 UUIDs as one binary string of raw RFC 9562-ordered bytes,
+     * 16 per UUID, instead of an array of Uuid objects.
+     *
+     * Substantially faster than {@see newV7Batch} for large batches. The native call is
+     * identical; the difference is that newV7Batch then allocates `$count` Uuid objects and
+     * `$count` substrings on top of it. This hands back the bytes the native core already
+     * produced, untouched.
+     *
+     * Use it when bytes are the destination — a BINARY(16) bind parameter, a wire format, a
+     * bulk insert. If you need Uuid objects, keep using {@see newV7Batch}: slicing this
+     * string yourself only moves the same allocations into your own code.
+     *
+     * Slice it with `substr($bytes, $i * 16, 16)`, which is what newV7Batch does internally.
+     *
+     * @param int $count how many UUIDs to create
+     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
+     *     null for the current time
+     * @return string `$count * 16` bytes: `$count` version 7 UUIDs in RFC 9562 order
+     */
+    public static function newV7BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
+    {
+        return Runtime::newV7Batch($count, self::unixMillisFrom($unixMillis));
+    }
+
+    /**
+     * Returns `$count` version 6 UUIDs as one binary string of raw RFC 9562-ordered bytes,
+     * 16 per UUID. The version 6 counterpart to {@see newV7BatchBytes}, with the same
+     * rationale and the same guidance about when it is the right call.
+     *
+     * `clock_seq` and `node` are independently random per item; unlike version 7 there is no
+     * monotonic counter, so items minted in the same millisecond are not guaranteed to sort
+     * in creation order.
+     *
+     * @param int $count how many UUIDs to create
+     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
+     *     null for the current time
+     * @return string `$count * 16` bytes: `$count` version 6 UUIDs in RFC 9562 order
+     */
+    public static function newV6BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
+    {
+        return Runtime::newV6Batch($count, self::unixMillisFrom($unixMillis));
+    }
 }

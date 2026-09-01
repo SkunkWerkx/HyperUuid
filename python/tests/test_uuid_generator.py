@@ -301,3 +301,85 @@ def test_v6_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison_for_di
     sorted_by_sqlguid = sorted(sql_ordered, key=_sql_guid_key)
 
     assert sql_ordered == sorted_by_sqlguid
+
+
+# ---- Destination-buffer fills -------------------------------------------------------
+
+
+def test_fill_v7_fills_the_callers_buffer():
+    count = 64
+    buf = bytearray(count * 16)
+    hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
+    ids = [uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])) for i in range(count)]
+    assert all(i.version == 7 for i in ids)
+    assert all(hyperuuid.v7_timestamp(i).timestamp() * 1000 == RFC_TEST_VECTOR_MS for i in ids)
+
+
+def test_fill_v7_is_strictly_increasing():
+    count = 256
+    buf = bytearray(count * 16)
+    hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
+    raw = [bytes(buf[i * 16 : (i + 1) * 16]) for i in range(count)]
+    assert raw == sorted(raw)
+    assert len(set(raw)) == count
+
+
+def test_fill_v6_fills_the_callers_buffer():
+    count = 32
+    buf = bytearray(count * 16)
+    hyperuuid.fill_v6(buf, RFC_TEST_VECTOR_MS)
+    ids = [uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])) for i in range(count)]
+    assert all(i.version == 6 for i in ids)
+
+
+def test_fill_matches_the_batch_form_structurally():
+    """The two paths draw their own entropy, so they are not value-equal — but every item
+    must decode to the same version carrying the same timestamp."""
+    count = 16
+    buf = bytearray(count * 16)
+    hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
+    from_bytes = [uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])) for i in range(count)]
+    from_batch = hyperuuid.new_v7_batch(count, RFC_TEST_VECTOR_MS)
+    assert [i.version for i in from_bytes] == [i.version for i in from_batch]
+    assert [hyperuuid.v7_timestamp(i) for i in from_bytes] == [
+        hyperuuid.v7_timestamp(i) for i in from_batch
+    ]
+
+
+def test_fill_rejects_a_partial_uuid_buffer():
+    with pytest.raises(ValueError):
+        hyperuuid.fill_v7(bytearray(17), RFC_TEST_VECTOR_MS)
+    with pytest.raises(ValueError):
+        hyperuuid.fill_v6(bytearray(15), RFC_TEST_VECTOR_MS)
+
+
+def test_fill_empty_buffer_is_a_no_op():
+    hyperuuid.fill_v7(bytearray(0), RFC_TEST_VECTOR_MS)
+    hyperuuid.fill_v6(bytearray(0), RFC_TEST_VECTOR_MS)
+
+
+def test_fill_v7_rejects_an_out_of_range_timestamp():
+    with pytest.raises(ValueError):
+        hyperuuid.fill_v7(bytearray(16), 1 << 48)
+
+
+def test_fill_v7_defaults_to_now():
+    buf = bytearray(16)
+    before = time.time()
+    hyperuuid.fill_v7(buf)
+    after = time.time()
+    ts = hyperuuid.v7_timestamp(uuid.UUID(bytes=bytes(buf))).timestamp()
+    assert before - 1 <= ts <= after + 1
+
+
+def test_fill_fully_overwrites_a_reused_buffer():
+    """The buffer-reuse case this API exists for: no byte of a previous fill may survive."""
+    buf = bytearray(b"\xAA" * (8 * 16))
+    hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
+    first = bytes(buf)
+    assert b"\xAA" * 16 not in first
+    hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
+    assert bytes(buf) != first, "second fill returned identical bytes"
+    assert all(
+        uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])).version == 7 for i in range(8)
+    )

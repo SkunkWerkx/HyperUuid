@@ -301,4 +301,96 @@ final class UuidGeneratorTests: XCTestCase {
             XCTAssertEqual(a, b)
         }
     }
+
+    // MARK: - Destination-buffer fills
+
+    func testFillV7IntoUUIDArrayFillsCallersStorage() throws {
+        var dst = [UUID](repeating: UUID(), count: 64)
+        try UuidGenerator.fillV7(into: &dst, unixMillis: Self.rfcVectorMs)
+        for (i, id) in dst.enumerated() {
+            let b = id.rfcBytes
+            XCTAssertEqual(b[6] >> 4, 7, "item \(i) version")
+            XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), Self.rfcVectorMs, "item \(i) timestamp")
+        }
+    }
+
+    func testFillV7IntoUUIDArrayIsStrictlyIncreasing() throws {
+        var dst = [UUID](repeating: UUID(), count: 256)
+        try UuidGenerator.fillV7(into: &dst, unixMillis: Self.rfcVectorMs)
+        for i in 1..<dst.count {
+            XCTAssertTrue(
+                dst[i - 1].rfcBytes.lexicographicallyPrecedes(dst[i].rfcBytes),
+                "items \(i - 1)/\(i) not in creation order")
+        }
+    }
+
+    func testFillV6IntoUUIDArray() throws {
+        var dst = [UUID](repeating: UUID(), count: 32)
+        try UuidGenerator.fillV6(into: &dst, unixMillis: Self.rfcVectorMs)
+        for (i, id) in dst.enumerated() {
+            XCTAssertEqual(id.rfcBytes[6] >> 4, 6, "item \(i) version")
+        }
+    }
+
+    func testFillV7IntoRawBufferMatchesArrayForm() throws {
+        let count = 16
+        var raw = [UInt8](repeating: 0, count: count * 16)
+        try raw.withUnsafeMutableBytes { buf in
+            try UuidGenerator.fillV7(into: buf, unixMillis: Self.rfcVectorMs)
+        }
+        for i in 0..<count {
+            let id = UUID(rfcBytes: Array(raw[(i * 16)..<(i * 16 + 16)]))
+            XCTAssertEqual(id.rfcBytes[6] >> 4, 7)
+            XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), Self.rfcVectorMs)
+        }
+    }
+
+    func testFillRejectsPartialUUIDBuffer() throws {
+        var raw = [UInt8](repeating: 0, count: 17)
+        try raw.withUnsafeMutableBytes { buf in
+            XCTAssertThrowsError(try UuidGenerator.fillV7(into: buf, unixMillis: Self.rfcVectorMs))
+        }
+    }
+
+    func testFillEmptyIsANoOp() throws {
+        var empty = [UUID]()
+        XCTAssertNoThrow(try UuidGenerator.fillV7(into: &empty, unixMillis: Self.rfcVectorMs))
+    }
+
+    // MARK: - Raw-byte SQL-order transforms
+
+    func testV7ToSqlOrderBytesAgreesWithUUIDForm() throws {
+        let id = try UuidGenerator.newV7(unixMillis: Self.rfcVectorMs)
+        let want = try UuidGenerator.v7ToSqlOrder(id).rfcBytes
+        var got = id.rfcBytes
+        try got.withUnsafeMutableBytes { try UuidGenerator.v7ToSqlOrder(bytes: $0) }
+        XCTAssertEqual(got, want)
+    }
+
+    func testV6ToSqlOrderBytesAgreesWithUUIDForm() throws {
+        let id = try UuidGenerator.newV6(unixMillis: Self.rfcVectorMs)
+        let want = try UuidGenerator.v6ToSqlOrder(id).rfcBytes
+        var got = id.rfcBytes
+        try got.withUnsafeMutableBytes { try UuidGenerator.v6ToSqlOrder(bytes: $0) }
+        XCTAssertEqual(got, want)
+    }
+
+    func testSqlOrderBytesRoundTrips() throws {
+        let id = try UuidGenerator.newV7(unixMillis: Self.rfcVectorMs)
+        let original = id.rfcBytes
+        var b = original
+        try b.withUnsafeMutableBytes { try UuidGenerator.v7ToSqlOrder(bytes: $0) }
+        XCTAssertNotEqual(b, original)
+        try b.withUnsafeMutableBytes { try UuidGenerator.v7FromSqlOrder(bytes: $0) }
+        XCTAssertEqual(b, original)
+    }
+
+    func testSqlOrderBytesRejectsWrongSize() throws {
+        var b = [UInt8](repeating: 0, count: 15)
+        try b.withUnsafeMutableBytes { buf in
+            XCTAssertThrowsError(try UuidGenerator.v7ToSqlOrder(bytes: buf))
+        }
+    }
+
+    static let rfcVectorMs: UInt64 = 1_645_557_742_000
 }

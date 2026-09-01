@@ -62,6 +62,21 @@ Requires `ext-ffi` enabled (built into PHP by default when compiled `--with-ffi`
 `php -m | grep -i ffi`). PHP's CLI SAPI runs FFI unrestricted regardless of the `ffi.enable`
 ini setting — the `preload`-only default only matters for non-CLI SAPIs like FPM.
 
+## Bulk generation into bytes
+
+`newV6BatchBytes` and `newV7BatchBytes` return the batch as one binary string of raw RFC 9562-ordered bytes — 16 per UUID — instead of an array of `Uuid` objects:
+
+```php
+$bytes = HyperUuid::newV7BatchBytes(1000);
+$first = substr($bytes, 0, 16);   // ready for a BINARY(16) bind parameter
+```
+
+**About 100x faster than `newV7Batch`** for a 1000-UUID batch (22 µs versus 2260 µs) — the largest gain of any binding in this project, because PHP's per-object construction cost is the steepest here. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects and 1000 substrings on top of it.
+
+The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `newV7Batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
+
+Slice it with `substr($bytes, $i * 16, 16)` — which is exactly what `newV7Batch` does internally.
+
 ## Benchmarks
 
 Real numbers, measured with [PHPBench](https://phpbench.readthedocs.io/) on linux-arm64,

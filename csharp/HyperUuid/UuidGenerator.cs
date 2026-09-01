@@ -146,6 +146,25 @@ public static partial class UuidGenerator
     // SequentialGuid library this crate is ported from.
     const int BatchStackThresholdBytes = 256;
 
+    static void RequireWholeUuids(Span<byte> destination, string paramName)
+    {
+        if (destination.Length % 16 != 0)
+            throw new ArgumentException(
+                $"Destination length must be a multiple of 16 (one whole UUID per 16 bytes); got {destination.Length}.",
+                paramName);
+    }
+
+    static void ThrowOnBatchFailure(int rc, string entryPoint, string outOfRangeMessage)
+    {
+        if (rc == 0)
+            return;
+        throw rc switch
+        {
+            2 => new ArgumentOutOfRangeException("unixMilliseconds", outOfRangeMessage),
+            _ => new InvalidOperationException($"{entryPoint} failed with code {rc} (random source failure)."),
+        };
+    }
+
     /// <summary>Well-known namespace UUIDs defined in RFC 9562 Section 6.6.</summary>
     public static class Namespaces
     {
@@ -170,7 +189,30 @@ public static partial class UuidGenerator
     });
 
     /// <summary>Creates a random UUID version 4 (RFC 9562 §5.4).</summary>
-    public static unsafe Guid NewV4()
+    public static Guid NewV4()
+    {
+        var rc = CoreNewV4(out var result);
+        if (rc != 0)
+            throw new InvalidOperationException($"uuid_new_v4 failed with code {rc} (random source failure).");
+        return result;
+    }
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="NewV4"/> — returns <see langword="false"/> and
+    /// leaves <paramref name="result"/> as <see cref="Guid.Empty"/> if the native random source
+    /// fails, instead of throwing.
+    /// </summary>
+    /// <remarks>
+    /// No exception ever crosses the P/Invoke boundary in either form — the native layer signals
+    /// failure with an <c>int</c> return code (0 success, 1 random-source failure, 2 timestamp out
+    /// of range; see <c>rust/src/ffi.rs</c>) and it's the managed wrapper that decides whether to
+    /// translate that code into a <see langword="throw"/>. This overload simply doesn't, which is
+    /// what a <c>Result</c>-shaped call site wants: a failure it can branch on without paying for
+    /// a managed exception or wrapping every call in a <c>try</c>/<c>catch</c>.
+    /// </remarks>
+    public static bool TryNewV4(out Guid result) => CoreNewV4(out result) == 0;
+
+    static unsafe int CoreNewV4(out Guid result)
     {
         Span<byte> buf = stackalloc byte[16];
         int rc;
@@ -178,9 +220,8 @@ public static partial class UuidGenerator
         {
             rc = uuid_new_v4(p);
         }
-        if (rc != 0)
-            throw new InvalidOperationException($"uuid_new_v4 failed with code {rc} (random source failure).");
-        return new Guid(buf, bigEndian: true);
+        result = rc == 0 ? new Guid(buf, bigEndian: true) : default;
+        return rc;
     }
 
     /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8 name.</summary>
@@ -237,14 +278,9 @@ public static partial class UuidGenerator
     /// unlike version 7, there is no monotonic counter, so calls within the same millisecond
     /// are not guaranteed to sort in creation order.
     /// </summary>
-    public static unsafe Guid NewV6(long unixMilliseconds)
+    public static Guid NewV6(long unixMilliseconds)
     {
-        Span<byte> buf = stackalloc byte[16];
-        int rc;
-        fixed (byte* p = buf)
-        {
-            rc = uuid_new_v6(unixMilliseconds, p);
-        }
+        var rc = CoreNewV6(unixMilliseconds, out var result);
         if (rc != 0)
         {
             throw rc switch
@@ -254,7 +290,35 @@ public static partial class UuidGenerator
                 _ => new InvalidOperationException($"uuid_new_v6 failed with code {rc} (random source failure)."),
             };
         }
-        return new Guid(buf, bigEndian: true);
+        return result;
+    }
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="NewV6(long)"/> — returns <see langword="false"/> for
+    /// both failure modes the native layer reports (random-source failure, and a
+    /// <paramref name="unixMilliseconds"/> that doesn't fit the 60-bit v6 timestamp field) rather
+    /// than throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
+    /// <c>Result</c>-style call site.
+    /// </summary>
+    public static bool TryNewV6(long unixMilliseconds, out Guid result) =>
+        CoreNewV6(unixMilliseconds, out result) == 0;
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="NewV6()"/>, using the current UTC time.
+    /// </summary>
+    public static bool TryNewV6(out Guid result) =>
+        TryNewV6(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), out result);
+
+    static unsafe int CoreNewV6(long unixMilliseconds, out Guid result)
+    {
+        Span<byte> buf = stackalloc byte[16];
+        int rc;
+        fixed (byte* p = buf)
+        {
+            rc = uuid_new_v6(unixMilliseconds, p);
+        }
+        result = rc == 0 ? new Guid(buf, bigEndian: true) : default;
+        return rc;
     }
 
     /// <summary>
@@ -287,10 +351,62 @@ public static partial class UuidGenerator
     /// timestamp capture — one native call and one random-bytes fetch instead of
     /// <paramref name="destination"/>'s length worth of each.
     /// </summary>
-    public static unsafe void FillV6(Span<Guid> destination, long unixMilliseconds)
+    public static void FillV6(Span<Guid> destination, long unixMilliseconds) =>
+        ThrowOnBatchFailure(CoreFillV6(destination, unixMilliseconds), "uuid_new_v6_batch",
+            "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field.");
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="FillV6(Span{Guid}, long)"/> — returns
+    /// <see langword="false"/> instead of throwing when the native call reports a random-source
+    /// failure or an out-of-range <paramref name="unixMilliseconds"/>. On failure
+    /// <paramref name="destination"/> is left untouched. See <see cref="TryNewV4"/> for why.
+    /// </summary>
+    public static bool TryFillV6(Span<Guid> destination, long unixMilliseconds) =>
+        CoreFillV6(destination, unixMilliseconds) == 0;
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> with raw RFC 9562-ordered version 6 UUID bytes —
+    /// 16 per UUID, contiguous, no <see cref="Guid"/> anywhere on the path.
+    /// </summary>
+    /// <remarks>
+    /// This is the allocation-free, conversion-free form of
+    /// <see cref="FillV6(Span{Guid}, long)"/>: the native core already writes the batch as one
+    /// contiguous block of RFC-ordered bytes, so handing it the caller's own buffer means one
+    /// native call and <em>zero</em> managed per-element work. The <see cref="Guid"/> overload has
+    /// to marshal through a scratch buffer and run a
+    /// <c>new Guid(chunk, bigEndian: true)</c> conversion per element, because
+    /// <see cref="Guid"/>'s in-memory field layout is mixed-endian and isn't the RFC byte order.
+    /// Prefer this overload when the destination is a wire buffer, a database parameter, or
+    /// anything else that wants RFC bytes rather than <see cref="Guid"/> values.
+    /// <para>
+    /// <paramref name="destination"/>'s length must be an exact multiple of 16; anything else is a
+    /// caller error and throws.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="destination"/>'s length is not a multiple of 16.
+    /// </exception>
+    public static void FillV6(Span<byte> destination, long unixMilliseconds)
+    {
+        RequireWholeUuids(destination, nameof(destination));
+        ThrowOnBatchFailure(CoreFillV6Bytes(destination, unixMilliseconds), "uuid_new_v6_batch",
+            "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field.");
+    }
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="FillV6(Span{byte}, long)"/>. Returns
+    /// <see langword="false"/> — rather than throwing — for a native failure <em>and</em> for a
+    /// <paramref name="destination"/> whose length isn't a multiple of 16, matching the BCL's own
+    /// <c>Try</c> convention (<see cref="Guid.TryWriteBytes(Span{byte})"/> likewise returns
+    /// <see langword="false"/> for a badly sized destination rather than throwing).
+    /// </summary>
+    public static bool TryFillV6(Span<byte> destination, long unixMilliseconds) =>
+        destination.Length % 16 == 0 && CoreFillV6Bytes(destination, unixMilliseconds) == 0;
+
+    static unsafe int CoreFillV6(Span<Guid> destination, long unixMilliseconds)
     {
         if (destination.IsEmpty)
-            return;
+            return 0;
 
         int totalBytes = destination.Length * 16;
         Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
@@ -306,24 +422,27 @@ public static partial class UuidGenerator
                 rc = uuid_new_v6_batch(unixMilliseconds, (uint)destination.Length, p);
             }
             if (rc != 0)
-            {
-                throw rc switch
-                {
-                    2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
-                        "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field."),
-                    _ => new InvalidOperationException(
-                        $"uuid_new_v6_batch failed with code {rc} (random source failure)."),
-                };
-            }
+                return rc;
             for (int i = 0; i < destination.Length; i++)
             {
                 destination[i] = new Guid(buf.Slice(i * 16, 16), bigEndian: true);
             }
+            return 0;
         }
         finally
         {
             if (rented is not null)
                 ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    static unsafe int CoreFillV6Bytes(Span<byte> destination, long unixMilliseconds)
+    {
+        if (destination.IsEmpty)
+            return 0;
+        fixed (byte* p = destination)
+        {
+            return uuid_new_v6_batch(unixMilliseconds, (uint)(destination.Length / 16), p);
         }
     }
 
@@ -361,14 +480,9 @@ public static partial class UuidGenerator
     public static Guid NewV7(DateTimeOffset timestamp) => NewV7(timestamp.ToUnixTimeMilliseconds());
 
     /// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond timestamp.</summary>
-    public static unsafe Guid NewV7(long unixMilliseconds)
+    public static Guid NewV7(long unixMilliseconds)
     {
-        Span<byte> buf = stackalloc byte[16];
-        int rc;
-        fixed (byte* p = buf)
-        {
-            rc = uuid_new_v7(unixMilliseconds, p);
-        }
+        var rc = CoreNewV7(unixMilliseconds, out var result);
         if (rc != 0)
         {
             throw rc switch
@@ -378,7 +492,35 @@ public static partial class UuidGenerator
                 _ => new InvalidOperationException($"uuid_new_v7 failed with code {rc} (random source failure)."),
             };
         }
-        return new Guid(buf, bigEndian: true);
+        return result;
+    }
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="NewV7(long)"/> — returns <see langword="false"/> for
+    /// both failure modes the native layer reports (random-source failure, and a
+    /// <paramref name="unixMilliseconds"/> that is negative or doesn't fit 48 bits) rather than
+    /// throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
+    /// <c>Result</c>-style call site.
+    /// </summary>
+    public static bool TryNewV7(long unixMilliseconds, out Guid result) =>
+        CoreNewV7(unixMilliseconds, out result) == 0;
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="NewV7()"/>, using the current UTC time.
+    /// </summary>
+    public static bool TryNewV7(out Guid result) =>
+        TryNewV7(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), out result);
+
+    static unsafe int CoreNewV7(long unixMilliseconds, out Guid result)
+    {
+        Span<byte> buf = stackalloc byte[16];
+        int rc;
+        fixed (byte* p = buf)
+        {
+            rc = uuid_new_v7(unixMilliseconds, p);
+        }
+        result = rc == 0 ? new Guid(buf, bigEndian: true) : default;
+        return rc;
     }
 
     /// <summary>
@@ -444,7 +586,7 @@ public static partial class UuidGenerator
     /// project's own <see href="https://github.com/NorseArchitecture/Svartalfheim">Svartalfheim</see>
     /// implements, ported here from the native Rust core instead of reimplemented in C#, so
     /// every binding in this repo (not just this one) gets it from one verified source.
-    /// Meaningful only for a genuine version 7 UUID; see <see cref="V6ToSqlOrder"/> for v6.
+    /// Meaningful only for a genuine version 7 UUID; see <see cref="V6ToSqlOrder(Guid)"/> for v6.
     /// </remarks>
     public static unsafe Guid V7ToSqlOrder(Guid uuid)
     {
@@ -461,7 +603,7 @@ public static partial class UuidGenerator
     }
 
     /// <summary>
-    /// Inverse of <see cref="V7ToSqlOrder"/> — converts a SQL-Server-ordered version 7
+    /// Inverse of <see cref="V7ToSqlOrder(Guid)"/> — converts a SQL-Server-ordered version 7
     /// <paramref name="uuid"/> (as read back via <see cref="Guid.ToByteArray()"/>) back to
     /// RFC 9562 order.
     /// </summary>
@@ -483,13 +625,13 @@ public static partial class UuidGenerator
     /// </summary>
     /// <remarks>
     /// Same <see cref="System.Data.SqlTypes.SqlGuid"/> significance order as
-    /// <see cref="V7ToSqlOrder"/>, applied to v6's very different field layout. v6 has no
+    /// <see cref="V7ToSqlOrder(Guid)"/>, applied to v6's very different field layout. v6 has no
     /// monotonic counter the way v7 does; the only field that determines its creation order is
     /// the 60-bit timestamp itself, so this moves that whole timestamp — most significant
     /// chunk first — into the comparison's most significant bytes, and relocates
     /// <c>clock_seq</c>/<c>node</c> (no ordering value — randomly generated per call, not a
     /// counter) into the remaining bytes. Version and variant end up at different byte offsets
-    /// than <see cref="V7ToSqlOrder"/>'s result (octet 8's top nibble and octet 6's top two
+    /// than <see cref="V7ToSqlOrder(Guid)"/>'s result (octet 8's top nibble and octet 6's top two
     /// bits here, not 7/8) — fine, since the two versions are separate methods and a caller
     /// always knows which one it's calling.
     /// <para>
@@ -513,7 +655,7 @@ public static partial class UuidGenerator
     }
 
     /// <summary>
-    /// Inverse of <see cref="V6ToSqlOrder"/> — converts a SQL-Server-ordered version 6
+    /// Inverse of <see cref="V6ToSqlOrder(Guid)"/> — converts a SQL-Server-ordered version 6
     /// <paramref name="uuid"/> (as read back via <see cref="Guid.ToByteArray()"/>) back to
     /// RFC 9562 order.
     /// </summary>
@@ -528,16 +670,138 @@ public static partial class UuidGenerator
         return new Guid(bytes, bigEndian: true);
     }
 
+    // ---- Raw-byte SQL-order transforms -------------------------------------------------
+    //
+    // The four overloads below are the same native permutations as the Guid-taking methods
+    // above, but operating directly on a caller's 16-byte buffer. They exist because the Guid
+    // round trip is the one genuinely subtle part of this file: the Guid form reads its input
+    // with `bigEndian: true` (RFC order) and then constructs its result with plain
+    // `new Guid(bytes)` — no byte-order conversion — precisely so that a later
+    // Guid.ToByteArray() reproduces the SQL-order bytes. That asymmetry is correct and
+    // load-bearing, but it is only explicable in prose.
+    //
+    // On these overloads there is no asymmetry to explain, because there is no Guid: RFC-ordered
+    // bytes go in, SQL-ordered bytes come out, in place. That makes them the form a byte-level
+    // correctness oracle can be pointed at directly — notably this project's own
+    // SequentialGuidBytes tests in Svartalfheim, which compare raw 16-byte permutations and
+    // would otherwise have to model Guid's mixed-endian field layout just to compare results.
+    // It also makes them the right call when the value is headed for a wire format or a database
+    // parameter that wants bytes anyway, since the Guid detour is pure overhead there.
+
+    /// <summary>
+    /// In-place raw-byte form of <see cref="V7ToSqlOrder(Guid)"/> — rewrites the 16 RFC
+    /// 9562-ordered version 7 bytes in <paramref name="uuid"/> into SQL Server
+    /// <c>uniqueidentifier</c> sort order.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+    public static unsafe void V7ToSqlOrder(Span<byte> uuid)
+    {
+        RequireSingleUuid(uuid, nameof(uuid));
+        fixed (byte* p = uuid) { uuid_v7_to_sql_order(p); }
+    }
+
+    /// <summary>
+    /// In-place raw-byte form of <see cref="V7FromSqlOrder(Guid)"/> — rewrites the 16
+    /// SQL-Server-ordered version 7 bytes in <paramref name="uuid"/> back into RFC 9562 order.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+    public static unsafe void V7FromSqlOrder(Span<byte> uuid)
+    {
+        RequireSingleUuid(uuid, nameof(uuid));
+        fixed (byte* p = uuid) { uuid_v7_to_rfc_order(p); }
+    }
+
+    /// <summary>
+    /// In-place raw-byte form of <see cref="V6ToSqlOrder(Guid)"/> — rewrites the 16 RFC
+    /// 9562-ordered version 6 bytes in <paramref name="uuid"/> into SQL Server
+    /// <c>uniqueidentifier</c> sort order.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+    public static unsafe void V6ToSqlOrder(Span<byte> uuid)
+    {
+        RequireSingleUuid(uuid, nameof(uuid));
+        fixed (byte* p = uuid) { uuid_v6_to_sql_order(p); }
+    }
+
+    /// <summary>
+    /// In-place raw-byte form of <see cref="V6FromSqlOrder(Guid)"/> — rewrites the 16
+    /// SQL-Server-ordered version 6 bytes in <paramref name="uuid"/> back into RFC 9562 order.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+    public static unsafe void V6FromSqlOrder(Span<byte> uuid)
+    {
+        RequireSingleUuid(uuid, nameof(uuid));
+        fixed (byte* p = uuid) { uuid_v6_to_rfc_order(p); }
+    }
+
+    static void RequireSingleUuid(Span<byte> uuid, string paramName)
+    {
+        if (uuid.Length != 16)
+            throw new ArgumentException($"A UUID is exactly 16 bytes; got {uuid.Length}.", paramName);
+    }
+
     /// <summary>
     /// Fills <paramref name="destination"/> with time-sortable version 7 UUIDs sharing one
     /// timestamp capture and one contiguous block of the monotonic counter — one native call
     /// and one random-bytes fetch instead of <paramref name="destination"/>'s length worth of
     /// each.
     /// </summary>
-    public static unsafe void FillV7(Span<Guid> destination, long unixMilliseconds)
+    public static void FillV7(Span<Guid> destination, long unixMilliseconds) =>
+        ThrowOnBatchFailure(CoreFillV7(destination, unixMilliseconds), "uuid_new_v7_batch",
+            "Unix millisecond timestamp must be non-negative and fit within 48 bits.");
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="FillV7(Span{Guid}, long)"/> — returns
+    /// <see langword="false"/> instead of throwing when the native call reports a random-source
+    /// failure or an out-of-range <paramref name="unixMilliseconds"/>. On failure
+    /// <paramref name="destination"/> is left untouched. See <see cref="TryNewV4"/> for why.
+    /// </summary>
+    public static bool TryFillV7(Span<Guid> destination, long unixMilliseconds) =>
+        CoreFillV7(destination, unixMilliseconds) == 0;
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> with raw RFC 9562-ordered version 7 UUID bytes —
+    /// 16 per UUID, contiguous, no <see cref="Guid"/> anywhere on the path.
+    /// </summary>
+    /// <remarks>
+    /// This is the allocation-free, conversion-free form of
+    /// <see cref="FillV7(Span{Guid}, long)"/>: the native core already writes the batch as one
+    /// contiguous block of RFC-ordered bytes, so handing it the caller's own buffer means one
+    /// native call and <em>zero</em> managed per-element work. The <see cref="Guid"/> overload has
+    /// to marshal through a scratch buffer and run a
+    /// <c>new Guid(chunk, bigEndian: true)</c> conversion per element, because
+    /// <see cref="Guid"/>'s in-memory field layout is mixed-endian and isn't the RFC byte order.
+    /// Prefer this overload when the destination is a wire buffer, a database parameter, or
+    /// anything else that wants RFC bytes rather than <see cref="Guid"/> values.
+    /// <para>
+    /// <paramref name="destination"/>'s length must be an exact multiple of 16; anything else is a
+    /// caller error and throws.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="destination"/>'s length is not a multiple of 16.
+    /// </exception>
+    public static void FillV7(Span<byte> destination, long unixMilliseconds)
+    {
+        RequireWholeUuids(destination, nameof(destination));
+        ThrowOnBatchFailure(CoreFillV7Bytes(destination, unixMilliseconds), "uuid_new_v7_batch",
+            "Unix millisecond timestamp must be non-negative and fit within 48 bits.");
+    }
+
+    /// <summary>
+    /// Non-throwing counterpart to <see cref="FillV7(Span{byte}, long)"/>. Returns
+    /// <see langword="false"/> — rather than throwing — for a native failure <em>and</em> for a
+    /// <paramref name="destination"/> whose length isn't a multiple of 16, matching the BCL's own
+    /// <c>Try</c> convention (<see cref="Guid.TryWriteBytes(Span{byte})"/> likewise returns
+    /// <see langword="false"/> for a badly sized destination rather than throwing).
+    /// </summary>
+    public static bool TryFillV7(Span<byte> destination, long unixMilliseconds) =>
+        destination.Length % 16 == 0 && CoreFillV7Bytes(destination, unixMilliseconds) == 0;
+
+    static unsafe int CoreFillV7(Span<Guid> destination, long unixMilliseconds)
     {
         if (destination.IsEmpty)
-            return;
+            return 0;
 
         int totalBytes = destination.Length * 16;
         Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
@@ -553,24 +817,27 @@ public static partial class UuidGenerator
                 rc = uuid_new_v7_batch(unixMilliseconds, (uint)destination.Length, p);
             }
             if (rc != 0)
-            {
-                throw rc switch
-                {
-                    2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
-                        "Unix millisecond timestamp must be non-negative and fit within 48 bits."),
-                    _ => new InvalidOperationException(
-                        $"uuid_new_v7_batch failed with code {rc} (random source failure)."),
-                };
-            }
+                return rc;
             for (int i = 0; i < destination.Length; i++)
             {
                 destination[i] = new Guid(buf.Slice(i * 16, 16), bigEndian: true);
             }
+            return 0;
         }
         finally
         {
             if (rented is not null)
                 ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    static unsafe int CoreFillV7Bytes(Span<byte> destination, long unixMilliseconds)
+    {
+        if (destination.IsEmpty)
+            return 0;
+        fixed (byte* p = destination)
+        {
+            return uuid_new_v7_batch(unixMilliseconds, (uint)(destination.Length / 16), p);
         }
     }
 

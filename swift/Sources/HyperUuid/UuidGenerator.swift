@@ -14,6 +14,8 @@ public enum UuidGenerator {
         case randomSourceFailure(code: Int32)
         /// The Unix millisecond timestamp doesn't fit the timestamp field being generated.
         case timestampOutOfRange
+        /// A destination buffer's length wasn't a whole number of 16-byte UUIDs.
+        case bufferNotWholeUUIDs(count: Int)
 
         public var description: String {
             switch self {
@@ -21,6 +23,8 @@ public enum UuidGenerator {
                 return "hyperuuid: native call failed with code \(code) (random source failure)"
             case .timestampOutOfRange:
                 return "hyperuuid: unix millisecond timestamp must be non-negative and fit within 48 bits"
+            case .bufferNotWholeUUIDs(let count):
+                return "hyperuuid: destination length must be a multiple of 16 (one whole UUID per 16 bytes); got \(count)"
             }
         }
     }
@@ -371,5 +375,122 @@ public enum UuidGenerator {
         var bytes = uuid.rfcBytes
         bytes.withUnsafeMutableBufferPointer { l.v6ToRfcOrder($0.baseAddress) }
         return UUID(rfcBytes: bytes)
+    }
+
+    // MARK: - Destination-buffer fills
+
+    /// Fills `destination` with time-sortable version 7 UUIDs sharing one `unixMillis`
+    /// timestamp capture and one contiguous block of the monotonic counter.
+    ///
+    /// `newV7Batch(count:)` allocates a fresh array on every call; this writes into storage
+    /// the caller already owns, which is what lets a hot path reuse one buffer across batches.
+    /// `destination` is raw RFC 9562-ordered bytes, 16 per UUID, and its length must be a whole
+    /// multiple of 16.
+    public static func fillV7(into destination: UnsafeMutableRawBufferPointer, unixMillis: UInt64) throws {
+        try fill(into: destination, unixMillis: unixMillis) { l in l.newV7Batch }
+    }
+
+    /// Fills `destination` with version 7 UUIDs sharing the current time.
+    public static func fillV7(into destination: UnsafeMutableRawBufferPointer) throws {
+        try fillV7(into: destination, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+    }
+
+    /// Fills `destination` with time-sortable version 6 UUIDs sharing one `unixMillis`
+    /// timestamp capture. `clock_seq` and `node` are independently random per item — unlike
+    /// version 7 there is no monotonic counter, so items are not guaranteed to sort in
+    /// creation order.
+    public static func fillV6(into destination: UnsafeMutableRawBufferPointer, unixMillis: UInt64) throws {
+        try fill(into: destination, unixMillis: unixMillis) { l in l.newV6Batch }
+    }
+
+    /// Fills `destination` with version 6 UUIDs sharing the current time.
+    public static func fillV6(into destination: UnsafeMutableRawBufferPointer) throws {
+        try fillV6(into: destination, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+    }
+
+    /// Fills `destination` with version 7 UUIDs, writing straight into the array's storage.
+    ///
+    /// Foundation's `UUID` wraps `uuid_t` — 16 bytes in RFC 9562 order — so a contiguous
+    /// `[UUID]` is exactly the layout the native core writes and no per-element conversion is
+    /// needed. The layout is asserted at runtime rather than assumed.
+    public static func fillV7(into destination: inout [UUID], unixMillis: UInt64) throws {
+        try fillUUIDs(into: &destination, unixMillis: unixMillis) { l in l.newV7Batch }
+    }
+
+    /// Fills `destination` with version 6 UUIDs, writing straight into the array's storage.
+    public static func fillV6(into destination: inout [UUID], unixMillis: UInt64) throws {
+        try fillUUIDs(into: &destination, unixMillis: unixMillis) { l in l.newV6Batch }
+    }
+
+    private static func fill(
+        into destination: UnsafeMutableRawBufferPointer,
+        unixMillis: UInt64,
+        _ pick: (LoadedLibrary) -> UuidNewV7BatchFn
+    ) throws {
+        guard destination.count % 16 == 0 else {
+            throw Error.bufferNotWholeUUIDs(count: destination.count)
+        }
+        guard destination.count > 0 else { return }
+        let l = try loaded()
+        let rc = pick(l)(
+            unixMillis,
+            UInt32(destination.count / 16),
+            destination.baseAddress?.assumingMemoryBound(to: UInt8.self)
+        )
+        switch rc {
+        case 0: return
+        case 2: throw Error.timestampOutOfRange
+        default: throw Error.randomSourceFailure(code: rc)
+        }
+    }
+
+    private static func fillUUIDs(
+        into destination: inout [UUID],
+        unixMillis: UInt64,
+        _ pick: (LoadedLibrary) -> UuidNewV7BatchFn
+    ) throws {
+        guard !destination.isEmpty else { return }
+        precondition(
+            MemoryLayout<UUID>.size == 16 && MemoryLayout<UUID>.stride == 16,
+            "UUID is not a contiguous 16-byte value; the direct fill below would be unsound"
+        )
+        var thrown: Swift.Error?
+        destination.withUnsafeMutableBytes { raw in
+            do { try fill(into: raw, unixMillis: unixMillis, pick) } catch { thrown = error }
+        }
+        if let thrown { throw thrown }
+    }
+
+    // MARK: - Raw-byte SQL-order transforms
+
+    /// Rewrites the 16 RFC 9562-ordered version 7 bytes in `uuid` into SQL Server
+    /// `uniqueidentifier` sort order, in place. See `v7ToSqlOrder(_:)` for the rationale.
+    public static func v7ToSqlOrder(bytes uuid: UnsafeMutableRawBufferPointer) throws {
+        try sqlOrder(uuid) { l in l.v7ToSqlOrder }
+    }
+
+    /// Inverse of `v7ToSqlOrder(bytes:)`, in place.
+    public static func v7FromSqlOrder(bytes uuid: UnsafeMutableRawBufferPointer) throws {
+        try sqlOrder(uuid) { l in l.v7ToRfcOrder }
+    }
+
+    /// Rewrites the 16 RFC 9562-ordered version 6 bytes in `uuid` into SQL Server
+    /// `uniqueidentifier` sort order, in place. See `v6ToSqlOrder(_:)` for the rationale.
+    public static func v6ToSqlOrder(bytes uuid: UnsafeMutableRawBufferPointer) throws {
+        try sqlOrder(uuid) { l in l.v6ToSqlOrder }
+    }
+
+    /// Inverse of `v6ToSqlOrder(bytes:)`, in place.
+    public static func v6FromSqlOrder(bytes uuid: UnsafeMutableRawBufferPointer) throws {
+        try sqlOrder(uuid) { l in l.v6ToRfcOrder }
+    }
+
+    private static func sqlOrder(
+        _ uuid: UnsafeMutableRawBufferPointer,
+        _ pick: (LoadedLibrary) -> UuidV7ToSqlOrderFn
+    ) throws {
+        guard uuid.count == 16 else { throw Error.bufferNotWholeUUIDs(count: uuid.count) }
+        let l = try loaded()
+        pick(l)(uuid.baseAddress?.assumingMemoryBound(to: UInt8.self))
     }
 }

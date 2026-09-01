@@ -456,4 +456,63 @@ final class HyperUuidTest extends TestCase
         }
         return $ms;
     }
+
+    public function testNewV7BatchBytesReturnsRawBytes(): void
+    {
+        $bytes = HyperUuid::newV7BatchBytes(64, self::RFC_TEST_VECTOR_MS);
+        self::assertIsString($bytes);
+        self::assertSame(64 * 16, strlen($bytes));
+    }
+
+    public function testNewV7BatchBytesDecodesToVersion7(): void
+    {
+        $bytes = HyperUuid::newV7BatchBytes(32, self::RFC_TEST_VECTOR_MS);
+        for ($i = 0; $i < 32; $i++) {
+            $id = new Uuid(substr($bytes, $i * 16, 16));
+            self::assertSame(7, $id->version(), "item {$i}");
+        }
+    }
+
+    public function testNewV7BatchBytesIsStrictlyIncreasing(): void
+    {
+        $bytes = HyperUuid::newV7BatchBytes(256, self::RFC_TEST_VECTOR_MS);
+        $raw = [];
+        for ($i = 0; $i < 256; $i++) {
+            $raw[] = substr($bytes, $i * 16, 16);
+        }
+        $sorted = $raw;
+        sort($sorted);
+        self::assertSame($sorted, $raw, 'batch is not in creation order');
+        self::assertCount(256, array_unique($raw), 'batch contains duplicates');
+    }
+
+    public function testNewV7BatchBytesAgreesWithTheObjectForm(): void
+    {
+        $bytes = HyperUuid::newV7BatchBytes(16, self::RFC_TEST_VECTOR_MS);
+        $fromObjects = HyperUuid::newV7Batch(16, self::RFC_TEST_VECTOR_MS);
+        for ($i = 0; $i < 16; $i++) {
+            $fromBytes = new Uuid(substr($bytes, $i * 16, 16));
+            self::assertSame($fromObjects[$i]->version(), $fromBytes->version(), "item {$i}");
+        }
+    }
+
+    public function testNewV6BatchBytesReturnsVersion6(): void
+    {
+        $bytes = HyperUuid::newV6BatchBytes(8, self::RFC_TEST_VECTOR_MS);
+        self::assertSame(8 * 16, strlen($bytes));
+        for ($i = 0; $i < 8; $i++) {
+            self::assertSame(6, (new Uuid(substr($bytes, $i * 16, 16)))->version(), "item {$i}");
+        }
+    }
+
+    public function testBatchBytesDefaultsToNow(): void
+    {
+        $before = (int) (microtime(true) * 1000);
+        $bytes = HyperUuid::newV7BatchBytes(1);
+        $after = (int) (microtime(true) * 1000);
+        $ts = (new Uuid(substr($bytes, 0, 16)))->timestamp();
+        $ms = (int) ((float) $ts->format('U.u') * 1000);
+        self::assertGreaterThanOrEqual($before - 1000, $ms);
+        self::assertLessThanOrEqual($after + 1000, $ms);
+    }
 }

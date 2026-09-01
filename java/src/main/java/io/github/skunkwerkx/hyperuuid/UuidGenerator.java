@@ -608,4 +608,179 @@ public final class UuidGenerator {
         }
         return result;
     }
+
+    // ---- Destination-buffer fills ----------------------------------------------------
+    //
+    // newV6Batch/newV7Batch allocate a fresh UUID[] and a scratch Arena segment on every
+    // call. These write into storage the caller already owns, so a hot path can reuse one
+    // buffer across batches instead of handing the collector two objects per batch.
+    //
+    // Unlike the Go and Swift bindings, the UUID[] form still costs a per-element
+    // conversion: java.util.UUID is two longs, not 16 RFC-ordered bytes, so every item has
+    // to be rebuilt from the native output. That is exactly the C# binding's situation, and
+    // it is why the byte[]/MemorySegment forms below are the ones that actually remove work
+    // rather than just removing an allocation.
+
+    private static void fillBytesNative(
+            MemorySegment out, int count, long unixMillis, MethodHandle handle, String fn) {
+        int rc;
+        try {
+            rc = (int) handle.invokeExact(unixMillis, count, out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
+        }
+        if (rc == 2) {
+            throw new IllegalArgumentException("unixMillis does not fit this version's timestamp field");
+        }
+        if (rc != 0) {
+            throw new IllegalStateException(fn + " failed with code " + rc + " (random source failure)");
+        }
+    }
+
+    private static void requireWholeUuids(int length) {
+        if (length % 16 != 0) {
+            throw new IllegalArgumentException(
+                    "destination length must be a multiple of 16 (one whole UUID per 16 bytes); got " + length);
+        }
+    }
+
+    /**
+     * Fills {@code destination} with time-sortable version 7 UUIDs sharing one timestamp
+     * capture and one contiguous block of the monotonic counter.
+     *
+     * <p>Writes into an array the caller already owns rather than allocating a new one. Each
+     * element is still rebuilt from the native bytes, because {@link UUID} is two longs and
+     * not RFC byte order — see {@link #fillV7(byte[], long)} for the form that skips that.
+     */
+    public static void fillV7(UUID[] destination, long unixMillis) {
+        fillUuidArray(destination, unixMillis, UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
+    }
+
+    /** Fills {@code destination} with version 7 UUIDs sharing the current time. */
+    public static void fillV7(UUID[] destination) {
+        fillV7(destination, System.currentTimeMillis());
+    }
+
+    /**
+     * Fills {@code destination} with time-sortable version 6 UUIDs sharing one timestamp
+     * capture. {@code clock_seq} and {@code node} are independently random per item — unlike
+     * version 7 there is no monotonic counter, so items are not guaranteed to sort in
+     * creation order.
+     */
+    public static void fillV6(UUID[] destination, long unixMillis) {
+        fillUuidArray(destination, unixMillis, UUID_NEW_V6_BATCH, "uuid_new_v6_batch");
+    }
+
+    /** Fills {@code destination} with version 6 UUIDs sharing the current time. */
+    public static void fillV6(UUID[] destination) {
+        fillV6(destination, System.currentTimeMillis());
+    }
+
+    private static void fillUuidArray(
+            UUID[] destination, long unixMillis, MethodHandle handle, String fn) {
+        if (destination.length == 0) {
+            return;
+        }
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment out = local.allocate((long) destination.length * 16);
+            fillBytesNative(out, destination.length, unixMillis, handle, fn);
+            UUID[] parsed = readUuidBatch(out, destination.length);
+            System.arraycopy(parsed, 0, destination, 0, destination.length);
+        }
+    }
+
+    /**
+     * Fills {@code destination} with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID.
+     *
+     * <p>This is the conversion-free form: the native core already writes RFC-ordered bytes
+     * contiguously, so nothing is rebuilt on the way out. Prefer it when the destination is a
+     * wire buffer or a database parameter that wants bytes anyway.
+     *
+     * @throws IllegalArgumentException if {@code destination.length} is not a multiple of 16
+     */
+    public static void fillV7(byte[] destination, long unixMillis) {
+        fillByteArray(destination, unixMillis, UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
+    }
+
+    /** Fills {@code destination} with raw version 7 UUID bytes using the current time. */
+    public static void fillV7(byte[] destination) {
+        fillV7(destination, System.currentTimeMillis());
+    }
+
+    /**
+     * Fills {@code destination} with raw RFC 9562-ordered version 6 UUID bytes, 16 per UUID.
+     *
+     * @throws IllegalArgumentException if {@code destination.length} is not a multiple of 16
+     */
+    public static void fillV6(byte[] destination, long unixMillis) {
+        fillByteArray(destination, unixMillis, UUID_NEW_V6_BATCH, "uuid_new_v6_batch");
+    }
+
+    /** Fills {@code destination} with raw version 6 UUID bytes using the current time. */
+    public static void fillV6(byte[] destination) {
+        fillV6(destination, System.currentTimeMillis());
+    }
+
+    private static void fillByteArray(
+            byte[] destination, long unixMillis, MethodHandle handle, String fn) {
+        requireWholeUuids(destination.length);
+        if (destination.length == 0) {
+            return;
+        }
+        int count = destination.length / 16;
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment out = local.allocate(destination.length);
+            fillBytesNative(out, count, unixMillis, handle, fn);
+            MemorySegment.copy(out, ValueLayout.JAVA_BYTE, 0, destination, 0, destination.length);
+        }
+    }
+
+    // ---- Raw-byte SQL-order transforms -----------------------------------------------
+    //
+    // The same native permutations as the UUID-taking methods above, rewriting a caller's
+    // own 16 bytes in place. Being pure byte-in/byte-out, these are the form a byte-level
+    // correctness oracle can be pointed at directly — shared across every binding in this
+    // repo rather than re-expressed against each language's own UUID type.
+
+    private static void sqlOrderBytes(byte[] uuid, MethodHandle handle, String fn) {
+        if (uuid.length != 16) {
+            throw new IllegalArgumentException("a UUID is exactly 16 bytes; got " + uuid.length);
+        }
+        try (Arena local = Arena.ofConfined()) {
+            MemorySegment seg = local.allocate(16);
+            MemorySegment.copy(uuid, 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
+            try {
+                handle.invokeExact(seg);
+            } catch (Throwable t) {
+                throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
+            }
+            MemorySegment.copy(seg, ValueLayout.JAVA_BYTE, 0, uuid, 0, 16);
+        }
+    }
+
+    /**
+     * Rewrites the 16 RFC 9562-ordered version 7 bytes in {@code uuid} into SQL Server
+     * {@code uniqueidentifier} sort order, in place. See {@link #v7ToSqlOrder(UUID)}.
+     */
+    public static void v7ToSqlOrder(byte[] uuid) {
+        sqlOrderBytes(uuid, UUID_V7_TO_SQL_ORDER, "uuid_v7_to_sql_order");
+    }
+
+    /** Inverse of {@link #v7ToSqlOrder(byte[])}, in place. */
+    public static void v7FromSqlOrder(byte[] uuid) {
+        sqlOrderBytes(uuid, UUID_V7_TO_RFC_ORDER, "uuid_v7_to_rfc_order");
+    }
+
+    /**
+     * Rewrites the 16 RFC 9562-ordered version 6 bytes in {@code uuid} into SQL Server
+     * {@code uniqueidentifier} sort order, in place. See {@link #v6ToSqlOrder(UUID)}.
+     */
+    public static void v6ToSqlOrder(byte[] uuid) {
+        sqlOrderBytes(uuid, UUID_V6_TO_SQL_ORDER, "uuid_v6_to_sql_order");
+    }
+
+    /** Inverse of {@link #v6ToSqlOrder(byte[])}, in place. */
+    public static void v6FromSqlOrder(byte[] uuid) {
+        sqlOrderBytes(uuid, UUID_V6_TO_RFC_ORDER, "uuid_v6_to_rfc_order");
+    }
 }

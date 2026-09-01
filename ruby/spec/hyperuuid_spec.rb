@@ -299,4 +299,52 @@ RSpec.describe HyperUuid do
       expect(HyperUuid::Uuid.parse(HyperUuid::Uuid::MAX.to_s)).to eq(HyperUuid::Uuid::MAX)
     end
   end
+
+  describe ".new_v7_batch_bytes" do
+    it "returns one binary String of 16 bytes per UUID" do
+      bytes = described_class.new_v7_batch_bytes(64, RFC_TEST_VECTOR_MS)
+      expect(bytes).to be_a(String)
+      expect(bytes.encoding).to eq(Encoding::BINARY)
+      expect(bytes.bytesize).to eq(64 * 16)
+    end
+
+    it "decodes to version 7 UUIDs carrying the requested timestamp" do
+      bytes = described_class.new_v7_batch_bytes(32, RFC_TEST_VECTOR_MS)
+      ids = Array.new(32) { |i| HyperUuid::Uuid.new(bytes[i * 16, 16]) }
+      expect(ids.map(&:version).uniq).to eq([7])
+      expect(ids.map { |i| (i.timestamp.to_f * 1000).round }.uniq).to eq([RFC_TEST_VECTOR_MS])
+    end
+
+    it "is strictly increasing and free of duplicates" do
+      bytes = described_class.new_v7_batch_bytes(256, RFC_TEST_VECTOR_MS)
+      raw = Array.new(256) { |i| bytes[i * 16, 16] }
+      expect(raw).to eq(raw.sort)
+      expect(raw.uniq.size).to eq(256)
+    end
+
+    it "agrees structurally with the object-returning batch" do
+      bytes = described_class.new_v7_batch_bytes(16, RFC_TEST_VECTOR_MS)
+      from_bytes = Array.new(16) { |i| HyperUuid::Uuid.new(bytes[i * 16, 16]) }
+      from_objects = described_class.new_v7_batch(16, RFC_TEST_VECTOR_MS)
+      expect(from_bytes.map(&:version)).to eq(from_objects.map(&:version))
+      expect(from_bytes.map(&:timestamp)).to eq(from_objects.map(&:timestamp))
+    end
+
+    it "defaults to the current time" do
+      before = (Time.now.to_f * 1000).to_i
+      bytes = described_class.new_v7_batch_bytes(1)
+      after = (Time.now.to_f * 1000).to_i
+      ms = (HyperUuid::Uuid.new(bytes[0, 16]).timestamp.to_f * 1000).round
+      expect(ms).to be_between(before - 1000, after + 1000)
+    end
+  end
+
+  describe ".new_v6_batch_bytes" do
+    it "returns one binary String of 16 bytes per UUID" do
+      bytes = described_class.new_v6_batch_bytes(8, RFC_TEST_VECTOR_MS)
+      expect(bytes.bytesize).to eq(8 * 16)
+      ids = Array.new(8) { |i| HyperUuid::Uuid.new(bytes[i * 16, 16]) }
+      expect(ids.map(&:version).uniq).to eq([6])
+    end
+  end
 end
