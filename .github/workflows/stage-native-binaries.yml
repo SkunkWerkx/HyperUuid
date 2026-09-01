@@ -37,6 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # gh attestation verify reads this repo's attestations before any binary is committed.
+      attestations: read
     steps:
       - name: Resolve the source commit
         id: source
@@ -73,7 +75,22 @@ jobs:
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      - name: Stage into php/src/native, swift/.../NativeLibs, go/native
+      # Committed binaries are the weakest provenance story in this repo: a reviewer can't
+      # diff them, and "trust me, CI built it" is exactly what a downstream consumer inside a
+      # trust boundary can't accept. So each artifact's SLSA attestation is verified BEFORE it
+      # is allowed into the tree — "it's in git" now also means "its provenance checked out at
+      # staging time." A failure here stops the commit rather than quietly shipping an
+      # unverifiable blob.
+      #
+      # Three destinations, one set of bytes: git stores these as a single blob each (verified
+      # — all three copies of a given RID hash to the same object), so the duplication costs
+      # nothing in repository storage. Symlinking them was considered and rejected: //go:embed
+      # refuses symlinks outright ("contains no embeddable files"), the Go module proxy's zip
+      # format drops them, and a Windows checkout without Developer Mode materializes them as
+      # text files, which would break PHP's FFI dlopen in a way that looks like corruption.
+      - name: Verify attestations, then stage into php/, swift/, go/
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           declare -A LIB_NAMES=(
@@ -84,12 +101,29 @@ jobs:
             [win-x64]=hyperuuid.dll
             [win-arm64]=hyperuuid.dll
           )
+          : > digests.txt
+          for rid in "${!LIB_NAMES[@]}"; do
+            src="artifacts/native/native-$rid/${LIB_NAMES[$rid]}"
+            echo "::group::verify $rid"
+            if ! gh attestation verify "$src" --repo "$GITHUB_REPOSITORY"; then
+              echo "::error::No valid build provenance for $rid — refusing to commit it."
+              exit 1
+            fi
+            echo "::endgroup::"
+            echo "$(sha256sum "$src" | cut -d' ' -f1)  $rid/${LIB_NAMES[$rid]}" >> digests.txt
+          done
+
           for dest_root in php/src/native swift/Sources/HyperUuid/NativeLibs go/native; do
             for rid in "${!LIB_NAMES[@]}"; do
               mkdir -p "$dest_root/$rid"
               cp "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest_root/$rid/"
             done
           done
+
+          echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat digests.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit and push if anything actually changed
         env:
@@ -104,5 +138,8 @@ jobs:
             echo "::notice::Staged binaries are byte-identical to what's already committed — nothing to push."
             exit 0
           fi
-          git commit -m "chore: stage native binaries from ci.yml run $RUN_ID ($SOURCE_SHA)"
+          git commit \
+            -m "chore: stage native binaries from ci.yml run $RUN_ID ($SOURCE_SHA)" \
+            -m "Build provenance verified with \`gh attestation verify\` before staging." \
+            -m "sha256:" -m "$(cat digests.txt)"
           git push origin HEAD:${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.base.ref }}
