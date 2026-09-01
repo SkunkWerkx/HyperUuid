@@ -160,6 +160,37 @@ arbitrary native build environment you don't control. If you hit this, the fix i
 one env var: `CGO_ENABLED=0 go build ./...` forces the purego fallback on any
 platform, native or not.
 
+## Destination-buffer fills
+
+`FillV6`/`FillV7` (and the `At` variants) write into a slice you already own instead of allocating a fresh one per call:
+
+```go
+dst := make([]uuid.UUID, 1000)
+for {
+    if err := hyperuuid.FillV7(dst); err != nil { /* ... */ }
+    // reuse dst next iteration — nothing allocated
+}
+```
+
+Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]byte`, so a `[]uuid.UUID` is contiguous 16-byte records in exactly the RFC order the native core writes — the batch lands directly in your slice with **no intermediate buffer and no per-element conversion**. (C# and Java can't do that; their UUID types aren't RFC byte order, so they must rebuild every element.)
+
+`go test -bench=. -benchmem ./go/...`, 1000 UUIDs per op:
+
+| method | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `NewV7At` x1000 individually | 138,646 | 16,000 | 1000 |
+| `NewV7BatchAt(1000)` | 22,989 | 16,384 | 1 |
+| `FillV7At` into an existing slice | 18,355 | **0** | **0** |
+| `FillV7BytesAt` into an existing buffer | 17,629 | **0** | **0** |
+
+`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 4% of each other, since neither converts; the byte form exists for convenience, not speed.
+
+`NewV6BatchAt`/`NewV7BatchAt` now delegate to the fills, so the array-returning API is a single allocation with no intermediate copy — existing callers got faster without changing a line.
+
+### Raw-byte SQL-order transforms
+
+`V6/V7ToSqlOrderBytes` and `V6/V7FromSqlOrderBytes` apply the same native permutation as `V7ToSqlOrder` in place on a caller's 16-byte slice. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo now makes against the one native implementation.
+
 ## Benchmarks
 
 `go test -bench=. -benchmem ./...` — allocation tracking is built into `testing.B`,

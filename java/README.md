@@ -43,6 +43,26 @@ The honest answer for versions v6/v7 is that there's no comparison to make — t
 
 The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
 
+## Destination-buffer fills
+
+`fillV6`/`fillV7` write into an array you already own instead of allocating a fresh one per call, over either a `UUID[]` or a `byte[]`:
+
+```java
+UUID[] dst = new UUID[1000];
+UuidGenerator.fillV7(dst);          // reuse dst across batches
+
+byte[] raw = new byte[1000 * 16];
+UuidGenerator.fillV7(raw);          // RFC-ordered bytes, no UUID objects at all
+```
+
+Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID` is two `long`s rather than 16 RFC-ordered bytes, so the `UUID[]` form still rebuilds every element from the native output — it removes the allocation, not the conversion. **The `byte[]` form is the one that removes real work**, since the native core already writes RFC-ordered bytes contiguously. Prefer it when the destination is a wire buffer or a `BINARY(16)` parameter that wants bytes anyway.
+
+A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`.
+
+### Raw-byte SQL-order transforms
+
+`v6/v7ToSqlOrder(byte[])` and `v6/v7FromSqlOrder(byte[])` apply the same native permutation in place on a caller's 16 bytes. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same cross-check every binding here now makes against the one native implementation.
+
 ## Benchmarks
 
 Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode:
