@@ -117,9 +117,20 @@ gem install hyperuuid
 
 Published to [RubyGems.org](https://rubygems.org/gems/hyperuuid) as real precompiled
 "platform gems" — `bundle`/`gem install` auto-selects the matching one for
-linux-x64/arm64 or osx-x64/arm64 (the compiled Magnus native extension, `backend: :native`),
-falling back automatically to the universal `ruby`-platform gem (pure Fiddle, zero compile,
-bundles all 6 platforms' native libs) everywhere else — Windows included, since Magnus
-doesn't target it. No extra configuration needed either way.
+linux-x64/arm64, osx-x64/arm64 or x64-mingw-ucrt (the compiled Magnus native extension,
+`backend: :native`), falling back automatically to the universal `ruby`-platform gem (pure
+Fiddle, zero compile, bundles all 6 platforms' native libs) everywhere else. No extra
+configuration needed either way.
+
+An earlier edition of this section said the fallback covered "Windows included, since Magnus
+doesn't target it." That was wrong in both halves. MinGW is the *only* Windows flavour
+`rb-sys` targets — its own `data/toolchains.json` maps `x64-mingw-ucrt` to the
+`x86_64-pc-windows-gnu` Rust target, `supported: true`; the target it has no support for is
+`x86_64-pc-windows-msvc`. And Windows is where the Fiddle fallback cost the most: measured
+on win-x64, Ruby 3.4, the Magnus backend does `new_v4` in 406ns against Fiddle's 2407ns
+(**5.9x**) and `new_v7` in 595ns against 2759ns (**4.6x**) — a far wider gap than any Linux
+or macOS leg shows. Windows-on-ARM is the one platform still on the Fiddle path:
+RubyInstaller does ship `aarch64-mingw-ucrt` and `rb-sys` lists it supported, but this repo
+hasn't built or tested it yet.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
