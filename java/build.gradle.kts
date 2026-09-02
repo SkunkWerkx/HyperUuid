@@ -19,7 +19,7 @@ group = "io.github.skunkwerkx"
 // don't collide with an already-published version — the real Maven Central publish
 // (release.yml, tag-triggered) never sets that env var, so it always uses this committed
 // version as-is.
-version = System.getenv("HYPERUUID_VERSION") ?: "0.1.1"
+version = System.getenv("HYPERUUID_VERSION") ?: "0.2.0"
 
 repositories {
     mavenCentral()

@@ -3,7 +3,7 @@ Gem::Specification.new do |spec|
   # The real, committed version — same story as every other binding's manual bump: 0.0.1
   # proves the real RubyGems Trusted Publishing path for real, ahead of the coordinated
   # v0.1.0 release.
-  spec.version = "0.1.1"
+  spec.version = "0.2.0"
   spec.summary = "RFC 9562 UUID v4/v5/v6/v7 generation — direct native FFI into a Rust core, no runtime bridge."
   spec.description = <<~DESC
     High-performance, allocation-free RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7
