@@ -651,12 +651,19 @@ public final class UuidGenerator {
      * <p>Writes into an array the caller already owns rather than allocating a new one. Each
      * element is still rebuilt from the native bytes, because {@link UUID} is two longs and
      * not RFC byte order — see {@link #fillV7(byte[], long)} for the form that skips that.
+     *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      */
     public static void fillV7(UUID[] destination, long unixMillis) {
         fillUuidArray(destination, unixMillis, UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
     }
 
-    /** Fills {@code destination} with version 7 UUIDs sharing the current time. */
+    /**
+     * Fills {@code destination} with version 7 UUIDs sharing the current time.
+     *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     */
     public static void fillV7(UUID[] destination) {
         fillV7(destination, System.currentTimeMillis());
     }
@@ -666,12 +673,19 @@ public final class UuidGenerator {
      * capture. {@code clock_seq} and {@code node} are independently random per item — unlike
      * version 7 there is no monotonic counter, so items are not guaranteed to sort in
      * creation order.
+     *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      */
     public static void fillV6(UUID[] destination, long unixMillis) {
         fillUuidArray(destination, unixMillis, UUID_NEW_V6_BATCH, "uuid_new_v6_batch");
     }
 
-    /** Fills {@code destination} with version 6 UUIDs sharing the current time. */
+    /**
+     * Fills {@code destination} with version 6 UUIDs sharing the current time.
+     *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     */
     public static void fillV6(UUID[] destination) {
         fillV6(destination, System.currentTimeMillis());
     }
@@ -696,13 +710,20 @@ public final class UuidGenerator {
      * contiguously, so nothing is rebuilt on the way out. Prefer it when the destination is a
      * wire buffer or a database parameter that wants bytes anyway.
      *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
+     *
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of 16
      */
     public static void fillV7(byte[] destination, long unixMillis) {
         fillByteArray(destination, unixMillis, UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
     }
 
-    /** Fills {@code destination} with raw version 7 UUID bytes using the current time. */
+    /**
+     * Fills {@code destination} with raw version 7 UUID bytes using the current time.
+     *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     */
     public static void fillV7(byte[] destination) {
         fillV7(destination, System.currentTimeMillis());
     }
@@ -710,13 +731,20 @@ public final class UuidGenerator {
     /**
      * Fills {@code destination} with raw RFC 9562-ordered version 6 UUID bytes, 16 per UUID.
      *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
+     *
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of 16
      */
     public static void fillV6(byte[] destination, long unixMillis) {
         fillByteArray(destination, unixMillis, UUID_NEW_V6_BATCH, "uuid_new_v6_batch");
     }
 
-    /** Fills {@code destination} with raw version 6 UUID bytes using the current time. */
+    /**
+     * Fills {@code destination} with raw version 6 UUID bytes using the current time.
+     *
+     * @param destination the array to fill; its length determines how many UUIDs are generated
+     */
     public static void fillV6(byte[] destination) {
         fillV6(destination, System.currentTimeMillis());
     }
@@ -761,12 +789,18 @@ public final class UuidGenerator {
     /**
      * Rewrites the 16 RFC 9562-ordered version 7 bytes in {@code uuid} into SQL Server
      * {@code uniqueidentifier} sort order, in place. See {@link #v7ToSqlOrder(UUID)}.
+     *
+     * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
      */
     public static void v7ToSqlOrder(byte[] uuid) {
         sqlOrderBytes(uuid, UUID_V7_TO_SQL_ORDER, "uuid_v7_to_sql_order");
     }
 
-    /** Inverse of {@link #v7ToSqlOrder(byte[])}, in place. */
+    /**
+     * Inverse of {@link #v7ToSqlOrder(byte[])}, in place.
+     *
+     * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
+     */
     public static void v7FromSqlOrder(byte[] uuid) {
         sqlOrderBytes(uuid, UUID_V7_TO_RFC_ORDER, "uuid_v7_to_rfc_order");
     }
@@ -774,12 +808,18 @@ public final class UuidGenerator {
     /**
      * Rewrites the 16 RFC 9562-ordered version 6 bytes in {@code uuid} into SQL Server
      * {@code uniqueidentifier} sort order, in place. See {@link #v6ToSqlOrder(UUID)}.
+     *
+     * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
      */
     public static void v6ToSqlOrder(byte[] uuid) {
         sqlOrderBytes(uuid, UUID_V6_TO_SQL_ORDER, "uuid_v6_to_sql_order");
     }
 
-    /** Inverse of {@link #v6ToSqlOrder(byte[])}, in place. */
+    /**
+     * Inverse of {@link #v6ToSqlOrder(byte[])}, in place.
+     *
+     * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
+     */
     public static void v6FromSqlOrder(byte[] uuid) {
         sqlOrderBytes(uuid, UUID_V6_TO_RFC_ORDER, "uuid_v6_to_rfc_order");
     }
