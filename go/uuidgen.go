@@ -42,8 +42,8 @@ func NewV4() (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	var out uuid.UUID
-	if rc := uuidNewV4(unsafe.Pointer(&out[0])); rc != 0 {
+	out, rc := newV4()
+	if rc != 0 {
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v4 failed with code %d: %w", rc, ErrRandomSource)
 	}
 	return out, nil
@@ -55,12 +55,8 @@ func NewV5(namespace uuid.UUID, name []byte) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	var out uuid.UUID
-	var namePtr unsafe.Pointer
-	if len(name) > 0 {
-		namePtr = unsafe.Pointer(&name[0])
-	}
-	if rc := uuidNewV5(unsafe.Pointer(&namespace[0]), namePtr, uint32(len(name)), unsafe.Pointer(&out[0])); rc != 0 {
+	out, rc := newV5(namespace, name)
+	if rc != 0 {
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v5 failed with code %d: %w", rc, ErrRandomSource)
 	}
 	return out, nil
@@ -86,8 +82,8 @@ func NewV6At(unixMillis uint64) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	var out uuid.UUID
-	switch rc := uuidNewV6(unixMillis, unsafe.Pointer(&out[0])); rc {
+	out, rc := newV6(unixMillis)
+	switch rc {
 	case 0:
 		return out, nil
 	case 2:
@@ -138,7 +134,7 @@ func V6UnixMillis(id uuid.UUID) (uint64, error) {
 	if err := ensureLoaded(); err != nil {
 		return 0, err
 	}
-	return uuidV6UnixMillis(unsafe.Pointer(&id[0])), nil
+	return v6UnixMillis(id), nil
 }
 
 // V6Timestamp recovers the UTC timestamp embedded in a version 6 UUID as a time.Time.
@@ -158,7 +154,7 @@ func V7UnixMillis(id uuid.UUID) (uint64, error) {
 	if err := ensureLoaded(); err != nil {
 		return 0, err
 	}
-	return uuidV7UnixMillis(unsafe.Pointer(&id[0])), nil
+	return v7UnixMillis(id), nil
 }
 
 // V7Timestamp recovers the UTC timestamp embedded in a version 7 UUID as a time.Time.
@@ -181,8 +177,8 @@ func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	var out uuid.UUID
-	switch rc := uuidNewV7(unixMillis, unsafe.Pointer(&out[0])); rc {
+	out, rc := newV7(unixMillis)
+	switch rc {
 	case 0:
 		return out, nil
 	case 2:
@@ -259,7 +255,7 @@ func V7ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	out := id
-	uuidV7ToSqlOrder(unsafe.Pointer(&out[0]))
+	out = v7ToSqlOrder(out)
 	return out, nil
 }
 
@@ -270,7 +266,7 @@ func V7FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	out := id
-	uuidV7ToRfcOrder(unsafe.Pointer(&out[0]))
+	out = v7ToRfcOrder(out)
 	return out, nil
 }
 
@@ -299,7 +295,7 @@ func V6ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	out := id
-	uuidV6ToSqlOrder(unsafe.Pointer(&out[0]))
+	out = v6ToSqlOrder(out)
 	return out, nil
 }
 
@@ -310,7 +306,7 @@ func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	out := id
-	uuidV6ToRfcOrder(unsafe.Pointer(&out[0]))
+	out = v6ToRfcOrder(out)
 	return out, nil
 }
 
@@ -330,11 +326,12 @@ func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 // exist there for performance but exist here only for callers who genuinely want raw bytes
 // (a wire buffer, a database parameter) rather than uuid.UUID values.
 
-// Each call below passes a closure rather than the backend func var directly: those vars are
-// nil until ensureLoaded() populates them, and a bare argument would be evaluated at the call
-// site, before the helper has had a chance to load the library. The closure defers the read
-// to invocation time, after ensureLoaded. (Caught by running a fill as the first native call
-// in a process -- the whole suite passed because earlier tests had already loaded it.)
+// Each call below passes the backend's batch function, which is an ordinary function that
+// reads its symbol at invocation time -- after ensureLoaded has populated it. This used to
+// be a closure over a func variable for exactly that reason: a bare func var as an argument
+// was evaluated at the call site, nil, before the helper had loaded the library. (Caught by
+// running a fill as the first native call in a process -- the whole suite passed because
+// earlier tests had already loaded it.)
 
 // errBatch maps a native batch return code onto this package's sentinel errors.
 func errBatch(fn string, rc int32) error {
@@ -393,7 +390,7 @@ func FillV6(dst []uuid.UUID) error {
 // FillV6At fills dst with version 6 UUIDs sharing the given unixMillis timestamp capture.
 func FillV6At(dst []uuid.UUID, unixMillis uint64) error {
 	return fillUUIDs(dst, unixMillis, "uuid_new_v6_batch",
-		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV6Batch(ms, n, p) })
+		newV6Batch)
 }
 
 // FillV7 fills dst with time-sortable version 7 UUIDs sharing one timestamp capture and one
@@ -406,7 +403,7 @@ func FillV7(dst []uuid.UUID) error {
 // one contiguous block of the monotonic counter.
 func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
 	return fillUUIDs(dst, unixMillis, "uuid_new_v7_batch",
-		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV7Batch(ms, n, p) })
+		newV7Batch)
 }
 
 // FillV6Bytes fills dst with raw RFC 9562-ordered version 6 UUID bytes, 16 per UUID, using
@@ -420,7 +417,7 @@ func FillV6Bytes(dst []byte) error {
 // unixMillis timestamp capture.
 func FillV6BytesAt(dst []byte, unixMillis uint64) error {
 	return fillBytes(dst, unixMillis, "uuid_new_v6_batch",
-		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV6Batch(ms, n, p) })
+		newV6Batch)
 }
 
 // FillV7Bytes fills dst with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID, using
@@ -434,7 +431,7 @@ func FillV7Bytes(dst []byte) error {
 // unixMillis timestamp capture and one contiguous block of the monotonic counter.
 func FillV7BytesAt(dst []byte, unixMillis uint64) error {
 	return fillBytes(dst, unixMillis, "uuid_new_v7_batch",
-		func(ms uint64, n uint32, p unsafe.Pointer) int32 { return uuidNewV7Batch(ms, n, p) })
+		newV7Batch)
 }
 
 // ---- Raw-byte SQL-order transforms --------------------------------------------------
@@ -460,21 +457,21 @@ func sqlOrderBytes(b []byte, call func(unsafe.Pointer)) error {
 // V7ToSqlOrderBytes rewrites the 16 RFC 9562-ordered version 7 bytes in b into SQL Server
 // uniqueidentifier sort order, in place. See V7ToSqlOrder for the byte-level rationale.
 func V7ToSqlOrderBytes(b []byte) error {
-	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV7ToSqlOrder(p) })
+	return sqlOrderBytes(b, v7ToSqlOrderBytes)
 }
 
 // V7FromSqlOrderBytes is the inverse of V7ToSqlOrderBytes, in place.
 func V7FromSqlOrderBytes(b []byte) error {
-	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV7ToRfcOrder(p) })
+	return sqlOrderBytes(b, v7ToRfcOrderBytes)
 }
 
 // V6ToSqlOrderBytes rewrites the 16 RFC 9562-ordered version 6 bytes in b into SQL Server
 // uniqueidentifier sort order, in place. See V6ToSqlOrder for the byte-level rationale.
 func V6ToSqlOrderBytes(b []byte) error {
-	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV6ToSqlOrder(p) })
+	return sqlOrderBytes(b, v6ToSqlOrderBytes)
 }
 
 // V6FromSqlOrderBytes is the inverse of V6ToSqlOrderBytes, in place.
 func V6FromSqlOrderBytes(b []byte) error {
-	return sqlOrderBytes(b, func(p unsafe.Pointer) { uuidV6ToRfcOrder(p) })
+	return sqlOrderBytes(b, v6ToRfcOrderBytes)
 }
