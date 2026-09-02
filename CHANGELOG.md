@@ -7,6 +7,18 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`Guid.Timestamp`**, a nullable extension property recovering the UTC timestamp embedded in a
+  version 6 or version 7 UUID and returning `null` for any other version. Written as a C# 14
+  `extension` block, which is the only form that can express a *property* — the classic
+  `this Guid` form is limited to methods, and reading a timestamp out of bits the value already
+  holds is a projection rather than an action. It re-spells `UuidGenerator.GetTimestamp`, which
+  keeps the logic; a test pins the two to identical results on every version so they can't
+  drift. Works on any `Guid`, including one from `Guid.CreateVersion7()`. *(NuGet)*
+
 ## [0.1.1] — 2026-08-31
 
 ### Added

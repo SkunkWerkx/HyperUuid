@@ -21,6 +21,10 @@ DateTimeOffset created = UuidGenerator.V7Timestamp(id4);
 // Version-agnostic: null instead of assuming id4 is v6/v7:
 DateTimeOffset? maybeCreated = UuidGenerator.GetTimestamp(id4);
 
+// Same thing as an extension property on Guid itself — works on any Guid, whatever made it:
+DateTimeOffset? created7 = id4.Timestamp;              // the creation time
+DateTimeOffset? none = Guid.NewGuid().Timestamp;       // null — a v4 UUID carries no time
+
 // Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
 Guid sqlOrdered = UuidGenerator.V7ToSqlOrder(id4);
 
@@ -30,6 +34,8 @@ Guid[] batch = UuidGenerator.NewV7Batch(1000);
 ```
 
 Returns plain `System.Guid` — this binding does no byte-order conversion of its own beyond the `bigEndian: true` `Guid` constructor overload (.NET 8+), since that's already the correct, direct RFC 9562 mapping. `UuidGenerator.Namespaces.Dns`/`Url`/`Oid`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.Nil`/`Max` are the §5.9/§5.10 special values (`Nil` is literally `Guid.Empty`). `NewV6`/`NewV7` also accept a `DateTimeOffset` directly (`NewV6(DateTimeOffset)`), not just a raw millisecond count; `GetTimestamp` is the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — it checks the version nibble itself and returns `null` for anything but a genuine v6/v7 `Guid`, instead of assuming the caller already knows.
+
+`Guid.Timestamp` is that same call spelled as an extension property, via a C# 14 `extension` block (`GuidExtensions`). It exists because the classic `this Guid` extension form can only express *methods*, and a timestamp recovered from bits the value already holds is a projection, not an action — so it wants to read as a property, the way every comparable accessor on a .NET value type does. It is a re-spelling, not a second implementation: `GetTimestamp` holds the logic and a test pins the two to identical results across every version, so they cannot drift. Nothing about it is package-specific either — it reads a `Guid.CreateVersion7()` value from the BCL just as happily, since both write the same RFC 9562 layout. Extension members lower to ordinary static calls, so this adds no allocation and nothing for the trimmer or Native AOT to chase.
 
 ## Why not `Guid.NewGuid()` / `Guid.CreateVersion7()`?
 
