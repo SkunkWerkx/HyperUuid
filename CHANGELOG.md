@@ -7,6 +7,56 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-09-02
+
+A release-machinery fix. No API changes in any binding — but **0.2.0 did not reach Maven
+Central**, so this is the version Java consumers want, and it is the first release whose crate
+is signed.
+
+### Fixed
+
+- **The Java binding now builds its javadoc**, unblocking the Maven Central publish that
+  failed on 0.2.0. Sixteen `@param` tags were missing from the destination-buffer and
+  raw-byte SQL-order methods added in 0.2.0, and `javadoc -Xwerror` — set in
+  `java/build.gradle.kts` — correctly refused them. **0.2.0 is absent from Maven Central and
+  will stay absent**; it cannot be published now that the version is spent elsewhere. Java
+  consumers should go straight from 0.1.1 to 0.2.1, which carries everything 0.2.0 added.
+  *(Maven Central)*
+- **The published crate is attested again.** On 0.2.0 the attestation step ran *after*
+  `cargo publish` and could not find the packaged `.crate`, so the crate uploaded and the
+  signing failed — and a crates.io publish is irreversible, which left 0.2.0 permanently
+  unsigned. The release pipeline now packages, attests, and only then publishes, so the same
+  failure would stop the release while it is still reversible. **The 0.2.0 crate has no
+  provenance attestation and cannot be given one**; its integrity is still checkable against
+  the index checksum cargo verifies on every download, and 0.2.1 restores full provenance.
+  *(crates.io)*
+
+### Changed
+
+- **crates.io publishing is tokenless**, using Trusted Publishing over OIDC rather than a
+  stored API token — short-lived credentials, minted per run and revoked when the job ends.
+  Consumer-invisible; recorded because it changes what a compromise of this repository's
+  secrets could reach. *(crates.io)*
+- **CI runs `javadoc` on every pull request.** The gate that caught this existed all along —
+  it simply never ran outside a release. C# and Rust get their doc enforcement from
+  compilation CI already performs (`CS1591` with warnings-as-errors, `#![deny(missing_docs)]`);
+  Java's `-Xwerror` only fired during the Maven publish, so undocumented members passed every
+  PR and failed the release instead. *(CI only, no package change)*
+
+### Upgrade note
+
+Drop-in from 0.2.0 for every binding except Java, where it is the first available 0.2.x.
+Nothing else changed: same API, same behaviour, same native core.
+
+If you verify provenance, note the one gap this release closes and the one it cannot:
+
+```sh
+# 0.2.1 — every package attested, including the crate
+gh attestation verify hyperuuid-0.2.1.gem --repo SkunkWerkx/HyperUuid
+
+# 0.2.0 — the .crate alone has no attestation; every other package does
+```
+
 ## [0.2.0] — 2026-09-02
 
 The theme is *stop paying for objects you didn't ask for*. Every binding already made one
@@ -199,6 +249,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
+[0.2.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SkunkWerkx/HyperUuid/releases/tag/v0.1.0
