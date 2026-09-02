@@ -13,7 +13,7 @@ require_relative "hyperuuid/runtime"
 module HyperUuid
   # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v6/v7) the
   # rest of this module generates.
-  VERSION = "0.2.0"
+  VERSION = "0.2.1"
 
   # Creates a random UUID version 4 (RFC 9562 §5.4).
   def self.new_v4

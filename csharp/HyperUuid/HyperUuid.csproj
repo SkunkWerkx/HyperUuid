@@ -12,7 +12,7 @@
          verified byte-identical across two independent from-scratch builds, the leading
          suspect for every prior release's failing NuGet health checks. nuget-org-pack packs
          this as-is, no CI-side override, ahead of the coordinated v0.1.0 release. -->
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
