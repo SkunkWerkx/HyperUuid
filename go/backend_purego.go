@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"github.com/google/uuid"
 )
 
 var (
@@ -65,3 +66,55 @@ func ensureLoaded() error {
 	})
 	return initErr
 }
+
+// The same by-value doors the cgo backend exposes, filled through pointers here: purego's
+// trampoline boxes its arguments per call regardless, so the heap escape the cgo shims
+// exist to avoid is not the cost that dominates this backend.
+func newV4() (uuid.UUID, int32) {
+	var out uuid.UUID
+	rc := uuidNewV4(unsafe.Pointer(&out[0]))
+	return out, rc
+}
+
+func newV5(ns uuid.UUID, name []byte) (uuid.UUID, int32) {
+	var out uuid.UUID
+	var namePtr unsafe.Pointer
+	if len(name) > 0 {
+		namePtr = unsafe.Pointer(&name[0])
+	}
+	rc := uuidNewV5(unsafe.Pointer(&ns[0]), namePtr, uint32(len(name)), unsafe.Pointer(&out[0]))
+	return out, rc
+}
+
+func newV6(unixMillis uint64) (uuid.UUID, int32) {
+	var out uuid.UUID
+	rc := uuidNewV6(unixMillis, unsafe.Pointer(&out[0]))
+	return out, rc
+}
+
+func newV7(unixMillis uint64) (uuid.UUID, int32) {
+	var out uuid.UUID
+	rc := uuidNewV7(unixMillis, unsafe.Pointer(&out[0]))
+	return out, rc
+}
+
+func v6UnixMillis(id uuid.UUID) uint64 { return uuidV6UnixMillis(unsafe.Pointer(&id[0])) }
+func v7UnixMillis(id uuid.UUID) uint64 { return uuidV7UnixMillis(unsafe.Pointer(&id[0])) }
+
+func newV6Batch(unixMillis uint64, count uint32, out unsafe.Pointer) int32 {
+	return uuidNewV6Batch(unixMillis, count, out)
+}
+
+func newV7Batch(unixMillis uint64, count uint32, out unsafe.Pointer) int32 {
+	return uuidNewV7Batch(unixMillis, count, out)
+}
+
+func v7ToSqlOrder(id uuid.UUID) uuid.UUID { uuidV7ToSqlOrder(unsafe.Pointer(&id[0])); return id }
+func v7ToRfcOrder(id uuid.UUID) uuid.UUID { uuidV7ToRfcOrder(unsafe.Pointer(&id[0])); return id }
+func v6ToSqlOrder(id uuid.UUID) uuid.UUID { uuidV6ToSqlOrder(unsafe.Pointer(&id[0])); return id }
+func v6ToRfcOrder(id uuid.UUID) uuid.UUID { uuidV6ToRfcOrder(unsafe.Pointer(&id[0])); return id }
+
+func v7ToSqlOrderBytes(p unsafe.Pointer) { uuidV7ToSqlOrder(p) }
+func v7ToRfcOrderBytes(p unsafe.Pointer) { uuidV7ToRfcOrder(p) }
+func v6ToSqlOrderBytes(p unsafe.Pointer) { uuidV6ToSqlOrder(p) }
+func v6ToRfcOrderBytes(p unsafe.Pointer) { uuidV6ToRfcOrder(p) }

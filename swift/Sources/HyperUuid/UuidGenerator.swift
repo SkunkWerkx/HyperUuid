@@ -44,7 +44,9 @@ public enum UuidGenerator {
     private typealias UuidV6ToSqlOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias UuidV6ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
 
-    private struct LoadedLibrary {
+    // A class, deliberately: `loaded()` used to copy this 13-field struct out of the
+    // `Result` on every single call. A reference is one retain.
+    private final class LoadedLibrary {
         let library: DynamicLibrary
         let newV4: UuidNewV4Fn
         let newV5: UuidNewV5Fn
@@ -58,6 +60,49 @@ public enum UuidGenerator {
         let v7ToRfcOrder: UuidV7ToRfcOrderFn
         let v6ToSqlOrder: UuidV6ToSqlOrderFn
         let v6ToRfcOrder: UuidV6ToRfcOrderFn
+
+        init(library: DynamicLibrary, newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
+             newV6: UuidNewV6Fn, v6UnixMillis: UuidV6UnixMillisFn, newV6Batch: UuidNewV6BatchFn,
+             newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
+             v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
+             v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn) {
+            self.library = library
+            self.newV4 = newV4; self.newV5 = newV5
+            self.newV6 = newV6; self.v6UnixMillis = v6UnixMillis; self.newV6Batch = newV6Batch
+            self.newV7 = newV7; self.v7UnixMillis = v7UnixMillis; self.newV7Batch = newV7Batch
+            self.v7ToSqlOrder = v7ToSqlOrder; self.v7ToRfcOrder = v7ToRfcOrder
+            self.v6ToSqlOrder = v6ToSqlOrder; self.v6ToRfcOrder = v6ToRfcOrder
+        }
+    }
+
+    // Foundation's UUID wraps `uuid_t`, sixteen bytes already in RFC 9562 order — so a
+    // `uuid_t` on the stack is both the scratch every single-UUID door needs and the value
+    // the result is built from. No heap `[UInt8]` on either side of the call, which is
+    // what every door here used to allocate (one for the out-value, one more per input).
+    private static let zero: uuid_t = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+    private static func withOut<T>(_ body: (UnsafeMutablePointer<UInt8>) -> T) -> (T, uuid_t) {
+        var out = zero
+        let result = withUnsafeMutablePointer(to: &out) {
+            body(UnsafeMutableRawPointer($0).assumingMemoryBound(to: UInt8.self))
+        }
+        return (result, out)
+    }
+
+    private static func withBytes<T>(of uuid: UUID, _ body: (UnsafePointer<UInt8>) -> T) -> T {
+        var bytes = uuid.uuid
+        return withUnsafePointer(to: &bytes) {
+            body(UnsafeRawPointer($0).assumingMemoryBound(to: UInt8.self))
+        }
+    }
+
+    /// The same permutation over a copy of the value's own bytes, returned as a UUID.
+    private static func reorder(_ uuid: UUID, _ fn: UuidV7ToSqlOrderFn) -> UUID {
+        var bytes = uuid.uuid
+        withUnsafeMutablePointer(to: &bytes) {
+            fn(UnsafeMutableRawPointer($0).assumingMemoryBound(to: UInt8.self))
+        }
+        return UUID(uuid: bytes)
     }
 
     // Swift initializes `static let`s lazily and exactly once, thread-safely — the same
@@ -134,34 +179,34 @@ public enum UuidGenerator {
     /// Creates a random UUID version 4 (RFC 9562 §5.4).
     public static func newV4() throws -> UUID {
         let l = try loaded()
-        var out = [UInt8](repeating: 0, count: 16)
-        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
-            l.newV4(outBuf.baseAddress)
-        }
+        let (rc, out) = withOut { l.newV4($0) }
         guard rc == 0 else { throw Error.randomSourceFailure(code: rc) }
-        return UUID(rfcBytes: out)
+        return UUID(uuid: out)
     }
 
     /// Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name
     /// bytes. The same (namespace, name) pair always produces the same UUID.
     public static func newV5(namespace: UUID, name: [UInt8]) throws -> UUID {
+        try name.withUnsafeBytes { try newV5(namespace: namespace, name: $0) }
+    }
+
+    /// See ``newV5(namespace:name:)-swift.type.method``; the name as a raw view of bytes — the
+    /// primitive the `String` and `[UInt8]` forms wrap, for a caller already holding a buffer.
+    public static func newV5(namespace: UUID, name: UnsafeRawBufferPointer) throws -> UUID {
         let l = try loaded()
-        let ns = namespace.rfcBytes
-        var out = [UInt8](repeating: 0, count: 16)
-        let rc: Int32 = ns.withUnsafeBufferPointer { nsBuf in
-            name.withUnsafeBufferPointer { nameBuf in
-                out.withUnsafeMutableBufferPointer { outBuf in
-                    l.newV5(nsBuf.baseAddress, name.isEmpty ? nil : nameBuf.baseAddress, UInt32(name.count), outBuf.baseAddress)
-                }
-            }
+        let (rc, out) = withBytes(of: namespace) { ns in
+            withOut { l.newV5(ns, name.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt32(name.count), $0) }
         }
         guard rc == 0 else { throw Error.randomSourceFailure(code: rc) }
-        return UUID(rfcBytes: out)
+        return UUID(uuid: out)
     }
 
     /// Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8 name.
     public static func newV5(namespace: UUID, name: String) throws -> UUID {
-        try newV5(namespace: namespace, name: Array(name.utf8))
+        // A native Swift String already stores contiguous UTF-8; withUTF8 hands the door a
+        // view of the string's own bytes — no Array(name.utf8) copy.
+        var name = name
+        return try name.withUTF8 { try newV5(namespace: namespace, name: UnsafeRawBufferPointer($0)) }
     }
 
     /// Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
@@ -171,12 +216,9 @@ public enum UuidGenerator {
     /// sort in creation order.
     public static func newV6(unixMillis: UInt64) throws -> UUID {
         let l = try loaded()
-        var out = [UInt8](repeating: 0, count: 16)
-        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
-            l.newV6(unixMillis, outBuf.baseAddress)
-        }
+        let (rc, out) = withOut { l.newV6(unixMillis, $0) }
         switch rc {
-        case 0: return UUID(rfcBytes: out)
+        case 0: return UUID(uuid: out)
         case 2: throw Error.timestampOutOfRange
         default: throw Error.randomSourceFailure(code: rc)
         }
@@ -199,8 +241,7 @@ public enum UuidGenerator {
     /// so the caller is responsible for checking that first if it matters.
     public static func v6UnixMillis(_ uuid: UUID) throws -> UInt64 {
         let l = try loaded()
-        let bytes = uuid.rfcBytes
-        return bytes.withUnsafeBufferPointer { l.v6UnixMillis($0.baseAddress) }
+        return withBytes(of: uuid) { l.v6UnixMillis($0) }
     }
 
     /// Recovers the UTC timestamp embedded in a version 6 UUID as a `Date`.
@@ -213,16 +254,11 @@ public enum UuidGenerator {
     /// each. `clock_seq` and `node` are independently random per item.
     public static func newV6Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
         guard count > 0 else { return [] }
-        let l = try loaded()
-        var out = [UInt8](repeating: 0, count: count * 16)
-        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
-            l.newV6Batch(unixMillis, UInt32(count), outBuf.baseAddress)
-        }
-        switch rc {
-        case 0: return (0..<count).map { UUID(rfcBytes: Array(out[($0 * 16)..<($0 * 16 + 16)])) }
-        case 2: throw Error.timestampOutOfRange
-        default: throw Error.randomSourceFailure(code: rc)
-        }
+        // The result array is the destination: one native call writes every UUID in place,
+        // with no scratch buffer and no per-element construction — the fill's own path.
+        var result = [UUID](repeating: UUID(uuid: zero), count: count)
+        try fillV6(into: &result, unixMillis: unixMillis)
+        return result
     }
 
     /// Creates `count` time-sortable version 6 UUIDs sharing the current time.
@@ -234,12 +270,9 @@ public enum UuidGenerator {
     /// timestamp.
     public static func newV7(unixMillis: UInt64) throws -> UUID {
         let l = try loaded()
-        var out = [UInt8](repeating: 0, count: 16)
-        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
-            l.newV7(unixMillis, outBuf.baseAddress)
-        }
+        let (rc, out) = withOut { l.newV7(unixMillis, $0) }
         switch rc {
-        case 0: return UUID(rfcBytes: out)
+        case 0: return UUID(uuid: out)
         case 2: throw Error.timestampOutOfRange
         default: throw Error.randomSourceFailure(code: rc)
         }
@@ -262,8 +295,7 @@ public enum UuidGenerator {
     /// timestamp", so the caller is responsible for checking that first if it matters.
     public static func v7UnixMillis(_ uuid: UUID) throws -> UInt64 {
         let l = try loaded()
-        let bytes = uuid.rfcBytes
-        return bytes.withUnsafeBufferPointer { l.v7UnixMillis($0.baseAddress) }
+        return withBytes(of: uuid) { l.v7UnixMillis($0) }
     }
 
     /// Recovers the UTC timestamp embedded in a version 7 UUID as a `Date`.
@@ -278,7 +310,7 @@ public enum UuidGenerator {
     /// applies, no bit-layout logic duplicated here. Still `throws` for a real native-load
     /// failure, same as every other call in this type.
     public static func getTimestamp(_ uuid: UUID) throws -> Date? {
-        switch uuid.rfcBytes[6] >> 4 {
+        switch uuid.uuid.6 >> 4 {
         case 6: return try v6Timestamp(uuid)
         case 7: return try v7Timestamp(uuid)
         default: return nil
@@ -290,16 +322,11 @@ public enum UuidGenerator {
     /// and one random-bytes fetch instead of `count` of each.
     public static func newV7Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
         guard count > 0 else { return [] }
-        let l = try loaded()
-        var out = [UInt8](repeating: 0, count: count * 16)
-        let rc: Int32 = out.withUnsafeMutableBufferPointer { outBuf in
-            l.newV7Batch(unixMillis, UInt32(count), outBuf.baseAddress)
-        }
-        switch rc {
-        case 0: return (0..<count).map { UUID(rfcBytes: Array(out[($0 * 16)..<($0 * 16 + 16)])) }
-        case 2: throw Error.timestampOutOfRange
-        default: throw Error.randomSourceFailure(code: rc)
-        }
+        // The result array is the destination: one native call writes every UUID in place,
+        // with no scratch buffer and no per-element construction — the fill's own path.
+        var result = [UUID](repeating: UUID(uuid: zero), count: count)
+        try fillV7(into: &result, unixMillis: unixMillis)
+        return result
     }
 
     /// Creates `count` time-sortable version 7 UUIDs sharing the current time.
@@ -323,19 +350,13 @@ public enum UuidGenerator {
     ///
     /// Meaningful only for a genuine version 7 UUID; see `v6ToSqlOrder` for v6.
     public static func v7ToSqlOrder(_ uuid: UUID) throws -> UUID {
-        let l = try loaded()
-        var bytes = uuid.rfcBytes
-        bytes.withUnsafeMutableBufferPointer { l.v7ToSqlOrder($0.baseAddress) }
-        return UUID(rfcBytes: bytes)
+        reorder(uuid, try loaded().v7ToSqlOrder)
     }
 
     /// Inverse of `v7ToSqlOrder` — converts a SQL-Server-ordered version 7 `uuid` back to
     /// RFC 9562 order.
     public static func v7FromSqlOrder(_ uuid: UUID) throws -> UUID {
-        let l = try loaded()
-        var bytes = uuid.rfcBytes
-        bytes.withUnsafeMutableBufferPointer { l.v7ToRfcOrder($0.baseAddress) }
-        return UUID(rfcBytes: bytes)
+        reorder(uuid, try loaded().v7ToRfcOrder)
     }
 
     /// Converts an RFC 9562-ordered version 6 `uuid` to the byte order SQL Server's
@@ -362,19 +383,13 @@ public enum UuidGenerator {
     ///
     /// Meaningful only for a genuine version 6 UUID.
     public static func v6ToSqlOrder(_ uuid: UUID) throws -> UUID {
-        let l = try loaded()
-        var bytes = uuid.rfcBytes
-        bytes.withUnsafeMutableBufferPointer { l.v6ToSqlOrder($0.baseAddress) }
-        return UUID(rfcBytes: bytes)
+        reorder(uuid, try loaded().v6ToSqlOrder)
     }
 
     /// Inverse of `v6ToSqlOrder` — converts a SQL-Server-ordered version 6 `uuid` back to
     /// RFC 9562 order.
     public static func v6FromSqlOrder(_ uuid: UUID) throws -> UUID {
-        let l = try loaded()
-        var bytes = uuid.rfcBytes
-        bytes.withUnsafeMutableBufferPointer { l.v6ToRfcOrder($0.baseAddress) }
-        return UUID(rfcBytes: bytes)
+        reorder(uuid, try loaded().v6ToRfcOrder)
     }
 
     // MARK: - Destination-buffer fills

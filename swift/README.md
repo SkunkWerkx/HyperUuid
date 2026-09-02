@@ -72,14 +72,14 @@ Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uu
 
 `swift package benchmark`, p50 wall clock, 1000 UUIDs per op:
 
-| Benchmark | p50 µs |
-| --- | ---: |
-| `newV7` x1000 individually | 955.0 |
-| `newV7Batch(count: 1000)` | 77.0 |
-| `fillV7(into: [UUID])` | 19.0 |
-| `fillV7(into: raw bytes)` | **16.0** |
+| Benchmark | 0.2.1 | now | mallocs now |
+| --- | ---: | ---: | ---: |
+| `newV7` x1000 individually | 947 µs | **844 µs** | 1000 → **0** |
+| `newV7Batch(count: 1000)` | 86 µs | **17 µs** | 1002 → **1** |
+| `fillV7(into: [UUID])` | 24 µs | **19 µs** | 1 |
+| `fillV7(into: raw bytes)` | 16 µs | **16 µs** | 1 |
 
-Worth noting how large that gap is: `fillV7` is roughly **4x faster than `newV7Batch`**, not the marginal improvement the same change produces in C#. Swift was paying real time for the result array plus a per-element `UUID(rfcBytes:)` construction, and dropping both lands it at 16 µs — the same floor every other binding here reaches.
+The gap between `newV7Batch` and the fills is gone, for the reason the earlier edition of this table named: `newV7Batch` was paying for a scratch buffer plus a per-element `UUID(rfcBytes:)` construction over it. It now allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work.
 
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
 
@@ -91,26 +91,26 @@ The raw-buffer overload is for callers who want RFC-ordered bytes rather than `U
 
 Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-arm64, p50 of 10,000 samples):
 
-| Call | Time (wall clock) | Malloc (total) |
-|---|---|---|
-| `Foundation.UUID()` | 3,101 ns | 0 |
-| `UuidGenerator.newV4()` | 1,000 ns | 1 |
-| `UuidGenerator.newV5(namespace:name:)` | 1,100 ns | 3 |
-| `UuidGenerator.newV6()` | 1,700 ns | 1 |
-| `UuidGenerator.newV7()` | 2,201 ns | 1 |
+| Call | 0.2.1 | now | Malloc (total) |
+|---|---:|---:|---:|
+| `Foundation.UUID()` | 3,101 ns | 3,201 ns | 0 |
+| `UuidGenerator.newV4()` | 1,000 ns | **900 ns** | 1 → **0** |
+| `UuidGenerator.newV5(namespace:name:)` | 1,500 ns | **1,100 ns** | 3 → **0** |
+| `UuidGenerator.newV6()` | 1,700 ns | **1,600 ns** | 1 → **0** |
+| `UuidGenerator.newV7()` | 1,700 ns | **1,600 ns** | 1 → **0** |
 
-Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the `dlopen`/`@convention(c)` call path is cheap. The honest asterisk: unlike `Foundation.UUID()` itself, these calls aren't allocation-free — each one heap-allocates the fixed-size `[UInt8]` marshaling buffers Swift's `Array` always backs with a heap allocation (Swift has no Span-style stack buffer to reach for here). 1-3 small, fixed-size allocations per call is cheap in absolute terms, but it's real, and worth saying plainly rather than inheriting a zero-alloc claim that doesn't hold on this side of the boundary.
+Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the `dlopen`/`@convention(c)` call path is cheap — and the asterisk an earlier edition of this table carried is retired: these calls used to heap-allocate a `[UInt8]` for the out-value and one more per input, on the grounds that Swift had no stack buffer to reach for. It does, for this shape: Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
 
-Batch generation amortizes both the native call and that allocation over the whole batch:
+Batch generation amortizes the native call over the whole batch, and no longer pays a per-element construction on top:
 
-| Call | Time for 1,000 UUIDs | Per-UUID |
-|---|---|---|
-| `newV6()` × 1000 (individual) | 944 µs | 944 ns |
-| `newV6Batch(count: 1000)` | 86 µs | 86 ns |
-| `newV7()` × 1000 (individual) | 943 µs | 943 ns |
-| `newV7Batch(count: 1000)` | 90 µs | 90 ns |
+| Call | 0.2.1 | now | Per-UUID now |
+|---|---:|---:|---:|
+| `newV6()` × 1000 (individual) | 991 µs | **842 µs** | 842 ns |
+| `newV6Batch(count: 1000)` | 91 µs | **20 µs** | 20 ns |
+| `newV7()` × 1000 (individual) | 947 µs | **844 µs** | 844 ns |
+| `newV7Batch(count: 1000)` | 86 µs | **17 µs** | 17 ns |
 
-**≈11x for v6, ≈10.5x for v7** — one native call and one marshaling allocation instead of a thousand of each.
+**≈42x for v6, ≈50x for v7** — one native call and one allocation instead of a thousand of each, with the batch doors now landing on the same floor the fills reach.
 
 ## Verifying provenance
 

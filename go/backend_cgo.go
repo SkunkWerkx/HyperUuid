@@ -43,22 +43,41 @@ typedef uint64_t (*fn_unix_millis)(const uint8_t*);
 typedef int32_t (*fn_new_batch)(uint64_t, uint32_t, uint8_t*);
 typedef void (*fn_sql_order)(uint8_t*);
 
-static int32_t call_new_v4(void *fn, uint8_t *out) {
-	return ((fn_new_v4)fn)(out);
+// A UUID crosses BY VALUE in both directions. Every single-UUID door used to hand the
+// core `&out[0]` of a Go local, and any Go pointer passed to a cgo call escapes to the
+// heap — one allocation per NewV4/NewV6/NewV7 that the README once called a floor for
+// the call shape. It was a floor for pointer-passing, not for the ABI: the shims below
+// keep the 16 bytes on the C stack and return them as a struct, so no Go pointer crosses
+// for anything but a caller's own slice (the v5 name, a batch destination).
+typedef struct { uint8_t b[16]; } hc_uuid;
+typedef struct { hc_uuid id; int32_t code; } hc_result;
+
+static hc_result call_new_v4(void *fn) {
+	hc_result r;
+	r.code = ((fn_new_v4)fn)(r.id.b);
+	return r;
 }
-static int32_t call_new_v5(void *fn, const uint8_t *ns, const uint8_t *name, uint32_t name_len, uint8_t *out) {
-	return ((fn_new_v5)fn)(ns, name, name_len, out);
+static hc_result call_new_v5(void *fn, hc_uuid ns, const uint8_t *name, uint32_t name_len) {
+	hc_result r;
+	r.code = ((fn_new_v5)fn)(ns.b, name, name_len, r.id.b);
+	return r;
 }
-static int32_t call_new_v6_v7(void *fn, uint64_t unix_millis, uint8_t *out) {
-	return ((fn_new_v6_v7)fn)(unix_millis, out);
+static hc_result call_new_v6_v7(void *fn, uint64_t unix_millis) {
+	hc_result r;
+	r.code = ((fn_new_v6_v7)fn)(unix_millis, r.id.b);
+	return r;
 }
-static uint64_t call_unix_millis(void *fn, const uint8_t *uuid) {
-	return ((fn_unix_millis)fn)(uuid);
+static uint64_t call_unix_millis(void *fn, hc_uuid uuid) {
+	return ((fn_unix_millis)fn)(uuid.b);
 }
 static int32_t call_new_batch(void *fn, uint64_t unix_millis, uint32_t count, uint8_t *out) {
 	return ((fn_new_batch)fn)(unix_millis, count, out);
 }
-static void call_sql_order(void *fn, uint8_t *uuid) {
+static hc_uuid call_sql_order(void *fn, hc_uuid uuid) {
+	((fn_sql_order)fn)(uuid.b);
+	return uuid;
+}
+static void call_sql_order_bytes(void *fn, uint8_t *uuid) {
 	((fn_sql_order)fn)(uuid);
 }
 */
@@ -68,24 +87,16 @@ import (
 	"fmt"
 	"sync"
 	"unsafe"
+
+	"github.com/google/uuid"
 )
 
 var (
 	initOnce sync.Once
 	initErr  error
 
-	uuidNewV4        func(out unsafe.Pointer) int32
-	uuidNewV5        func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
-	uuidNewV6        func(unixMillis uint64, out unsafe.Pointer) int32
-	uuidV6UnixMillis func(uuid unsafe.Pointer) uint64
-	uuidNewV6Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
-	uuidNewV7        func(unixMillis uint64, out unsafe.Pointer) int32
-	uuidV7UnixMillis func(uuid unsafe.Pointer) uint64
-	uuidNewV7Batch   func(unixMillis uint64, count uint32, out unsafe.Pointer) int32
-	uuidV7ToSqlOrder func(uuid unsafe.Pointer)
-	uuidV7ToRfcOrder func(uuid unsafe.Pointer)
-	uuidV6ToSqlOrder func(uuid unsafe.Pointer)
-	uuidV6ToRfcOrder func(uuid unsafe.Pointer)
+	symNewV4, symNewV5, symNewV6, symNewV7, symV6UnixMillis, symV7UnixMillis,
+	symNewV6Batch, symNewV7Batch, symV7ToSql, symV7ToRfc, symV6ToSql, symV6ToRfc unsafe.Pointer
 )
 
 // dlsymOrErr looks up name in the already-dlopen'd handle, wrapping dlerror()'s C string into
@@ -146,42 +157,62 @@ func ensureLoaded() error {
 			return
 		}
 
-		uuidNewV4 = func(out unsafe.Pointer) int32 {
-			return int32(C.call_new_v4(newV4, (*C.uint8_t)(out)))
-		}
-		uuidNewV5 = func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32 {
-			return int32(C.call_new_v5(newV5, (*C.uint8_t)(ns), (*C.uint8_t)(name), C.uint32_t(nameLen), (*C.uint8_t)(out)))
-		}
-		uuidNewV6 = func(unixMillis uint64, out unsafe.Pointer) int32 {
-			return int32(C.call_new_v6_v7(newV6, C.uint64_t(unixMillis), (*C.uint8_t)(out)))
-		}
-		uuidV6UnixMillis = func(id unsafe.Pointer) uint64 {
-			return uint64(C.call_unix_millis(v6UnixMillis, (*C.uint8_t)(id)))
-		}
-		uuidNewV6Batch = func(unixMillis uint64, count uint32, out unsafe.Pointer) int32 {
-			return int32(C.call_new_batch(newV6Batch, C.uint64_t(unixMillis), C.uint32_t(count), (*C.uint8_t)(out)))
-		}
-		uuidNewV7 = func(unixMillis uint64, out unsafe.Pointer) int32 {
-			return int32(C.call_new_v6_v7(newV7, C.uint64_t(unixMillis), (*C.uint8_t)(out)))
-		}
-		uuidV7UnixMillis = func(id unsafe.Pointer) uint64 {
-			return uint64(C.call_unix_millis(v7UnixMillis, (*C.uint8_t)(id)))
-		}
-		uuidNewV7Batch = func(unixMillis uint64, count uint32, out unsafe.Pointer) int32 {
-			return int32(C.call_new_batch(newV7Batch, C.uint64_t(unixMillis), C.uint32_t(count), (*C.uint8_t)(out)))
-		}
-		uuidV7ToSqlOrder = func(id unsafe.Pointer) {
-			C.call_sql_order(v7ToSql, (*C.uint8_t)(id))
-		}
-		uuidV7ToRfcOrder = func(id unsafe.Pointer) {
-			C.call_sql_order(v7ToRfc, (*C.uint8_t)(id))
-		}
-		uuidV6ToSqlOrder = func(id unsafe.Pointer) {
-			C.call_sql_order(v6ToSql, (*C.uint8_t)(id))
-		}
-		uuidV6ToRfcOrder = func(id unsafe.Pointer) {
-			C.call_sql_order(v6ToRfc, (*C.uint8_t)(id))
-		}
+		symNewV4, symNewV5, symNewV6, symNewV7 = newV4, newV5, newV6, newV7
+		symV6UnixMillis, symV7UnixMillis = v6UnixMillis, v7UnixMillis
+		symNewV6Batch, symNewV7Batch = newV6Batch, newV7Batch
+		symV7ToSql, symV7ToRfc, symV6ToSql, symV6ToRfc = v7ToSql, v7ToRfc, v6ToSql, v6ToRfc
 	})
 	return initErr
 }
+
+func toGo(r C.hc_result) (uuid.UUID, int32) {
+	return *(*uuid.UUID)(unsafe.Pointer(&r.id)), int32(r.code)
+}
+
+func toC(id uuid.UUID) C.hc_uuid {
+	return *(*C.hc_uuid)(unsafe.Pointer(&id))
+}
+
+func newV4() (uuid.UUID, int32) { return toGo(C.call_new_v4(symNewV4)) }
+
+func newV5(ns uuid.UUID, name []byte) (uuid.UUID, int32) {
+	var namePtr *C.uint8_t
+	if len(name) > 0 {
+		namePtr = (*C.uint8_t)(unsafe.Pointer(&name[0]))
+	}
+	return toGo(C.call_new_v5(symNewV5, toC(ns), namePtr, C.uint32_t(len(name))))
+}
+
+func newV6(unixMillis uint64) (uuid.UUID, int32) {
+	return toGo(C.call_new_v6_v7(symNewV6, C.uint64_t(unixMillis)))
+}
+
+func newV7(unixMillis uint64) (uuid.UUID, int32) {
+	return toGo(C.call_new_v6_v7(symNewV7, C.uint64_t(unixMillis)))
+}
+
+func v6UnixMillis(id uuid.UUID) uint64 { return uint64(C.call_unix_millis(symV6UnixMillis, toC(id))) }
+func v7UnixMillis(id uuid.UUID) uint64 { return uint64(C.call_unix_millis(symV7UnixMillis, toC(id))) }
+
+func newV6Batch(unixMillis uint64, count uint32, out unsafe.Pointer) int32 {
+	return int32(C.call_new_batch(symNewV6Batch, C.uint64_t(unixMillis), C.uint32_t(count), (*C.uint8_t)(out)))
+}
+
+func newV7Batch(unixMillis uint64, count uint32, out unsafe.Pointer) int32 {
+	return int32(C.call_new_batch(symNewV7Batch, C.uint64_t(unixMillis), C.uint32_t(count), (*C.uint8_t)(out)))
+}
+
+func sqlOrder(sym unsafe.Pointer, id uuid.UUID) uuid.UUID {
+	r := C.call_sql_order(sym, toC(id))
+	return *(*uuid.UUID)(unsafe.Pointer(&r))
+}
+
+func v7ToSqlOrder(id uuid.UUID) uuid.UUID { return sqlOrder(symV7ToSql, id) }
+func v7ToRfcOrder(id uuid.UUID) uuid.UUID { return sqlOrder(symV7ToRfc, id) }
+func v6ToSqlOrder(id uuid.UUID) uuid.UUID { return sqlOrder(symV6ToSql, id) }
+func v6ToRfcOrder(id uuid.UUID) uuid.UUID { return sqlOrder(symV6ToRfc, id) }
+
+func v7ToSqlOrderBytes(p unsafe.Pointer) { C.call_sql_order_bytes(symV7ToSql, (*C.uint8_t)(p)) }
+func v7ToRfcOrderBytes(p unsafe.Pointer) { C.call_sql_order_bytes(symV7ToRfc, (*C.uint8_t)(p)) }
+func v6ToSqlOrderBytes(p unsafe.Pointer) { C.call_sql_order_bytes(symV6ToSql, (*C.uint8_t)(p)) }
+func v6ToRfcOrderBytes(p unsafe.Pointer) { C.call_sql_order_bytes(symV6ToRfc, (*C.uint8_t)(p)) }

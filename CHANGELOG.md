@@ -7,6 +7,48 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The carrier diet HyperCast 0.2.0 ran, ported back to the three bindings here that had the
+same shape underneath: a confined arena or a heap array wrapped around a native call that
+never needed one. Measured before and after on one machine in one session; the core and
+every UUID it produces are untouched.
+
+### Added
+
+- **`newV5(namespace:name:)` over an `UnsafeRawBufferPointer`** in Swift — the primitive the
+  `String` and `[UInt8]` forms now wrap. *(`.package(url:)`)*
+
+### Changed
+
+- **Java: nothing is copied on the way across.** Every downcall is linked
+  `Linker.Option.critical(true)`, so a caller's `byte[]` — a v5 name, a batch destination,
+  sixteen bytes to reorder in place — is pinned and handed to the native side directly; the
+  single-UUID doors use one per-thread 16-byte in/out scratch instead of an
+  `Arena.ofConfined()` opened and torn down per call, written and read as two big-endian
+  longs. `reachability-metadata.json` registers the option and the GraalVM Native Image
+  smoke test passes on it. JMH: `newV4` 155 → **102 ns**, `newV5` 230 → **102 ns**, `newV6`
+  128 → **67 ns**, `newV7` 125 → **77 ns**, each 112 → 32 B/op; `fillV7(byte[])` now
+  **0 B/op** — the caller's array is written in place. *(Maven Central)*
+- **Go: the UUID crosses by value.** The cgo shims keep the sixteen bytes on their own stack
+  and return them as a struct, and take a UUID argument the same way, so no Go pointer
+  crosses except a caller's own slice: `NewV4`/`NewV6At`/`NewV7At` **1 → 0 allocs**,
+  `NewV5String` 3 → 1 (Go's own `[]byte(name)`), `V6`/`V7UnixMillis` 75 → **58 ns, 0 allocs**.
+  Per-call time on the generators barely moves, because entropy, not the crossing, is what
+  those doors cost; the README's "structural floor" claim is corrected. purego is unchanged.
+  *(`go get`)*
+- **Swift: zero mallocs per call.** `uuid_t` on the stack is the scratch and the result —
+  no heap `[UInt8]` for the out-value or the inputs — the v5 name crosses via `withUTF8`,
+  the batch object doors fill their result array in place through the existing fill path,
+  and the library handle is a class reference rather than a 13-field struct copied per call.
+  `newV4` 1 → **0 mallocs**, `newV5` 3 → **0**, `newV7Batch(1000)` 86 → **17 µs** and 1002 →
+  **1** malloc. *(`.package(url:)`)*
+
+### Upgrade note
+
+Drop-in for every binding. Nothing is removed or renamed; the one new door is an overload
+beside the existing surface.
+
 ## [0.2.1] — 2026-09-02
 
 A release-machinery fix. No API changes in any binding — but **0.2.0 did not reach Maven
@@ -249,6 +291,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...HEAD
 [0.2.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...v0.1.1

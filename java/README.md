@@ -59,14 +59,14 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 
 `./gradlew :benchmarks:jmh`, JMH average time, 1000 UUIDs per op:
 
-| Benchmark | µs/op | error |
-| --- | ---: | ---: |
-| `newV7` x1000 individually | 120.979 | ±34.953 |
-| `newV7Batch(1000)` | 31.744 | ±12.984 |
-| `fillV7(UUID[])` into an existing array | 32.642 | ±6.512 |
-| `fillV7(byte[])` into an existing buffer | **18.827** | ±2.872 |
+| Benchmark | 0.2.1 | now | B/op now |
+| --- | ---: | ---: | ---: |
+| `newV7` x1000 individually | 121.5 µs | **74.5 µs** | 32,000 |
+| `newV7Batch(1000)` | 33.2 µs | **26.1 µs** | 52,104 |
+| `fillV7(UUID[])` into an existing array | 34.2 µs | **27.7 µs** | 48,088 |
+| `fillV7(byte[])` into an existing buffer | 18.5 µs | **17.9 µs** | **0** |
 
-The middle two rows are the point: filling a `UUID[]` measures the same as allocating a fresh one, within overlapping error. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it lands within a microsecond or two of what every other binding in this project reaches for the same work.
+The middle two rows are still the point: filling a `UUID[]` measures the same as allocating a fresh one, within overlapping error. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it now does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
 
 A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`.
 
@@ -76,15 +76,17 @@ A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`
 
 ## Benchmarks
 
-Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode:
+Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode, `-prof gc` for the allocation column — 0.2.1 against the carrier rewrite, same machine, same session:
 
-| Method | Mean | vs. `UUID.randomUUID()` |
-| --- | ---: | ---: |
-| `UUID.randomUUID()` | 1111.64 ns | baseline |
-| `UuidGenerator.newV4()` | 152.82 ns | **7.27x faster** |
-| `UuidGenerator.newV5()` | 221.03 ns | **5.03x faster** |
-| `UuidGenerator.newV6()` | 118.49 ns | **9.38x faster** |
-| `UuidGenerator.newV7()` | 136.37 ns | **8.15x faster** |
+| Method | 0.2.1 | now | B/op | vs. `UUID.randomUUID()` |
+| --- | ---: | ---: | ---: | ---: |
+| `UUID.randomUUID()` | 1137 ns | 1117 ns | 128 | baseline |
+| `UuidGenerator.newV4()` | 155.0 ns | **101.8 ns** | 112 → **32** | **11.0x faster** |
+| `UuidGenerator.newV5()` | 230.1 ns | **102.2 ns** | 272 → **64** | **10.9x faster** |
+| `UuidGenerator.newV6()` | 127.8 ns | **67.1 ns** | 112 → **32** | **16.6x faster** |
+| `UuidGenerator.newV7()` | 125.2 ns | **76.7 ns** | 112 → **32** | **14.6x faster** |
+
+**What changed:** every door used to open an `Arena.ofConfined()` per call — a native allocation plus a scope teardown — and copy every input into it. Every downcall is now linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
 The FFM downcall doesn't lose to the JDK's own generator, and the reason is worth stating so the win isn't mistaken for a rigged comparison: `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default. Reported as measured, not adjusted to make the story better.
 
@@ -92,8 +94,10 @@ Batch generation vs. an equivalent loop:
 
 | Method | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v7 | 124.39 µs | 31.80 µs | **3.91x** |
-| v6 | 107.47 µs | 36.95 µs | 2.91x |
+| v7 | 74.5 µs | 26.1 µs | **2.9x** |
+| v6 | 66.8 µs | 28.0 µs | **2.4x** |
+
+The batch multiplier shrank from ~3.9x for the best reason available: the individual calls got faster, so there is less waste left to amortize.
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 
