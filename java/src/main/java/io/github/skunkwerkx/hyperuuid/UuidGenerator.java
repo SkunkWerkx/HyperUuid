@@ -10,6 +10,7 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -26,8 +27,13 @@ import java.util.UUID;
  * dependency (plain Java rather than Kotlin: {@code kotlin-stdlib} would otherwise be a real
  * transitive dependency for every consumer, unlike every other binding in this repo).
  *
- * <p>No allocation beyond the confined {@link Arena} scratch segments here — the underlying
- * Rust core never allocates for these calls either. This is JVM-only: {@code java.lang.foreign}
+ * <p>Nothing is copied on the way across. Every downcall is linked
+ * {@link Linker.Option#critical(boolean) critical(true)}, so a caller's own {@code byte[]} — a
+ * v5 name, a batch destination, sixteen bytes to reorder in place — is pinned and handed to the
+ * native side directly, and the 16-byte in/out scratch the single-UUID doors need lives in one
+ * per-thread segment for the life of the thread rather than a confined {@link Arena} opened
+ * and torn down on every call. The underlying Rust core never allocates for these calls
+ * either. This is JVM-only: {@code java.lang.foreign}
  * doesn't exist outside the JVM. This jar bundles a native build for every platform (see
  * {@link NativePlatform}) and picks the right one at runtime.
  */
@@ -51,48 +57,92 @@ public final class UuidGenerator {
     private static final Linker LINKER = Linker.nativeLinker();
     private static final SymbolLookup LOOKUP = loadLibrary();
 
+    // critical(true) is what lets a heap segment (MemorySegment.ofArray over the caller's
+    // byte[]) cross without being copied into native memory first: the array is pinned for
+    // the duration of the call instead. The contract in exchange — the callee must be short,
+    // must not block, and must never upcall into Java — is exactly what every export here is:
+    // a bounded computation over the bytes it was handed, with no callbacks.
+    private static final Linker.Option CRITICAL = Linker.Option.critical(true);
+
     private static final MethodHandle UUID_NEW_V4 = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v4").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_NEW_V5 = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v5").orElseThrow(),
             FunctionDescriptor.of(
                     ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+                    ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_NEW_V6 = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v6").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_V6_UNIX_MILLIS = LINKER.downcallHandle(
             LOOKUP.find("uuid_v6_unix_millis").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_NEW_V6_BATCH = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v6_batch").orElseThrow(),
             FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_NEW_V7 = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v7").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_V7_UNIX_MILLIS = LINKER.downcallHandle(
             LOOKUP.find("uuid_v7_unix_millis").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_NEW_V7_BATCH = LINKER.downcallHandle(
             LOOKUP.find("uuid_new_v7_batch").orElseThrow(),
             FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_V7_TO_SQL_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v7_to_sql_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+            LOOKUP.find("uuid_v7_to_sql_order").orElseThrow(),
+            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_V7_TO_RFC_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v7_to_rfc_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+            LOOKUP.find("uuid_v7_to_rfc_order").orElseThrow(),
+            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_V6_TO_SQL_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v6_to_sql_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+            LOOKUP.find("uuid_v6_to_sql_order").orElseThrow(),
+            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
     private static final MethodHandle UUID_V6_TO_RFC_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v6_to_rfc_order").orElseThrow(), FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+            LOOKUP.find("uuid_v6_to_rfc_order").orElseThrow(),
+            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
 
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
     public static final UUID NIL = new UUID(0L, 0L);
 
     /** The RFC 9562 §5.10 Max UUID — all 128 bits one. */
     public static final UUID MAX = new UUID(-1L, -1L);
+
+    // RFC 9562 order is exactly UUID's msb/lsb decomposition, so a UUID is two big-endian
+    // longs in a segment — written and read as such, no byte[] in between. Unaligned,
+    // because a heap segment over a caller's byte[] carries no alignment guarantee at all
+    // (the aligned layout rejects it outright), and on every supported RID an unaligned
+    // load of an aligned address costs the same as an aligned one.
+    private static final ValueLayout.OfLong BIG_ENDIAN_LONG =
+            ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.BIG_ENDIAN);
+
+    /**
+     * Per-thread scratch for the single-UUID doors: sixteen bytes to hand a UUID in and
+     * sixteen to receive one, allocated once per thread instead of a confined Arena opened
+     * and closed on every call (a native allocation plus a scope teardown each time, which
+     * was most of what those doors cost). Doors never nest, so no call can observe another's
+     * scratch mid-flight; nothing is shared between threads, so no door needs locking.
+     */
+    private static final class Scratch {
+        private final Arena arena = Arena.ofAuto();
+        final MemorySegment in = arena.allocate(16, 8);
+        final MemorySegment out = arena.allocate(16, 8);
+    }
+
+    private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
+
+    private static UUID readUuid(MemorySegment segment, long offset) {
+        return new UUID(segment.get(BIG_ENDIAN_LONG, offset), segment.get(BIG_ENDIAN_LONG, offset + 8));
+    }
+
+    private static MemorySegment writeUuid(MemorySegment segment, UUID uuid) {
+        segment.set(BIG_ENDIAN_LONG, 0, uuid.getMostSignificantBits());
+        segment.set(BIG_ENDIAN_LONG, 8, uuid.getLeastSignificantBits());
+        return segment;
+    }
 
     // The library must outlive every downcall made through it, so it's loaded into the
     // JDK-provided global arena that lives for the process's lifetime rather than one this
@@ -122,19 +172,17 @@ public final class UuidGenerator {
      * @return a new random version 4 UUID
      */
     public static UUID newV4() {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate(16);
-            int rc;
-            try {
-                rc = (int) UUID_NEW_V4.invokeExact(out);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_new_v4 downcall failed unexpectedly", t);
-            }
-            if (rc != 0) {
-                throw new IllegalStateException("uuid_new_v4 failed with code " + rc + " (random source failure)");
-            }
-            return readUuid(out);
+        MemorySegment out = SCRATCH.get().out;
+        int rc;
+        try {
+            rc = (int) UUID_NEW_V4.invokeExact(out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_new_v4 downcall failed unexpectedly", t);
         }
+        if (rc != 0) {
+            throw new IllegalStateException("uuid_new_v4 failed with code " + rc + " (random source failure)");
+        }
+        return readUuid(out, 0);
     }
 
     /**
@@ -172,30 +220,21 @@ public final class UuidGenerator {
      * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, byte[] name) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment nsSeg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(namespace), 0, nsSeg, ValueLayout.JAVA_BYTE, 0, 16);
-
-            MemorySegment nameSeg;
-            if (name.length == 0) {
-                nameSeg = MemorySegment.NULL;
-            } else {
-                nameSeg = local.allocate(name.length);
-                MemorySegment.copy(name, 0, nameSeg, ValueLayout.JAVA_BYTE, 0, name.length);
-            }
-
-            MemorySegment out = local.allocate(16);
-            int rc;
-            try {
-                rc = (int) UUID_NEW_V5.invokeExact(nsSeg, nameSeg, name.length, out);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_new_v5 downcall failed unexpectedly", t);
-            }
-            if (rc != 0) {
-                throw new IllegalStateException("uuid_new_v5 failed with code " + rc);
-            }
-            return readUuid(out);
+        Scratch scratch = SCRATCH.get();
+        MemorySegment nsSeg = writeUuid(scratch.in, namespace);
+        // The caller's own array crosses pinned; a zero-length name is the ABI's NULL.
+        MemorySegment nameSeg = name.length == 0 ? MemorySegment.NULL : MemorySegment.ofArray(name);
+        MemorySegment out = scratch.out;
+        int rc;
+        try {
+            rc = (int) UUID_NEW_V5.invokeExact(nsSeg, nameSeg, name.length, out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_new_v5 downcall failed unexpectedly", t);
         }
+        if (rc != 0) {
+            throw new IllegalStateException("uuid_new_v5 failed with code " + rc);
+        }
+        return readUuid(out, 0);
     }
 
     /**
@@ -220,22 +259,20 @@ public final class UuidGenerator {
      *     timestamp field
      */
     public static UUID newV6(long unixMillis) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate(16);
-            int rc;
-            try {
-                rc = (int) UUID_NEW_V6.invokeExact(unixMillis, out);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_new_v6 downcall failed unexpectedly", t);
-            }
-            if (rc == 2) {
-                throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
-            }
-            if (rc != 0) {
-                throw new IllegalStateException("uuid_new_v6 failed with code " + rc + " (random source failure)");
-            }
-            return readUuid(out);
+        MemorySegment out = SCRATCH.get().out;
+        int rc;
+        try {
+            rc = (int) UUID_NEW_V6.invokeExact(unixMillis, out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_new_v6 downcall failed unexpectedly", t);
         }
+        if (rc == 2) {
+            throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
+        }
+        if (rc != 0) {
+            throw new IllegalStateException("uuid_new_v6 failed with code " + rc + " (random source failure)");
+        }
+        return readUuid(out, 0);
     }
 
     /**
@@ -261,14 +298,11 @@ public final class UuidGenerator {
      * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v6UnixMillis(UUID uuid) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                return (long) UUID_V6_UNIX_MILLIS.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_v6_unix_millis downcall failed unexpectedly", t);
-            }
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            return (long) UUID_V6_UNIX_MILLIS.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v6_unix_millis downcall failed unexpectedly", t);
         }
     }
 
@@ -299,23 +333,26 @@ public final class UuidGenerator {
         if (count == 0) {
             return new UUID[0];
         }
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate((long) count * 16);
-            int rc;
-            try {
-                rc = (int) UUID_NEW_V6_BATCH.invokeExact(unixMillis, count, out);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_new_v6_batch downcall failed unexpectedly", t);
-            }
-            if (rc == 2) {
-                throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
-            }
-            if (rc != 0) {
-                throw new IllegalStateException(
-                        "uuid_new_v6_batch failed with code " + rc + " (random source failure)");
-            }
-            return readUuidBatch(out, count);
+        // One heap array as the destination, crossing pinned, then one UUID per 16 bytes.
+        MemorySegment out = MemorySegment.ofArray(new byte[count * 16]);
+        int rc;
+        try {
+            rc = (int) UUID_NEW_V6_BATCH.invokeExact(unixMillis, count, out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_new_v6_batch downcall failed unexpectedly", t);
         }
+        if (rc == 2) {
+            throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
+        }
+        if (rc != 0) {
+            throw new IllegalStateException(
+                    "uuid_new_v6_batch failed with code " + rc + " (random source failure)");
+        }
+        UUID[] result = new UUID[count];
+        for (int i = 0; i < count; i++) {
+            result[i] = readUuid(out, (long) i * 16);
+        }
+        return result;
     }
 
     /**
@@ -347,22 +384,20 @@ public final class UuidGenerator {
      *     within 48 bits
      */
     public static UUID newV7(long unixMillis) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate(16);
-            int rc;
-            try {
-                rc = (int) UUID_NEW_V7.invokeExact(unixMillis, out);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_new_v7 downcall failed unexpectedly", t);
-            }
-            if (rc == 2) {
-                throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
-            }
-            if (rc != 0) {
-                throw new IllegalStateException("uuid_new_v7 failed with code " + rc + " (random source failure)");
-            }
-            return readUuid(out);
+        MemorySegment out = SCRATCH.get().out;
+        int rc;
+        try {
+            rc = (int) UUID_NEW_V7.invokeExact(unixMillis, out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_new_v7 downcall failed unexpectedly", t);
         }
+        if (rc == 2) {
+            throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
+        }
+        if (rc != 0) {
+            throw new IllegalStateException("uuid_new_v7 failed with code " + rc + " (random source failure)");
+        }
+        return readUuid(out, 0);
     }
 
     /**
@@ -388,14 +423,11 @@ public final class UuidGenerator {
      * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v7UnixMillis(UUID uuid) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                return (long) UUID_V7_UNIX_MILLIS.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_v7_unix_millis downcall failed unexpectedly", t);
-            }
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            return (long) UUID_V7_UNIX_MILLIS.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v7_unix_millis downcall failed unexpectedly", t);
         }
     }
 
@@ -460,16 +492,13 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into SQL Server wire order
      */
     public static UUID v7ToSqlOrder(UUID uuid) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                UUID_V7_TO_SQL_ORDER.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_v7_to_sql_order downcall failed unexpectedly", t);
-            }
-            return readUuid(seg);
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            UUID_V7_TO_SQL_ORDER.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v7_to_sql_order downcall failed unexpectedly", t);
         }
+        return readUuid(seg, 0);
     }
 
     /**
@@ -480,16 +509,13 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into RFC 9562 order
      */
     public static UUID v7FromSqlOrder(UUID uuid) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                UUID_V7_TO_RFC_ORDER.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
-            }
-            return readUuid(seg);
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            UUID_V7_TO_RFC_ORDER.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
         }
+        return readUuid(seg, 0);
     }
 
     /**
@@ -521,16 +547,13 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into SQL Server wire order
      */
     public static UUID v6ToSqlOrder(UUID uuid) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                UUID_V6_TO_SQL_ORDER.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_v6_to_sql_order downcall failed unexpectedly", t);
-            }
-            return readUuid(seg);
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            UUID_V6_TO_SQL_ORDER.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v6_to_sql_order downcall failed unexpectedly", t);
         }
+        return readUuid(seg, 0);
     }
 
     /**
@@ -541,16 +564,13 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into RFC 9562 order
      */
     public static UUID v6FromSqlOrder(UUID uuid) {
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(RfcBytes.toRfcBytes(uuid), 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                UUID_V6_TO_RFC_ORDER.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_v6_to_rfc_order downcall failed unexpectedly", t);
-            }
-            return readUuid(seg);
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            UUID_V6_TO_RFC_ORDER.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v6_to_rfc_order downcall failed unexpectedly", t);
         }
+        return readUuid(seg, 0);
     }
 
     /**
@@ -568,23 +588,26 @@ public final class UuidGenerator {
         if (count == 0) {
             return new UUID[0];
         }
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate((long) count * 16);
-            int rc;
-            try {
-                rc = (int) UUID_NEW_V7_BATCH.invokeExact(unixMillis, count, out);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
-            }
-            if (rc == 2) {
-                throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
-            }
-            if (rc != 0) {
-                throw new IllegalStateException(
-                        "uuid_new_v7_batch failed with code " + rc + " (random source failure)");
-            }
-            return readUuidBatch(out, count);
+        // One heap array as the destination, crossing pinned, then one UUID per 16 bytes.
+        MemorySegment out = MemorySegment.ofArray(new byte[count * 16]);
+        int rc;
+        try {
+            rc = (int) UUID_NEW_V7_BATCH.invokeExact(unixMillis, count, out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
         }
+        if (rc == 2) {
+            throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
+        }
+        if (rc != 0) {
+            throw new IllegalStateException(
+                    "uuid_new_v7_batch failed with code " + rc + " (random source failure)");
+        }
+        UUID[] result = new UUID[count];
+        for (int i = 0; i < count; i++) {
+            result[i] = readUuid(out, (long) i * 16);
+        }
+        return result;
     }
 
     /**
@@ -597,23 +620,12 @@ public final class UuidGenerator {
         return newV7Batch(count, System.currentTimeMillis());
     }
 
-    private static UUID readUuid(MemorySegment segment) {
-        return RfcBytes.fromRfcBytes(segment.toArray(ValueLayout.JAVA_BYTE));
-    }
-
-    private static UUID[] readUuidBatch(MemorySegment segment, int count) {
-        UUID[] result = new UUID[count];
-        for (int i = 0; i < count; i++) {
-            result[i] = RfcBytes.fromRfcBytes(segment.asSlice((long) i * 16, 16).toArray(ValueLayout.JAVA_BYTE));
-        }
-        return result;
-    }
-
     // ---- Destination-buffer fills ----------------------------------------------------
     //
-    // newV6Batch/newV7Batch allocate a fresh UUID[] and a scratch Arena segment on every
-    // call. These write into storage the caller already owns, so a hot path can reuse one
-    // buffer across batches instead of handing the collector two objects per batch.
+    // newV6Batch/newV7Batch allocate a fresh UUID[] and a scratch byte[] on every call.
+    // These write into storage the caller already owns — the byte[] form pinned and handed to
+    // the native side directly, nothing copied — so a hot path can reuse one buffer across
+    // batches instead of handing the collector two objects per batch.
     //
     // Unlike the Go and Swift bindings, the UUID[] form still costs a per-element
     // conversion: java.util.UUID is two longs, not 16 RFC-ordered bytes, so every item has
@@ -695,11 +707,10 @@ public final class UuidGenerator {
         if (destination.length == 0) {
             return;
         }
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate((long) destination.length * 16);
-            fillBytesNative(out, destination.length, unixMillis, handle, fn);
-            UUID[] parsed = readUuidBatch(out, destination.length);
-            System.arraycopy(parsed, 0, destination, 0, destination.length);
+        MemorySegment out = MemorySegment.ofArray(new byte[destination.length * 16]);
+        fillBytesNative(out, destination.length, unixMillis, handle, fn);
+        for (int i = 0; i < destination.length; i++) {
+            destination[i] = readUuid(out, (long) i * 16);
         }
     }
 
@@ -755,12 +766,8 @@ public final class UuidGenerator {
         if (destination.length == 0) {
             return;
         }
-        int count = destination.length / 16;
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment out = local.allocate(destination.length);
-            fillBytesNative(out, count, unixMillis, handle, fn);
-            MemorySegment.copy(out, ValueLayout.JAVA_BYTE, 0, destination, 0, destination.length);
-        }
+        // The caller's array is the destination: pinned for the call, written in place.
+        fillBytesNative(MemorySegment.ofArray(destination), destination.length / 16, unixMillis, handle, fn);
     }
 
     // ---- Raw-byte SQL-order transforms -----------------------------------------------
@@ -774,15 +781,12 @@ public final class UuidGenerator {
         if (uuid.length != 16) {
             throw new IllegalArgumentException("a UUID is exactly 16 bytes; got " + uuid.length);
         }
-        try (Arena local = Arena.ofConfined()) {
-            MemorySegment seg = local.allocate(16);
-            MemorySegment.copy(uuid, 0, seg, ValueLayout.JAVA_BYTE, 0, 16);
-            try {
-                handle.invokeExact(seg);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
-            }
-            MemorySegment.copy(seg, ValueLayout.JAVA_BYTE, 0, uuid, 0, 16);
+        // In place, on the caller's own bytes — no staging copy in either direction.
+        MemorySegment seg = MemorySegment.ofArray(uuid);
+        try {
+            handle.invokeExact(seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
         }
     }
 
