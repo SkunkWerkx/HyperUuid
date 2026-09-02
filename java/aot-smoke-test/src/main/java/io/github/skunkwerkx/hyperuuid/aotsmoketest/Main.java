@@ -11,6 +11,11 @@ import java.util.UUID;
 public final class Main {
     private Main() {}
 
+    /**
+     * Exercises every door and exits non-zero on the first wrong answer.
+     *
+     * @param args ignored
+     */
     public static void main(String[] args) {
         UUID v4 = UuidGenerator.newV4();
         require(v4.version() == 4, "expected v4 version 4, got " + v4.version());
