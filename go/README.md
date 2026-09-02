@@ -197,22 +197,24 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 no extra tooling needed. Measured on the same linux-arm64 machine, same run, both
 backends (`go test -bench=.` for cgo, `CGO_ENABLED=0 go test -bench=.` for purego):
 
-| Call | cgo | purego | Speedup |
-| --- | ---: | ---: | ---: |
-| `NewV4` | 170.4 ns, 1 alloc | 531.9 ns, 4 allocs | **3.1x** |
-| `NewV5String` | 210.3 ns, 3 allocs | 731.4 ns, 7 allocs | **3.5x** |
-| `NewV6At` | 140.5 ns, 1 alloc | 532.6 ns, 5 allocs | **3.8x** |
-| `NewV7At` | 151.0 ns, 1 alloc | 562.7 ns, 5 allocs | **3.7x** |
+| Call | cgo 0.2.1 | cgo now | purego | Speedup (cgo now vs purego) |
+| --- | ---: | ---: | ---: | ---: |
+| `NewV4` | 174 ns, 1 alloc | **165 ns, 0 allocs** | 506 ns, 4 allocs | **3.1x** |
+| `NewV5String` | 200 ns, 3 allocs | **200 ns, 1 alloc** | 731 ns, 7 allocs | **3.7x** |
+| `NewV6At` | 133 ns, 1 alloc | **139 ns, 0 allocs** | 533 ns, 5 allocs | **3.8x** |
+| `NewV7At` | 133 ns, 1 alloc | **142 ns, 0 allocs** | 543 ns, 5 allocs | **3.8x** |
 
-Every purego call did 4-7 heap allocations; cgo cuts that to 1 (3 for v5, which
-marshals a variable-length name buffer). `go build -gcflags=-m` explains why cgo
-doesn't reach zero allocations either: any pointer crossing into opaque foreign
-code — cgo included, not a purego-specific issue — is categorically excluded from
-Go's escape analysis, so the compiler must conservatively heap-allocate the
-pointee. That's a structural floor for this call shape (an out-param pointer into
-C), independent of FFI mechanism; closing it fully would need a different API shape
-(a caller-owned buffer passed by value, or a pool), not just a different FFI
-library.
+Every purego call does 4-7 heap allocations; cgo now does none. An earlier edition
+of this section called the one allocation cgo used to make "a structural floor for
+this call shape (an out-param pointer into C)" — and it was a floor for *that*
+shape, not for the ABI. `go build -gcflags=-m` is right that any Go pointer handed
+to a cgo call is conservatively heap-allocated, so the shims stopped handing one
+over: the C side keeps the sixteen bytes on its own stack and returns them as a
+struct, and takes a UUID argument the same way, so nothing crosses by pointer except
+a caller's own slice. The allocation is gone (the one `NewV5String` keeps is Go's own
+`[]byte(name)` conversion); per-call time barely moves, because on these doors the
+entropy fetch, not the crossing, is what costs. The same by-value shape took 30-50%
+off every door in HyperCast, whose parsers had no such floor underneath.
 
 **Batch generation is the one place cgo doesn't help — worth stating plainly rather
 than only reporting the numbers where it wins:**
@@ -237,8 +239,8 @@ genuine head-to-head, not a strawman. Same machine, same run, both backends:
 
 | Call | cgo | purego | `google/uuid`'s `id.Time()` |
 | --- | ---: | ---: | ---: |
-| v6 | 76.1 ns, 1 alloc | 437.4 ns, 4 allocs | 3.8-4.0 ns, 0 allocs |
-| v7 | 85.0 ns, 1 alloc | 443.7 ns, 4 allocs | 3.8-4.0 ns, 0 allocs |
+| v6 | 58 ns, 0 allocs (was 75 ns, 1 alloc) | 437.4 ns, 4 allocs | 3.8-4.0 ns, 0 allocs |
+| v7 | 57 ns, 0 allocs (was 74 ns, 1 alloc) | 443.7 ns, 4 allocs | 3.8-4.0 ns, 0 allocs |
 
 cgo closes most of the gap to purego (5.2-5.8x faster here) but `google/uuid`'s
 `Time()` still wins outright either way, by roughly 20x against cgo and two orders
