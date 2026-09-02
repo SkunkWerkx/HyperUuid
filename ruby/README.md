@@ -109,6 +109,30 @@ Batch generation still amortizes per-call cost on both backends — one native c
 
 The batch multiplier shrank from 11x to ~3.8x for the best reason available: the individual calls got 3x faster, so there's less waste left to amortize. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
 
+## Verifying provenance
+
+Every gem RubyGems.org serves — the universal fallback and each of the six precompiled
+platform gems — carries its own GitHub build-provenance attestation, signed directly by
+this repo's own `release.yml` (the `rubygems-publish` job attests `ruby/pkg/*.gem` right
+before the push), so plain `--repo` verifies any of them:
+
+```sh
+gem fetch hyperuuid -v X.Y.Z --platform <platform>   # or omit --platform for the universal gem
+gh attestation verify hyperuuid-X.Y.Z-<platform>.gem --repo SkunkWerkx/HyperUuid
+```
+
+That's the release's second layer of checking, not the only one: before any gem gets built,
+the same job verifies all ten native binaries it packs (six FFI libs, four Magnus
+extensions) against *their own* attestations — those are signed from `SkunkWerkx/.github`
+by `hyper-build-native.yml`, so that check needs `--signer-repo SkunkWerkx/.github` added —
+and refuses to proceed on an unverified one. RubyGems.org has no unpublish and no
+duplicate-version overwrite, so this all happens while a bad artifact is still reversible.
+The release run's job summary then re-fetches every gem from the CDN and records
+attested-vs-served digests, turning "rubygems.org stores an upload verbatim" into a
+per-release measurement rather than an assumption — see
+[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for
+more on why `--signer-repo` is needed for some artifacts here and not others.
+
 ## Install
 
 ```sh

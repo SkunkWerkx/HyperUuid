@@ -101,6 +101,26 @@ Reproduce: `./gradlew :benchmarks:jmh`.
 
 Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary exercising every function in this binding, including the SQL/RFC byte-order conversions, no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime) — already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config.
 
+## Verifying provenance
+
+The published jar carries a GitHub build-provenance attestation, but not one signed by this
+repo directly — `release.yml`'s `maven-publish` job hands off to a reusable workflow
+(`hyper-publish-maven.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
+identity Fulcio records as the signer. `--repo` alone isn't enough; add `--signer-repo`,
+or use `--owner` in place of both:
+
+```sh
+curl -LO https://repo1.maven.org/maven2/io/github/skunkwerkx/hyperuuid/X.Y.Z/hyperuuid-X.Y.Z.jar
+gh attestation verify hyperuuid-X.Y.Z.jar \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+# or: gh attestation verify hyperuuid-X.Y.Z.jar --owner SkunkWerkx
+```
+
+Get the signer-repo wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`,
+which reads like a bad signature but is only an identity mismatch — see
+[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for the
+full breakdown of which artifacts in this project are signed from which repo and why.
+
 ## Install
 
 Published to [Maven Central](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid) — no extra repository configuration needed, `mavenCentral()` is virtually every Gradle/Maven project's default already:

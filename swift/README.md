@@ -112,6 +112,24 @@ Batch generation amortizes both the native call and that allocation over the who
 
 **≈11x for v6, ≈10.5x for v7** — one native call and one marshaling allocation instead of a thousand of each.
 
+## Verifying provenance
+
+Like PHP, there's no separate package registry to attest here — SwiftPM resolves a git tag
+directly against this repo. The native libraries bundled under
+`swift/Sources/HyperUuid/NativeLibs/` (staged by `stage-native-binaries.yml`) each carry
+their own build-provenance attestation from `hyper-build-native.yml`, which physically lives
+in `SkunkWerkx/.github` — so verifying needs `--signer-repo` alongside `--repo`, or `gh`
+reports a bare `verifying with issuer "sigstore.dev"` that reads like a bad signature but is
+only an identity mismatch:
+
+```sh
+gh attestation verify swift/Sources/HyperUuid/NativeLibs/osx-arm64/libhyperuuid.dylib \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+```
+
+See [csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance)
+for more on why `--signer-repo` is needed for some artifacts here and not others.
+
 ## Install
 
 Add the package URL as a dependency:

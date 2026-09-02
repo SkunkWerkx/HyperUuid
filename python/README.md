@@ -146,3 +146,21 @@ Reproduce: `maturin develop --release --manifest-path native/Cargo.toml` (from `
 build the release extension — `pip install -e ".[bench]"` alone builds debug by default and
 will understate every number above — then `pip install pyperf` and
 `python bench_uuid.py --fast -o results.json`.
+
+## Verifying provenance
+
+Every wheel PyPI serves carries a GitHub build-provenance attestation, signed directly by
+this repo's own `release.yml` (the `pypi-build-wheels` job attests each platform wheel
+right where it's built, no reusable workflow in between), so plain `--repo` verifies it:
+
+```sh
+pip download hyperuuid==X.Y.Z --no-deps -d .
+gh attestation verify hyperuuid-X.Y.Z-*.whl --repo SkunkWerkx/HyperUuid
+```
+
+This is a separate thing from the [PEP 740](https://peps.python.org/pep-0740/) attestations
+`gh-action-pypi-publish` already sends to PyPI itself, which PyPI-side tooling checks on its
+own — this is the GitHub/Sigstore transparency-log route, checked with `gh attestation
+verify`, the same route every other artifact in this project uses. See
+[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for why
+some artifacts here need `--signer-repo` and this one doesn't.

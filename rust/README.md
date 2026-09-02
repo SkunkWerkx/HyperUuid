@@ -160,6 +160,26 @@ next `./gradlew test` or `dotnet test` fails at native load with something unhel
 missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. CI never
 hits this — each leg builds in its own job.
 
+## Verifying provenance
+
+The published `.crate` carries a GitHub build-provenance attestation, but not one signed by
+this repo directly — `release.yml`'s `pack-crates` job hands off to a reusable workflow
+(`hyper-publish-crate.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
+identity Fulcio records as the signer. `--repo` alone isn't enough; add `--signer-repo`,
+or use `--owner` in place of both:
+
+```sh
+curl -LO https://static.crates.io/crates/hyperuuid/hyperuuid-X.Y.Z.crate
+gh attestation verify hyperuuid-X.Y.Z.crate \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+# or: gh attestation verify hyperuuid-X.Y.Z.crate --owner SkunkWerkx
+```
+
+Get the signer-repo wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`,
+which reads like a bad signature but is only an identity mismatch — see
+[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for the
+full breakdown of which artifacts in this project are signed from which repo and why.
+
 ## Install
 
 ```sh

@@ -200,6 +200,28 @@ spike rather than a second shipped backend. CI compile-checks the `php` feature 
 (Linux/macOS) so it can't silently bit-rot, but there's no `phpunit` run against it — see
 [`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning.
 
+## Verifying provenance
+
+Packagist has nothing of its own to attest — there's no packed artifact, just a git tag it
+resolves against this repo. What's actually worth checking is the native binaries
+`stage-native-binaries.yml` committed into `php/src/native/`, each individually signed
+by `hyper-build-native.yml` when it was built — that workflow physically lives in
+`SkunkWerkx/.github`, so verifying needs `--signer-repo` alongside `--repo`, or `gh` reports
+a bare `verifying with issuer "sigstore.dev"` that reads like a bad signature but is only an
+identity mismatch:
+
+```sh
+composer require skunkwerkx/hyperuuid:X.Y.Z
+gh attestation verify vendor/skunkwerkx/hyperuuid/src/native/linux-x64/libhyperuuid.so \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+```
+
+The staging commit's own message records the exact `ci.yml` run ID and source SHA the
+binary came from (e.g. `chore: stage native binaries from ci.yml run 33523131897`), so
+you can cross-check the attested commit against that message directly. See
+[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for
+more on why `--signer-repo` is needed for some artifacts here and not others.
+
 ## Install
 
 ```sh

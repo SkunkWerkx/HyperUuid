@@ -250,3 +250,21 @@ there's no provenance argument for reaching past it here. Honestly: in Go
 specifically, prefer `id.Time()` over this binding's `V6Timestamp`/`V7Timestamp`
 unconditionally, cgo backend or not. They exist for API symmetry with every other
 binding in this repo, not because they're the better choice in Go.
+
+## Verifying build provenance
+
+(Not to be confused with the UUID-provenance point above — this is about the binary, not the
+ID.) Go has no package registry to attest either — `go get` resolves straight from the
+`go/vX.Y.Z` git tag against this repo. The native libraries committed under `go/native/`
+(staged by `stage-native-binaries.yml`) each carry their own build-provenance attestation
+from `hyper-build-native.yml`, which physically lives in `SkunkWerkx/.github` — so verifying
+needs `--signer-repo` alongside `--repo`, or `gh` reports a bare `verifying with issuer
+"sigstore.dev"` that reads like a bad signature but is only an identity mismatch:
+
+```sh
+gh attestation verify go/native/linux-x64/libhyperuuid.so \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+```
+
+See [csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance)
+for more on why `--signer-repo` is needed for some artifacts here and not others.

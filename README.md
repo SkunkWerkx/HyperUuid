@@ -114,6 +114,27 @@ PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 b
 
 **Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt and aarch64-mingw-ucrt, each gem fat across Ruby 3.4 and 4.0 since a Magnus extension is tied to one Ruby minor) with an automatic fallback to a universal, zero-compile pure-Fiddle gem for everything outside that grid — Ruby 3.2/3.3, musl. Go's embedded native libraries and Swift's `NativeLibs` are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
 
+## Provenance
+
+Every published artifact across all eight bindings — the package itself where a registry
+has one, and the native binaries underneath it either way — carries a GitHub build-provenance
+attestation, checkable with `gh attestation verify`. Which flags that needs depends on where
+the signing workflow physically lives, not on which registry the artifact ended up in:
+artifacts signed directly inside this repo's own `release.yml` — the RubyGems gem, the PyPI
+wheel, and the published NuGet package — verify with plain `--repo SkunkWerkx/HyperUuid`.
+Artifacts signed by a reusable workflow hosted in `SkunkWerkx/.github` — the crates.io crate,
+the Maven jar, the pre-push NuGet package, and every native library (which is the entire
+story for Go, Swift, and PHP, none of which has a package-level attestation of its own) —
+need `--signer-repo SkunkWerkx/.github` added, or `--owner SkunkWerkx` in place of both
+flags. Get it wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
+reads like a bad signature but is only an identity mismatch.
+
+See each binding's own README for its exact verify command and artifact:
+[Rust](rust/#verifying-provenance), [C#](csharp/#native-binary-provenance),
+[Java](java/#verifying-provenance), [Ruby](ruby/#verifying-provenance),
+[Python](python/#verifying-provenance), [PHP](php/#verifying-provenance),
+[Swift](swift/#verifying-provenance), [Go](go/#verifying-build-provenance).
+
 ## WebAssembly
 
 **2 of 8 targets proven, live today:**
