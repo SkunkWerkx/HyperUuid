@@ -26,6 +26,21 @@ if (ms != 1_645_557_742_000L)
     return 1;
 }
 
+// The C# 14 extension property. It lowers to an ordinary static call, which is precisely why
+// it belongs here: "lowers to something trim-safe" is the claim, and this is where claims about
+// the published surface get checked instead of asserted. Both arms matter — the value case and
+// the null case are different code paths through the version nibble.
+if (v7.Timestamp != DateTimeOffset.FromUnixTimeMilliseconds(1_645_557_742_000L))
+{
+    Console.WriteLine($"FAIL: Guid.Timestamp mismatch, got {v7.Timestamp}");
+    return 1;
+}
+if (a.Timestamp is not null)
+{
+    Console.WriteLine($"FAIL: Guid.Timestamp returned {a.Timestamp} for a v4 UUID");
+    return 1;
+}
+
 // Non-throwing construction path — must be AOT-clean too, and must actually report failure
 // rather than throw (2^48 ms overflows v7's 48-bit unix_ts_ms field).
 if (!UuidGenerator.TryNewV7(1_645_557_742_000L, out var tryV7) || tryV7 == Guid.Empty)
@@ -66,6 +81,6 @@ Console.WriteLine($"v4: {a} {b}");
 Console.WriteLine($"v5: {v5} matches RFC 9562 Appendix A.4 vector");
 Console.WriteLine($"v7: {v7} embeds timestamp {ms}");
 Console.WriteLine();
-Console.WriteLine("try/span/batch surface verified under Native AOT");
+Console.WriteLine("try/span/batch/extension surface verified under Native AOT");
 Console.WriteLine("ALL NATIVE AOT CHECKS PASSED");
 return 0;
