@@ -46,3 +46,21 @@ uuid = { version = "1", features = ["v4", "v5", "v6", "v7"] }
 [[bench]]
 name = "uuid_benchmarks"
 harness = false
+
+# Size, not speed. Measured on win-x64 (Ruby 3.4, already carrying `-C strip=symbols`): the
+# Magnus extension goes 1,102,336 -> 1,040,384 bytes, -5.6%, with .text 842,336 -> 792,704
+# and all 14 exports intact. Every leg's artifact shrinks, not just that one, so it reaches
+# the gems, wheels and the NuGet payload alike.
+#
+# Explicitly NOT a performance change, checked rather than hoped: interleaved A/B runs of the
+# same 200k-iteration probe put LTO and stock within noise of each other (new_v4 ~356 vs
+# ~363 ns/op, new_v7 ~554 vs ~562 across three alternating rounds). An earlier single-shot
+# reading suggested a ~12% win; that was cross-session noise and did not survive being run
+# back to back. Build time is unaffected at this crate's size (23s against 22s).
+#
+# Scope worth knowing: Cargo ignores a dependency's profile settings, so this applies to
+# builds *of this repo* — every binding's cdylib, the three extension features, `cargo bench`
+# — and never to a downstream crates.io consumer, who gets their own workspace's profile.
+[profile.release]
+lto = true
+codegen-units = 1
