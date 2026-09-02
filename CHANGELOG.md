@@ -7,17 +7,108 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-09-02
+
+The theme is *stop paying for objects you didn't ask for*. Every binding already made one
+native call per batch; what cost real time was the per-item object construction wrapped around
+it. Eight packages now expose the raw bytes directly, and the wins scale with how expensive
+each language's object construction is — 73x in PHP, 35x in Python, ~11x in Ruby.
+
+Alongside that: Ruby's compiled Magnus extension now ships for **both** Windows architectures,
+so the slow `Fiddle` fallback is no longer the only option anywhere mainstream, and every
+registry's package now carries build provenance rather than just NuGet's.
 
 ### Added
 
-- **`Guid.Timestamp`**, a nullable extension property recovering the UTC timestamp embedded in a
-  version 6 or version 7 UUID and returning `null` for any other version. Written as a C# 14
-  `extension` block, which is the only form that can express a *property* — the classic
-  `this Guid` form is limited to methods, and reading a timestamp out of bits the value already
-  holds is a projection rather than an action. It re-spells `UuidGenerator.GetTimestamp`, which
-  keeps the logic; a test pins the two to identical results on every version so they can't
-  drift. Works on any `Guid`, including one from `Guid.CreateVersion7()`. *(NuGet)*
+- **Raw-byte and destination-buffer APIs, across all eight packages.** One cross-binding parity
+  pass, each shaped to what the language can actually do:
+  - **C#** — a non-throwing `Try*` twin for every fallible operation (`TryNewV4`/`V6`/`V7`,
+    `TryFillV6`/`V7`), so a `Result<T>`-shaped gateway no longer needs a `try`/`catch` per call;
+    `Span<byte>` overloads for `V6`/`V7To`/`FromSqlOrder`; `Span<byte>` overloads for
+    `FillV6`/`V7`. *(NuGet)*
+  - **Go** — `FillV6`/`V7` and `FillV6`/`V7Bytes`, each with an `At` variant, plus
+    `V6`/`V7To`/`FromSqlOrderBytes` rewriting a caller's 16 bytes in place. `uuid.UUID` is
+    `[16]byte`, so a whole batch lands in the caller's slice in one native call with no
+    per-element conversion: `FillV7At` measures 18,355 ns / **0 B / 0 allocs** per 1000, against
+    138,646 ns and 1000 allocs for individual calls. *(`go get`)*
+  - **Swift** — `fillV6`/`fillV7` over both an `UnsafeMutableRawBufferPointer` and an
+    `inout [UUID]`, plus `v6`/`v7To`/`FromSqlOrder(bytes:)`. Foundation's `UUID` wraps `uuid_t`,
+    already RFC 9562-ordered, so the array form needs no conversion either — asserted with a
+    `precondition` on `MemoryLayout<UUID>` rather than assumed. Adds
+    `Error.bufferNotWholeUUIDs`. *(`.package(url:)`)*
+  - **Java** — `fillV6`/`fillV7` over both `UUID[]` and `byte[]`, plus
+    `v6`/`v7To`/`FromSqlOrder(byte[])` in place. `java.util.UUID` is two `long`s rather than 16
+    ordered bytes, so — like C# and unlike Go/Swift — the `UUID[]` form removes the allocation
+    but still rebuilds each element; the `byte[]` form is the one that removes real work, and
+    both say so. *(Maven Central)*
+  - **Python** — `fill_v6`/`fill_v7` write into a caller's `bytearray`: **~35x** on a
+    1000-UUID batch, 650 µs → 18.5 µs. The largest proportional gain of the typed languages,
+    because `new_v7_batch` was building 1000 `uuid.UUID` instances around a single native call.
+    Takes a `bytearray` specifically, not the general buffer protocol, which needs a
+    `Py_buffer` that only entered the stable ABI in 3.11. *(PyPI)*
+  - **Ruby** — `new_v6_batch_bytes`/`new_v7_batch_bytes`: **~11x**, 400 µs → 35 µs. No Rust
+    change at all; the Runtime layer already had the native core's bytes as one binary `String`
+    and was immediately slicing them into objects. *(RubyGems)*
+  - **PHP** — `newV6BatchBytes`/`newV7BatchBytes`: **73x**, 2147 µs → 29.3 µs, the largest
+    speedup in the repo. PHP's per-object construction cost is the steepest here, so removing
+    it gains the most. *(Packagist)*
+- **`Guid.Timestamp`** — a nullable extension property recovering the UTC timestamp embedded in
+  a version 6 or 7 UUID, `null` for any other version. Written as a C# 14 `extension` block,
+  the only form that can express a *property*: reading a timestamp out of bits the value
+  already holds is a projection, not an action. It re-spells `UuidGenerator.GetTimestamp`,
+  which keeps the logic, and a test pins the two to identical results on every version so they
+  cannot drift. Works on any `Guid`, including one from `Guid.CreateVersion7()`. *(NuGet)*
+- **Precompiled Ruby platform gems for Windows** — `x64-mingw-ucrt` and `aarch64-mingw-ucrt`,
+  joining the existing linux and macOS ones. Windows is where the `Fiddle` fallback cost the
+  most, and both architectures now get the compiled Magnus extension instead: measured on
+  win-x64, `new_v4` in 406ns against Fiddle's 2407ns (**5.9x**) and `new_v7` 595ns against
+  2759ns (**4.6x**); on win-arm64, 416ns against 2299ns (**5.5x**) and 621ns against 2474ns
+  (**4.0x**). Windows-on-ARM had been the one mainstream platform still on the fallback.
+  *(RubyGems)*
+- **Fat platform gems.** A Magnus extension is bound to a single Ruby minor — there is no
+  `abi3` equivalent to collapse that axis the way PyO3 does — so each platform gem now carries
+  one compiled extension per supported Ruby, under `lib/hyperuuid/<minor>/`, and picks at
+  `require` time. Ruby 3.4 and 4.0 today; anything outside that grid still resolves the
+  universal zero-compile Fiddle gem automatically. *(RubyGems)*
+- **Build provenance on every registry's package, not just NuGet's.** The gem, the wheel, the
+  crate and the jars all shipped unsigned at 0.1.1 even though the native binaries inside them
+  were signed. Each is now attested, and the gates that were missing on the way in are in
+  place: the RubyGems job verifies all ten native artifacts before packing rather than
+  trusting them, attests `pkg/*.gem` before the push so a failure stops the release while it is
+  still reversible, then re-fetches each gem from the CDN and records attested-vs-served
+  digests — turning "the registry stores an upload verbatim" into a per-release measurement
+  instead of a belief. Verify with
+  `gh attestation verify <file> --repo SkunkWerkx/HyperUuid`. *(all registries)*
+
+### Changed
+
+- **Both Windows Magnus extensions build the `gnullvm` Rust target rather than `gnu`** — same
+  mingw-w64/UCRT ABI, LLVM instead of GCC. `rb-sys`'s own table maps `x64-mingw-ucrt` to
+  `x86_64-pc-windows-gnu`, but that describes the toolchain it cross-compiles *with*, not an
+  ABI requirement. The GCC target statically links libgcc; the LLVM one uses compiler-rt. Net
+  effect on the shipped extension: **1,612,742 → 342,016 bytes, 79% smaller**, with `.text`
+  landing next to the arm64 build's. Both the load into RubyInstaller's GCC-built Ruby and
+  unwinding across the boundary (magnus turns Rust panics into Ruby exceptions, and this swaps
+  the unwinder) were tested on real hardware rather than reasoned about. *(RubyGems)*
+- **The release profile enables `lto = true` and `codegen-units = 1`.** Applies to builds of
+  this repo — every binding's cdylib and the three extension features — and never to a
+  downstream crates.io consumer, who gets their own workspace's profile. *(all packages)*
+- **Ruby platform gems declare `required_ruby_version >= 3.4, < 4.1`**, narrower than the
+  gemspec's own `>= 3.2`. A platform gem is only correct on the ABIs actually inside it, and
+  RubyGems declining it is the only guard that runs *first* — a wrong-ABI extension must never
+  be installed at all. On Windows it would at least fail to load cleanly, but Linux extensions
+  don't link libruby, so one can load successfully against the wrong ABI and misbehave later.
+  *(RubyGems)*
+
+### Upgrade note
+
+The new byte-returning forms are **only** faster when bytes are the destination — a database
+bind parameter, a wire format, a bulk `COPY`. This inverts the usual "batch is faster" advice
+and is worth reading before switching: in Python, filling and then constructing `uuid.UUID`
+objects measures ~1210 µs against `new_v7_batch`'s 650 µs, roughly twice as slow, because the
+extension's internal fast path beats anything callable from Python. Ruby and PHP are the same
+story — slicing the returned string yourself only relocates the identical allocations into your
+own code. If you want objects, keep using the existing batch methods. Nothing is deprecated.
 
 ## [0.1.1] — 2026-08-31
 
@@ -108,6 +199,6 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v.0.1.1...HEAD
-[0.1.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...v.0.1.1
+[0.2.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SkunkWerkx/HyperUuid/releases/tag/v0.1.0
