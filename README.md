@@ -167,7 +167,7 @@ binaries. CI runs every binding's full suite a second time through it on every l
 | Binding | Engine | Select it | `new_v7`, one call | 1000-UUID batch | Native, same box |
 | --- | --- | --- | ---: | ---: | --- |
 | Java | [GraalWasm](https://www.graalvm.org/webassembly/) (`org.graalvm.polyglot:wasm`, `compileOnly`, never in the POM) | `-Dhyperuuid.backend=wasm`, or automatic when the jar has no native build for the platform | 420 ns on GraalVM CE 25 (JIT), 181 ns under Native Image, 3.1 µs on Temurin 25 (interpreter only, with a warning) | 15.9 µs (JIT) | 64 ns / 15.8 µs |
-| Ruby | [wasmtime gem](https://github.com/bytecodealliance/wasmtime-rb) (development dependency only) | `HYPERUUID_WASM=1`, or automatic when no Fiddle library exists for the platform | 867 ns | 40.6 µs | ~450 ns / 24 µs |
+| Ruby | [wasmtime gem](https://github.com/bytecodealliance/wasmtime-rb) (a Gemfile group for the suite, never a dependency of the gem) | `HYPERUUID_WASM=1`, or automatic when no Fiddle library exists for the platform | 867 ns | 40.6 µs | ~450 ns / 24 µs |
 | Python | [wasmtime-py](https://github.com/bytecodealliance/wasmtime-py) (`pip install hyperuuid[wasm]`) | `HYPERUUID_WASM=1`, or automatic when the PyO3 extension fails to import (today every wheel and the sdist carry it, so in practice you set the variable; a pure-Python wheel would change that and is not built yet) | 6.2 µs (the bare crossing is 3.1 µs by going underneath wasmtime-py's public call, which re-fetches the function type per call and costs 38 µs) | 41 µs | 0.85 µs / 18.7 µs |
 | Go | [wasmtime-go](https://github.com/bytecodealliance/wasmtime-go) (cgo throughout; no win-arm64 build) | `-tags hyperuuid_wasm` | 3.1 µs | 41 µs | 142 ns / 17.6 µs |
 
