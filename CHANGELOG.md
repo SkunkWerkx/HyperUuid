@@ -7,12 +7,16 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-09-03
 
-The carrier diet HyperCast 0.2.0 ran, ported back to the three bindings here that had the
-same shape underneath: a confined arena or a heap array wrapped around a native call that
-never needed one. Measured before and after on one machine in one session; the core and
-every UUID it produces are untouched.
+Two themes. The first is *one core, one more way in*: Java, Ruby, Python and Go can now run
+the Rust core as a `wasm32-wasip1` module inside the process, through a wasm engine the
+ecosystem already has, so a platform with no native build in the package still has a working
+backend and nothing has to be `dlopen`'d at all. The second is the carrier diet HyperCast
+0.2.0 ran, ported back to the three bindings here that had the same shape underneath: a
+confined arena or a heap array wrapped around a native call that never needed one. Measured
+before and after on one machine in one session; the core and every UUID it produces are
+untouched.
 
 ### Added
 
@@ -20,21 +24,38 @@ every UUID it produces are untouched.
   module, `hyperuuid.wasm`, ships beside the native libraries in the jar, the gems and the
   wheels, and is committed under `go/native/`; a wasm engine the ecosystem already has runs it
   in-process, behind each binding's existing backend switch, with the engine an optional
-  dependency: GraalWasm for Java (`-Dhyperuuid.backend=wasm`, `compileOnly`, never in the
-  POM), the wasmtime gem for Ruby (`HYPERUUID_WASM=1`), wasmtime-py for Python
-  (`pip install hyperuuid[wasm]`, `HYPERUUID_WASM=1`), wasmtime-go for Go
-  (`-tags hyperuuid_wasm`). Java, Ruby and Python also fall back to it automatically when the
-  package carries no native build for the platform. Measured on one box, through each
-  shipped binding: `new_v7` at 420 ns under GraalVM's JIT and 181 ns under Native Image
-  (3.1 µs interpreter-only on a stock JDK), 867 ns from Ruby, 6.2 µs from Python, 3.1 µs
-  from Go, against 64 / ~450 / 850 / 142 ns native; the 1000-UUID byte fills land at
-  15.9 / 40.6 / 41 / 41 µs against 15.8 / 24 / 18.7 / 17.6 µs native. Every call is serialized under a
-  lock. The module exports wasi-libc's `malloc`/`free` through a linker flag in
-  `rust/.cargo/config.toml`, because a host-picked offset into the guest's initial memory
-  collides with dlmalloc; CI builds the module on every leg and runs every suite a second
-  time through it. *(Maven Central, RubyGems, PyPI, `go get`)*
+  dependency the consumer adds only if they want this path:
+  - **Java** — [GraalWasm](https://www.graalvm.org/webassembly/), `-Dhyperuuid.backend=wasm`,
+    or automatic when the jar has no native build for the platform. `org.graalvm.polyglot:wasm`
+    is `compileOnly` and never in the POM; `UuidGenerator.backend()` reports which path won.
+  - **Ruby** — the [wasmtime](https://rubygems.org/gems/wasmtime) gem, `HYPERUUID_WASM=1`, or
+    automatic when no native library exists for the platform. `HyperUuid::BACKEND` reports
+    `:wasm`; `spec/wasm_backend_spec.rb` pins the outputs byte-for-byte against Fiddle.
+  - **Python** — [wasmtime-py](https://github.com/bytecodealliance/wasmtime-py) via
+    `pip install hyperuuid[wasm]`, `HYPERUUID_WASM=1`, or automatic when the PyO3 extension
+    fails to import. `hyperuuid.BACKEND` reports `"wasm"` or `"native"`.
+  - **Go** — [wasmtime-go](https://github.com/bytecodealliance/wasmtime-go) behind
+    `-tags hyperuuid_wasm`, opt-in only and never selected automatically; the tag compiles in
+    exactly one backend. cgo throughout, so no win-arm64 build.
+
+  Measured on one box, through each shipped binding: `new_v7` at 420 ns under GraalVM's JIT
+  and 181 ns under Native Image (3.1 µs interpreter-only on a stock JDK), 867 ns from Ruby,
+  6.2 µs from Python, 3.1 µs from Go, against 64 / ~450 / 850 / 142 ns native; the 1000-UUID
+  byte fills land at 15.9 / 40.6 / 41 / 41 µs against 15.8 / 24 / 18.7 / 17.6 µs native. Every
+  call is serialized under a lock, because neither a GraalWasm `Context` nor a wasmtime
+  `Store` is safe for concurrent use; the native backends stay lock-free. The module exports
+  wasi-libc's `malloc`/`free` through two linker flags in `rust/.cargo/config.toml`, because a
+  host-picked offset into the guest's initial memory collides with dlmalloc and corrupted a
+  batch mid-buffer. CI builds the module on every leg and runs the four suites a second time
+  through it. *(Maven Central, RubyGems, PyPI, `go get`)*
 - **`newV5(namespace:name:)` over an `UnsafeRawBufferPointer`** in Swift — the primitive the
   `String` and `[UInt8]` forms now wrap. *(`.package(url:)`)*
+- **The wasm module is attested like every native library.** `hyperuuid.wasm` carries the
+  same build-provenance attestation as the six native builds, signed by the reusable workflow
+  in `SkunkWerkx/.github`, and `stage-native-binaries.yml` refuses to commit it under
+  `go/native/` unless that attestation verifies. Every README now has a Verifying provenance
+  section with the exact `gh attestation verify` command and flags for its artifact.
+  *(all packages; docs and release machinery)*
 
 ### Changed
 
@@ -60,6 +81,9 @@ every UUID it produces are untouched.
   and the library handle is a class reference rather than a 13-field struct copied per call.
   `newV4` 1 → **0 mallocs**, `newV5` 3 → **0**, `newV7Batch(1000)` 86 → **17 µs** and 1002 →
   **1** malloc. *(`.package(url:)`)*
+- **Ruby: the gemspec declares no wasmtime.** The engine is a Gemfile group for this repo's
+  own suite, not a development dependency of the gem, so `gem install hyperuuid` and
+  `bundle install` against the gem pull in nothing new. *(RubyGems)*
 
 ### Upgrade note
 
@@ -67,8 +91,10 @@ Drop-in for every binding. Nothing is removed or renamed. The wasm backends are 
 change nothing until asked for: no new runtime dependency in any package (Java's GraalWasm
 is `compileOnly`, Ruby's wasmtime a Gemfile group for the suite, Python's an extra, Go's behind a
 build tag — though wasmtime-go does now appear in `go.mod`, so it enters a consumer's module
-graph without entering their binary). The Rust crate itself is unchanged since 0.2.1; it
-takes the coordinated version like every other package.
+graph without entering their binary). The Rust crate's source is unchanged since 0.2.1; the
+only addition under `rust/` is the `.cargo/config.toml` that exports `malloc`/`free` on
+`wasm32-wasip1`, which applies to builds run from that directory and to nothing a consumer
+compiles. The crate takes the coordinated version like every other package.
 
 ## [0.2.1] — 2026-09-02
 
@@ -312,7 +338,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...HEAD
+[0.3.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.0...v0.1.1
