@@ -12,12 +12,17 @@ final class RfcBytes {
     private RfcBytes() {}
 
     static UUID fromRfcBytes(byte[] bytes) {
+        return fromRfcBytes(bytes, 0);
+    }
+
+    /** The UUID whose 16 RFC 9562 bytes start at {@code offset} in {@code bytes}. */
+    static UUID fromRfcBytes(byte[] bytes, int offset) {
         long msb = 0;
-        for (int i = 0; i < 8; i++) {
+        for (int i = offset; i < offset + 8; i++) {
             msb = (msb << 8) | (bytes[i] & 0xFF);
         }
         long lsb = 0;
-        for (int i = 8; i < 16; i++) {
+        for (int i = offset + 8; i < offset + 16; i++) {
             lsb = (lsb << 8) | (bytes[i] & 0xFF);
         }
         return new UUID(msb, lsb);

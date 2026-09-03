@@ -10,6 +10,15 @@ locally with `cargo build --release` in `rust/` and copy the result in if you ne
 one by hand; CI's own `build-native` job does the same per-leg during in-repo testing, overwriting
 whichever platform's file matches that leg — harmless, since it's the same build either way.
 
+`wasm32-wasip1/hyperuuid.wasm` lives here for the same reason, and is the one entry that
+isn't a per-platform shared library: it's the core compiled as a WebAssembly module, embedded
+by the same `//go:embed native` and loaded only by the `hyperuuid_wasm` build tag's
+wasmtime-go backend (`backend_wasmtime.go`, see the README's WebAssembly section).
+Regenerate it with `cargo build --release --target wasm32-wasip1` in `rust/` — from inside
+`rust/`, not with `--manifest-path`, so `rust/.cargo/config.toml`'s wasip1 linker flags
+(which export the guest's `malloc`/`free`) are picked up — and copy
+`rust/target/wasm32-wasip1/release/hyperuuid.wasm` in.
+
 ## Verifying provenance
 
 These are compiled binaries committed to git, which is the least inspectable thing in this

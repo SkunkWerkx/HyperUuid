@@ -291,6 +291,16 @@ jobs:
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
 
+      # The wasm32-wasip1 module rides in every gem beside the six native libraries: the
+      # universal gem's third backend (wasmtime, when the platform has no Fiddle library or
+      # HYPERUUID_WASM=1 asks for it) and the same fallback inside each platform gem.
+      - uses: actions/download-artifact@v8
+        with:
+          name: wasm-wasip1-module
+          path: artifacts/wasm-wasip1-module
+          run-id: ${{ needs.find-ci-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
       # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the six
       # plain FFI libs go verbatim into the universal "ruby" platform gem and each Magnus
       # extension goes verbatim into its own precompiled platform gem — so `gem push` is
@@ -311,7 +321,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/*; do
+          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/* artifacts/wasm-wasip1-module/*; do
             echo "::group::verify $f"
             if ! gh attestation verify "$f" \
                  --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
@@ -345,6 +355,8 @@ jobs:
             mkdir -p "$dest"
             cp "../artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
           done
+          mkdir -p lib/hyperuuid/native/wasm32-wasip1
+          cp ../artifacts/wasm-wasip1-module/hyperuuid.wasm lib/hyperuuid/native/wasm32-wasip1/
           bundle exec rake build
 
       - name: Build precompiled platform gems (Magnus)
@@ -503,6 +515,22 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      # The wheel's wasmtime backend module, built here from the same tagged checkout the
+      # wheel itself is built from (this leg never reuses ci.yml's artifacts, see above), so
+      # the two halves of one wheel come from one source tree. From inside rust/, where cargo
+      # reads the crate's .cargo/config.toml export flags.
+      - name: Build wasm32-wasip1 module
+        working-directory: rust
+        run: cargo build --release --target wasm32-wasip1
+
+      - name: Stage wasm32-wasip1 module into the package
+        shell: bash
+        run: |
+          mkdir -p python/src/hyperuuid/native/wasm32-wasip1
+          cp rust/target/wasm32-wasip1/release/hyperuuid.wasm python/src/hyperuuid/native/wasm32-wasip1/
 
       - uses: actions/setup-python@v7
         with:
@@ -602,6 +630,7 @@ jobs:
     with:
       crate: hyperuuid
       java_resources_dir: java/src/main/resources/native
+      wasip1_module: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
     secrets:
       MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}

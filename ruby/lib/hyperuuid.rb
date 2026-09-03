@@ -115,8 +115,24 @@ end
 # remain the universal zero-compile fallback; precompiled platform gems are how the
 # extension ships without ever making a consumer compile anything. Set HYPERUUID_PURE=1 to
 # force Fiddle.
+#
+# The third backend is WebAssembly (lib/hyperuuid/wasm_runtime.rb): the same core as a
+# wasm32-wasip1 module, run in-process by the `wasmtime` gem, which is deliberately not a
+# runtime dependency of this gem — a consumer who wants it installs it. HYPERUUID_WASM=1
+# forces it (and fails loudly if wasmtime is missing); otherwise it is only ever chosen when
+# there is no native library for this platform at all and wasmtime happens to be available,
+# so no supported platform's behavior changes by its existence.
 HyperUuid::BACKEND =
-  if ENV["HYPERUUID_PURE"]
+  if ENV["HYPERUUID_WASM"]
+    begin
+      require "wasmtime"
+    rescue LoadError
+      raise LoadError,
+            "hyperuuid: HYPERUUID_WASM=1 needs the wasmtime gem — `gem install wasmtime` (or add it to your Gemfile)"
+    end
+    require_relative "hyperuuid/wasm_runtime"
+    :wasm
+  elsif ENV["HYPERUUID_PURE"]
     :fiddle
   else
     # Two layouts, and both have to work. A released platform gem is a "fat" gem carrying one
@@ -136,7 +152,21 @@ HyperUuid::BACKEND =
         require "hyperuuid_native"
         :native
       rescue LoadError
-        :fiddle
+        if HyperUuid::Runtime.fiddle_library_available?
+          :fiddle
+        else
+          # No shared library for this platform either. wasmtime, if the consumer has it,
+          # is the only backend left that can run here; without it, stay on Fiddle so the
+          # first call raises its own precise "not found" LoadError rather than a vaguer one
+          # from here.
+          begin
+            require "wasmtime"
+            require_relative "hyperuuid/wasm_runtime"
+            :wasm
+          rescue LoadError
+            :fiddle
+          end
+        end
       end
     end
   end

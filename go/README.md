@@ -5,7 +5,7 @@
 **The same [`google/uuid.UUID`](https://pkg.go.dev/github.com/google/uuid) type your code already uses — minted by a shared Rust core instead of Go's own generator, so a Go service and a Python/Ruby/C#/whatever-else service agree byte-for-byte on every ID they produce.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
-calling directly into the native `libhyperuuid` shared library. Two backends, chosen
+calling directly into the native `libhyperuuid` shared library. Two native backends, chosen
 automatically by build tag, same public API either way: real cgo on darwin/linux
 (`backend_cgo.go`) — 3-6x faster per call, see Benchmarks below — and
 [purego](https://github.com/ebitengine/purego) (`backend_purego.go`) — dlopen/dlsym
@@ -13,7 +13,9 @@ plus per-arch call trampolines, no cgo and no C compiler required — everywhere
 including Windows unconditionally and any darwin/linux build with `CGO_ENABLED=0`.
 Bundles a native build for every supported platform (linux/darwin/windows ×
 amd64/arm64) via `go:embed` and picks the right one at runtime, so `go get` is the whole
-install.
+install. A third backend, opt-in behind `-tags hyperuuid_wasm`, runs the same core as a
+WebAssembly module inside the process through wasmtime-go instead of dlopen'ing anything —
+see [WebAssembly (wasmtime-go)](#webassembly-wasmtime-go).
 
 ```go
 import (
@@ -159,6 +161,69 @@ every cross-compile and for GitHub's own `ubuntu-latest`/`macos-latest` runners
 arbitrary native build environment you don't control. If you hit this, the fix is
 one env var: `CGO_ENABLED=0 go build ./...` forces the purego fallback on any
 platform, native or not.
+
+## WebAssembly (wasmtime-go)
+
+The root README's WebAssembly table lists Go as a **structural** blocker, and that row is
+still true: it is about compiling *this module* to wasm, and neither `cgo` nor `purego`
+has a wasm target. This section is the inverse direction — the Rust core compiled to
+`wasm32-wasip1` and run *inside* an ordinary Go process by
+[wasmtime-go](https://github.com/bytecodealliance/wasmtime-go), with no native shared
+library dlopen'd at all. Same public API, same suite, third backend:
+
+```shell
+go build -tags hyperuuid_wasm ./...
+go test  -tags hyperuuid_wasm ./...
+```
+
+`backend_wasmtime.go` is gated on the `hyperuuid_wasm` tag and the other two backends
+are gated on its absence, so exactly one is ever compiled in. It is opt-in only — never
+selected automatically — because it is the right answer to two specific questions and a
+worse answer to every other one:
+
+- **A platform this module ships no native build for.** The embedded
+  `native/wasm32-wasip1/hyperuuid.wasm` is one artifact for every OS and architecture
+  wasmtime itself runs on; `currentTarget()` and the per-RID shared libraries are not
+  consulted.
+- **A deployment that must not write an executable to a temp file.** The native backends
+  have to (see `native_extract.go`); this one instantiates the module straight from the
+  embedded bytes.
+
+Two costs, stated plainly:
+
+**It is cgo throughout.** wasmtime-go links wasmtime's precompiled static library through
+its C API, so a build with this tag needs a working C toolchain on every platform,
+Windows included — which is exactly the story `backend_purego.go` exists to avoid (see
+"cgo on darwin/linux, purego everywhere else" above). It is also a `require` in
+`go.mod` regardless of tag, because Go has no tag-conditional requirements; it lands in
+every consumer's module graph and `go.sum`, and compiles into a binary only with the tag.
+
+**Every call crosses into a wasm guest, serialized under a mutex.** A wasmtime `Store`
+is not safe for concurrent use, so one process-wide instance takes a lock per call. A
+wasm guest sees only its own linear memory, so nothing is handed over by pointer either:
+inputs are copied into a guest buffer obtained from the module's own exported `malloc`
+(never a host-picked offset — the guest allocator claims the tail of the initial memory
+on first use, and a batch written there was observed corrupted by its very next
+allocation), and results are copied back out. The v7 counter lives inside that one
+instance, so batch and single-call monotonicity hold exactly as they do against one
+loaded shared library.
+
+Measured on the same linux-arm64 machine as the tables below, `go test -tags
+hyperuuid_wasm -bench=. -benchmem`:
+
+| Call | cgo | wasmtime-go |
+| --- | ---: | ---: |
+| `NewV4` | 165 ns, 0 allocs | 2,677 ns, 9 allocs |
+| `NewV5String` | 200 ns, 1 alloc | 4,286 ns, 14 allocs |
+| `NewV7At` | 142 ns, 0 allocs | 3,127 ns, 11 allocs |
+| `NewV7BatchAt(1000, ...)` | 33.6 µs, 2 allocs | 51.0 µs, 14 allocs |
+| `FillV7At` (1000, existing slice) | 18.4 µs, 0 allocs | 40.3 µs, 13 allocs |
+| `FillV7BytesAt` (1000, existing buffer) | 17.6 µs, 0 allocs | 41.3 µs, 13 allocs |
+
+Per call it is roughly 20x the native crossing; per UUID inside a batch it is a little
+over 2x, and the allocations are wasmtime-go's own per-call argument boxing, not this
+module's. The advice the Destination-buffer fills section gives applies here with more
+force, not less: if the workload can batch, batch.
 
 ## Destination-buffer fills
 

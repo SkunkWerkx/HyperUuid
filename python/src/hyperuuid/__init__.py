@@ -15,11 +15,45 @@ from __future__ import annotations
 import datetime
 import uuid as _uuid
 
-from . import _native
+import os as _os
+
+# --- backend selection -----------------------------------------------------------------
+# `_native` is the PyO3 extension: the Rust core linked straight into CPython, the backend
+# every published wheel ships. `_wasm` is the same core compiled to wasm32-wasip1 and run
+# inside this process by wasmtime-py (see `_wasm.py` for how the crossing works and what it
+# costs). HYPERUUID_WASM=1 forces the wasm backend; otherwise it is the fallback for an
+# interpreter no wheel matches, taken only when `wasmtime` is importable — a plain
+# `pip install hyperuuid[wasm]` on an unsupported platform is the whole opt-in.
+if _os.environ.get("HYPERUUID_WASM"):
+    from . import _wasm as _native
+
+    BACKEND = "wasm"
+else:
+    try:
+        from . import _native
+
+        BACKEND = "native"
+    except ImportError as _native_error:
+        try:
+            import wasmtime as _wasmtime  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                f"{_native_error}. No hyperuuid._native extension for this interpreter; the "
+                "wasm backend can stand in if wasmtime is installed: pip install hyperuuid[wasm]"
+            ) from _native_error
+        from . import _wasm as _native
+
+        BACKEND = "wasm"
+
+#: Which backend this process loaded: ``"native"`` (the PyO3 extension) or ``"wasm"`` (the
+#: same core as a wasm32-wasip1 module under wasmtime-py). Informational — every function in
+#: this module behaves identically on both; the test suite runs against each.
+BACKEND: str
 
 _native._bind()
 
 __all__ = [
+    "BACKEND",
     "new_v4",
     "new_v5",
     "new_v6",

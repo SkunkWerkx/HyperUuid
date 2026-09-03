@@ -13,3 +13,20 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
+
+# wasm32-wasip1 is the one target where a host cannot hand this library a pointer into its
+# own memory: a wasm guest only sees its own linear memory, so every host that embeds the
+# module (GraalWasm in the Java binding, wasmtime in the Ruby/Python/Go ones) has to ask the
+# guest for a buffer it can fill. wasi-libc's malloc/free are already linked in (Rust's std
+# allocator on this target is dlmalloc behind them); exporting them costs nothing and keeps
+# ffi.rs's "plain pointers, no allocator protocol" contract untouched for every native
+# platform. Linker flags rather than #[no_mangle] shims, so the C ABI surface stays exactly
+# the twelve uuid_* exports on every other target.
+#
+# Using the guest's allocator, rather than a host-picked offset past the data segments, is
+# load-bearing: dlmalloc claims the tail of the initial memory on first use, and a batch call
+# writing there was observed corrupting the host's buffer on the very next allocation.
+# Cargo only reads this file from the crate directory (`cargo build` run inside rust/), the
+# same way every other target section here already relies on.
+[target.wasm32-wasip1]
+rustflags = ["-C", "link-arg=--export=malloc", "-C", "link-arg=--export=free"]

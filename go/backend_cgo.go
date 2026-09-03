@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux)
+//go:build cgo && (darwin || linux) && !hyperuuid_wasm
 
 // This backend calls libhyperuuid through real cgo instead of purego — measured ~5x faster
 // per call on this project's own benchmarks (see README.md) because a real C call avoids the

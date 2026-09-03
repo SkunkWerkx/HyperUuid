@@ -200,6 +200,17 @@ spike rather than a second shipped backend. CI compile-checks the `php` feature 
 (Linux/macOS) so it can't silently bit-rot, but there's no `phpunit` run against it — see
 [`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning.
 
+## WebAssembly
+
+None today, in either direction, and this README says so rather than leaving it to the root
+README's table. Compiling *this binding* into a wasm PHP: the actively maintained build
+(WordPress Playground's `@php-wasm`) loads extensions at build time or startup only, and
+there is no indication the `FFI` extension this binding needs is available there at all.
+Running the core as wasm *inside* PHP, the way the Java, Ruby, Python and Go bindings now
+do: there is no maintained wasm engine PHP can embed, so there is nothing to stand that on.
+The root README's [WebAssembly section](../README.md#webassembly) tracks both directions for
+every binding; if either changes for PHP, this section is where it lands.
+
 ## Verifying provenance
 
 Packagist has nothing of its own to attest — there's no packed artifact, just a git tag it

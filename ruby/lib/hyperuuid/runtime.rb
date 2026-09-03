@@ -104,6 +104,16 @@ module HyperUuid
         rewrite(:v6_to_rfc_order, bytes)
       end
 
+      # Whether this platform has a shared library for Fiddle to dlopen at all: a known RID
+      # and the file actually present in this install. Backend selection (hyperuuid.rb)
+      # asks this before falling back to the WebAssembly backend, which needs neither.
+      def fiddle_library_available?
+        rid, lib_name = NativePlatform.rid_and_library_name
+        File.exist?(File.join(NATIVE_DIR, rid, lib_name))
+      rescue NativePlatform::UnsupportedPlatformError
+        false
+      end
+
       private
 
       # One 16-byte scratch allocation per thread, reused by every single-item call —

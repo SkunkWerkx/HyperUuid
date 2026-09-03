@@ -1,4 +1,4 @@
-//go:build !(cgo && (darwin || linux))
+//go:build !(cgo && (darwin || linux)) && !hyperuuid_wasm
 
 // This backend calls libhyperuuid through github.com/ebitengine/purego — dlopen/dlsym plus
 // per-arch call trampolines, no cgo and no C compiler required. It's the only backend on

@@ -30,6 +30,11 @@ Gem::Specification.new do |spec|
   # longer implicitly on the load path.
   spec.add_dependency "fiddle"
   spec.add_development_dependency "benchmark-ips", "~> 2.15"
+  # Development-only: the WebAssembly backend (lib/hyperuuid/wasm_runtime.rb) runs the core
+  # inside the wasmtime gem, and the suite runs under it with HYPERUUID_WASM=1. A consumer
+  # who wants that backend installs wasmtime themselves — it is never pulled in by this gem,
+  # so the zero-third-party-dependency install above stays exactly that.
+  spec.add_development_dependency "wasmtime", "~> 47.0"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "yard", "~> 0.9"
 

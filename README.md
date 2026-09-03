@@ -112,6 +112,8 @@ Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s
 
 PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 build, so it always runs under x64 emulation there regardless of host CPU — already exercised for real by the win-x64 leg.
 
+Every leg also builds the core as a `wasm32-wasip1` module and runs the Java, Ruby and Python suites a second time through their in-process wasm backends, and the Go suite the same way on the non-Windows legs (wasmtime-go is cgo throughout and has no win-arm64 build) — see [WebAssembly](#webassembly).
+
 **Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt and aarch64-mingw-ucrt, each gem fat across Ruby 3.4 and 4.0 since a Magnus extension is tied to one Ruby minor) with an automatic fallback to a universal, zero-compile pure-Fiddle gem for everything outside that grid — Ruby 3.2/3.3, musl. Go's embedded native libraries and Swift's `NativeLibs` are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
 
 ## Provenance
@@ -123,8 +125,9 @@ the signing workflow physically lives, not on which registry the artifact ended 
 artifacts signed directly inside this repo's own `release.yml` — the RubyGems gem, the PyPI
 wheel, and the published NuGet package — verify with plain `--repo SkunkWerkx/HyperUuid`.
 Artifacts signed by a reusable workflow hosted in `SkunkWerkx/.github` — the crates.io crate,
-the Maven jar, the pre-push NuGet package, and every native library (which is the entire
-story for Go, Swift, and PHP, none of which has a package-level attestation of its own) —
+the Maven jar, the pre-push NuGet package, every native library (which is the entire
+story for Go, Swift, and PHP, none of which has a package-level attestation of its own), and
+the `wasm32-wasip1` module that rides inside the jar, the gems and `go/native/` —
 need `--signer-repo SkunkWerkx/.github` added, or `--owner SkunkWerkx` in place of both
 flags. Get it wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
 reads like a bad signature but is only an identity mismatch.
@@ -137,24 +140,62 @@ See each binding's own README for its exact verify command and artifact:
 
 ## WebAssembly
 
-**2 of 8 targets proven, live today:**
+There are two directions a binding can meet WebAssembly, and they have nothing in common
+mechanically:
 
-- **Rust** — the core crate itself runs correctly under `wasm32-wasip1` via [`wasmtime`](https://wasmtime.dev/): real WASI randomness (`random_get`) and a real wall clock (`clock_time_get`), not just "compiles for the target."
+- **The binding runs inside wasm.** The whole consumer app is compiled to wasm (Blazor, a
+  wasm32 Rust crate) and the Rust core has to be linked into that build. Two of eight do this
+  today, and four are blocked for reasons that are the ecosystems', not this repo's (table
+  below).
+- **wasm runs inside the binding.** The process stays native; what changes is that the Rust
+  core arrives as a `wasm32-wasip1` module and a wasm engine already available in that
+  ecosystem runs it in-process. No `dlopen`, no per-platform binary, the same twelve C-ABI
+  exports. Four of eight do this today, each behind the binding's existing backend switch,
+  with the engine as an optional dependency the consumer adds only if they want it.
+
+**The binding inside wasm: 2 of 8 proven, live today**
+
+- **Rust** — the core crate itself runs correctly under `wasm32-wasip1` via [`wasmtime`](https://wasmtime.dev/): real WASI randomness (`random_get`), not just "compiles for the target." No clock: `now_v7` is compiled out on `wasm32`, and every v6/v7 door takes the host's timestamp, which is exactly how the four in-process backends below drive it. That build, with the crate's own `.cargo/config.toml` exporting `malloc`/`free`, *is* the `hyperuuid.wasm` those four ship.
 - **C#** — genuinely turnkey. `dotnet add package HyperUuid` into a Blazor WebAssembly project is enough; no `<NativeFileReference>`, no hand-written P/Invoke. See [`csharp/README.md`](csharp/README.md)'s WebAssembly (Blazor) section for exactly how (two builds of the same assembly, an auto-imported `.targets` file supplying the native reference) and the one real caveat that survives it — a `wasm-opt`/rustc version-skew bug in every current `wasm-tools` SDK band, filed upstream as [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858) with a verified workaround.
 
-**1 of 8 proven once, then deliberately dropped:** Python's Pyodide path worked — the Rust core built as a genuine Emscripten *side module*, loaded at runtime in a real [Pyodide](https://pyodide.org/) session via plain `ctypes.CDLL` — but that proof-of-concept existed specifically to justify keeping the `ctypes` fallback backend alive. Once PyO3's `abi3` wheels made `ctypes` unnecessary for every real install (see [State of the union](#state-of-the-union)), the fallback — and the smoke test that proved it — was removed with it, nothing structural stops resurrecting it if a real Pyodide use case shows up.
+**wasm inside the binding: 4 of 8 proven, live today** — one artifact, `hyperuuid.wasm`,
+built from the same crate with wasi-libc's `malloc`/`free` exported (a linker flag in
+`rust/.cargo/config.toml`, no source change), shipped beside the native libraries in the
+jar, the gems and the wheels, and committed under `go/native/` like the rest of Go's
+binaries. CI runs every binding's full suite a second time through it on every leg.
 
-**5 of 8 investigated and currently blocked** — not from a lack of trying, from real gaps checked directly against each ecosystem's own tooling:
+| Binding | Engine | Select it | `new_v7`, one call | 1000-UUID batch | Native, same box |
+| --- | --- | --- | ---: | ---: | --- |
+| Java | [GraalWasm](https://www.graalvm.org/webassembly/) (`org.graalvm.polyglot:wasm`, `compileOnly`, never in the POM) | `-Dhyperuuid.backend=wasm`, or automatic when the jar has no native build for the platform | 420 ns on GraalVM CE 25 (JIT), 181 ns under Native Image, 3.1 µs on Temurin 25 (interpreter only, with a warning) | 15.9 µs (JIT) | 64 ns / 15.8 µs |
+| Ruby | [wasmtime gem](https://github.com/bytecodealliance/wasmtime-rb) (development dependency only) | `HYPERUUID_WASM=1`, or automatic when no Fiddle library exists for the platform | 867 ns | 40.6 µs | ~450 ns / 24 µs |
+| Python | [wasmtime-py](https://github.com/bytecodealliance/wasmtime-py) (`pip install hyperuuid[wasm]`) | `HYPERUUID_WASM=1`, or automatic when the PyO3 extension fails to import (today every wheel and the sdist carry it, so in practice you set the variable; a pure-Python wheel would change that and is not built yet) | 6.2 µs (the bare crossing is 3.1 µs by going underneath wasmtime-py's public call, which re-fetches the function type per call and costs 38 µs) | 41 µs | 0.85 µs / 18.7 µs |
+| Go | [wasmtime-go](https://github.com/bytecodealliance/wasmtime-go) (cgo throughout; no win-arm64 build) | `-tags hyperuuid_wasm` | 3.1 µs | 41 µs | 142 ns / 17.6 µs |
+
+Two facts every one of those four shares, both learned the hard way in the same afternoon.
+The host must take its buffers from the guest's own allocator: a host-picked offset past the
+data segments looked free and was not, because dlmalloc claims the tail of the initial
+memory on first use, and the next allocation overwrote a batch mid-buffer, intermittently,
+depending on what it read back as a chunk header. And every call is serialized under a lock,
+because neither a GraalWasm `Context` nor a wasmtime `Store` is safe for concurrent use; the
+native backends stay lock-free. The per-call numbers are the engines' host-call overhead, not
+wasm execution — the same module costs 0.9 µs from Ruby and 38 µs from Python's public API —
+which is why the batch doors close most of the gap and the single-call doors do not. Every
+number here was measured through the shipped binding, not a harness beside it; each
+binding's README has its own section with the mechanics and the exact loop.
+
+**1 of 8 proven once, then deliberately dropped:** Python's Pyodide path worked — the Rust core built as a genuine Emscripten *side module*, loaded at runtime in a real [Pyodide](https://pyodide.org/) session via plain `ctypes.CDLL` — but that proof-of-concept existed specifically to justify keeping the `ctypes` fallback backend alive. Once PyO3's `abi3` wheels made `ctypes` unnecessary for every real install (see [State of the union](#state-of-the-union)), the fallback — and the smoke test that proved it — was removed with it, nothing structural stops resurrecting it if a real Pyodide use case shows up. The wasmtime backend above is the other direction entirely: wasm inside CPython, not CPython inside wasm.
+
+**The binding inside wasm: 5 of 8 investigated and currently blocked** — not from a lack of trying, from real gaps checked directly against each ecosystem's own tooling. Four of these five now have the inverse direction working (above); Swift and PHP have neither.
 
 | Binding | Blocker | Why |
 | --- | --- | --- |
-| Go | Structural | Neither of Go's two backends works: `cgo` is unavailable for any wasm target (architectural, not a flag), and `purego`'s own supported-platform list has no wasm entry — its whole model is runtime `dlopen`, which doesn't exist in WASM. `go:wasmexport`/`go:wasmimport` (Go 1.24+) let a Go wasm module talk to its host, not link a separately-compiled Rust wasm module. |
-| Swift | Structural | swift.org ships real, official WASM SDKs since Swift 6.2 — but its own docs state dynamic linking "is not formally specified for `wasip1` triples and tooling for it is not available yet," and there's no documented static-lib-linking path to a Rust `.a` either (nothing like C#'s `NativeFileReference`). |
+| Go | Structural | Neither of Go's two native backends works: `cgo` is unavailable for any wasm target (architectural, not a flag), and `purego`'s own supported-platform list has no wasm entry — its whole model is runtime `dlopen`, which doesn't exist in WASM. `go:wasmexport`/`go:wasmimport` (Go 1.24+) let a Go wasm module talk to its host, not link a separately-compiled Rust wasm module. |
+| Swift | Structural | swift.org ships real, official WASM SDKs since Swift 6.2 — but its own docs state dynamic linking "is not formally specified for `wasip1` triples and tooling for it is not available yet," and there's no documented static-lib-linking path to a Rust `.a` either (nothing like C#'s `NativeFileReference`). No wasm engine ships as a Swift package with a stable API either, so the inverse direction has nothing to stand on yet. |
 | Ruby | Structural | `ruby.wasm` is official (bundled with CRuby since 3.2) but ships as one statically-linked component with no runtime library search — confirmed Fiddle itself only resolves libraries known at build time, not arbitrary runtime paths. The Magnus extension doesn't change this: `ruby.wasm` links C extensions statically at build time too. |
-| PHP | Structural | The actively maintained WASM build (WordPress Playground's `@php-wasm`, not the stale `oraoto/pib`) loads extensions build-time/startup-only; no indication the FFI extension this binding needs is available there at all. |
+| PHP | Structural | The actively maintained WASM build (WordPress Playground's `@php-wasm`, not the stale `oraoto/pib`) loads extensions build-time/startup-only; no indication the FFI extension this binding needs is available there at all. There is no maintained wasm engine for PHP to embed either, so the inverse direction is closed too. |
 | Java | Functional gap | No official OpenJDK path. The one Oracle-backed option, GraalVM Native Image's Web Image (`--tool:svm-wasm`), is explicitly labeled experimental and its feature list never mentions the Foreign Function & Memory API this binding is built on; neither third-party compiler (TeaVM, CheerpJ) supports FFM either. This one would mean rewriting the interop layer against experimental tooling with a real hole in it, not a packaging exercise. |
 
-Go/Swift/Ruby/PHP hit the same underlying wall from four different angles: this project's whole architecture — one native core, every binding `dlopen`s the same compiled artifact at runtime — assumes dynamic library loading exists. WASM sandboxes generally don't have one. C#'s working story isn't an exception to that; it's a different mechanism entirely (link-time static linking via `NativeFileReference`), which happens to have a genuine, well-supported analog in .NET's tooling that these four don't (yet) have in theirs. Java's gap is different in kind — not the loading mechanism, but a real missing capability (FFM support) in the compilers that exist at all.
+Go/Swift/Ruby/PHP hit the same underlying wall from four different angles: this project's whole architecture — one native core, every binding `dlopen`s the same compiled artifact at runtime — assumes dynamic library loading exists. WASM sandboxes generally don't have one. C#'s working story isn't an exception to that; it's a different mechanism entirely (link-time static linking via `NativeFileReference`), which happens to have a genuine, well-supported analog in .NET's tooling that these four don't (yet) have in theirs. Java's gap is different in kind — not the loading mechanism, but a real missing capability (FFM support) in the compilers that exist at all. The wasm-inside-the-binding backends sidestep that wall rather than climb it: the engine is the loader.
 
 ## Why not your platform's built-in UUID call?
 
@@ -225,7 +266,7 @@ The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any pla
 | Go (purego, Windows/`CGO_ENABLED=0`) — v7 | 574.8 µs | 29.4 µs | **19.6x** |
 | Go (purego, Windows/`CGO_ENABLED=0`) — v6 | 565.9 µs | 33.0 µs | 17.2x |
 
-Go's two backends tell different stories here, and both are worth knowing before picking where to put your hot path. Every individual purego call does 4-7 heap allocations (252-360 B/op via `go test -bench=. -benchmem`) — unlike Rust and C#, which are both genuinely zero-allocation per call — almost certainly `unsafe.Pointer` arguments crossing into purego's dynamically-generated call trampolines defeating Go's escape analysis. Batch generation collapses ~5000 of those allocations into 7, which is why purego's batch win looks the largest of any binding. Since 2026-08-27, darwin/linux builds default to a real cgo backend instead (`go/backend_cgo.go`, purego remaining the automatic fallback on Windows and any `CGO_ENABLED=0` build — see `go/README.md` for the full tradeoff and why Windows stays on purego unconditionally): cgo cuts per-call allocations to zero (one for v5, Go's own `[]byte(name)`) and individual calls 3-4x faster outright, which *shrinks* the batch-vs-individual gap rather than widening it, since batch generation was already amortizing most of the cost purego was paying per call. Net effect: cgo wins for individual-call-heavy workloads, purego and cgo land in the same place for batch-heavy ones — and batch is exactly where [the control group](#the-control-group-go) stops being the exception.
+Go's two native backends tell different stories here, and both are worth knowing before picking where to put your hot path (the wasmtime-go backend behind `-tags hyperuuid_wasm` has its own numbers in the [Go README](go/#webassembly-wasmtime-go)). Every individual purego call does 4-7 heap allocations (252-360 B/op via `go test -bench=. -benchmem`) — unlike Rust and C#, which are both genuinely zero-allocation per call — almost certainly `unsafe.Pointer` arguments crossing into purego's dynamically-generated call trampolines defeating Go's escape analysis. Batch generation collapses ~5000 of those allocations into 7, which is why purego's batch win looks the largest of any binding. Since 2026-08-27, darwin/linux builds default to a real cgo backend instead (`go/backend_cgo.go`, purego remaining the automatic fallback on Windows and any `CGO_ENABLED=0` build — see `go/README.md` for the full tradeoff and why Windows stays on purego unconditionally): cgo cuts per-call allocations to zero (one for v5, Go's own `[]byte(name)`) and individual calls 3-4x faster outright, which *shrinks* the batch-vs-individual gap rather than widening it, since batch generation was already amortizing most of the cost purego was paying per call. Net effect: cgo wins for individual-call-heavy workloads, purego and cgo land in the same place for batch-heavy ones — and batch is exactly where [the control group](#the-control-group-go) stops being the exception.
 
 Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and asserts zero allocations, then asserts the batch functions' scratch buffer *does* allocate, confirming it's the one deliberate exception documented in `v6.rs`/`v7.rs`.
 
@@ -259,10 +300,10 @@ That also explains why Go and C# barely move: they were already at the floor. Th
 - **Monotonically increasing v7** — a process-global counter (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls
 - **Batch generation** — `*Batch`/`*_batch` for v6/v7 amortizes timestamp capture, counter reservation, and the random-bytes fetch across the whole batch
 - **SQL Server byte ordering** — `*ToSqlOrder`/`*_to_sql_order` for both v6 and v7, computed once in the Rust core and exported to every binding, verified against the real `System.Data.SqlTypes.SqlGuid` comparator
-- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol or an embedded interpreter — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path
+- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path. The one deliberate exception is opt-in: Java, Ruby, Python and Go can each run the same core as a `wasm32-wasip1` module inside the process (GraalWasm, wasmtime) for a platform with no native build, still the same twelve exports, still the same test suite — see [WebAssembly](#webassembly)
 - **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
 - **AOT-friendly** — C# publishes cleanly under `PublishAot`; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
-- **CI-proven, not CI-claimed** — 6 real-hardware platforms × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch
+- **CI-proven, not CI-claimed** — 6 real-hardware platforms × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch, and the Java/Ruby/Python/Go suites a second time on every leg through a freshly-built `wasm32-wasip1` module
 
 ## Contributing
 

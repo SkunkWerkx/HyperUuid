@@ -16,6 +16,23 @@ every UUID it produces are untouched.
 
 ### Added
 
+- **A wasm backend in Java, Ruby, Python and Go.** The core built as a `wasm32-wasip1`
+  module, `hyperuuid.wasm`, ships beside the native libraries in the jar, the gems and the
+  wheels, and is committed under `go/native/`; a wasm engine the ecosystem already has runs it
+  in-process, behind each binding's existing backend switch, with the engine an optional
+  dependency: GraalWasm for Java (`-Dhyperuuid.backend=wasm`, `compileOnly`, never in the
+  POM), the wasmtime gem for Ruby (`HYPERUUID_WASM=1`), wasmtime-py for Python
+  (`pip install hyperuuid[wasm]`, `HYPERUUID_WASM=1`), wasmtime-go for Go
+  (`-tags hyperuuid_wasm`). Java, Ruby and Python also fall back to it automatically when the
+  package carries no native build for the platform. Measured on one box, through each
+  shipped binding: `new_v7` at 420 ns under GraalVM's JIT and 181 ns under Native Image
+  (3.1 µs interpreter-only on a stock JDK), 867 ns from Ruby, 6.2 µs from Python, 3.1 µs
+  from Go, against 64 / ~450 / 850 / 142 ns native; the 1000-UUID byte fills land at
+  15.9 / 40.6 / 41 / 41 µs against 15.8 / 24 / 18.7 / 17.6 µs native. Every call is serialized under a
+  lock. The module exports wasi-libc's `malloc`/`free` through a linker flag in
+  `rust/.cargo/config.toml`, because a host-picked offset into the guest's initial memory
+  collides with dlmalloc; CI builds the module on every leg and runs every suite a second
+  time through it. *(Maven Central, RubyGems, PyPI, `go get`)*
 - **`newV5(namespace:name:)` over an `UnsafeRawBufferPointer`** in Swift — the primitive the
   `String` and `[UInt8]` forms now wrap. *(`.package(url:)`)*
 
@@ -46,8 +63,12 @@ every UUID it produces are untouched.
 
 ### Upgrade note
 
-Drop-in for every binding. Nothing is removed or renamed; the one new door is an overload
-beside the existing surface.
+Drop-in for every binding. Nothing is removed or renamed. The wasm backends are opt-in and
+change nothing until asked for: no new runtime dependency in any package (Java's GraalWasm
+is `compileOnly`, Ruby's wasmtime a development dependency, Python's an extra, Go's behind a
+build tag — though wasmtime-go does now appear in `go.mod`, so it enters a consumer's module
+graph without entering their binary). The Rust crate itself is unchanged since 0.2.1; it
+takes the coordinated version like every other package.
 
 ## [0.2.1] — 2026-09-02
 
