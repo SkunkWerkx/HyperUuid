@@ -5,7 +5,7 @@
 **The same [`google/uuid.UUID`](https://pkg.go.dev/github.com/google/uuid) type your code already uses — minted by a shared Rust core instead of Go's own generator, so a Go service and a Python/Ruby/C#/whatever-else service agree byte-for-byte on every ID they produce.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
-calling directly into the native `libhyperuuid` shared library. Two backends, chosen
+calling directly into the native `libhyperuuid` shared library. Two native backends, chosen
 automatically by build tag, same public API either way: real cgo on darwin/linux
 (`backend_cgo.go`) — 3-6x faster per call, see Benchmarks below — and
 [purego](https://github.com/ebitengine/purego) (`backend_purego.go`) — dlopen/dlsym
@@ -13,7 +13,9 @@ plus per-arch call trampolines, no cgo and no C compiler required — everywhere
 including Windows unconditionally and any darwin/linux build with `CGO_ENABLED=0`.
 Bundles a native build for every supported platform (linux/darwin/windows ×
 amd64/arm64) via `go:embed` and picks the right one at runtime, so `go get` is the whole
-install.
+install. A third backend, opt-in behind `-tags hyperuuid_wasm`, runs the same core as a
+WebAssembly module inside the process through wasmtime-go instead of dlopen'ing anything —
+see [WebAssembly (wasmtime-go)](#webassembly-wasmtime-go).
 
 ```go
 import (

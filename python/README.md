@@ -8,7 +8,9 @@
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. A
 native extension built with [PyO3](https://pyo3.rs) — the Rust core linked directly into the
 CPython extension module, no `dlopen`, no C-ABI hop, no `ctypes` marshalling, no runtime
-bridge.
+bridge. A second backend runs the same core as a `wasm32-wasip1` module inside CPython through
+`wasmtime-py`, opt-in via `pip install hyperuuid[wasm]` and `HYPERUUID_WASM=1` — see
+[WebAssembly (wasmtime)](#webassembly-wasmtime).
 
 Ships as real platform-specific wheels — linux/macOS/Windows, x64/arm64, six in total, one
 `abi3` build covering every supported CPython 3.9+ — so `pip install hyperuuid` lands at

@@ -112,6 +112,18 @@ Batch generation amortizes the native call over the whole batch, and no longer p
 
 **≈42x for v6, ≈50x for v7** — one native call and one allocation instead of a thousand of each, with the batch doors now landing on the same floor the fills reach.
 
+## WebAssembly
+
+None today, in either direction. Compiling *this binding* to wasm: swift.org ships real WASM
+SDKs since Swift 6.2, but its own docs say dynamic linking "is not formally specified for
+`wasip1` triples and tooling for it is not available yet," and there is no documented path
+to link a Rust `.a` statically either — this binding is `dlopen`/`@convention(c)` all the
+way down. Running the core as wasm *inside* Swift, the way the Java, Ruby, Python and Go
+bindings now do: no wasm engine ships as a Swift package with a stable API today, so there
+is nothing to embed. The root README's [WebAssembly section](../README.md#webassembly)
+tracks both directions for every binding; if either changes for Swift, this section is
+where it lands.
+
 ## Verifying provenance
 
 Like PHP, there's no separate package registry to attest here — SwiftPM resolves a git tag

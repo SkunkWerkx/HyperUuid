@@ -6,7 +6,7 @@
 **Ruby's own stdlib stops at `SecureRandom.uuid` — random v4, full stop. No v5, no v6, no v7. This gem is the whole RFC, with zero gem dependency beyond `Fiddle` (which ships with every Ruby install) — and it's faster than `SecureRandom.uuid` too.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
-two backends sharing one public surface. The fast path is a native extension built with
+three backends sharing one public surface. The fast path is a native extension built with
 [Magnus](https://github.com/matsadler/magnus) — the Rust core linked directly into the Ruby
 VM, auto-selected when loadable — which redefines the low-level `Runtime` methods in place
 on require; everything above them (`Uuid`, the module doors, batch slicing) is shared
