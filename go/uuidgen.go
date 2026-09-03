@@ -4,7 +4,9 @@
 // Windows unconditionally (backend_purego.go) — dlopen/dlsym plus either a real C call or
 // purego's per-arch call trampolines, no C compiler required to build or consume this module
 // on the purego path (the same "no runtime bridge" positioning as the Python/PyO3 and
-// Java/FFM bindings).
+// Java/FFM bindings). A third backend, opt-in by build tag, runs the same core as a
+// WebAssembly module inside the process instead of dlopen'ing anything at all
+// (backend_wasmtime.go, `-tags hyperuuid_wasm`).
 //
 // This module bundles a native build for every supported platform (see currentTarget) and
 // loads the right one at runtime, the same trick the Java binding uses since neither a Go
