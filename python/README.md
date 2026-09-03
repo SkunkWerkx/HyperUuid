@@ -147,6 +147,65 @@ build the release extension — `pip install -e ".[bench]"` alone builds debug b
 will understate every number above — then `pip install pyperf` and
 `python bench_uuid.py --fast -o results.json`.
 
+## WebAssembly (wasmtime)
+
+The same Rust core, compiled to `wasm32-wasip1`, run *inside* CPython by
+[`wasmtime-py`](https://github.com/bytecodealliance/wasmtime-py) — the inverse of the Pyodide
+experiment this package once carried (CPython itself in the browser, loading the core as an
+Emscripten side module). Nothing is reimplemented: `hyperuuid._wasm` calls the identical twelve
+`uuid_*` C-ABI exports the PyO3 extension does, across a guest/host memory boundary instead of a
+direct call. The whole test suite runs against it.
+
+```sh
+pip install hyperuuid[wasm]        # adds wasmtime; the .wasm module ships inside every wheel and the sdist
+HYPERUUID_WASM=1 python app.py     # force it; hyperuuid.BACKEND reports "wasm" or "native"
+```
+
+Without the variable, `_native` is used whenever it imports, and `_wasm` is the fallback when it
+does not and `wasmtime` is installed — an install whose extension cannot load keeps working
+instead of failing at import. One honest limit on that story today: pip still resolves an
+interpreter with no matching wheel to the sdist, and the sdist builds the PyO3 extension, so it
+needs a Rust toolchain either way. A pure-Python wheel carrying only the wasm backend is what
+would make `pip install hyperuuid[wasm]` land with nothing to compile anywhere; it is not built
+yet.
+
+Three things about the crossing decide the numbers below:
+
+- **Buffers come from the guest.** A wasm module only sees its own linear memory, so this backend
+  asks the module's exported `malloc` for every buffer it fills — 16-byte scratch, a v5 name, a
+  batch destination — rather than picking an offset itself. That is load-bearing, not tidiness:
+  a host-chosen offset past the data segments was tried first, and the guest's own allocator
+  (dlmalloc, which claims the tail of the initial memory on first use) corrupted a batch.
+- **Calls are serialized.** A wasmtime `Store` is not thread-safe and the v7 counter lives inside
+  the one instance, so one process-wide lock guards every call. Uncontended under the GIL; on a
+  free-threaded build it is what keeps two threads out of one store.
+- **The call path sidesteps wasmtime-py's per-call type lookup.** `Func.__call__` re-fetches the
+  function's type from the engine and builds and frees a `FuncType` plus one `ValType` wrapper per
+  parameter and result on *every* call — measured at 38 µs per call, almost none of it in the
+  guest. This backend builds the argument and result arrays once and hands them to the same
+  `wasmtime_func_call` C entry point the library reaches after that bookkeeping, 3.1 µs for the
+  bare call. That touches `wasmtime._ffi`, which is not public API, so it is bound inside a `try`
+  at load time and degrades to the public call — slow, never broken — if a wasmtime release
+  moves it.
+
+Measured end to end on CPython 3.14.7, aarch64-linux, `timeit` best of five, same session as the
+native column:
+
+| Call | wasm backend | native (`_native`) |
+| --- | ---: | ---: |
+| `new_v4()` | 5.5 µs | 0.71 µs |
+| `new_v7(ms)` | 6.2 µs | 0.85 µs |
+| `new_v5(...)` | 8.1 µs | 1.2 µs |
+| `v7_timestamp(...)` | 5.3 µs | 0.51 µs |
+| `fill_v7(bytearray)`, 1000 UUIDs | 41 µs | 18.7 µs |
+| `new_v7_batch(1000)` → `list[UUID]` | 648 µs | 585 µs |
+
+Read it the way the rest of this README reads: single calls pay the crossing (about 5 µs of
+Python-side lock, argument packing and guest memory copy on top of the 3.1 µs call), the byte
+fill amortizes it to under 2.2x native, and the object-building batch is construction-bound on
+both backends so the crossing barely shows. If you are on this backend and minting in bulk, reach
+for `fill_v7`/`fill_v6` exactly as the section above already advises.
+
 ## Verifying provenance
 
 Every wheel PyPI serves carries a GitHub build-provenance attestation, signed directly by

@@ -33,12 +33,20 @@ Issues = "https://github.com/SkunkWerkx/HyperUuid/issues"
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 bench = ["pyperf>=2.6"]
+# The wasm32-wasip1 build of the same core, run in-process by wasmtime-py — the backend for
+# an interpreter no `_native` wheel matches (see README's WebAssembly section). Optional
+# because a matching wheel needs nothing at all, and wasmtime is a ~10 MB runtime.
+wasm = ["wasmtime>=47"]
 
 [tool.maturin]
 manifest-path = "../rust/Cargo.toml"
 python-source = "src"
 module-name = "hyperuuid._native"
 features = ["python"]
+# The wasm32-wasip1 build of the core (staged under src/hyperuuid/native/ by CI, gitignored
+# like every other binding's native staging dir). maturin's python-source walk skips it
+# without this, so the wasm backend would import cleanly and then find no module to load.
+include = [{ path = "src/hyperuuid/native/wasm32-wasip1/hyperuuid.wasm", format = ["sdist", "wheel"] }]
 
 [tool.ruff.lint]
 # Doc-comment enforcement only — the "missing docstring" family of pydocstyle rules
