@@ -63,8 +63,12 @@ every UUID it produces are untouched.
 
 ### Upgrade note
 
-Drop-in for every binding. Nothing is removed or renamed; the one new door is an overload
-beside the existing surface.
+Drop-in for every binding. Nothing is removed or renamed. The wasm backends are opt-in and
+change nothing until asked for: no new runtime dependency in any package (Java's GraalWasm
+is `compileOnly`, Ruby's wasmtime a development dependency, Python's an extra, Go's behind a
+build tag — though wasmtime-go does now appear in `go.mod`, so it enters a consumer's module
+graph without entering their binary). The Rust crate itself is unchanged since 0.2.1; it
+takes the coordinated version like every other package.
 
 ## [0.2.1] — 2026-09-02
 
