@@ -1,4 +1,5 @@
 require "spec_helper"
+require "hyperuuid"
 require "open3"
 
 # Cross-backend agreement for the WebAssembly backend, the same contract

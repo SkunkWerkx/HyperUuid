@@ -1,4 +1,5 @@
 require "spec_helper"
+require "hyperuuid"
 require "open3"
 
 # Cross-backend agreement: the Magnus extension and the pure-Fiddle fallback must be
