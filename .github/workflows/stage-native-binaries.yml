@@ -75,6 +75,16 @@ jobs:
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
+      # go/native/wasm32-wasip1/hyperuuid.wasm is committed for the same reason the six
+      # native libraries under go/native are: a go:embed consumer gets whatever is in the
+      # tree. Same verify-then-stage gate as the rest.
+      - uses: actions/download-artifact@v8
+        with:
+          name: wasm-wasip1-module
+          path: artifacts/wasm-wasip1-module
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ github.token }}
+
       # Committed binaries are the weakest provenance story in this repo: a reviewer can't
       # diff them, and "trust me, CI built it" is exactly what a downstream consumer inside a
       # trust boundary can't accept. So each artifact's SLSA attestation is verified BEFORE it
@@ -130,6 +140,18 @@ jobs:
               cp "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest_root/$rid/"
             done
           done
+
+          wasm=artifacts/wasm-wasip1-module/hyperuuid.wasm
+          echo "::group::verify wasm32-wasip1"
+          if ! gh attestation verify "$wasm" \
+               --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+            echo "::error::No valid build provenance for the wasm32-wasip1 module — refusing to commit it."
+            exit 1
+          fi
+          echo "::endgroup::"
+          echo "$(sha256sum "$wasm" | cut -d' ' -f1)  wasm32-wasip1/hyperuuid.wasm" >> digests.txt
+          mkdir -p go/native/wasm32-wasip1
+          cp "$wasm" go/native/wasm32-wasip1/
 
           echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

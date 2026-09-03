@@ -137,24 +137,62 @@ See each binding's own README for its exact verify command and artifact:
 
 ## WebAssembly
 
-**2 of 8 targets proven, live today:**
+There are two directions a binding can meet WebAssembly, and they have nothing in common
+mechanically:
+
+- **The binding runs inside wasm.** The whole consumer app is compiled to wasm (Blazor, a
+  wasm32 Rust crate) and the Rust core has to be linked into that build. Two of eight do this
+  today, and four are blocked for reasons that are the ecosystems', not this repo's (table
+  below).
+- **wasm runs inside the binding.** The process stays native; what changes is that the Rust
+  core arrives as a `wasm32-wasip1` module and a wasm engine already available in that
+  ecosystem runs it in-process. No `dlopen`, no per-platform binary, the same twelve C-ABI
+  exports. Four of eight do this today, each behind the binding's existing backend switch,
+  with the engine as an optional dependency the consumer adds only if they want it.
+
+**The binding inside wasm: 2 of 8 proven, live today**
 
 - **Rust** — the core crate itself runs correctly under `wasm32-wasip1` via [`wasmtime`](https://wasmtime.dev/): real WASI randomness (`random_get`) and a real wall clock (`clock_time_get`), not just "compiles for the target."
 - **C#** — genuinely turnkey. `dotnet add package HyperUuid` into a Blazor WebAssembly project is enough; no `<NativeFileReference>`, no hand-written P/Invoke. See [`csharp/README.md`](csharp/README.md)'s WebAssembly (Blazor) section for exactly how (two builds of the same assembly, an auto-imported `.targets` file supplying the native reference) and the one real caveat that survives it — a `wasm-opt`/rustc version-skew bug in every current `wasm-tools` SDK band, filed upstream as [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858) with a verified workaround.
 
-**1 of 8 proven once, then deliberately dropped:** Python's Pyodide path worked — the Rust core built as a genuine Emscripten *side module*, loaded at runtime in a real [Pyodide](https://pyodide.org/) session via plain `ctypes.CDLL` — but that proof-of-concept existed specifically to justify keeping the `ctypes` fallback backend alive. Once PyO3's `abi3` wheels made `ctypes` unnecessary for every real install (see [State of the union](#state-of-the-union)), the fallback — and the smoke test that proved it — was removed with it, nothing structural stops resurrecting it if a real Pyodide use case shows up.
+**wasm inside the binding: 4 of 8 proven, live today** — one artifact, `hyperuuid.wasm`,
+built from the same crate with wasi-libc's `malloc`/`free` exported (a linker flag in
+`rust/.cargo/config.toml`, no source change), shipped beside the native libraries in the
+jar, the gems and the wheels, and committed under `go/native/` like the rest of Go's
+binaries. CI runs every binding's full suite a second time through it on every leg.
 
-**5 of 8 investigated and currently blocked** — not from a lack of trying, from real gaps checked directly against each ecosystem's own tooling:
+| Binding | Engine | Select it | `new_v7`, one call | 1000-UUID batch | Native, same box |
+| --- | --- | --- | ---: | ---: | --- |
+| Java | [GraalWasm](https://www.graalvm.org/webassembly/) (`org.graalvm.polyglot:wasm`, `compileOnly`, never in the POM) | `-Dhyperuuid.backend=wasm`, or automatic when the jar has no native build for the platform | 420 ns on GraalVM CE 25 (JIT), 181 ns under Native Image, 3.1 µs on Temurin 25 (interpreter only, with a warning) | 15.9 µs (JIT) | 64 ns / 15.8 µs |
+| Ruby | [wasmtime gem](https://github.com/bytecodealliance/wasmtime-rb) (development dependency only) | `HYPERUUID_WASM=1`, or automatic when no Fiddle library exists for the platform | 867 ns | 40.6 µs | ~450 ns / 24 µs |
+| Python | [wasmtime-py](https://github.com/bytecodealliance/wasmtime-py) (`pip install hyperuuid[wasm]`) | `HYPERUUID_WASM=1`, or automatic when no wheel matches | 6.2 µs (the bare crossing is 3.1 µs by going underneath wasmtime-py's public call, which re-fetches the function type per call and costs 38 µs) | 41 µs | 0.85 µs / 18.7 µs |
+| Go | [wasmtime-go](https://github.com/bytecodealliance/wasmtime-go) (cgo throughout; no win-arm64 build) | `-tags hyperuuid_wasm` | 3.1 µs | 41 µs | 142 ns / 17.6 µs |
+
+Two facts every one of those four shares, both learned the hard way in the same afternoon.
+The host must take its buffers from the guest's own allocator: a host-picked offset past the
+data segments looked free and was not, because dlmalloc claims the tail of the initial
+memory on first use, and the next allocation overwrote a batch mid-buffer, intermittently,
+depending on what it read back as a chunk header. And every call is serialized under a lock,
+because neither a GraalWasm `Context` nor a wasmtime `Store` is safe for concurrent use; the
+native backends stay lock-free. The per-call numbers are the engines' host-call overhead, not
+wasm execution — the same module costs 0.9 µs from Ruby and 38 µs from Python's public API —
+which is why the batch doors close most of the gap and the single-call doors do not. Every
+number here was measured through the shipped binding, not a harness beside it; each
+binding's README has its own section with the mechanics and the exact loop.
+
+**1 of 8 proven once, then deliberately dropped:** Python's Pyodide path worked — the Rust core built as a genuine Emscripten *side module*, loaded at runtime in a real [Pyodide](https://pyodide.org/) session via plain `ctypes.CDLL` — but that proof-of-concept existed specifically to justify keeping the `ctypes` fallback backend alive. Once PyO3's `abi3` wheels made `ctypes` unnecessary for every real install (see [State of the union](#state-of-the-union)), the fallback — and the smoke test that proved it — was removed with it, nothing structural stops resurrecting it if a real Pyodide use case shows up. The wasmtime backend above is the other direction entirely: wasm inside CPython, not CPython inside wasm.
+
+**The binding inside wasm: 5 of 8 investigated and currently blocked** — not from a lack of trying, from real gaps checked directly against each ecosystem's own tooling. Four of these five now have the inverse direction working (above); Swift and PHP have neither.
 
 | Binding | Blocker | Why |
 | --- | --- | --- |
 | Go | Structural | Neither of Go's two backends works: `cgo` is unavailable for any wasm target (architectural, not a flag), and `purego`'s own supported-platform list has no wasm entry — its whole model is runtime `dlopen`, which doesn't exist in WASM. `go:wasmexport`/`go:wasmimport` (Go 1.24+) let a Go wasm module talk to its host, not link a separately-compiled Rust wasm module. |
-| Swift | Structural | swift.org ships real, official WASM SDKs since Swift 6.2 — but its own docs state dynamic linking "is not formally specified for `wasip1` triples and tooling for it is not available yet," and there's no documented static-lib-linking path to a Rust `.a` either (nothing like C#'s `NativeFileReference`). |
+| Swift | Structural | swift.org ships real, official WASM SDKs since Swift 6.2 — but its own docs state dynamic linking "is not formally specified for `wasip1` triples and tooling for it is not available yet," and there's no documented static-lib-linking path to a Rust `.a` either (nothing like C#'s `NativeFileReference`). No wasm engine ships as a Swift package with a stable API either, so the inverse direction has nothing to stand on yet. |
 | Ruby | Structural | `ruby.wasm` is official (bundled with CRuby since 3.2) but ships as one statically-linked component with no runtime library search — confirmed Fiddle itself only resolves libraries known at build time, not arbitrary runtime paths. The Magnus extension doesn't change this: `ruby.wasm` links C extensions statically at build time too. |
-| PHP | Structural | The actively maintained WASM build (WordPress Playground's `@php-wasm`, not the stale `oraoto/pib`) loads extensions build-time/startup-only; no indication the FFI extension this binding needs is available there at all. |
+| PHP | Structural | The actively maintained WASM build (WordPress Playground's `@php-wasm`, not the stale `oraoto/pib`) loads extensions build-time/startup-only; no indication the FFI extension this binding needs is available there at all. There is no maintained wasm engine for PHP to embed either, so the inverse direction is closed too. |
 | Java | Functional gap | No official OpenJDK path. The one Oracle-backed option, GraalVM Native Image's Web Image (`--tool:svm-wasm`), is explicitly labeled experimental and its feature list never mentions the Foreign Function & Memory API this binding is built on; neither third-party compiler (TeaVM, CheerpJ) supports FFM either. This one would mean rewriting the interop layer against experimental tooling with a real hole in it, not a packaging exercise. |
 
-Go/Swift/Ruby/PHP hit the same underlying wall from four different angles: this project's whole architecture — one native core, every binding `dlopen`s the same compiled artifact at runtime — assumes dynamic library loading exists. WASM sandboxes generally don't have one. C#'s working story isn't an exception to that; it's a different mechanism entirely (link-time static linking via `NativeFileReference`), which happens to have a genuine, well-supported analog in .NET's tooling that these four don't (yet) have in theirs. Java's gap is different in kind — not the loading mechanism, but a real missing capability (FFM support) in the compilers that exist at all.
+Go/Swift/Ruby/PHP hit the same underlying wall from four different angles: this project's whole architecture — one native core, every binding `dlopen`s the same compiled artifact at runtime — assumes dynamic library loading exists. WASM sandboxes generally don't have one. C#'s working story isn't an exception to that; it's a different mechanism entirely (link-time static linking via `NativeFileReference`), which happens to have a genuine, well-supported analog in .NET's tooling that these four don't (yet) have in theirs. Java's gap is different in kind — not the loading mechanism, but a real missing capability (FFM support) in the compilers that exist at all. The wasm-inside-the-binding backends sidestep that wall rather than climb it: the engine is the loader.
 
 ## Why not your platform's built-in UUID call?
 
