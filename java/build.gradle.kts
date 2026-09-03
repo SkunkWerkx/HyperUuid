@@ -25,7 +25,18 @@ repositories {
     mavenCentral()
 }
 
+// GraalWasm, the wasm backend's runtime, is deliberately compileOnly: this jar's POM carries no
+// dependency on it, so a consumer on the default FFM path downloads nothing extra. Opting into
+// the wasm path means adding both artifacts (polyglot for the API, wasm for the engine — a
+// POM-type dependency that fans out into Truffle) to their own build; see README.md's
+// WebAssembly section. Tests get both on the runtime classpath so the whole suite can run a
+// second time through the wasm module (the testWasm task below).
+val graalPolyglotVersion = "25.3.4.1"
+
 dependencies {
+    compileOnly("org.graalvm.polyglot:polyglot:$graalPolyglotVersion")
+    testRuntimeOnly("org.graalvm.polyglot:polyglot:$graalPolyglotVersion")
+    testRuntimeOnly("org.graalvm.polyglot:wasm:$graalPolyglotVersion")
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -48,6 +59,27 @@ tasks.test {
     // UuidGenerator's FFM downcalls are a "restricted method" — silences the runtime
     // warning today and avoids them being blocked outright in a future JDK.
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
+// The identical suite, forced through the GraalWasm backend (-Dhyperuuid.backend=wasm), so
+// both interop paths are held to the same 48 assertions on every build. --enable-native-access
+// is for Truffle's own System.load, not this binding; WarnInterpreterOnly=false silences the
+// engine's fallback-runtime notice on a non-GraalVM JDK, which is what CI and most dev boxes
+// run — the numbers in README.md say what that fallback costs, this just keeps the test log
+// readable.
+val testWasm = tasks.register<Test>("testWasm") {
+    description = "Runs the test suite against the bundled wasm32-wasip1 module via GraalWasm."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Dpolyglot.engine.WarnInterpreterOnly=false")
+    systemProperty("hyperuuid.backend", "wasm")
+    shouldRunAfter(tasks.test)
+}
+
+tasks.check {
+    dependsOn(testWasm)
 }
 
 java {

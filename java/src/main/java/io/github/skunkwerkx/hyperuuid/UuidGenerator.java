@@ -33,9 +33,17 @@ import java.util.UUID;
  * native side directly, and the 16-byte in/out scratch the single-UUID doors need lives in one
  * per-thread segment for the life of the thread rather than a confined {@link Arena} opened
  * and torn down on every call. The underlying Rust core never allocates for these calls
- * either. This is JVM-only: {@code java.lang.foreign}
- * doesn't exist outside the JVM. This jar bundles a native build for every platform (see
+ * either. This jar bundles a native build for every supported platform (see
  * {@link NativePlatform}) and picks the right one at runtime.
+ *
+ * <p>The same core also ships inside this jar as a {@code wasm32-wasip1} module, run by
+ * <a href="https://www.graalvm.org/webassembly/">GraalWasm</a> when {@link #BACKEND_PROPERTY}
+ * says so or when no native build exists for the running platform. That path needs
+ * {@code org.graalvm.polyglot:polyglot} and {@code org.graalvm.polyglot:wasm} on the
+ * classpath (optional dependencies, never pulled in transitively), serializes every call on
+ * one lock, and costs several times a native downcall per operation; {@link #backend()}
+ * reports which path is active. Everything else — every method, every exception, every
+ * message — is identical between the two.
  */
 public final class UuidGenerator {
     private UuidGenerator() {}
@@ -54,8 +62,24 @@ public final class UuidGenerator {
         private Namespaces() {}
     }
 
+    /**
+     * Name of the system property that picks the interop path: {@code "native"} for the FFM
+     * downcalls into the bundled platform library, {@code "wasm"} for the bundled
+     * {@code wasm32-wasip1} module run by GraalWasm. Unset means native when this platform's
+     * library is bundled, wasm otherwise.
+     */
+    public static final String BACKEND_PROPERTY = "hyperuuid.backend";
+
+    /**
+     * Non-null only when the wasm path was selected — see {@link #selectWasm()}. Every public
+     * method checks this one {@code static final} against {@code null} before its FFM path;
+     * the JIT folds that check away, so the native path costs exactly what it did before a
+     * second backend existed.
+     */
+    private static final Backend WASM = selectWasm();
+
     private static final Linker LINKER = Linker.nativeLinker();
-    private static final SymbolLookup LOOKUP = loadLibrary();
+    private static final SymbolLookup LOOKUP = WASM == null ? loadLibrary() : null;
 
     // critical(true) is what lets a heap segment (MemorySegment.ofArray over the caller's
     // byte[]) cross without being copied into native memory first: the array is pinned for
@@ -64,46 +88,95 @@ public final class UuidGenerator {
     // a bounded computation over the bytes it was handed, with no callbacks.
     private static final Linker.Option CRITICAL = Linker.Option.critical(true);
 
-    private static final MethodHandle UUID_NEW_V4 = LINKER.downcallHandle(
-            LOOKUP.find("uuid_new_v4").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_NEW_V5 = LINKER.downcallHandle(
-            LOOKUP.find("uuid_new_v5").orElseThrow(),
-            FunctionDescriptor.of(
+    private static final MethodHandle UUID_NEW_V4 = downcall("uuid_new_v4", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V5 = downcall("uuid_new_v5", FunctionDescriptor.of(
                     ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_NEW_V6 = LINKER.downcallHandle(
-            LOOKUP.find("uuid_new_v6").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_V6_UNIX_MILLIS = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v6_unix_millis").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_NEW_V6_BATCH = LINKER.downcallHandle(
-            LOOKUP.find("uuid_new_v6_batch").orElseThrow(),
-            FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_NEW_V7 = LINKER.downcallHandle(
-            LOOKUP.find("uuid_new_v7").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_V7_UNIX_MILLIS = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v7_unix_millis").orElseThrow(),
-            FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_NEW_V7_BATCH = LINKER.downcallHandle(
-            LOOKUP.find("uuid_new_v7_batch").orElseThrow(),
-            FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_V7_TO_SQL_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v7_to_sql_order").orElseThrow(),
-            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_V7_TO_RFC_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v7_to_rfc_order").orElseThrow(),
-            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_V6_TO_SQL_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v6_to_sql_order").orElseThrow(),
-            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
-    private static final MethodHandle UUID_V6_TO_RFC_ORDER = LINKER.downcallHandle(
-            LOOKUP.find("uuid_v6_to_rfc_order").orElseThrow(),
-            FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
+                    ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V6 = downcall("uuid_new_v6", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V6_UNIX_MILLIS = downcall("uuid_v6_unix_millis", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V6_BATCH = downcall("uuid_new_v6_batch", FunctionDescriptor.of(
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V7 = downcall("uuid_new_v7", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V7_UNIX_MILLIS = downcall("uuid_v7_unix_millis", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_NEW_V7_BATCH = downcall("uuid_new_v7_batch", FunctionDescriptor.of(
+                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V7_TO_SQL_ORDER = downcall("uuid_v7_to_sql_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V7_TO_RFC_ORDER = downcall("uuid_v7_to_rfc_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V6_TO_SQL_ORDER = downcall("uuid_v6_to_sql_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+    private static final MethodHandle UUID_V6_TO_RFC_ORDER = downcall("uuid_v6_to_rfc_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+
+    // Null when the wasm backend is active — the static final MethodHandles above are then
+    // never invoked, and there is no library to look symbols up in.
+    private static MethodHandle downcall(String symbol, FunctionDescriptor descriptor) {
+        if (LOOKUP == null) {
+            return null;
+        }
+        return LINKER.downcallHandle(LOOKUP.find(symbol).orElseThrow(), descriptor, CRITICAL);
+    }
+
+    /**
+     * Decides the interop path once, at class init, and never again. {@link #BACKEND_PROPERTY}
+     * set to {@code "wasm"} forces the GraalWasm backend; {@code "native"} forces FFM (and fails
+     * loudly if this platform has no bundled library); unset takes FFM when this platform's
+     * native library is bundled and falls back to wasm when it is not — an OS/arch this jar
+     * ships no native build for still works, just through the wasm module.
+     *
+     * <p>{@link WasmBackend} is instantiated by name so that {@code org.graalvm.polyglot} is
+     * never loaded unless it is actually going to be used: it is a {@code compileOnly}
+     * dependency of this jar, present at runtime only if the consumer added it.
+     */
+    private static Backend selectWasm() {
+        String choice = System.getProperty(BACKEND_PROPERTY);
+        boolean nativeAvailable;
+        try {
+            nativeAvailable = UuidGenerator.class.getResource(NativePlatform.resourcePath()) != null;
+        } catch (RuntimeException | LinkageError unsupportedPlatform) {
+            // NativePlatform refuses an OS/arch it has no RID for; that is exactly the case the
+            // wasm module exists to cover.
+            nativeAvailable = false;
+        }
+        if ("native".equals(choice) || (choice == null && nativeAvailable)) {
+            return null;
+        }
+        if (choice != null && !"wasm".equals(choice)) {
+            throw new IllegalStateException(
+                    BACKEND_PROPERTY + " must be \"native\" or \"wasm\"; got \"" + choice + "\"");
+        }
+        if (UuidGenerator.class.getResource(WasmBackend.RESOURCE_PATH) == null) {
+            throw new IllegalStateException(choice == null
+                    ? NativePlatform.resourcePath() + " classpath resource not found (unsupported "
+                            + "platform, or this jar was built without a native library for it), and "
+                            + WasmBackend.RESOURCE_PATH + " is not bundled either"
+                    : WasmBackend.RESOURCE_PATH + " classpath resource not found (this jar was built "
+                            + "without the wasm module)");
+        }
+        try {
+            return (Backend) Class.forName(UuidGenerator.class.getPackageName() + ".WasmBackend")
+                    .getDeclaredConstructor()
+                    .newInstance();
+        } catch (ReflectiveOperationException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IllegalStateException("hyperuuid: could not start the wasm backend", cause);
+        } catch (NoClassDefFoundError e) {
+            throw new IllegalStateException("hyperuuid: the wasm backend needs GraalWasm on the "
+                    + "classpath — add org.graalvm.polyglot:polyglot and org.graalvm.polyglot:wasm "
+                    + "(the latter is a POM-type dependency)", e);
+        }
+    }
+
+    /**
+     * Which interop path this process is using: {@code "native"} (FFM downcalls into the
+     * bundled platform library) or {@code "wasm"} (the bundled {@code wasm32-wasip1} module run
+     * by GraalWasm). Decided once at class init; see {@link #BACKEND_PROPERTY}.
+     *
+     * @return {@code "native"} or {@code "wasm"}
+     */
+    public static String backend() {
+        return WASM == null ? "native" : WASM.name();
+    }
 
     /** The RFC 9562 §5.9 Nil UUID — all 128 bits zero. */
     public static final UUID NIL = new UUID(0L, 0L);
@@ -172,6 +245,9 @@ public final class UuidGenerator {
      * @return a new random version 4 UUID
      */
     public static UUID newV4() {
+        if (WASM != null) {
+            return WASM.newV4();
+        }
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
@@ -220,6 +296,9 @@ public final class UuidGenerator {
      * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, byte[] name) {
+        if (WASM != null) {
+            return WASM.newV5(namespace, name);
+        }
         Scratch scratch = SCRATCH.get();
         MemorySegment nsSeg = writeUuid(scratch.in, namespace);
         // The caller's own array crosses pinned; a zero-length name is the ABI's NULL.
@@ -259,6 +338,9 @@ public final class UuidGenerator {
      *     timestamp field
      */
     public static UUID newV6(long unixMillis) {
+        if (WASM != null) {
+            return WASM.newV6(unixMillis);
+        }
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
@@ -298,6 +380,9 @@ public final class UuidGenerator {
      * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v6UnixMillis(UUID uuid) {
+        if (WASM != null) {
+            return WASM.v6UnixMillis(uuid);
+        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             return (long) UUID_V6_UNIX_MILLIS.invokeExact(seg);
@@ -330,6 +415,9 @@ public final class UuidGenerator {
      *     timestamp field
      */
     public static UUID[] newV6Batch(int count, long unixMillis) {
+        if (WASM != null) {
+            return WASM.newV6Batch(count, unixMillis);
+        }
         if (count == 0) {
             return new UUID[0];
         }
@@ -384,6 +472,9 @@ public final class UuidGenerator {
      *     within 48 bits
      */
     public static UUID newV7(long unixMillis) {
+        if (WASM != null) {
+            return WASM.newV7(unixMillis);
+        }
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
@@ -423,6 +514,9 @@ public final class UuidGenerator {
      * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v7UnixMillis(UUID uuid) {
+        if (WASM != null) {
+            return WASM.v7UnixMillis(uuid);
+        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             return (long) UUID_V7_UNIX_MILLIS.invokeExact(seg);
@@ -492,6 +586,9 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into SQL Server wire order
      */
     public static UUID v7ToSqlOrder(UUID uuid) {
+        if (WASM != null) {
+            return WASM.v7ToSqlOrder(uuid);
+        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             UUID_V7_TO_SQL_ORDER.invokeExact(seg);
@@ -509,6 +606,9 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into RFC 9562 order
      */
     public static UUID v7FromSqlOrder(UUID uuid) {
+        if (WASM != null) {
+            return WASM.v7FromSqlOrder(uuid);
+        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             UUID_V7_TO_RFC_ORDER.invokeExact(seg);
@@ -547,6 +647,9 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into SQL Server wire order
      */
     public static UUID v6ToSqlOrder(UUID uuid) {
+        if (WASM != null) {
+            return WASM.v6ToSqlOrder(uuid);
+        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             UUID_V6_TO_SQL_ORDER.invokeExact(seg);
@@ -564,6 +667,9 @@ public final class UuidGenerator {
      * @return {@code uuid} reordered into RFC 9562 order
      */
     public static UUID v6FromSqlOrder(UUID uuid) {
+        if (WASM != null) {
+            return WASM.v6FromSqlOrder(uuid);
+        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             UUID_V6_TO_RFC_ORDER.invokeExact(seg);
@@ -585,6 +691,9 @@ public final class UuidGenerator {
      *     within 48 bits
      */
     public static UUID[] newV7Batch(int count, long unixMillis) {
+        if (WASM != null) {
+            return WASM.newV7Batch(count, unixMillis);
+        }
         if (count == 0) {
             return new UUID[0];
         }
@@ -668,6 +777,10 @@ public final class UuidGenerator {
      * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      */
     public static void fillV7(UUID[] destination, long unixMillis) {
+        if (WASM != null) {
+            WASM.fillV7(destination, unixMillis);
+            return;
+        }
         fillUuidArray(destination, unixMillis, UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
     }
 
@@ -690,6 +803,10 @@ public final class UuidGenerator {
      * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      */
     public static void fillV6(UUID[] destination, long unixMillis) {
+        if (WASM != null) {
+            WASM.fillV6(destination, unixMillis);
+            return;
+        }
         fillUuidArray(destination, unixMillis, UUID_NEW_V6_BATCH, "uuid_new_v6_batch");
     }
 
@@ -727,6 +844,10 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of 16
      */
     public static void fillV7(byte[] destination, long unixMillis) {
+        if (WASM != null) {
+            WASM.fillV7(destination, unixMillis);
+            return;
+        }
         fillByteArray(destination, unixMillis, UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
     }
 
@@ -748,6 +869,10 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of 16
      */
     public static void fillV6(byte[] destination, long unixMillis) {
+        if (WASM != null) {
+            WASM.fillV6(destination, unixMillis);
+            return;
+        }
         fillByteArray(destination, unixMillis, UUID_NEW_V6_BATCH, "uuid_new_v6_batch");
     }
 
@@ -797,6 +922,10 @@ public final class UuidGenerator {
      * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
      */
     public static void v7ToSqlOrder(byte[] uuid) {
+        if (WASM != null) {
+            WASM.v7ToSqlOrder(uuid);
+            return;
+        }
         sqlOrderBytes(uuid, UUID_V7_TO_SQL_ORDER, "uuid_v7_to_sql_order");
     }
 
@@ -806,6 +935,10 @@ public final class UuidGenerator {
      * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
      */
     public static void v7FromSqlOrder(byte[] uuid) {
+        if (WASM != null) {
+            WASM.v7FromSqlOrder(uuid);
+            return;
+        }
         sqlOrderBytes(uuid, UUID_V7_TO_RFC_ORDER, "uuid_v7_to_rfc_order");
     }
 
@@ -816,6 +949,10 @@ public final class UuidGenerator {
      * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
      */
     public static void v6ToSqlOrder(byte[] uuid) {
+        if (WASM != null) {
+            WASM.v6ToSqlOrder(uuid);
+            return;
+        }
         sqlOrderBytes(uuid, UUID_V6_TO_SQL_ORDER, "uuid_v6_to_sql_order");
     }
 
@@ -825,6 +962,10 @@ public final class UuidGenerator {
      * @param uuid the 16 RFC 9562-ordered bytes, rewritten in place
      */
     public static void v6FromSqlOrder(byte[] uuid) {
+        if (WASM != null) {
+            WASM.v6FromSqlOrder(uuid);
+            return;
+        }
         sqlOrderBytes(uuid, UUID_V6_TO_RFC_ORDER, "uuid_v6_to_rfc_order");
     }
 }

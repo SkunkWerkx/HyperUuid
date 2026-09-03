@@ -5,7 +5,7 @@
 
 **`java.util.UUID` can generate v4 (random) and v3 (MD5 name-based) — that's it. No v5, no v6, no v7, no batch API. This binding gives you the whole RFC.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via the Java Foreign Function & Memory API (stable since JDK 22 / JEP 454) — no runtime bridge, no reflection, no extra runtime dependency (plain Java, not Kotlin: see the root README for why that matters). This jar bundles a native build for every supported platform and picks the right one at runtime.
+RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via the Java Foreign Function & Memory API (stable since JDK 22 / JEP 454) — no runtime bridge, no reflection, no extra runtime dependency (plain Java, not Kotlin: see the root README for why that matters). This jar bundles a native build for every supported platform and picks the right one at runtime — and, alongside them, the same core as a `wasm32-wasip1` module that [GraalWasm](https://www.graalvm.org/webassembly/) can run inside the JVM with no native binary at all (see [WebAssembly](#webassembly-graalwasm)).
 
 ```java
 import io.github.skunkwerkx.hyperuuid.UuidGenerator;
@@ -41,7 +41,7 @@ The honest answer for versions v6/v7 is that there's no comparison to make — t
 5. **Cross-language consistency.** The same Rust core mints v5/v6/v7 UUIDs for every other binding in this repo — a Java service and a Python or Go service produce byte-identical v5 UUIDs for the same `(namespace, name)`, which no per-language reimplementation can structurally guarantee.
 6. **SQL Server byte ordering.** `UuidGenerator.v7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`v6ToSqlOrder` does the same for version 6, though same-millisecond v6 UUIDs aren't guaranteed to sort correctly since v6 has no counter), computed once in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. One caveat worth being direct about: this is verified at the raw-byte level against .NET's own `Guid` wire format, which ADO.NET passes through unchanged — it has *not* been checked against any specific JDBC driver's own `uniqueidentifier` parameter binding, which may or may not apply a further transform of its own. Verify against your driver, or bind the returned bytes directly, before relying on it in a JDBC-facing query.
 
-The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
+The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar, or the wasm module below on a platform without one) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
 
 ## Destination-buffer fills
 
@@ -104,6 +104,41 @@ Reproduce: `./gradlew :benchmarks:jmh`.
 ## AOT
 
 Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary exercising every function in this binding, including the SQL/RFC byte-order conversions, no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime) — already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config.
+
+## WebAssembly (GraalWasm)
+
+The jar carries the Rust core a second time, as `native/wasm32-wasip1/hyperuuid.wasm` — the exact same twelve `uuid_*` C exports, compiled for WASI preview 1 instead of an OS. [GraalWasm](https://www.graalvm.org/webassembly/) runs that module inside the JVM, so `UuidGenerator` has a second interop path that needs no platform-specific binary and no `java.lang.foreign`: the polyglot API calls the exports, and the guest's own exported `malloc` supplies the buffers the core fills. Every public method, exception and message is identical between the two paths — the full test suite runs twice on every build (`./gradlew test testWasm`), once through each.
+
+This is not the Java binding compiled *to* WebAssembly (the root README's WebAssembly table still says why that path is blocked). It is the opposite direction: the Rust core running *as* WebAssembly inside an ordinary JVM.
+
+**Enabling it.** GraalWasm is deliberately not a dependency of this jar — its POM lists nothing, so the default FFM path pulls in nothing extra. Add the two artifacts yourself (`wasm` is a POM-type dependency that fans out into the Truffle runtime):
+
+```kotlin
+dependencies {
+    implementation("io.github.skunkwerkx:hyperuuid:<version>")
+    implementation("org.graalvm.polyglot:polyglot:25.3.4.1")
+    runtimeOnly("org.graalvm.polyglot:wasm:25.3.4.1")
+}
+```
+
+Then either set `-Dhyperuuid.backend=wasm` to force it, or do nothing: with the property unset, `UuidGenerator` takes the FFM path when the jar has a native build for the running OS/arch and falls back to the wasm module when it does not. `-Dhyperuuid.backend=native` forces FFM and fails loudly on a platform without a bundled library. `UuidGenerator.backend()` reports `"native"` or `"wasm"` for whichever won. Selecting wasm without GraalWasm on the classpath fails at class init with a message naming the two artifacts; the `org.graalvm.polyglot` classes are never loaded otherwise.
+
+**What it costs**, measured through `UuidGenerator` itself on linux-arm64 with the module the jar ships: one million `newV7(long)` calls after warm-up, then three thousand fills of a 16,000-byte array and of a 1000-element `UUID[]`, in one loop with no harness between the caller and the class. The FFM row is the same loop on the same JVM, so the two are directly comparable (the JMH table above is the FFM path's own benchmark):
+
+| Runtime | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
+| --- | ---: | ---: | ---: |
+| FFM downcall, GraalVM CE 25 or Temurin 25 | 64 ns | 15.8 µs | 79 µs |
+| GraalWasm on GraalVM CE 25 (JIT) | 420 ns | 15.9 µs | 26.1 µs |
+| GraalWasm under GraalVM Native Image | 181 ns | 19.8 µs | — |
+| GraalWasm on Temurin 25 (interpreter fallback) | 3.1 µs | 850 µs | 867 µs |
+
+Three things those rows say plainly. On a stock OpenJDK, GraalWasm has no JIT: the engine prints a fallback-runtime warning at startup (`-Dpolyglot.engine.WarnInterpreterOnly=false` silences it) and runs the module interpreted, at roughly 50x the FFM cost per call and slower than `UUID.randomUUID()`. The JIT numbers need a GraalVM JDK or a Native Image build; nothing in this jar can change that. And the batch doors are where the two paths meet: one crossing per thousand UUIDs, and the byte fill lands at parity with FFM under the JIT. (The `UUID[]` fill reads faster than FFM here because it copies the bytes out in one crossing and builds the objects in plain Java; the FFM path's own number for that door is what it is.) The per-call gap is the polyglot crossing itself — each export is resolved once and called through its cached `Value`, and a UUID comes back in one 16-byte read, which together took the call from 675 ns to 420 ns; what remains is the engine's host-to-guest entry plus the lock.
+
+One number from the same Native Image binary that is not about this backend: the FFM path itself measured 6.5 µs per `newV7(long)` under Native Image in this harness, a hundred times its JVM cost and far behind the wasm module in the same binary. That is a finding about `Linker.Option.critical` heap access under Native Image, recorded here because it was measured here, not something the wasm path changes.
+
+**Threading.** A polyglot context does not allow concurrent access from multiple threads, so every call on the wasm path is serialized on one lock; one context and one module instance serve the whole process, which is also what keeps the core's process-wide v7 counter a single sequence. The FFM path has no lock. A hot, multi-threaded generator should expect that difference, not just the per-call one.
+
+**Native Image.** The bundled `reachability-metadata.json` registers `WasmBackend`'s constructor for reflection and the `native/*/*` resource glob already covers the module, so a consumer's `native-image` build of the wasm path needs no extra configuration on this jar's account — verified by building the published jar plus the two GraalWasm artifacts into a native executable and running it with `-Dhyperuuid.backend=wasm` (the 181 ns row above); the same binary run without the property takes the FFM path.
 
 ## Verifying provenance
 
