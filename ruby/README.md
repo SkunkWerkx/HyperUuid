@@ -15,7 +15,10 @@ shared library via [`Fiddle`](https://docs.ruby-lang.org/en/master/Fiddle.html) 
 dlopen/dlsym plus a raw C-ABI call, no runtime bridge, nothing to compile on
 `bundle install`. Set `HYPERUUID_PURE=1` to force the Fiddle backend;
 `HyperUuid::BACKEND` reports which one is live. Bundles a native build for every supported
-platform (linux/darwin/windows × x64/arm64) and picks the right one at runtime.
+platform (linux/darwin/windows × x64/arm64) and picks the right one at runtime. A third
+backend runs the same core as a WebAssembly module inside the
+[`wasmtime`](https://rubygems.org/gems/wasmtime) gem, for any platform with no native build
+at all — see [WebAssembly (wasmtime)](#webassembly-wasmtime).
 
 ```ruby
 require "hyperuuid"
@@ -108,6 +111,53 @@ Batch generation still amortizes per-call cost on both backends — one native c
 | `new_v7_batch(1000)` | 2,744.3 (**3.9x**) |
 
 The batch multiplier shrank from 11x to ~3.8x for the best reason available: the individual calls got 3x faster, so there's less waste left to amortize. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
+
+## WebAssembly (wasmtime)
+
+The Rust core also ships inside this gem as a `wasm32-wasip1` module
+(`lib/hyperuuid/native/wasm32-wasip1/hyperuuid.wasm`), and the
+[`wasmtime`](https://rubygems.org/gems/wasmtime) gem can run it in-process. This is the
+inverse of ruby.wasm — not Ruby inside a wasm sandbox, but a wasm module inside Ruby — and
+it is the one backend that needs no shared library for the platform it runs on: no
+`dlopen`, no Magnus extension, nothing compiled against this Ruby's ABI. Everything above
+`Runtime` (`Uuid`, the module doors, batch slicing) is the same code the other two backends
+run, and `spec/wasm_backend_spec.rb` pins that the outputs agree with the Fiddle backend
+byte for byte.
+
+`wasmtime` is deliberately **not** a dependency of this gem; a consumer who wants this path
+installs it:
+
+```sh
+gem install wasmtime
+HYPERUUID_WASM=1 ruby -rhyperuuid -e 'p HyperUuid::BACKEND'   # => :wasm
+```
+
+`HYPERUUID_WASM=1` forces the backend (and raises a `LoadError` naming the gem if it is
+missing). Without it, the wasm backend is only ever chosen automatically when there is no
+native library for this platform at all — no Magnus extension and no `libhyperuuid` for the
+RID — and `wasmtime` happens to be installed. No supported platform's behavior changes just
+because this backend exists.
+
+Two things are different under the sandbox, both by necessity. A wasm guest only sees its own
+linear memory, so every buffer the core fills comes from the module's own exported `malloc`
+(the same wasi-libc allocator Rust's std uses on that target) and is read back with
+`Memory#read` — using the guest's allocator rather than a host-picked offset is what keeps a
+batch from being clobbered by the guest's next allocation. And a `Wasmtime::Store` is
+single-threaded, so every call is serialized under one Mutex around one shared instance,
+which is also what keeps the core's v7 counter (it lives inside the instance) monotonic
+across threads and batches, exactly as the one dlopen'd library does natively.
+
+Measured, same box as the benchmarks above (Ruby 4.0.6, linux-arm64, wasmtime 47.0.3):
+
+| Call | wasmtime | native (Magnus) |
+|---|---:|---:|
+| `uuid_new_v7`, single, per call | 867 ns | ~450 ns |
+| `uuid_new_v7_batch(1000)`, per call | 40.6 µs (50.6 µs with the 16 KB read back into Ruby) | 24 µs |
+
+So roughly 2x the native cost per call, and the batch doors amortize it the same way they do
+for Fiddle. The guest's own work is not where the time goes — the identical module runs at
+14 µs per thousand under a JIT-compiled host — it is the crossing, and Ruby's is one of the
+cheaper ones.
 
 ## Verifying provenance
 
