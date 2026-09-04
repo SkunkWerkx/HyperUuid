@@ -42,6 +42,77 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Local dev loop, ported from HyperCast (which had it from its first release, mirroring the
+// C# csproj's copy of the freshly-built core): when the Rust cdylib exists in-repo (a
+// release-profile cargo build in ../rust), stage it as the classpath resource
+// /native/{rid}/{lib} the loader expects, so `./gradlew test` needs nothing copied by hand.
+// CI overlays every platform's build into the same layout before packaging.
+val nativeRid = run {
+    val osName = System.getProperty("os.name").lowercase()
+    val isArm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm") }
+    when {
+        osName.contains("win") -> if (isArm) "win-arm64" else "win-x64"
+        osName.contains("mac") || osName.contains("darwin") -> if (isArm) "osx-arm64" else "osx-x64"
+        else -> if (isArm) "linux-arm64" else "linux-x64"
+    }
+}
+
+// Only when this platform's library has NOT been placed under src/main/resources
+// explicitly. The forge builds the PyO3 extension (cargo build --features python) into the
+// same rust/target/release/ BEFORE the Java leg runs, so staging from there in CI would put
+// an extension with unresolved Py* imports beside the correctly placed one (HyperCast's
+// first collapsed-job run failed every Linux leg exactly so). Explicit placement is the
+// signal that the right bytes are already on the classpath.
+//
+// A Sync that stages nothing, rather than a Copy that is skipped: a skipped task leaves
+// whatever it staged last time in generated-resources, and the moment a library is placed
+// explicitly on top of that, processResources fails on the duplicate entry (found by
+// staging, then placing, in one working tree). Sync removes what it did not stage.
+val nativePlaced = file("src/main/resources/native/$nativeRid").exists()
+val stageNativeLibrary = tasks.register<Sync>("stageNativeLibrary") {
+    from("../rust/target/release") {
+        include("libhyperuuid.so", "libhyperuuid.dylib", "hyperuuid.dll")
+        if (nativePlaced) {
+            exclude("**")
+        }
+    }
+    into(layout.buildDirectory.dir("generated-resources/native/$nativeRid"))
+}
+
+// The same dev loop for the wasm32-wasip1 module the GraalWasm backend runs: a
+// `cargo build --release --target wasm32-wasip1` in ../rust (from inside rust/, so its
+// .cargo/config.toml export flags apply) lands at /native/wasm32-wasip1/hyperuuid.wasm on
+// the classpath, beside the platform library. Same explicit-placement yield as above.
+val wasmPlaced = file("src/main/resources/native/wasm32-wasip1").exists()
+val stageWasmModule = tasks.register<Sync>("stageWasmModule") {
+    from("../rust/target/wasm32-wasip1/release") {
+        include("hyperuuid.wasm")
+        if (wasmPlaced) {
+            exclude("**")
+        }
+    }
+    into(layout.buildDirectory.dir("generated-resources/native/wasm32-wasip1"))
+}
+
+sourceSets.main {
+    resources.srcDir(layout.buildDirectory.dir("generated-resources"))
+}
+
+tasks.processResources {
+    dependsOn(stageNativeLibrary, stageWasmModule)
+}
+
+// sourcesJar packages the main source set, and `generated-resources` is one of its resource
+// dirs (above) — so it reads the staging tasks' output too, and Gradle fails the build
+// outright on the undeclared dependency rather than risk a task-order-dependent jar. Only
+// the publish path builds sourcesJar (`./gradlew test` never does), which is how HyperCast
+// first hit this against Maven Central and not in CI. withType/configureEach rather than
+// tasks.named("sourcesJar"): the sources and javadoc jars are registered by the vanniktech
+// publish plugin, so they don't exist yet at this point in configuration.
+tasks.withType<Jar>().configureEach {
+    dependsOn(stageNativeLibrary, stageWasmModule)
+}
+
 // Ships the license text and this binding's README inside the jar, under META-INF/ (the
 // conventional home for both). Gradle copies from anywhere on disk, so the repo root's
 // LICENSE is referenced directly — no local copy, unlike the gem and the wheel, whose
@@ -62,7 +133,7 @@ tasks.test {
 }
 
 // The identical suite, forced through the GraalWasm backend (-Dhyperuuid.backend=wasm), so
-// both interop paths are held to the same 48 assertions on every build. --enable-native-access
+// both interop paths are held to the same assertions on every build. --enable-native-access
 // is for Truffle's own System.load, not this binding; WarnInterpreterOnly=false silences the
 // engine's fallback-runtime notice on a non-GraalVM JDK, which is what CI and most dev boxes
 // run — the numbers in README.md say what that fallback costs, this just keeps the test log
