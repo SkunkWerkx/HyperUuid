@@ -59,7 +59,7 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 
 `./gradlew :benchmarks:jmh`, JMH average time, 1000 UUIDs per op:
 
-| Benchmark | 0.2.1 | now | B/op now |
+| Benchmark | before | after | B/op after |
 | --- | ---: | ---: | ---: |
 | `newV7` x1000 individually | 121.5 µs | **74.5 µs** | 32,000 |
 | `newV7Batch(1000)` | 33.2 µs | **26.1 µs** | 52,104 |
@@ -76,9 +76,9 @@ A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`
 
 ## Benchmarks
 
-Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode, `-prof gc` for the allocation column — 0.2.1 against the carrier rewrite, same machine, same session:
+Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode, `-prof gc` for the allocation column — before the carrier rewrite against after, same machine, same session:
 
-| Method | 0.2.1 | now | B/op | vs. `UUID.randomUUID()` |
+| Method | before | after | B/op | vs. `UUID.randomUUID()` |
 | --- | ---: | ---: | ---: | ---: |
 | `UUID.randomUUID()` | 1137 ns | 1117 ns | 128 | baseline |
 | `UuidGenerator.newV4()` | 155.0 ns | **101.8 ns** | 112 → **32** | **11.0x faster** |

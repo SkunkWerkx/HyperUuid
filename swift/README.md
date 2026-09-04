@@ -72,7 +72,7 @@ Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uu
 
 `swift package benchmark`, p50 wall clock, 1000 UUIDs per op:
 
-| Benchmark | 0.2.1 | now | mallocs now |
+| Benchmark | before | after | mallocs after |
 | --- | ---: | ---: | ---: |
 | `newV7` x1000 individually | 947 µs | **844 µs** | 1000 → **0** |
 | `newV7Batch(count: 1000)` | 86 µs | **17 µs** | 1002 → **1** |
@@ -91,7 +91,7 @@ The raw-buffer overload is for callers who want RFC-ordered bytes rather than `U
 
 Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-arm64, p50 of 10,000 samples):
 
-| Call | 0.2.1 | now | Malloc (total) |
+| Call | before | after | Malloc (total) |
 |---|---:|---:|---:|
 | `Foundation.UUID()` | 3,101 ns | 3,201 ns | 0 |
 | `UuidGenerator.newV4()` | 1,000 ns | **900 ns** | 1 → **0** |
@@ -103,7 +103,7 @@ Every HyperUuid call here is faster than `Foundation.UUID()` on this machine —
 
 Batch generation amortizes the native call over the whole batch, and no longer pays a per-element construction on top:
 
-| Call | 0.2.1 | now | Per-UUID now |
+| Call | before | after | Per-UUID after |
 |---|---:|---:|---:|
 | `newV6()` × 1000 (individual) | 991 µs | **842 µs** | 842 ns |
 | `newV6Batch(count: 1000)` | 91 µs | **20 µs** | 20 ns |

@@ -262,7 +262,7 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 no extra tooling needed. Measured on the same linux-arm64 machine, same run, both
 backends (`go test -bench=.` for cgo, `CGO_ENABLED=0 go test -bench=.` for purego):
 
-| Call | cgo 0.2.1 | cgo now | purego | Speedup (cgo now vs purego) |
+| Call | cgo before | cgo after | purego | Speedup (cgo after vs purego) |
 | --- | ---: | ---: | ---: | ---: |
 | `NewV4` | 174 ns, 1 alloc | **165 ns, 0 allocs** | 506 ns, 4 allocs | **3.1x** |
 | `NewV5String` | 200 ns, 3 allocs | **200 ns, 1 alloc** | 731 ns, 7 allocs | **3.7x** |

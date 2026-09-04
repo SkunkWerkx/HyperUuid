@@ -163,12 +163,12 @@ The reason for the last two rows: **nuget.org adds its repository signature as a
 ```shell
 # verify the published bytes directly — nothing to undo.
 # Signed by release.yml, which lives in this repo, so no --signer-repo is needed.
-gh attestation verify HyperUuid.0.1.1.nupkg --repo SkunkWerkx/HyperUuid
+gh attestation verify HyperUuid.X.Y.Z.nupkg --repo SkunkWerkx/HyperUuid
 
 # or recover the as-built artifact and verify that instead.
 # Signed by hyper-pack-nuget.yml over in the forge repo, so this half needs --signer-repo.
-zip -d HyperUuid.0.1.1.nupkg .signature.p7s
-gh attestation verify HyperUuid.0.1.1.nupkg \
+zip -d HyperUuid.X.Y.Z.nupkg .signature.p7s
+gh attestation verify HyperUuid.X.Y.Z.nupkg \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
 
