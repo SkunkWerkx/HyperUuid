@@ -7,6 +7,33 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Test and dev-loop setup learned while porting the WASM lineup to HyperCast, carried back.
+Nothing a consumer installs changes.
+
+### Added
+
+- **A repeatable Native Image proof of the wasm path.** `./gradlew :aot-smoke-test:nativeRun
+  -Pwasm` puts GraalWasm on the smoke test's classpath and runs the binary with
+  `-Dhyperuuid.backend=wasm`; the binary prints which backend it took. The 0.3.0 receipt for
+  this came from a one-off hand build against the published jar. *(dev only)*
+- **JMH through the wasm backend.** `./gradlew :benchmarks:jmh -Pwasm` runs the same suite
+  through GraalWasm, with the longer warmup Truffle's runtime compilation needs — HyperCast
+  saw error bars wider than the values at the FFM suite's 3×1s — and `-PjmhInclude=<regex>`
+  runs a subset. Under GraalVM CE 25.3's JIT that run puts `newV7` at 133 ns against 72 ns
+  FFM in the same session, closer than the README's hand-loop 420 ns row. *(dev only)*
+- **A dev loop for the native library and the wasm module.** The Java build stages
+  `rust/target/release` and `rust/target/wasm32-wasip1/release` onto the classpath when
+  nothing has been placed under `src/main/resources/native` explicitly, and the Ruby and
+  Python backends fall back to the same in-repo builds when the packaged file is absent, so
+  `./gradlew test testWasm`, `HYPERUUID_WASM=1 bundle exec rspec` and `HYPERUUID_WASM=1
+  pytest` need nothing copied by hand. The Ruby fallback also counts for backend selection:
+  `fiddle_library_available?` sees the in-repo build too. Same dev trap as HyperCast's
+  README already documents: an extension-feature build overwrites the plain cdylib, and the
+  fallback will dlopen it and fail on unresolved `Py*` symbols until a plain
+  `cargo build --release` puts it back. *(dev only)*
+
 ## [0.3.0] — 2026-09-03
 
 Two themes. The first is *one core, one more way in*: Java, Ruby, Python and Go can now run
@@ -338,6 +365,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.1...v0.2.0

@@ -41,7 +41,13 @@ import time
 import uuid as _uuid
 from pathlib import Path
 
-_MODULE_PATH = Path(__file__).resolve().parent / "native" / "wasm32-wasip1" / "hyperuuid.wasm"
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_MODULE_PATH = _PACKAGE_DIR / "native" / "wasm32-wasip1" / "hyperuuid.wasm"
+# Development loop: the in-repo cargo build, the same fallback the Ruby runtime takes for
+# its native library, so `HYPERUUID_WASM=1 pytest` needs nothing staged by hand.
+_REPO_BUILD_PATH = (
+    _PACKAGE_DIR.parent.parent.parent / "rust" / "target" / "wasm32-wasip1" / "release" / "hyperuuid.wasm"
+)
 
 # Signatures of the exports this backend calls, as (parameter kinds, result kind) in wasm
 # value-type terms — the C ABI in rust/src/ffi.rs, with every pointer an i32 offset into the
@@ -116,13 +122,14 @@ class _Guest:
     def __init__(self) -> None:
         import wasmtime
 
-        if not _MODULE_PATH.is_file():
+        path = _MODULE_PATH if _MODULE_PATH.is_file() else _REPO_BUILD_PATH
+        if not path.is_file():
             raise ImportError(
                 f"hyperuuid: {_MODULE_PATH} not found (this install was built without the "
                 "wasm32-wasip1 module)"
             )
         engine = wasmtime.Engine()
-        module = wasmtime.Module.from_file(engine, str(_MODULE_PATH))
+        module = wasmtime.Module.from_file(engine, str(path))
         linker = wasmtime.Linker(engine)
         linker.define_wasi()
         self._store = wasmtime.Store(engine)

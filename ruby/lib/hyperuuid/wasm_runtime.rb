@@ -28,6 +28,11 @@ module HyperUuid
   #   library does natively.
   module Runtime
     WASM_MODULE_PATH = File.join(NATIVE_DIR, "wasm32-wasip1", "hyperuuid.wasm")
+    # Development loop: the in-repo cargo build, the same fallback runtime.rb takes for the
+    # native library, so `HYPERUUID_WASM=1 bundle exec rspec` needs nothing staged by hand.
+    WASM_REPO_BUILD_PATH = File.expand_path(
+      File.join(__dir__, "../../../rust/target/wasm32-wasip1/release/hyperuuid.wasm")
+    )
 
     # One instantiated module: the exported functions, the exported memory, and the two
     # 16-byte scratch buffers (one in, one out) the single-item doors reuse for the life of
@@ -45,6 +50,7 @@ module HyperUuid
       ].freeze
 
       def initialize(path)
+        path = WASM_REPO_BUILD_PATH if !File.exist?(path) && File.exist?(WASM_REPO_BUILD_PATH)
         unless File.exist?(path)
           raise LoadError,
                 "hyperuuid: #{path} not found (this gem was built without its WebAssembly module)"

@@ -17,6 +17,9 @@ public final class Main {
      * @param args ignored
      */
     public static void main(String[] args) {
+        // Which interop path this binary took — "native" (FFM) or "wasm" (GraalWasm) — so a
+        // -Dhyperuuid.backend=wasm run is visibly proving the path it claims to.
+        System.out.println("backend: " + UuidGenerator.backend());
         UUID v4 = UuidGenerator.newV4();
         require(v4.version() == 4, "expected v4 version 4, got " + v4.version());
 

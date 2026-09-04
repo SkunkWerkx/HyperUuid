@@ -105,16 +105,29 @@ module HyperUuid
       end
 
       # Whether this platform has a shared library for Fiddle to dlopen at all: a known RID
-      # and the file actually present in this install. Backend selection (hyperuuid.rb)
-      # asks this before falling back to the WebAssembly backend, which needs neither.
+      # and the file actually present — in this install, or in the in-repo cargo build the
+      # dev loop falls back to. Backend selection (hyperuuid.rb) asks this before falling
+      # back to the WebAssembly backend, which needs neither.
       def fiddle_library_available?
-        rid, lib_name = NativePlatform.rid_and_library_name
-        File.exist?(File.join(NATIVE_DIR, rid, lib_name))
+        !library_path.nil?
       rescue NativePlatform::UnsupportedPlatformError
         false
       end
 
       private
+
+      # The shared library to dlopen: this install's native/{rid}/{lib}, or — the
+      # development loop — the in-repo cargo build, exactly what the other bindings' local
+      # staging does (HyperCast's runtime has had this since its first release). Nil when
+      # neither exists.
+      def library_path
+        rid, lib_name = NativePlatform.rid_and_library_name
+        path = File.join(NATIVE_DIR, rid, lib_name)
+        return path if File.exist?(path)
+
+        repo_build = File.expand_path(File.join(__dir__, "../../../rust/target/release", lib_name))
+        File.exist?(repo_build) ? repo_build : nil
+      end
 
       # One 16-byte scratch allocation per thread, reused by every single-item call —
       # Fiddle::Pointer.malloc(..., RUBY_FREE) registers a GC finalizer per call, measured
@@ -142,11 +155,12 @@ module HyperUuid
       end
 
       def load_functions
-        rid, lib_name = NativePlatform.rid_and_library_name
-        path = File.join(NATIVE_DIR, rid, lib_name)
-        unless File.exist?(path)
+        path = library_path
+        if path.nil?
+          rid, lib_name = NativePlatform.rid_and_library_name
           raise LoadError,
-                "hyperuuid: #{path} not found (unsupported platform, or this gem was built without a native library for it)"
+                "hyperuuid: #{File.join(NATIVE_DIR, rid, lib_name)} not found (unsupported " \
+                "platform, or this gem was built without a native library for it)"
         end
 
         handle = Fiddle.dlopen(path)
