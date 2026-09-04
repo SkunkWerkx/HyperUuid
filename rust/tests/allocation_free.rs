@@ -12,27 +12,33 @@
 //! public API with no exception, and this test is what would catch a scratch buffer creeping
 //! back in on a target where `cargo check` alone would never notice.
 //!
-//! Deliberately one `#[test]` function, not five: `ALLOC_COUNT` is one process-wide counter,
-//! and `cargo test` spawns a real OS thread per test function by default — thread *creation*
-//! itself can allocate (stack/TLS bookkeeping), and that's indistinguishable from this
-//! binary's own allocations to a global counter. Confirmed empirically: splitting these into
-//! separate `#[test]` fns produced 1-allocation-off failures that moved around between runs
-//! and even a shared `Mutex` didn't fix it, since serializing the test *bodies* does nothing
-//! about the other five threads' concurrent spawn overhead. One test function means one
-//! thread for this whole file — no flag (`--test-threads=1`) required, so it can't silently
-//! regress if CI's invocation ever changes.
+//! The counter is per-thread, not process-wide, and this file is deliberately one `#[test]`
+//! function. Both matter. `cargo test` runs each test body on its own spawned thread while
+//! the harness's main thread keeps going: right after `spawn` returns it inserts the join
+//! handle into a `HashMap` and pushes a timeout entry onto a `VecDeque`, and the first of
+//! each allocates — concurrently with the body already running. A process-wide counter saw
+//! exactly that on a slow-to-schedule CI runner (linux-arm64, 1-allocation-off on the very
+//! first measured call, green on retry), and had earlier seen the same shape from sibling
+//! test threads' spawn overhead when this was five `#[test]` fns. Counting in a thread-local
+//! makes the harness invisible by construction; one test function keeps the whole claim on
+//! one thread with no `--test-threads=1` flag for CI's invocation to drift away from.
+//!
+//! The thread-local is `const`-initialised and holds a type with no `Drop`, so reaching it
+//! from inside the allocator registers no destructor and allocates nothing itself.
 
 use hyperuuid::{v4, v5, v6, v7};
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 struct CountingAllocator;
 
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static ALLOC_COUNT: Cell<usize> = const { Cell::new(0) };
+}
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::SeqCst);
+        ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         unsafe { System.alloc(layout) }
     }
 
@@ -47,9 +53,9 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 const RFC_TEST_VECTOR_MS: u64 = 1_645_557_742_000;
 
 fn allocs_during<T>(f: impl FnOnce() -> T) -> (usize, T) {
-    let before = ALLOC_COUNT.load(Ordering::SeqCst);
+    let before = ALLOC_COUNT.with(Cell::get);
     let result = std::hint::black_box(f());
-    let after = ALLOC_COUNT.load(Ordering::SeqCst);
+    let after = ALLOC_COUNT.with(Cell::get);
     (after - before, result)
 }
 
