@@ -41,15 +41,25 @@
 //         cargo check --no-default-features --target thumbv7em-none-eabi
 #![cfg_attr(not(feature = "std"), no_std)]
 
-// The panic handler for the one no_std artifact this crate links itself: the wasm static
-// library behind the `wasm-staticlib` feature (Cargo.toml has why it exists). Built with
-// `panic = "abort"`, so a panic is a trap: the wasm `unreachable` instruction, which the
-// host sees as a RuntimeError rather than as a corrupted return value. Never compiled for a
-// bare-metal rlib consumer, who brings a handler of their own, nor with `std`, which has one.
-#[cfg(all(feature = "wasm-staticlib", not(feature = "std"), target_arch = "wasm32"))]
+// The panic handler for the no_std artifacts this crate links itself: the static libraries
+// behind the `staticlib` feature (Cargo.toml has what they are and why they carry no std).
+// Built with `panic = "abort"`, so a panic ends the program instead of unwinding into the
+// host: on wasm32 it is the `unreachable` trap, which the host sees as a RuntimeError rather
+// than as a corrupted return value; anywhere else it is the C library's `abort`, which the
+// executable the library is linked into already has. Never compiled for a bare-metal rlib
+// consumer, who brings a handler of their own, nor with `std`, which has one.
+#[cfg(all(feature = "staticlib", not(feature = "std")))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
-    core::arch::wasm32::unreachable()
+    #[cfg(target_arch = "wasm32")]
+    core::arch::wasm32::unreachable();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        unsafe extern "C" {
+            safe fn abort() -> !;
+        }
+        abort()
+    }
 }
 
 mod ffi;

@@ -117,8 +117,7 @@ jobs:
           import ctypes, sys
           want, failed = sys.argv[1], False
           for path in ("go/native/linux-x64/libhyperuuid.so",
-                       "php/src/native/linux-x64/libhyperuuid.so",
-                       "swift/Sources/HyperUuid/NativeLibs/linux-x64/libhyperuuid.so"):
+                       "php/src/native/linux-x64/libhyperuuid.so"):
               try:
                   packed = ctypes.CDLL("./" + path).hyperuuid_version()
                   got = f"{packed >> 16}.{(packed >> 8) & 0xFF}.{packed & 0xFF}"
@@ -131,6 +130,19 @@ jobs:
                   failed = True
           sys.exit(1 if failed else 0)
           PY
+
+          # Swift links the core in on Linux rather than loading it, so the committed archive
+          # has to be linked into something before it can be asked. All five archives come
+          # from one build, so this runner's own triple answers for the bundle.
+          bundle=swift/HyperUuidCore.artifactbundle
+          printf '#include <stdio.h>\n#include "hyperuuid.h"\nint main(void) { unsigned v = hyperuuid_version(); printf("%%u.%%u.%%u", v >> 16, (v >> 8) & 255, v & 255); return 0; }\n' > static-version.c
+          cc -I "$bundle/include" static-version.c "$bundle/x86_64-unknown-linux-gnu/libhyperuuid.a" -o static-version
+          got=$(./static-version)
+          echo "$bundle/x86_64-unknown-linux-gnu/libhyperuuid.a: $got"
+          if [ "$got" != "$want" ]; then
+            echo "::error::The Swift static library reports $got; this release is $want. stage-native-binaries.yml has not staged the version-bump commit's ci.yml run."
+            exit 1
+          fi
 
   # Packs the .nupkg fresh, right now — deliberately not in ci.yml. A .nupkg bakes its
   # version into its own filename/metadata at pack time, and ci.yml runs before any tag

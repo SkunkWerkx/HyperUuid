@@ -121,7 +121,7 @@ still exactly those thirteen exports.
 
 The C# binding's Blazor WebAssembly support takes a second wasm build, the
 `wasm32-unknown-emscripten` static library its NuGet package links into the app:
-`cargo wasm-staticlib`, which leaves Rust's standard library out of it (the `wasm-staticlib`
+`cargo wasm-staticlib`, which leaves Rust's standard library out of it (the `staticlib`
 feature supplies the panic handler in its place), so it can be linked into one app beside
 HyperCast's.
 

@@ -1,6 +1,21 @@
+// How this build reaches the native core is decided by the target, at compile time.
+//
+// Linux (glibc and musl) and WebAssembly link it in: Package.swift declares a binary
+// static-library target, `HyperUuidCore`, with one archive per triple, and where SwiftPM
+// finds an archive for the triple being built the C module is importable and
+// `UuidGenerator` takes its function pointers straight from the linked symbols. Nothing is
+// loaded at run time, so nothing has to ship beside the executable — which is also the only
+// way to cover the two targets that have no dynamic loader at all, the static Linux SDK and
+// WASI.
+//
+// macOS and Windows load a shared library instead, out of the package's resources; that is
+// everything below. `canImport`, not an OS check, picks between the two, so a target with no
+// archive of its own lands on the `#error` rather than on a loader with nothing to load.
+#if !canImport(HyperUuidCore)
+
 /// Maps this build's compile-time OS/arch to the RID-style directory (matching the other
-/// bindings' `runtimes/{rid}/native/` / `native/{rid}/` convention) and filename the native
-/// library was built for.
+/// bindings' `runtimes/{rid}/native/` / `native/{rid}/` convention) and filename of the
+/// shared library a macOS or Windows build loads.
 ///
 /// Unlike the Go/Java bindings — which each produce one artifact that must pick a native
 /// build at *runtime* (a .jar or a Go binary can end up running on any platform) — a single
@@ -24,34 +39,16 @@ enum NativePlatform {
     #elseif os(macOS) && arch(x86_64)
     static let rid = "osx-x64"
     static let libraryFileName = "libhyperuuid.dylib"
-    #elseif os(Linux) && canImport(Musl)
-    // The other bindings ship linux-musl-x64/linux-musl-arm64 builds; this one deliberately
-    // doesn't. Swift's musl target is the fully static Linux SDK, and a statically linked
-    // executable has no dynamic loader to `dlopen` a shared library with — there is nothing
-    // a bundled musl `.so` could be loaded by.
-    //
-    // Deferred, not impossible. The way to cover musl is to link the core statically: a
-    // per-triple `.a` in an artifact bundle, declared as a SwiftPM binary static-library
-    // target (SE-0482, Swift 6.2+), with this binding taking its function pointers from the
-    // linked symbols instead of from `dlsym`. That is a second packaging mechanism and a
-    // second code path, and it is not built yet.
-    #error("hyperuuid: musl Linux is not supported by the Swift binding yet — Swift's musl target links fully statically and cannot dlopen the native library, and the statically linked build that would cover it (SE-0482, Swift 6.2+) is not built; build against glibc Linux instead")
-    #elseif os(Linux) && arch(arm64)
-    static let rid = "linux-arm64"
-    static let libraryFileName = "libhyperuuid.so"
-    #elseif os(Linux) && arch(x86_64)
-    static let rid = "linux-x64"
-    static let libraryFileName = "libhyperuuid.so"
     #else
-    #error("hyperuuid: unsupported platform — the Swift binding bundles native builds for glibc Linux, macOS and Windows on x86_64 and arm64 only")
+    #error("hyperuuid: unsupported platform — the Swift binding links the native core statically on Linux (glibc and musl) and WebAssembly (WASI), and loads a bundled shared library on macOS and Windows, each on x86_64 and arm64 where the platform has both; this target is none of those")
     #endif
 
     /// The directory SwiftPM stages this target's resources into: `{package}_{target}` plus a
     /// suffix that depends on the build system as well as the platform. Swift Build — SwiftPM's
     /// default from Swift 6.4 — writes a `.bundle` everywhere; the build system before it
-    /// wrote a `.bundle` on macOS and a plain `.resources` directory on Linux and Windows,
+    /// wrote a `.bundle` on macOS and a plain `.resources` directory everywhere else,
     /// and is still there behind `--build-system native`. A toolchain produces only one of
-    /// the two, so off macOS both names are looked for. The generated `Bundle.module`
+    /// the two, so on Windows both names are looked for. The generated `Bundle.module`
     /// accessor knows which, but it `fatalError`s when the directory is absent, so
     /// `DynamicLibrary.locateBundled()` looks for it by name instead.
     #if os(macOS)
@@ -60,3 +57,5 @@ enum NativePlatform {
     static let resourceBundleNames = ["HyperUuid_HyperUuid.bundle", "HyperUuid_HyperUuid.resources"]
     #endif
 }
+
+#endif
