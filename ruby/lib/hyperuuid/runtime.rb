@@ -12,8 +12,18 @@ module HyperUuid
   # files are already plain files on disk once installed — native/{rid}/{lib} can be
   # dlopen'd directly, no extraction step needed.
   module Runtime
-    class RandomSourceError < StandardError; end
-    class TimestampOutOfRangeError < StandardError; end
+    # The package's two exceptions live on HyperUuid itself (errors.rb). These are the names
+    # they had through 0.3.0, kept as aliases of the very same classes so a
+    # `rescue HyperUuid::Runtime::TimestampOutOfRangeError` written against an earlier
+    # release still catches.
+    RandomSourceError = HyperUuid::RandomSourceError
+    TimestampOutOfRangeError = HyperUuid::TimestampOutOfRangeError
+
+    # One copy of each out-of-range message for the Fiddle and wasm backends and for the
+    # doors' own range check in hyperuuid.rb; the Magnus extension (rust/src/ruby_ext.rs)
+    # carries the same text, and spec/native_backend_spec.rb pins that the two agree.
+    V6_TIMESTAMP_OUT_OF_RANGE = "unix_millis does not fit the 60-bit v6 timestamp field"
+    V7_TIMESTAMP_OUT_OF_RANGE = "unix_millis must fit within the RFC 9562 48-bit field"
 
     NATIVE_DIR = File.join(__dir__, "native")
 
@@ -24,17 +34,18 @@ module HyperUuid
       def new_v4
         out = scratch
         rc = functions[:new_v4].call(out)
-        raise RandomSourceError, "uuid_new_v4 failed with code #{rc}" unless rc.zero?
+        raise random_source_failure("uuid_new_v4") unless rc.zero?
         out[0, 16]
       end
 
       def new_v5(namespace_bytes, name_bytes)
         out = scratch
-        # Fiddle passes a String's bytes for void* directly (read-only) — no Pointer
-        # wrapper, no copy — the same zero-copy crossing every other input here uses.
-        name = name_bytes.empty? ? nil : name_bytes
-        rc = functions[:new_v5].call(namespace_bytes, name, name_bytes.bytesize, out)
-        raise RandomSourceError, "uuid_new_v5 failed with code #{rc}" unless rc.zero?
+        # Fiddle passes a String's own bytes for void* (read-only, no copy of them) — the
+        # same crossing every other input here uses. An empty name crosses as it is, a
+        # valid pointer with length 0, never as nil: NULL is not part of this export's
+        # contract.
+        rc = functions[:new_v5].call(namespace_bytes, name_bytes, name_bytes.bytesize, out)
+        raise random_source_failure("uuid_new_v5") unless rc.zero?
         out[0, 16]
       end
 
@@ -43,8 +54,8 @@ module HyperUuid
         rc = functions[:new_v6].call(unix_millis, out)
         case rc
         when 0 then out[0, 16]
-        when 2 then raise TimestampOutOfRangeError, "unix_millis does not fit the 60-bit v6 timestamp field"
-        else raise RandomSourceError, "uuid_new_v6 failed with code #{rc}"
+        when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
+        else raise random_source_failure("uuid_new_v6")
         end
       end
 
@@ -58,8 +69,8 @@ module HyperUuid
         rc = functions[:new_v6_batch].call(unix_millis, count, out)
         case rc
         when 0 then out[0, count * 16]
-        when 2 then raise TimestampOutOfRangeError, "unix_millis does not fit the 60-bit v6 timestamp field"
-        else raise RandomSourceError, "uuid_new_v6_batch failed with code #{rc}"
+        when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
+        else raise random_source_failure("uuid_new_v6_batch")
         end
       end
 
@@ -68,8 +79,8 @@ module HyperUuid
         rc = functions[:new_v7].call(unix_millis, out)
         case rc
         when 0 then out[0, 16]
-        when 2 then raise TimestampOutOfRangeError, "unix_millis must fit within the RFC 9562 48-bit field"
-        else raise RandomSourceError, "uuid_new_v7 failed with code #{rc}"
+        when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
+        else raise random_source_failure("uuid_new_v7")
         end
       end
 
@@ -83,8 +94,8 @@ module HyperUuid
         rc = functions[:new_v7_batch].call(unix_millis, count, out)
         case rc
         when 0 then out[0, count * 16]
-        when 2 then raise TimestampOutOfRangeError, "unix_millis must fit within the RFC 9562 48-bit field"
-        else raise RandomSourceError, "uuid_new_v7_batch failed with code #{rc}"
+        when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
+        else raise random_source_failure("uuid_new_v7_batch")
         end
       end
 
@@ -102,6 +113,19 @@ module HyperUuid
 
       def v6_to_rfc_order(bytes)
         rewrite(:v6_to_rfc_order, bytes)
+      end
+
+      # The loaded core's version word, major << 16 | minor << 8 | patch, straight from the
+      # library's zero-argument hyperuuid_version export. HyperUuid.native_version unpacks
+      # it; like every method here, each backend replaces this one in place.
+      def packed_version
+        functions[:version].call
+      end
+
+      # The one failure every generating export shares, with the one message every backend
+      # raises for it: the export's name, and that the system's random source failed.
+      def random_source_failure(export)
+        RandomSourceError.new("#{export}: the system random source failed")
       end
 
       # Whether this platform has a shared library for Fiddle to dlopen at all: a known RID
@@ -221,6 +245,8 @@ module HyperUuid
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           ),
+          # The one export that mints nothing: the zero-argument version probe.
+          version: Fiddle::Function.new(handle["hyperuuid_version"], [], Fiddle::TYPE_UINT32_T),
         }
       end
     end

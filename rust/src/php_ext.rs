@@ -1,12 +1,12 @@
 //! Benchmark spike: this crate linked straight into a Zend extension via `ext-php-rs`,
 //! mirroring the Python (PyO3) / Ruby (Magnus) native-backend pattern, to measure it
-//! against PHP's `ext-ffi` path (`../src/Runtime.php`). `Runtime.php` already measured the
+//! against PHP's `ext-ffi` path (`../../php/src/Runtime.php`). `Runtime.php` already measured the
 //! raw `ext-ffi` crossing at ~105ns — "already extension-class" — unlike ctypes (~1µs) and
 //! Fiddle (~1.6µs), which is *why* Python and Ruby got a native backend and PHP didn't.
 //! This module exists to check that reasoning against real numbers rather than leave it
 //! asserted.
 //!
-//! Deliberately not wired into the `hyperuuid/hyperuuid` Composer package: this is a
+//! Deliberately not wired into the `skunkwerkx/hyperuuid` Composer package: this is a
 //! benchmark-only spike, not a second production backend. Functions mirror
 //! `Runtime.php`'s raw-bytes shape (16-byte binary strings in/out) so the two paths are
 //! compared at the same layer — no `Uuid` value-object construction on either side.
@@ -22,6 +22,14 @@ fn uuid_arg(bytes: &Binary<u8>) -> PhpResult<Uuid> {
         .try_into()
         .map_err(|_| PhpException::default("bytes must be exactly 16 bytes".into()))?;
     Ok(Uuid::from_bytes(array))
+}
+
+/// The packed `major << 16 | minor << 8 | patch` the cdylib exports, so the spike can be
+/// version-checked the same way `HyperUuid::nativeVersion()` checks the ext-ffi path.
+#[php_function]
+#[php(name = "hyperuuid_native_version")]
+pub fn hyperuuid_native_version() -> i64 {
+    i64::from(crate::hyperuuid_version())
 }
 
 #[php_function]
@@ -119,6 +127,7 @@ pub fn hyperuuid_native_new_v7_batch(count: u32, unix_millis: u64) -> PhpResult<
 #[php_module]
 pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
     module
+        .function(wrap_function!(hyperuuid_native_version))
         .function(wrap_function!(hyperuuid_native_new_v4))
         .function(wrap_function!(hyperuuid_native_new_v5))
         .function(wrap_function!(hyperuuid_native_new_v6))

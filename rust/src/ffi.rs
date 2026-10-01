@@ -10,6 +10,29 @@
 use crate::{v4, v5, v6, v7, Uuid};
 use core::slice;
 
+/// This library's version, packed `major << 16 | minor << 8 | patch` from the crate's own
+/// manifest — so a host can prove the library it loaded is the one its binding was built
+/// against before minting the first UUID, and can name the mismatch when it isn't. Takes
+/// nothing, touches nothing: the cheapest possible "did the native library resolve" probe,
+/// and the same shape as HyperCast's `hypercast_version`.
+#[unsafe(no_mangle)]
+pub extern "C" fn hyperuuid_version() -> u32 {
+    const fn field(text: &str) -> u32 {
+        let bytes = text.as_bytes();
+        let mut value = 0u32;
+        let mut i = 0;
+        while i < bytes.len() {
+            value = value * 10 + (bytes[i] - b'0') as u32;
+            i += 1;
+        }
+        value
+    }
+    const VERSION: u32 = (field(env!("CARGO_PKG_VERSION_MAJOR")) << 16)
+        | (field(env!("CARGO_PKG_VERSION_MINOR")) << 8)
+        | field(env!("CARGO_PKG_VERSION_PATCH"));
+    VERSION
+}
+
 /// Writes a random UUID version 4 (RFC 9562 §5.4) to `out_ptr` (16 bytes).
 /// Returns 0 on success, 1 if the random source failed.
 #[unsafe(no_mangle)]
@@ -25,7 +48,8 @@ pub extern "C" fn uuid_new_v4(out_ptr: *mut u8) -> i32 {
 }
 
 /// Writes a deterministic UUID version 5 (RFC 9562 §5.5) to `out_ptr` (16 bytes), derived
-/// from a 16-byte namespace UUID at `ns_ptr` and a `name_len`-byte name at `name_ptr`.
+/// from a 16-byte namespace UUID at `ns_ptr` and a `name_len`-byte name at `name_ptr`. A
+/// `name_len` of 0 never dereferences `name_ptr`, so an empty name may cross as null.
 #[unsafe(no_mangle)]
 pub extern "C" fn uuid_new_v5(
     ns_ptr: *const u8,
@@ -38,7 +62,14 @@ pub extern "C" fn uuid_new_v5(
     let namespace_bytes: [u8; 16] = unsafe { slice::from_raw_parts(ns_ptr, 16) }
         .try_into()
         .unwrap();
-    let name = unsafe { slice::from_raw_parts(name_ptr, name_len as usize) };
+    // name_len == 0 never touches name_ptr — several bindings pass null for an empty name
+    // (C#'s fixed over an empty span, Go's nil slice, Fiddle's nil), and
+    // `slice::from_raw_parts` requires non-null even for a 0-length slice.
+    let name: &[u8] = if name_len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(name_ptr, name_len as usize) }
+    };
 
     let uuid = v5::new_v5(namespace_bytes.into(), name);
     // SAFETY: caller guarantees `out_ptr` points to a live 16-byte allocation.

@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/HyperUuid.svg)](https://www.nuget.org/packages/HyperUuid)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
 **`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.67x — with zero heap allocation, on every version including v5 — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
 
@@ -37,9 +38,11 @@ Returns plain `System.Guid` — this binding does no byte-order conversion of it
 
 `Guid.Timestamp` is that same call spelled as an extension property, via a C# 14 `extension` block (`GuidExtensions`). It exists because the classic `this Guid` extension form can only express *methods*, and a timestamp recovered from bits the value already holds is a projection, not an action — so it wants to read as a property, the way every comparable accessor on a .NET value type does. It is a re-spelling, not a second implementation: `GetTimestamp` holds the logic and a test pins the two to identical results across every version, so they cannot drift. Nothing about it is package-specific either — it reads a `Guid.CreateVersion7()` value from the BCL just as happily, since both write the same RFC 9562 layout. Extension members lower to ordinary static calls, so this adds no allocation and nothing for the trimmer or Native AOT to chase.
 
+Before the first UUID, `UuidGenerator.IsAvailable` says whether the native library resolved and `UuidGenerator.NativeVersion` names the core it loaded — the probe a consumer with a managed fallback (`Guid.NewGuid()`, `Guid.CreateVersion7()`) gates on, instead of catching `DllNotFoundException` around its first real call. It is probed once and never throws; every other member lets a load failure propagate, the `Try*` forms included, which report the native layer's own return codes and nothing else. A library that loaded but predates the probe (0.3.0 and earlier) reads as unavailable too: a stale binary beside a newer binding is exactly the mismatch it exists to name.
+
 ## Why not `Guid.NewGuid()` / `Guid.CreateVersion7()`?
 
-1. **It's measurably faster, not just different.** Real BenchmarkDotNet numbers, `[MemoryDiagnoser]`, linux-arm64 (`dotnet run -c Release --project ../csharp/HyperUuid.Benchmarks -- --filter *Generation*`):
+1. **It's measurably faster, not just different.** Real BenchmarkDotNet numbers, `[MemoryDiagnoser]`, linux-arm64 (`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Generation*`, from the repo root):
 
    | Method | Mean | Allocated |
    | --- | ---: | ---: |
@@ -49,7 +52,7 @@ Returns plain `System.Guid` — this binding does no byte-order conversion of it
    | `UuidGenerator.NewV6()` | 75.57 ns (**8.34x faster**) | 0 B |
    | `UuidGenerator.NewV7()` | 82.10 ns (7.68x faster) | 0 B |
 
-   Including `NewV5(Guid, string)` — it used to allocate 40 B encoding the name to UTF-8 via `Encoding.UTF8.GetBytes(name)`; now it UTF-8-encodes into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods already used (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library). `NewV5(Guid, ReadOnlySpan<byte>)` remains available if you already have bytes and want to skip the encode step entirely.
+   Including `NewV5(Guid, string)` — it used to allocate 40 B encoding the name to UTF-8 via `Encoding.UTF8.GetBytes(name)`; now it UTF-8-encodes into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods already used (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library). `NewV5(Guid, ReadOnlySpan<char>)` is the same path for a name you hold as a slice rather than a `string` — one field of a parsed line, a pooled buffer — so nothing has to be materialized first, and `NewV5(Guid, ReadOnlySpan<byte>)` skips the encode step entirely: it hashes the bytes exactly as given, which also makes it the overload for a name that is not text at all.
 
 2. **A real monotonic counter.** `Guid.CreateVersion7()` implements no counter (RFC 9562 §6.2 Method 1): two BCL v7 GUIDs minted in the same millisecond sort randomly relative to each other, which is exactly the clustered-index fragmentation problem v7 adoption exists to solve. `UuidGenerator.NewV7()` reserves a slot in a process-global counter every call, guaranteeing strict creation order under concurrency — verified across interleaved individual *and* batch calls in this project's own test suite, not just in isolation.
 3. **v6, which the BCL doesn't have at all.** A field-compatible reordering of v1 for the same sort/index locality as v7, useful when you're migrating off legacy v1 IDs. No `Guid.CreateVersion6` exists anywhere in the BCL.
@@ -66,37 +69,37 @@ Returns plain `System.Guid` — this binding does no byte-order conversion of it
 5. **Cross-language consistency.** The exact same Rust core also mints v5 namespace UUIDs for Ruby, Python, Go, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't C#-only, that's not something the BCL can offer at all.
 6. **SQL Server byte ordering, for free.** `UuidGenerator.V7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`V6ToSqlOrder` does the same for version 6), the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use. Verified directly against the real `SqlGuid` comparator in this package's own test suite, not a hand-rolled stand-in — and it's the same native function every other binding in this repo calls, not a C#-only reimplementation. Neither `Guid.NewGuid()` nor `Guid.CreateVersion7()` has any such concept.
 
-7. **Non-throwing and zero-conversion call shapes, for callers that need them.** Every fallible operation has a `Try` twin — `TryNewV4`/`TryNewV6`/`TryNewV7`/`TryFillV6`/`TryFillV7` — that reports failure as `false` rather than an exception. No exception ever crosses the P/Invoke boundary in either shape (the native layer signals with an `int` return code; see `rust/src/ffi.rs`), but the `Try` form lets a `Result`-style gateway branch on failure without wrapping every call in a `try`/`catch`. Separately, the SQL-order transforms and the batch fills both have raw-`Span<byte>` overloads that never construct a `Guid` at all — RFC-ordered bytes in, transformed bytes out, in place. That matters for two reasons: it's the form a byte-level correctness oracle can be pointed at directly (no need to model `Guid`'s mixed-endian field layout to compare results), and it's measurably the fastest batch path, since the native core already writes RFC bytes contiguously into your buffer and the `Guid` overload has to convert every element on the way out.
+7. **Non-throwing and zero-conversion call shapes, for callers that need them.** Every operation the native layer can fail — a random-source failure, or a timestamp its field cannot hold — has a `Try` twin that reports it as `false` rather than an exception: `TryNewV4`/`TryNewV6`/`TryNewV7` for single IDs, `TryFillV6`/`TryFillV7` for batches into a buffer you own. No exception ever crosses the P/Invoke boundary in either shape (the native layer signals with an `int` return code; see `rust/src/ffi.rs`), but the `Try` form lets a `Result`-style gateway branch on failure without wrapping every call in a `try`/`catch`. What has no twin, on purpose: `NewV5` has no failure mode to report (a hash of your own bytes, no random source and no timestamp); the allocating `NewV6Batch`/`NewV7Batch` are conveniences over the fills, so the non-throwing batch is `TryFill*` into your own array; and `V7Timestamp` throws only where `DateTimeOffset` itself cannot represent the year. Nor does `Try` cover a native library that never loaded — that is `UuidGenerator.IsAvailable`'s question, asked once up front. Separately, the SQL-order transforms and the batch fills both have raw-`Span<byte>` overloads that never construct a `Guid` at all — RFC-ordered bytes in, transformed bytes out, in place. That matters for two reasons: it's the form a byte-level correctness oracle can be pointed at directly (no need to model `Guid`'s mixed-endian field layout to compare results), and it's measurably the fastest batch path, since the native core already writes RFC bytes contiguously into your buffer and the `Guid` overload has to convert every element on the way out.
 
-The honest trade-off: this is a native dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID) instead of a BCL type that's always just there. If you only need plain v4 randomness in a C#-only codebase, `Guid.NewGuid()` is simpler and that's a completely reasonable choice.
+**The honest trade-off:** this is a native dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID) instead of a BCL type that's always just there. If you only need plain v4 randomness in a C#-only codebase, `Guid.NewGuid()` is simpler and that's a completely reasonable choice.
 
 ## AOT
 
 Publishes cleanly under `PublishAot` — `LibraryImport` is source-generated with no runtime reflection anywhere in this assembly, and the project opts into (and fails the build on) the trim/Native-AOT analyzers via `IsAotCompatible`.
 
-That claim is reproducible rather than asserted. `HyperUuid.AotSmokeTest/` is a real AOT-published console app that exercises the full public surface — v4/v5/v7 generation against the RFC 9562 Appendix A.4 vector, the non-throwing `Try*` path (including that an out-of-range timestamp is *reported*, not thrown), the raw-byte SQL-order transform against its `Guid` counterpart, and a destination-buffer batch fill — and returns a nonzero exit code on any mismatch:
+That claim is reproducible rather than asserted. `HyperUuid.AotSmokeTest/` is a real AOT-published console app that crosses every native entry point the binding declares — the twelve `uuid_*` functions and `hyperuuid_version` — through every call shape the public surface offers: the version probe; v4, v5, v6 and v7 generation, with v5 against the RFC 9562 Appendix A.4 vector on all three name overloads and for an empty name; the non-throwing `Try*` path (including that an out-of-range timestamp is *reported*, not thrown); both SQL-order directions for both versions, raw bytes against their `Guid` counterparts; the batch fills into `Guid` and raw-byte buffers and the allocating batches; and the `Guid.Timestamp` extension property. It returns a nonzero exit code on any mismatch:
 
 ```shell
 dotnet publish csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj \
-  -c Release -r linux-arm64 /p:PublishAot=true
-./csharp/HyperUuid.AotSmokeTest/bin/Release/net10.0/linux-arm64/publish/HyperUuid.AotSmokeTest
+  -c Release -r linux-x64 -p:PublishAot=true
+./csharp/HyperUuid.AotSmokeTest/bin/Release/net10.0/linux-x64/publish/HyperUuid.AotSmokeTest
 ```
 
-Last verified on `linux-arm64`: **zero `ILxxxx`/`AOTxxxx` trim or AOT diagnostics**, a 1.2 MB self-contained native binary, and `ALL NATIVE AOT CHECKS PASSED` with exit code 0. `TreatWarningsAsErrors` is on for the library project, so an analyzer warning is a build failure, not a line in a log nobody reads.
+Last verified on `linux-x64` and, inside an Alpine container, `linux-musl-x64`: **zero `ILxxxx`/`AOTxxxx` trim or AOT diagnostics**, a 1.5 MB self-contained native binary, and `ALL NATIVE AOT CHECKS PASSED` with exit code 0. `TreatWarningsAsErrors` is on for the library project, so an analyzer warning is a build failure, not a line in a log nobody reads. CI re-proves it per platform on every PR (see [Native binary provenance](#native-binary-provenance)).
 
 ## WebAssembly (Blazor)
 
-Works from a plain `<PackageReference Include="HyperUuid" />` on **.NET 11 and later** — no `<NativeFileReference>`, no hand-written P/Invoke, no bridging in your own Rust build. Verified for real, in an actual headless Chromium session: `HyperUuid.WasmSmokeTest` (below) generates v4s, matches the RFC 9562 v5 vector, round-trips v6/v7 timestamps, fills a 1000-id v7 batch in one native call, and embeds a real-clock v7 timestamp within 2 seconds of the wall clock — not just "it builds."
+Works from a plain `<PackageReference Include="HyperUuid" />` on **.NET 11 and later** — no `<NativeFileReference>`, no hand-written P/Invoke, no bridging in your own Rust build. Verified for real, in an actual headless Chromium session: `HyperUuid.WasmSmokeTest` (below) answers the version probe, generates v4s, matches the RFC 9562 v5 vector, round-trips v6/v7 timestamps, fills 1000-id v6 and v7 batches in one native call each, round-trips the SQL-order transforms, and embeds a real-clock v7 timestamp within 2 seconds of the wall clock — not just "it builds."
 
-**Target frameworks.** The package targets net10.0 for the native platforms, and browser-wasm needs .NET 11 or later: the SDK's `wasm-tools` workload and the exception-handling encoding described below are both .NET 11 behavior, and the smoke test targets `net11.0` only. net8.0 is not supported: its WASM P/Invoke-table generator scans the default `lib/{tfm}/` assembly instead of the `runtimes/browser-wasm/lib/{tfm}/` one that actually ships, registers this package's functions under module `"hyperuuid"` rather than `"*"`, and the app throws `DllNotFoundException("*")` at runtime with no workaround on the package side.
+**Target frameworks.** Two floors, different on purpose. The package targets net10.0, which is what the native platforms need. WebAssembly is .NET 11 and later only: the exception-handling translation described below is .NET 11 toolchain behavior, and the smoke test targets `net11.0` and nothing older. NuGet still imports the package's `.targets` into a net10.0 Blazor WebAssembly project (a `.targets` file directly under `build/` applies to every target framework), so the wiring is gated on the consuming project's own target framework: below .NET 11 the native core is not linked, and the build says so with warning `HYPERUUID001` rather than leaving it to be discovered in the browser. In that configuration `UuidGenerator.IsAvailable` is `false` — or, where the `wasm-tools` workload relinks the runtime, the link stops on undefined `uuid_*` symbols — so target net11.0, or gate on `IsAvailable` and keep a managed fallback.
 
 **How:** one compiled assembly covers every platform, including `browser-wasm` — no separate build. Every native entry point is declared twice, unconditionally, sharing the same underlying C symbol: once against `"hyperuuid"` (resolved via `dlopen` on every real native platform), once against `"*"` (a statically-linked WASM native has no separate `"hyperuuid"` module to open, since its functions are already part of the same `dotnet.native.wasm` the app itself runs in; `"*"` resolves against the current module instead). `OperatingSystem.IsBrowser()` picks the right one at each call site — a real runtime check the .NET linker specifically knows how to constant-fold per publish target (the same mechanism the BCL itself uses for platform-conditional code), so a trimmed/published build still only ships the branch that platform can actually reach. Only the Rust core's `wasm32-unknown-emscripten` static library (`cargo rustc --crate-type staticlib` — the default `cdylib` produces an already-linked module `NativeFileReference` can't pull symbols from) is genuinely RID-specific, landing under `runtimes/browser-wasm/nativeassets/net10.0/` in the `.nupkg`; the managed assembly itself needs no RID-specific copy anymore, confirmed by inspecting a real self-contained `dotnet publish -r <rid>` output too: no WASM files leak into a non-WASM deployment.
 
-Building this exact source once instead of twice also turned out to matter beyond simplicity: two independent, from-scratch `dotnet pack` runs now produce a byte-identical managed assembly (verified with a real checksum comparison, not assumed) — the earlier two-builds-sharing-one-`obj/`-directory design never gave that guarantee, and is the leading suspect for this package's NuGet health-check failures on every release before this one.
+Building this exact source once instead of twice also turned out to matter beyond simplicity: two independent, from-scratch `dotnet pack` runs produce a byte-identical managed assembly (verified with a real checksum comparison, not assumed) — the earlier two-builds-sharing-one-`obj/`-directory design never gave that guarantee, and was the leading suspect for this package's NuGet health-check failures on the releases that used it (0.0.5 and earlier).
 
-The one piece that *doesn't* auto-wire — NuGet's `runtimes/{rid}/nativeassets/{tfm}/` convention is real, and the WASM SDK really does auto-promote a resolved `NativeLibrary` item into `NativeFileReference`, but restore doesn't actually populate `NativeLibrary` from a plain `PackageReference`'s `nativeassets` folder the way it does `native/` for ordinary P/Invoke (confirmed empirically, not assumed) — is supplied by this package's own `build/net10.0/HyperUuid.targets`, auto-imported into every consuming project via NuGet's standard convention, which adds both the `NativeFileReference` and (also confirmed necessary the hard way — linking the code in alone does *not* make it resolvable via `"*"` at runtime) an explicit `EmccExportedFunction` entry per native function this package P/Invokes. That's the actual mechanism making this "just works" for real, not a hopeful description of how NuGet packaging is supposed to behave.
+The one piece that *doesn't* auto-wire — NuGet's `runtimes/{rid}/nativeassets/{tfm}/` convention is real, and the WASM SDK really does auto-promote a resolved `NativeLibrary` item into `NativeFileReference`, but restore doesn't actually populate `NativeLibrary` from a plain `PackageReference`'s `nativeassets` folder the way it does `native/` for ordinary P/Invoke (confirmed empirically, not assumed) — is supplied by this package's own `build/HyperUuid.targets`, auto-imported into every consuming project via NuGet's standard convention, which adds both the `NativeFileReference` and (also confirmed necessary the hard way — linking the code in alone does *not* make it resolvable via `"*"` at runtime) an explicit `EmccExportedFunction` entry per native function this package P/Invokes. That's the actual mechanism making this "just works" for real, not a hopeful description of how NuGet packaging is supposed to behave.
 
-`HyperUuid.WasmSmokeTest` proves this chain in a real browser: a Blazor WebAssembly app (`net11.0`) that imports the shipped `build/net10.0/HyperUuid.targets`, calls v4, v5, v6, v7 and a 1000-id batch through the public `UuidGenerator` surface, and renders `PASS` or `FAIL`. `./check.sh` in that directory stages the wasm static library, publishes the app, loads it in headless Chromium and requires `PASS`. It is a local check (it needs the `wasm-tools` workload and a browser), not part of the solution or CI.
+`HyperUuid.WasmSmokeTest` proves this chain in a real browser: a Blazor WebAssembly app (`net11.0`) that imports the shipped `build/HyperUuid.targets`, calls every native entry point — the twelve `uuid_*` functions and `hyperuuid_version` — through the public `UuidGenerator` surface, and renders `PASS` or `FAIL`. Every one, because that is the only way the check means what it says: an entry point missing from the `EmccExportedFunction` list links fine and fails only when called. `./check.sh` in that directory stages the wasm static library, publishes the app, loads it in headless Chromium and requires `PASS`. It is a local check (it needs the `wasm-tools` workload and a browser), not part of the solution or CI; what CI does on every PR is build the `wasm32-unknown-emscripten` static library itself, so a wasm-breaking change to the core surfaces immediately.
 
 **WebAssembly is .NET 11 and later only.** .NET 11 links browser-wasm with the new (exnref) exception-handling encoding, while the precompiled Rust standard library inside the static library uses the legacy one, and the browser refuses a module that mixes them (`module uses a mix of legacy and new exception handling instructions`). The same `HyperUuid.targets` therefore appends Binaryen's translate-to-exnref pass to the SDK's post-link `wasm-opt`, with no action needed from a consumer.
 
@@ -104,14 +107,19 @@ The one piece that *doesn't* auto-wire — NuGet's `runtimes/{rid}/nativeassets/
 
 ## Platform support
 
-Native binaries ship inside the package for six RIDs, plus a WebAssembly static library:
+Native binaries ship inside the package for eight RIDs, plus a WebAssembly static library:
 
 | Platform | RIDs | Native asset |
 | --- | --- | --- |
-| Linux | `linux-x64`, `linux-arm64` | `libhyperuuid.so` |
+| Linux (glibc) | `linux-x64`, `linux-arm64` | `libhyperuuid.so` |
+| Linux (musl — Alpine) | `linux-musl-x64`, `linux-musl-arm64` | `libhyperuuid.so` |
 | macOS | `osx-x64`, `osx-arm64` | `libhyperuuid.dylib` |
 | Windows | `win-x64`, `win-arm64` | `hyperuuid.dll` |
-| Blazor WebAssembly | `browser-wasm` | `libhyperuuid.a` (static — see above) |
+| Blazor WebAssembly (.NET 11+) | `browser-wasm` | `libhyperuuid.a` (static — see above) |
+
+**musl is its own build, not the glibc one relabeled.** A glibc `libhyperuuid.so` does not load under musl's dynamic loader, and NuGet's RID graph falls back from `linux-musl-x64` to `linux-x64` when nothing more specific is in the package — which is what 0.3.0 and earlier did on Alpine: the glibc library was selected, failed to load, and the first call threw. The musl libraries are built inside Alpine itself and depend on nothing but musl libc. Proven the way a consumer meets it, in an `mcr.microsoft.com/dotnet/sdk` Alpine container: this binding's whole test suite and the Native AOT smoke test (`-r linux-musl-x64`) against the musl library, then a throwaway console app consuming the packed `.nupkg` through a plain `PackageReference` with the glibc *and* musl libraries both inside it, which maps `runtimes/linux-musl-x64/native/libhyperuuid.so` and nothing else. The same app against a glibc-only package is the control: `UuidGenerator.IsAvailable` is `false` there, and nothing throws until something ignores it.
+
+On any platform outside that table the package still restores and compiles — the managed assembly is platform-neutral — and `UuidGenerator.IsAvailable` is how an app finds out at run time that no native library came with it.
 
 **Known gap: iOS, Mac Catalyst, and Android are not supported.** A .NET MAUI app can reference
 this package for its Windows and macOS heads, which the RIDs above cover, but not for its mobile
@@ -131,7 +139,7 @@ or Native AOT's
 [`NativeLibrary`/`DirectPInvoke`](https://learn.microsoft.com/dotnet/core/deploying/native-aot/interop),
 rather than resolved at runtime from `runtimes/{rid}/native/`. That is structurally the same problem
 the WebAssembly support above already solves: build the Rust core as a `.a` rather than a shared
-library, and let this package's own auto-imported `build/net10.0/HyperUuid.targets` inject the
+library, and let this package's own auto-imported `build/HyperUuid.targets` inject the
 reference so a consumer still writes nothing but a `PackageReference`. The packaging mechanism is
 therefore already proven in this repo; what is *not* yet established is how the managed
 `LibraryImport` declaration should resolve against a statically-linked core on iOS, which is the
@@ -150,7 +158,7 @@ cd rust && cargo build --release
 # -> target/release/libhyperuuid.so  (.dylib on macOS, hyperuuid.dll on Windows)
 ```
 
-Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's own MSBuild globs will pick it up, or point `dlopen` at it however you prefer — the C ABI in `rust/src/ffi.rs` is the entire contract, and it's twelve exported functions that take plain pointers.
+Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's own MSBuild globs will pick it up, or point `dlopen` at it however you prefer — the C ABI in `rust/src/ffi.rs` is the entire contract: the twelve `uuid_*` functions and `hyperuuid_version`, taking plain pointers into your own buffers. For local development nothing needs dropping anywhere: when no library has been staged under `runtimes/` for your machine's RID, the project copies `rust/target/release/` straight to the output, so `dotnet test` after a `cargo build --release` just runs.
 
 **Reproducibility, stated honestly.** The build is deterministic *locally*: `cargo clean -p hyperuuid` followed by `cargo build --release` reproduces a byte-identical `libhyperuuid.so` (verified by SHA-256). It is **not** currently bit-reproducible *across machines* — a local `rustc 1.98.0` build on WSL and the CI-built `linux-arm64` artifact differ in both hash and size (458,712 vs 458,176 bytes), as you'd expect from differing toolchain versions and embedded build paths. So "rebuild it and compare hashes" is not a verification path a consumer can currently rely on.
 
@@ -193,7 +201,7 @@ Attestations are produced on pushes, releases, and same-repo pull requests. Only
 
 **Not currently done: NuGet author signing.** The package carries nuget.org's repository signature but no author signature of our own, which would need an X.509 code-signing certificate registered to the account. It's complementary to the above rather than a substitute, and the difference is who does the checking: an author signature is verified automatically by every consumer's SDK at restore time, whereas an attestation is only checked by someone who deliberately runs `gh attestation verify`. Attestation ties an artifact to a commit and a build; an author signature ties it to an identity. If you want the automatic restore-time check, this is the gap.
 
-**Per-platform AOT receipts.** The same CI run publishes `HyperUuid.AotSmokeTest` under Native AOT on all six RIDs, fails the build on any `ILxxxx`/`AOTxxxx` trim diagnostic, executes the resulting binary, and requires exit 0. Each leg's log uploads as an `aot-report-{rid}` artifact.
+**Per-platform AOT receipts.** The same CI run publishes `HyperUuid.AotSmokeTest` under Native AOT on all six desktop RIDs and, in Alpine containers, on the two musl ones, fails the build on any `ILxxxx`/`AOTxxxx` trim diagnostic, executes the resulting binary, and requires exit 0. Each leg's log uploads as an `aot-report-{rid}` artifact.
 
 ## Install
 
@@ -203,7 +211,9 @@ Published to [nuget.org](https://www.nuget.org/packages/HyperUuid) — no extra 
 dotnet add package HyperUuid
 ```
 
-Targets net10.0 for the native platforms; Blazor WebAssembly needs .NET 11 or later — see the WebAssembly section above.
+Per-RID native libraries ship inside the package under `runtimes/`, so a consumer adds one reference and nothing else — no build step, no manual native staging. See [Platform support](#platform-support) for the list.
+
+Targets net10.0 for the native platforms; Blazor WebAssembly needs .NET 11 or later — see [WebAssembly (Blazor)](#webassembly-blazor).
 
 See [the repo root README](https://github.com/SkunkWerkx/HyperUuid/blob/master/README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

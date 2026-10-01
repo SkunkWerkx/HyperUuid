@@ -14,6 +14,11 @@ NAME = "example.com"
 # syscall, no vDSO fast path there; bare-metal Linux prices it at tens of nanoseconds).
 RFC_TEST_VECTOR_MS = 1_645_557_742_000
 
+# Every number below belongs to one backend on one Ruby, so say which before printing any:
+# run it again under HYPERUUID_PURE=1 or HYPERUUID_WASM=1 for the other two.
+puts "backend: #{HyperUuid::BACKEND} (core #{HyperUuid.native_version}) — #{RUBY_DESCRIPTION}"
+puts
+
 puts "== single-item generation =="
 Benchmark.ips do |x|
   x.report("SecureRandom.uuid") { SecureRandom.uuid }
@@ -33,5 +38,17 @@ Benchmark.ips do |x|
   x.report("new_v6_batch(1000)") { HyperUuid.new_v6_batch(1000) }
   x.report("new_v7 x1000 (individual)") { 1000.times { HyperUuid.new_v7 } }
   x.report("new_v7_batch(1000)") { HyperUuid.new_v7_batch(1000) }
+  x.compare!
+end
+
+# The README's "Bulk generation into bytes" figures: the same native call as the batch
+# above, minus the Uuid objects built on top of it.
+puts
+puts "== batch(1000) as Uuid objects vs as raw bytes =="
+Benchmark.ips do |x|
+  x.report("new_v6_batch(1000)") { HyperUuid.new_v6_batch(1000) }
+  x.report("new_v6_batch_bytes(1000)") { HyperUuid.new_v6_batch_bytes(1000) }
+  x.report("new_v7_batch(1000)") { HyperUuid.new_v7_batch(1000) }
+  x.report("new_v7_batch_bytes(1000)") { HyperUuid.new_v7_batch_bytes(1000) }
   x.compare!
 end

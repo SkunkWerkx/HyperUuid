@@ -12,13 +12,10 @@ plugins {
 // token auth + GPG signing path end to end — that coordinate stays live on Central permanently
 // (no delete), this is where every publish from here on happens).
 group = "io.github.skunkwerkx"
-// The real, committed version — same story as every other binding's manual bump: 0.0.1
-// proves this coordinate's own first real Maven Central publish, ahead of the coordinated
-// v0.1.0 release. CI overrides this (0.1.0-ci.<run_number>) via HYPERUUID_VERSION for repeated
-// manual workflow_dispatch runs against the GitHub Packages feed during testing, so those
-// don't collide with an already-published version — the real Maven Central publish
-// (release.yml, tag-triggered) never sets that env var, so it always uses this committed
-// version as-is.
+// CI overrides this (0.1.0-ci.<run_number>) via HYPERUUID_VERSION so repeated manual
+// workflow_dispatch runs during testing don't collide with an already-published version —
+// the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so
+// it always uses this committed version as-is.
 version = System.getenv("HYPERUUID_VERSION") ?: "0.3.0"
 
 repositories {
@@ -47,13 +44,29 @@ dependencies {
 // release-profile cargo build in ../rust), stage it as the classpath resource
 // /native/{rid}/{lib} the loader expects, so `./gradlew test` needs nothing copied by hand.
 // CI overlays every platform's build into the same layout before packaging.
+//
+// The same resolution NativePlatform.java does at runtime, so the library lands under the
+// RID the loader will ask for: x64 or arm64 only, and on Linux the musl family when this
+// (Gradle's own) JVM has musl's loader mapped — a `cargo build` on Alpine produces a musl
+// library, and it has to be staged as linux-musl-*. Anything else stages nothing, and the
+// suite then runs through the wasm module exactly as a consumer on that platform would.
 val nativeRid = run {
     val osName = System.getProperty("os.name").lowercase()
-    val isArm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm") }
+    val arch = when (System.getProperty("os.arch").lowercase()) {
+        "amd64", "x86_64", "x64" -> "x64"
+        "aarch64", "arm64" -> "arm64"
+        else -> null
+    }
+    val musl = runCatching {
+        file("/proc/self/maps").readLines(Charsets.ISO_8859_1)
+            .any { it.contains("ld-musl-") || it.contains("libc.musl-") }
+    }.getOrDefault(false)
     when {
-        osName.contains("win") -> if (isArm) "win-arm64" else "win-x64"
-        osName.contains("mac") || osName.contains("darwin") -> if (isArm) "osx-arm64" else "osx-x64"
-        else -> if (isArm) "linux-arm64" else "linux-x64"
+        arch == null -> "unsupported"
+        osName.startsWith("windows") -> "win-$arch"
+        osName.startsWith("mac") || osName.startsWith("darwin") -> "osx-$arch"
+        osName.startsWith("linux") -> if (musl) "linux-musl-$arch" else "linux-$arch"
+        else -> "unsupported"
     }
 }
 
@@ -72,7 +85,7 @@ val nativePlaced = file("src/main/resources/native/$nativeRid").exists()
 val stageNativeLibrary = tasks.register<Sync>("stageNativeLibrary") {
     from("../rust/target/release") {
         include("libhyperuuid.so", "libhyperuuid.dylib", "hyperuuid.dll")
-        if (nativePlaced) {
+        if (nativePlaced || nativeRid == "unsupported") {
             exclude("**")
         }
     }
@@ -123,6 +136,14 @@ tasks.jar {
         from("../LICENSE")
         from("README.md")
     }
+    // A stable module name for a consumer on the module path — without it the name is
+    // derived from the jar's file name — and therefore something exact to hand
+    // --enable-native-access (README.md's "Native access" section). Not a module-info.java:
+    // GraalWasm is an optional dependency this jar has to load without, and a module
+    // descriptor would have to declare it one way or the other.
+    manifest {
+        attributes("Automatic-Module-Name" to "io.github.skunkwerkx.hyperuuid")
+    }
 }
 
 tasks.test {
@@ -130,6 +151,10 @@ tasks.test {
     // UuidGenerator's FFM downcalls are a "restricted method" — silences the runtime
     // warning today and avoids them being blocked outright in a future JDK.
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // This binding's own version, so the suite can pin UuidGenerator.nativeVersion() to it:
+    // the core and the jar move together (prepare-release.yml bumps both), and the probe
+    // exists to prove exactly that.
+    systemProperty("hyperuuid.version", version)
 }
 
 // The identical suite, forced through the GraalWasm backend (-Dhyperuuid.backend=wasm), so
@@ -146,6 +171,7 @@ val testWasm = tasks.register<Test>("testWasm") {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED", "-Dpolyglot.engine.WarnInterpreterOnly=false")
     systemProperty("hyperuuid.backend", "wasm")
+    systemProperty("hyperuuid.version", version)
     shouldRunAfter(tasks.test)
 }
 
@@ -154,13 +180,19 @@ tasks.check {
 }
 
 java {
-    // 22 (not 21, as the prior Kotlin build targeted): java.lang.foreign is a stable, non-
-    // preview API only from JDK 22 (JEP 454) onward — plain javac (unlike kotlinc, which
-    // doesn't gate on the JDK's own @PreviewFeature markers the same way) enforces that at
-    // this project's own source/target level, not just the compiling JDK's.
-    sourceCompatibility = JavaVersion.VERSION_22
-    targetCompatibility = JavaVersion.VERSION_22
+    // 25 is the floor: the first long-term-support JDK with the final java.lang.foreign API
+    // (JEP 454 finalized it in 22, and 22 through 24 are all past end of life). Only
+    // upstream-supported runtimes, the same rule every other binding in this repo holds to.
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
     withSourcesJar()
+}
+
+// --release, not just the -source/-target pair above: it also compiles against JDK 25's own
+// API signatures whatever JDK is running the build, so a newer JDK on a CI leg cannot let a
+// newer API slip into a jar that claims 25.
+tasks.withType<JavaCompile>().configureEach {
+    options.release = 25
 }
 
 // javadoc's own doclint already flags a missing comment/@param/@return as a WARNING by
@@ -177,14 +209,10 @@ tasks.javadoc {
 // sources/javadoc jars, POM, and the Central Portal repository target all come from here, not
 // from a manually created MavenPublication (that would collide: the plugin creates one named
 // "maven" too). publishToMavenCentral() targets the new Central Publisher Portal, not the
-// dead OSSRH/Nexus staging API — io.github.skunkwerkx is now an approved, Central-Support-
-// verified org namespace (io.github.buvinghausen was the interim personal-account namespace
-// that auto-verified on its own, used only for this package's very first real publish).
-// Credentials
-// (mavenCentralUsername/mavenCentralPassword, from the Central Portal's own token generator —
-// not a raw Sonatype account password) and the signing key come from
-// ORG_GRADLE_PROJECT_-prefixed env vars in CI, ~/.gradle/gradle.properties locally; neither
-// lives in this file.
+// dead OSSRH/Nexus staging API. Credentials (mavenCentralUsername/mavenCentralPassword, from
+// the Central Portal's own token generator — not a raw Sonatype account password) and the
+// signing key come from ORG_GRADLE_PROJECT_-prefixed env vars in CI,
+// ~/.gradle/gradle.properties locally; neither lives in this file.
 mavenPublishing {
     publishToMavenCentral()
     signAllPublications()
@@ -192,9 +220,9 @@ mavenPublishing {
     pom {
         name.set("hyperuuid")
         description.set(
-            "RFC 9562 UUID v4/v5/v6/v7 generation — high-performance, allocation-free " +
-                "FFM bindings straight into a native Rust core (libhyperuuid). " +
-                "No runtime bridge, no reflection, no extra dependency."
+            "RFC 9562 UUID v4/v5/v6/v7 generation — high-performance FFM bindings " +
+                "straight into a native Rust core (libhyperuuid) that never allocates. " +
+                "JDK 25+. No runtime bridge, no extra dependency."
         )
         url.set("https://github.com/SkunkWerkx/HyperUuid")
         licenses {

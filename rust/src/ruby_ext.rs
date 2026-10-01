@@ -7,10 +7,13 @@
 //! On require (after `lib/hyperuuid.rb` has defined the pure-Fiddle module), this extension
 //! redefines the `HyperUuid::Runtime` singleton methods **in place** — no delegation layer,
 //! no second surface. Everything above Runtime (the `Uuid` class, the top-level `HyperUuid`
-//! doors, batch slicing) is shared byte-for-byte between backends, which is exactly what
-//! keeps them provably in agreement. Exceptions stay the package's own
-//! `Runtime::RandomSourceError` / `Runtime::TimestampOutOfRangeError`.
-//! `HYPERUUID_PURE=1` (checked Ruby-side) keeps Fiddle.
+//! doors and their argument checks, batch slicing) is shared byte-for-byte between backends,
+//! which is exactly what keeps them provably in agreement. Exceptions stay the package's own
+//! `HyperUuid::RandomSourceError` / `HyperUuid::TimestampOutOfRangeError`, with the same
+//! messages `lib/hyperuuid/runtime.rb` gives the Fiddle and wasm backends — the two texts
+//! below are that file's `V6_TIMESTAMP_OUT_OF_RANGE` / `V7_TIMESTAMP_OUT_OF_RANGE`, and
+//! `random_source_error` is its `random_source_failure`. `HYPERUUID_PURE=1` (checked
+//! Ruby-side) keeps Fiddle.
 
 use std::sync::OnceLock;
 
@@ -32,8 +35,17 @@ fn cached() -> &'static Cached {
     CACHED.get().expect("hyperuuid_native used before init")
 }
 
-fn random_source_error(ruby: &Ruby, message: String) -> Error {
-    Error::new(ruby.get_inner(cached().random_source_error), message)
+const V6_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis does not fit the 60-bit v6 timestamp field";
+const V7_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis must fit within the RFC 9562 48-bit field";
+
+/// The one message every backend raises for a failed random source: the C-ABI export the
+/// call corresponds to, and nothing backend-specific — the Fiddle and wasm backends only
+/// ever see a return code, so the OS error this backend could name is left out on purpose.
+fn random_source_error(ruby: &Ruby, export: &'static str) -> Error {
+    Error::new(
+        ruby.get_inner(cached().random_source_error),
+        format!("{export}: the system random source failed"),
+    )
 }
 
 fn timestamp_out_of_range(ruby: &Ruby, message: &'static str) -> Error {
@@ -57,7 +69,7 @@ fn uuid_string(ruby: &Ruby, uuid: core::Uuid) -> RString {
 fn new_v4(ruby: &Ruby) -> Result<RString, Error> {
     match core::v4::new_v4() {
         Ok(uuid) => Ok(uuid_string(ruby, uuid)),
-        Err(e) => Err(random_source_error(ruby, format!("uuid_new_v4 failed: {e}"))),
+        Err(_) => Err(random_source_error(ruby, "uuid_new_v4")),
     }
 }
 
@@ -73,13 +85,10 @@ fn new_v5(ruby: &Ruby, namespace_bytes: RString, name_bytes: RString) -> Result<
 fn new_v6(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
     match core::v6::new_v6(unix_millis) {
         Ok(uuid) => Ok(uuid_string(ruby, uuid)),
-        Err(core::v6::NewV6Error::TimestampOutOfRange) => Err(timestamp_out_of_range(
-            ruby,
-            "unix_millis does not fit the 60-bit v6 timestamp field",
-        )),
-        Err(core::v6::NewV6Error::Random(e)) => {
-            Err(random_source_error(ruby, format!("uuid_new_v6 failed: {e}")))
+        Err(core::v6::NewV6Error::TimestampOutOfRange) => {
+            Err(timestamp_out_of_range(ruby, V6_TIMESTAMP_OUT_OF_RANGE))
         }
+        Err(core::v6::NewV6Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v6")),
     }
 }
 
@@ -94,12 +103,11 @@ fn new_v6_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
     let mut out = vec![0u8; count as usize * 16];
     match core::v6::new_v6_batch(unix_millis, count, &mut out) {
         Ok(()) => Ok(ruby.str_from_slice(&out)),
-        Err(core::v6::NewV6Error::TimestampOutOfRange) => Err(timestamp_out_of_range(
-            ruby,
-            "unix_millis does not fit the 60-bit v6 timestamp field",
-        )),
-        Err(core::v6::NewV6Error::Random(e)) => {
-            Err(random_source_error(ruby, format!("uuid_new_v6_batch failed: {e}")))
+        Err(core::v6::NewV6Error::TimestampOutOfRange) => {
+            Err(timestamp_out_of_range(ruby, V6_TIMESTAMP_OUT_OF_RANGE))
+        }
+        Err(core::v6::NewV6Error::Random(_)) => {
+            Err(random_source_error(ruby, "uuid_new_v6_batch"))
         }
     }
 }
@@ -107,13 +115,10 @@ fn new_v6_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
 fn new_v7(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
     match core::v7::new_v7(unix_millis) {
         Ok(uuid) => Ok(uuid_string(ruby, uuid)),
-        Err(core::v7::NewV7Error::TimestampOutOfRange) => Err(timestamp_out_of_range(
-            ruby,
-            "unix_millis must fit within the RFC 9562 48-bit field",
-        )),
-        Err(core::v7::NewV7Error::Random(e)) => {
-            Err(random_source_error(ruby, format!("uuid_new_v7 failed: {e}")))
+        Err(core::v7::NewV7Error::TimestampOutOfRange) => {
+            Err(timestamp_out_of_range(ruby, V7_TIMESTAMP_OUT_OF_RANGE))
         }
+        Err(core::v7::NewV7Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v7")),
     }
 }
 
@@ -128,12 +133,11 @@ fn new_v7_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
     let mut out = vec![0u8; count as usize * 16];
     match core::v7::new_v7_batch(unix_millis, count, &mut out) {
         Ok(()) => Ok(ruby.str_from_slice(&out)),
-        Err(core::v7::NewV7Error::TimestampOutOfRange) => Err(timestamp_out_of_range(
-            ruby,
-            "unix_millis must fit within the RFC 9562 48-bit field",
-        )),
-        Err(core::v7::NewV7Error::Random(e)) => {
-            Err(random_source_error(ruby, format!("uuid_new_v7_batch failed: {e}")))
+        Err(core::v7::NewV7Error::TimestampOutOfRange) => {
+            Err(timestamp_out_of_range(ruby, V7_TIMESTAMP_OUT_OF_RANGE))
+        }
+        Err(core::v7::NewV7Error::Random(_)) => {
+            Err(random_source_error(ruby, "uuid_new_v7_batch"))
         }
     }
 }
@@ -154,6 +158,13 @@ fn v6_to_rfc_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
     Ok(uuid_string(ruby, core::v6::to_rfc_order(&uuid_arg(ruby, bytes)?)))
 }
 
+/// The loaded core's packed version word — the same value the C-ABI `hyperuuid_version`
+/// export returns. Here the core is linked in, so this is the version of the crate this very
+/// extension was compiled from; `HyperUuid.native_version` unpacks it Ruby-side.
+fn packed_version() -> u32 {
+    core::hyperuuid_version()
+}
+
 #[magnus::init(name = "hyperuuid_native")]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     // rb_define_module returns the existing module — lib/hyperuuid.rb has already defined
@@ -162,10 +173,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let runtime: RModule = hyperuuid.define_module("Runtime")?;
     let _ = CACHED.set(Cached {
         random_source_error: Opaque::from(
-            runtime.const_get::<_, ExceptionClass>("RandomSourceError")?,
+            hyperuuid.const_get::<_, ExceptionClass>("RandomSourceError")?,
         ),
         timestamp_out_of_range_error: Opaque::from(
-            runtime.const_get::<_, ExceptionClass>("TimestampOutOfRangeError")?,
+            hyperuuid.const_get::<_, ExceptionClass>("TimestampOutOfRangeError")?,
         ),
     });
     runtime.define_singleton_method("new_v4", function!(new_v4, 0))?;
@@ -180,5 +191,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     runtime.define_singleton_method("v7_to_rfc_order", function!(v7_to_rfc_order, 1))?;
     runtime.define_singleton_method("v6_to_sql_order", function!(v6_to_sql_order, 1))?;
     runtime.define_singleton_method("v6_to_rfc_order", function!(v6_to_rfc_order, 1))?;
+    runtime.define_singleton_method("packed_version", function!(packed_version, 0))?;
     Ok(())
 }

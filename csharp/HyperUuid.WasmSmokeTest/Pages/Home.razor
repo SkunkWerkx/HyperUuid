@@ -24,10 +24,18 @@
 
         // Every call goes through the public UuidGenerator surface a Blazor consumer uses and
         // lands in the statically linked wasm module via LibraryImport("*"), so an entry point
-        // missing from build/net10.0/HyperUuid.targets' EmccExportedFunction list fails here at
-        // runtime, not at the link.
+        // missing from build/HyperUuid.targets' EmccExportedFunction list fails here at
+        // runtime, not at the link. That only holds for an entry point this page actually
+        // calls, so it calls all thirteen: the twelve uuid_* functions and hyperuuid_version.
         try
         {
+            // The probe must name the core that actually linked in. First, because it is the
+            // one call that reports a missing export as false rather than throwing.
+            if (!UuidGenerator.IsAvailable || UuidGenerator.NativeVersion is null)
+                Fail($"native probe: available={UuidGenerator.IsAvailable} version={UuidGenerator.NativeVersion}");
+            else
+                lines.Add($"ok   native: version={UuidGenerator.NativeVersion}");
+
             var a = UuidGenerator.NewV4();
             var b = UuidGenerator.NewV4();
             if (a == b) Fail("two v4 calls produced identical output");
@@ -64,6 +72,37 @@
                 if (batch[i].CompareTo(batch[i - 1]) == 0 || UuidGenerator.V7UnixMillis(batch[i]) != fixedMs) increasing = false;
             if (batch.Length != 1000 || !increasing) Fail("v7 batch is not 1000 distinct ids at the requested timestamp");
             else lines.Add("ok   v7 batch: 1000 distinct ids at the requested timestamp");
+
+            // The v6 batch is its own entry point, in both destination shapes.
+            var v6Batch = UuidGenerator.NewV6Batch(1000, fixedMs);
+            var v6Raw = new byte[4 * 16];
+            UuidGenerator.FillV6(v6Raw, fixedMs);
+            if (v6Batch.Distinct().Count() != 1000
+                || v6Batch.Any(id => UuidGenerator.V6UnixMillis(id) != fixedMs)
+                || UuidGenerator.V6UnixMillis(new Guid(v6Raw.AsSpan(3 * 16, 16), bigEndian: true)) != fixedMs)
+                Fail("v6 batch is not 1000 distinct ids at the requested timestamp");
+            else
+                lines.Add("ok   v6 batch: 1000 distinct ids at the requested timestamp");
+
+            // The four SQL-order entry points: to and back, per version, with the raw-byte form
+            // agreeing with the Guid form on the way out.
+            var v7Bytes = new byte[16];
+            v7.TryWriteBytes(v7Bytes, bigEndian: true, out _);
+            UuidGenerator.V7ToSqlOrder(v7Bytes);
+            var v7Sql = UuidGenerator.V7ToSqlOrder(v7);
+            if (v7Sql == v7 || !v7Bytes.AsSpan().SequenceEqual(v7Sql.ToByteArray()) || UuidGenerator.V7FromSqlOrder(v7Sql) != v7)
+                Fail($"v7 SQL order does not round-trip for {v7}");
+            else
+                lines.Add($"ok   v7 SQL order: {v7Sql} round-trips");
+
+            var v6Bytes = new byte[16];
+            v6.TryWriteBytes(v6Bytes, bigEndian: true, out _);
+            UuidGenerator.V6ToSqlOrder(v6Bytes);
+            var v6Sql = UuidGenerator.V6ToSqlOrder(v6);
+            if (v6Sql == v6 || !v6Bytes.AsSpan().SequenceEqual(v6Sql.ToByteArray()) || UuidGenerator.V6FromSqlOrder(v6Sql) != v6)
+                Fail($"v6 SQL order does not round-trip for {v6}");
+            else
+                lines.Add($"ok   v6 SQL order: {v6Sql} round-trips");
         }
         catch (Exception ex)
         {

@@ -20,11 +20,34 @@ use FFI;
  * (PHP's request model makes static scratch safe — arrays auto-decay to pointers, so no
  * pre-taken address is needed); only the in-place byte-order rewrites still copy, because
  * the native call genuinely mutates the buffer.
+ *
+ * @internal FFI plumbing, not part of the public API — PHP has no package-private visibility.
+ *     Callers go through {@see HyperUuid} and {@see Uuid}, which guarantee the 16-byte
+ *     buffers these methods hand to native code unchecked.
  */
 final class Runtime
 {
+    /** The widest count or length the C ABI's `uint32_t` parameters can carry. */
+    private const UINT32_MAX = 0xFFFFFFFF;
+
     private static ?FFI $ffi = null;
     private static ?FFI\CData $out16 = null;
+
+    /** Non-instantiable — static calls only. */
+    private function __construct()
+    {
+    }
+
+    /**
+     * The loaded library's own version, packed `major << 16 | minor << 8 | patch` by the
+     * core's zero-argument probe, rendered as "major.minor.patch".
+     */
+    public static function nativeVersion(): string
+    {
+        $ffi = self::$ffi ?? self::load();
+        $packed = $ffi->hyperuuid_version();
+        return sprintf('%d.%d.%d', $packed >> 16, ($packed >> 8) & 0xFF, $packed & 0xFF);
+    }
 
     public static function newV4(): string
     {
@@ -38,6 +61,10 @@ final class Runtime
 
     public static function newV5(string $namespaceBytes, string $nameBytes): string
     {
+        if (\strlen($nameBytes) > self::UINT32_MAX) {
+            // name_len is a uint32_t; ext-ffi would silently truncate a longer length.
+            throw new \InvalidArgumentException('name must be shorter than 4 GiB');
+        }
         $ffi = self::$ffi ?? self::load();
         $rc = $ffi->uuid_new_v5(
             $namespaceBytes,
@@ -74,6 +101,7 @@ final class Runtime
 
     public static function newV6Batch(int $count, int $unixMillis): string
     {
+        self::checkCount($count);
         if ($count === 0) {
             return '';
         }
@@ -114,6 +142,7 @@ final class Runtime
 
     public static function newV7Batch(int $count, int $unixMillis): string
     {
+        self::checkCount($count);
         if ($count === 0) {
             return '';
         }
@@ -176,14 +205,38 @@ final class Runtime
     }
 
     /**
-     * Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
-     * static let — the native library and its function pointers live for the process's
-     * lifetime, same as every other binding (never unloaded).
+     * A batch count crosses the ABI as a `uint32_t`: a negative or over-wide count is a
+     * caller bug, reported as one here instead of as an FFI allocation error or a silently
+     * truncated batch.
+     */
+    private static function checkCount(int $count): void
+    {
+        if ($count < 0 || $count > self::UINT32_MAX) {
+            throw new \InvalidArgumentException(
+                "count must be between 0 and 4294967295, got {$count}"
+            );
+        }
+    }
+
+    /**
+     * Loaded lazily, once per request: PHP's statics reset between requests, so under a web
+     * SAPI the declarations are bound again on each request's first call (the OS keeps the
+     * library itself mapped for the worker's lifetime). The CLI's single long request is the
+     * one case that matches the other bindings' load-once-per-process (Go's sync.Once,
+     * Swift's lazy static let).
      */
     private static function load(): FFI
     {
         [$rid, $libName] = NativePlatform::ridAndLibraryName();
         $path = __DIR__ . "/native/{$rid}/{$libName}";
+        if (!is_file($path)) {
+            // Development loop: fall back to the in-repo cargo build, exactly what the
+            // other bindings' local staging does.
+            $repoBuild = \dirname(__DIR__, 2) . "/rust/target/release/{$libName}";
+            if (is_file($repoBuild)) {
+                $path = $repoBuild;
+            }
+        }
         if (!is_file($path)) {
             throw new \RuntimeException(
                 "hyperuuid: {$path} not found (unsupported platform, or this package was built "
@@ -192,7 +245,8 @@ final class Runtime
         }
 
         self::$ffi = FFI::cdef(
-            'int uuid_new_v4(void *out_ptr);'
+            'uint32_t hyperuuid_version(void);'
+            . 'int uuid_new_v4(void *out_ptr);'
             . 'int uuid_new_v5(const char *ns_ptr, const char *name_ptr, uint32_t name_len, void *out_ptr);'
             . 'int uuid_new_v6(uint64_t unix_millis, void *out_ptr);'
             . 'uint64_t uuid_v6_unix_millis(const char *uuid_ptr);'

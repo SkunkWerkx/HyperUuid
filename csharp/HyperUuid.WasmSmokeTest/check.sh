@@ -12,7 +12,7 @@ out="$(mktemp -d)"
 server=""
 trap '[ -z "$server" ] || kill "$server" 2>/dev/null || true; rm -rf "$out"' EXIT
 
-(cd "$repo/rust" && cargo rustc --release --target wasm32-unknown-emscripten --crate-type staticlib)
+(cd "$repo/rust" && cargo wasm-staticlib)
 dest="$here/../HyperUuid/runtimes/browser-wasm/nativeassets/net10.0"
 mkdir -p "$dest"
 cp "$repo/rust/target/wasm32-unknown-emscripten/release/libhyperuuid.a" "$dest/"

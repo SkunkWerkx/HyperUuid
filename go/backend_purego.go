@@ -10,7 +10,6 @@ package hyperuuid
 
 import (
 	"fmt"
-	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -18,9 +17,6 @@ import (
 )
 
 var (
-	initOnce sync.Once
-	initErr  error
-
 	uuidNewV4        func(out unsafe.Pointer) int32
 	uuidNewV5        func(ns, name unsafe.Pointer, nameLen uint32, out unsafe.Pointer) int32
 	uuidNewV6        func(unixMillis uint64, out unsafe.Pointer) int32
@@ -33,38 +29,47 @@ var (
 	uuidV7ToRfcOrder func(uuid unsafe.Pointer)
 	uuidV6ToSqlOrder func(uuid unsafe.Pointer)
 	uuidV6ToRfcOrder func(uuid unsafe.Pointer)
+	hyperuuidVersion func() uint32
 )
 
-// ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
-// it, exactly once.
-func ensureLoaded() error {
-	initOnce.Do(func() {
-		path, err := extractNativeLib()
-		if err != nil {
-			initErr = err
-			return
-		}
+// loadBackend extracts this platform's embedded native library to a temp file and dlopen's
+// it via purego. ensureLoaded (load.go) runs it exactly once.
+func loadBackend() (err error) {
+	path, err := extractNativeLib()
+	if err != nil {
+		return err
+	}
 
-		handle, err := openLibrary(path)
-		if err != nil {
-			initErr = fmt.Errorf("hyperuuid: loading native library: %w", err)
-			return
-		}
+	handle, err := openLibrary(path)
+	if err != nil {
+		return fmt.Errorf("loading native library: %w", err)
+	}
 
-		purego.RegisterLibFunc(&uuidNewV4, handle, "uuid_new_v4")
-		purego.RegisterLibFunc(&uuidNewV5, handle, "uuid_new_v5")
-		purego.RegisterLibFunc(&uuidNewV6, handle, "uuid_new_v6")
-		purego.RegisterLibFunc(&uuidV6UnixMillis, handle, "uuid_v6_unix_millis")
-		purego.RegisterLibFunc(&uuidNewV6Batch, handle, "uuid_new_v6_batch")
-		purego.RegisterLibFunc(&uuidNewV7, handle, "uuid_new_v7")
-		purego.RegisterLibFunc(&uuidV7UnixMillis, handle, "uuid_v7_unix_millis")
-		purego.RegisterLibFunc(&uuidNewV7Batch, handle, "uuid_new_v7_batch")
-		purego.RegisterLibFunc(&uuidV7ToSqlOrder, handle, "uuid_v7_to_sql_order")
-		purego.RegisterLibFunc(&uuidV7ToRfcOrder, handle, "uuid_v7_to_rfc_order")
-		purego.RegisterLibFunc(&uuidV6ToSqlOrder, handle, "uuid_v6_to_sql_order")
-		purego.RegisterLibFunc(&uuidV6ToRfcOrder, handle, "uuid_v6_to_rfc_order")
-	})
-	return initErr
+	// RegisterLibFunc panics on a symbol the library does not export (an older core, say).
+	// That is a load failure, not a caller bug: fold it into the returned error so Available
+	// answers false and every function returns the reason, the same as the cgo backend.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("resolving native symbols: %v", r)
+		}
+	}()
+
+	purego.RegisterLibFunc(&uuidNewV4, handle, "uuid_new_v4")
+	purego.RegisterLibFunc(&uuidNewV5, handle, "uuid_new_v5")
+	purego.RegisterLibFunc(&uuidNewV6, handle, "uuid_new_v6")
+	purego.RegisterLibFunc(&uuidV6UnixMillis, handle, "uuid_v6_unix_millis")
+	purego.RegisterLibFunc(&uuidNewV6Batch, handle, "uuid_new_v6_batch")
+	purego.RegisterLibFunc(&uuidNewV7, handle, "uuid_new_v7")
+	purego.RegisterLibFunc(&uuidV7UnixMillis, handle, "uuid_v7_unix_millis")
+	purego.RegisterLibFunc(&uuidNewV7Batch, handle, "uuid_new_v7_batch")
+	purego.RegisterLibFunc(&uuidV7ToSqlOrder, handle, "uuid_v7_to_sql_order")
+	purego.RegisterLibFunc(&uuidV7ToRfcOrder, handle, "uuid_v7_to_rfc_order")
+	purego.RegisterLibFunc(&uuidV6ToSqlOrder, handle, "uuid_v6_to_sql_order")
+	purego.RegisterLibFunc(&uuidV6ToRfcOrder, handle, "uuid_v6_to_rfc_order")
+	purego.RegisterLibFunc(&hyperuuidVersion, handle, "hyperuuid_version")
+	// One real call through the ABI, so Available means "answered", not "resolved".
+	nativeVersion = hyperuuidVersion()
+	return nil
 }
 
 // The same by-value doors the cgo backend exposes, filled through pointers here: purego's

@@ -1,6 +1,8 @@
 # hyperuuid
 
 [![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/SkunkWerkx/HyperUuid/go.svg)](https://pkg.go.dev/github.com/SkunkWerkx/HyperUuid/go)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
 **The same [`google/uuid.UUID`](https://pkg.go.dev/github.com/google/uuid) type your code already uses — minted by a shared Rust core instead of Go's own generator, so a Go service and a Python/Ruby/C#/whatever-else service agree byte-for-byte on every ID they produce.**
 
@@ -11,16 +13,17 @@ automatically by build tag, same public API either way: real cgo on darwin/linux
 [purego](https://github.com/ebitengine/purego) (`backend_purego.go`) — dlopen/dlsym
 plus per-arch call trampolines, no cgo and no C compiler required — everywhere else,
 including Windows unconditionally and any darwin/linux build with `CGO_ENABLED=0`.
-Bundles a native build for every supported platform (linux/darwin/windows ×
-amd64/arm64) via `go:embed` and picks the right one at runtime, so `go get` is the whole
-install. A third backend, opt-in behind `-tags hyperuuid_wasm`, runs the same core as a
-WebAssembly module inside the process through wasmtime-go instead of dlopen'ing anything —
-see [WebAssembly (wasmtime-go)](#webassembly-wasmtime-go).
+Bundles a native build for every supported platform (see [Platforms](#platforms)) via
+`go:embed` and picks the right one at runtime, so `go get` is the whole install. A third
+backend, opt-in behind `-tags hyperuuid_wasm`, runs the same core as a WebAssembly module
+inside the process through wasmtime-go instead of dlopen'ing anything — see
+[WebAssembly (wasmtime-go)](#webassembly-wasmtime-go).
 
 ```go
 import (
 	"github.com/google/uuid"
-	"github.com/SkunkWerkx/HyperUuid/go"
+
+	hyperuuid "github.com/SkunkWerkx/HyperUuid/go"
 )
 
 id, err := hyperuuid.NewV4()
@@ -32,6 +35,27 @@ sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // byte order SQL Server's uniquei
 
 created, err := hyperuuid.GetTimestamp(id) // version-agnostic: ErrNotTimeBased instead of assuming id is v6/v7
 ```
+
+## Install
+
+```sh
+go get github.com/SkunkWerkx/HyperUuid/go
+```
+
+Requires Go 1.26 or later (the `go` directive in `go.mod`). The import path ends in `/go`
+while the package is named `hyperuuid`, so spell the name out in the import, as above —
+`goimports` adds it for you, but a hand-written `import "github.com/SkunkWerkx/HyperUuid/go"`
+reads as if the package were called `go`.
+
+Go modules have no separate registry to publish to — `go get` resolves straight from a git
+tag, which *is* the real, complete publish story here, not a placeholder for one. This
+module lives in a subdirectory of the monorepo, so its own semver tags are prefixed
+(`go/vX.Y.Z`, not a bare `vX.Y.Z` — those track this repo's other bindings' own release
+events instead). The native libraries under `native/{rid}/` are committed straight into git:
+unlike a real package registry, `go get`/`go build` has no packing step of its own — whatever
+`go:embed` finds in the git tree at the resolved module version is what a consumer gets.
+
+## API
 
 Returns [`github.com/google/uuid`](https://pkg.go.dev/github.com/google/uuid)'s
 `uuid.UUID` — already RFC 9562 network-byte-order-identical to what the native core
@@ -56,45 +80,133 @@ the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — it checks
 `id.Version()` itself and returns `ErrNotTimeBased` for anything but a genuine v6/v7
 `uuid.UUID`, instead of assuming the caller already knows.
 
-## Why not `google/uuid`'s own `NewV6`/`NewV7`?
+`NewV5` is the raw-byte form `NewV5String` converts into: a name is bytes, not text, and
+nothing requires it to be valid UTF-8. An empty or nil name is valid and hashes the
+namespace alone.
 
-This binding depends on `google/uuid` for the `uuid.UUID` type itself — it's already
-in your import graph, and it already ships working `NewV6()`/`NewV7()` functions of
-its own. Two real, checked-against-its-actual-source reasons to reach for this
-binding's generators instead:
+### Errors
 
-1. **Node ID privacy.** `google/uuid`'s `NewV6()` defaults to a real network
-   interface's MAC address for the node ID field when one is available (see its own
-   [`version6.go`](https://github.com/google/uuid/blob/master/version6.go) —
-   `setNodeInterface`), which is exactly the hardware-identity leak RFC 9562 §6.9
-   recommends against. `hyperuuid.NewV6`/`NewV6BatchAt` always use a random node ID
-   with the multicast bit set, the same way this project's v6 works in every other
-   binding.
-2. **Explicit, testable timestamps.** `google/uuid`'s `NewV6`/`NewV7` always read the
-   system clock internally with no way to inject a specific instant. Every time-based
-   generator here — `NewV6At`, `NewV7At`, and both batch variants — takes
-   `unixMillis` as an explicit parameter, so tests can assert against a fixed RFC
-   test vector instead of the wall clock, and the same call works identically
-   compiled to `wasm32`, which has no OS clock of its own.
+Every function returns an `error`; nothing in this package panics. The sentinels, all
+matched with `errors.Is`:
 
-(`google/uuid`'s own `NewV7()` *does* implement a real monotonic sub-millisecond
-sequence — worth knowing if you're comparing the two, since a naively-random v7
-generator would not.) Both libraries produce spec-valid, mutually interoperable
-UUIDs; picking one over the other for v6/v7 generation is about these two
-properties and, if your other services are in a different language, using the one
-engine that's byte-for-byte identical everywhere.
+| Error | Returned when |
+| --- | --- |
+| `ErrNativeUnavailable` | the native library could not be loaded — any function, see [the next section](#the-native-library-available-loaderror-nativeversion) |
+| `ErrRandomSource` | the core's random source failed — `NewV4`, the v6 and v7 generators, and their batch and Fill forms. `NewV5` draws no entropy and never returns it |
+| `ErrTimestampOutOfRange` | `unixMillis` doesn't fit the version's own timestamp field — every v6 and v7 generator. Version 7 holds 48 bits of Unix milliseconds; version 6's 60-bit count of 100 ns ticks since 1582-10-15 runs out earlier, in the year 5236 |
+| `ErrNotTimeBased` | `GetTimestamp` was given a UUID that isn't version 6 or 7 |
+| `ErrNegativeCount` | `NewV6Batch`/`NewV7Batch` (and their `At` forms) were given a negative count. A count of 0 returns a nil slice |
+| `ErrBufferNotWholeUUIDs` | a `FillV6Bytes`/`FillV7Bytes` destination isn't a multiple of 16 bytes long |
+| `ErrNotOneUUID` | a raw-byte SQL-order transform was given a buffer that isn't exactly 16 bytes |
 
-```sh
-go get github.com/SkunkWerkx/HyperUuid/go
+## Destination-buffer fills
+
+`FillV6`/`FillV7` (and the `At` variants) write into a slice you already own instead of allocating a fresh one per call:
+
+```go
+dst := make([]uuid.UUID, 1000)
+for {
+    if err := hyperuuid.FillV7(dst); err != nil { /* ... */ }
+    // reuse dst next iteration — nothing allocated
+}
 ```
 
-Go modules have no separate registry to publish to — `go get` resolves straight from a git
-tag, which *is* the real, complete publish story here, not a placeholder for one. This
-module lives in a subdirectory of the monorepo, so its own semver tags are prefixed
-(`go/vX.Y.Z`, not a bare `vX.Y.Z` — those track this repo's other bindings' own release
-events instead). The native libraries under `native/{rid}/` are committed straight into git:
-unlike a real package registry, `go get`/`go build` has no packing step of its own — whatever
-`go:embed` finds in the git tree at the resolved module version is what a consumer gets.
+Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]byte`, so a `[]uuid.UUID` is contiguous 16-byte records in exactly the RFC order the native core writes — the batch lands directly in your slice with **no intermediate buffer and no per-element conversion**. (C# and Java can't do that; their UUID types aren't RFC byte order, so they must rebuild every element.)
+
+`go test -bench=. -benchmem ./...` from `go/`, 1000 UUIDs per op:
+
+| method | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `NewV7At` x1000 individually | 138,646 | 16,000 | 1000 |
+| `NewV7BatchAt(1000)` | 22,989 | 16,384 | 1 |
+| `FillV7At` into an existing slice | 18,355 | **0** | **0** |
+| `FillV7BytesAt` into an existing buffer | 17,629 | **0** | **0** |
+
+`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 4% of each other, since neither converts; the byte form exists for convenience, not speed.
+
+`NewV6BatchAt`/`NewV7BatchAt` now delegate to the fills, so the array-returning API is a single allocation with no intermediate copy — existing callers got faster without changing a line.
+
+### Raw-byte SQL-order transforms
+
+`V6/V7ToSqlOrderBytes` and `V6/V7FromSqlOrderBytes` apply the same native permutation as `V7ToSqlOrder` in place on a caller's 16-byte slice. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo now makes against the one native implementation.
+
+## The native library: `Available`, `LoadError`, `NativeVersion`
+
+The core is loaded once, on first use, and the outcome is cached for the life of the
+process. When that load fails, every function returns an error wrapping
+`ErrNativeUnavailable` around the specific reason — an unsupported platform, no embedded
+build for it, a failed extraction or `dlopen`, a core that doesn't export the ABI this
+binding was built against. Three entry points probe the same outcome up front, without
+generating anything:
+
+- `Available()` — `true` when the native library (or, under `-tags hyperuuid_wasm`, the
+  wasm module) loaded and exports the ABI this binding was built against: every symbol
+  resolved and `hyperuuid_version` answered. A `false` is permanent for the process.
+- `LoadError()` — `nil` when it loaded; otherwise the same error every other function
+  returns, reason included.
+- `NativeVersion()` — `"major.minor.patch"` as the loaded core reports it about itself, so
+  a mismatch against the version this module was built for can be named before the first
+  UUID. Returns the `LoadError` if the library did not load.
+
+```go
+if err := hyperuuid.LoadError(); err != nil {
+	// errors.Is(err, hyperuuid.ErrNativeUnavailable) == true, and the message says why:
+	//   hyperuuid: native library unavailable: dlopen failed: libgcc_s.so.1: cannot open
+	//   shared object file: No such file or directory
+	log.Fatal(err)
+}
+version, _ := hyperuuid.NativeVersion()
+```
+
+[HyperCast](https://github.com/SkunkWerkx/HyperCast)'s Go binding has the same three entry
+points and the same `ErrNativeUnavailable`, with one difference that follows from its API:
+its doors return `(value, *Fault)`, so they panic with that error where these functions
+return it.
+
+On the two native backends, loading means extracting the embedded library to a temp file
+and `dlopen`ing it from there (`native_extract.go`). The file is created in `os.TempDir()`
+— `TMPDIR` moves it — once per process, and is not removed at exit.
+
+## Platforms
+
+| Platform | Embedded build | Needs at run time |
+| --- | --- | --- |
+| Linux x64 / arm64, glibc | `native/linux-x64`, `native/linux-arm64` | glibc 2.34 or newer, and `libgcc_s.so.1` |
+| Linux x64 / arm64, musl (Alpine) | `native/linux-musl-x64`, `native/linux-musl-arm64` | musl libc, nothing else |
+| macOS x64 / arm64 | `native/osx-x64`, `native/osx-arm64` | — |
+| Windows x64 / arm64 | `native/win-x64`, `native/win-arm64` | — |
+
+Anything else — another OS, or an architecture such as 386 or riscv64 — is reported as
+`unsupported platform {GOOS}/{GOARCH}` inside `ErrNativeUnavailable`, never guessed at.
+
+**glibc.** The glibc builds reference symbols up to `GLIBC_2.34`, which is Debian 12,
+Ubuntu 22.04, RHEL 9 and Amazon Linux 2023 or later. On an older glibc — Debian 11's 2.31,
+say — the load fails with the loader's own ``version `GLIBC_2.33' not found``. They also
+link `libgcc_s.so.1`, which every mainstream glibc distribution ships and a minimal image
+may not: on `gcr.io/distroless/base` the load fails with `libgcc_s.so.1: cannot open
+shared object file`, and on `gcr.io/distroless/cc` it works.
+
+**musl.** Which Linux build is loaded is decided at run time, by what the process is
+actually running on: if `/proc/self/maps` shows a musl loader mapped (`ld-musl-*` or
+`libc.musl-*`), the `linux-musl-*` build is used; otherwise, or if the file can't be read,
+the glibc one. The musl builds depend on musl libc alone — no `libgcc`, no `gcompat`. What
+that means for a build:
+
+- **Built on Alpine** — both backends work. The default cgo build needs a C compiler
+  (`apk add build-base`) at build time only. `CGO_ENABLED=0` (purego) needs none.
+- **Built on a glibc machine, shipped to Alpine** — build with `CGO_ENABLED=0`; a cgo
+  build links the builder's glibc, which a bare Alpine image does not have. Even then, Go's linker
+  writes glibc's loader into the binary by default, so on a bare Alpine image it fails to
+  start (`not found`, exit 127) before this module is ever reached. Name musl's loader
+  instead and it runs:
+  `CGO_ENABLED=0 go build -ldflags '-I /lib/ld-musl-x86_64.so.1' ./...` (verified on x64;
+  arm64's loader is `/lib/ld-musl-aarch64.so.1`). Installing `gcompat` in the image also
+  works, and the musl build is still the one selected.
+- **The wasm backend** (`-tags hyperuuid_wasm`) does not link on musl: wasmtime-go's
+  precompiled static library targets glibc.
+- A version of this module from before the musl builds were added has no `linux-musl-*`
+  directory to embed; there, a musl process gets `ErrNativeUnavailable` naming the
+  missing file rather than a failed `dlopen` of the glibc build.
 
 ## cgo on darwin/linux, purego everywhere else
 
@@ -225,36 +337,33 @@ over 2x, and the allocations are wasmtime-go's own per-call argument boxing, not
 module's. The advice the Destination-buffer fills section gives applies here with more
 force, not less: if the workload can batch, batch.
 
-## Destination-buffer fills
+## Why not `google/uuid`'s own `NewV6`/`NewV7`?
 
-`FillV6`/`FillV7` (and the `At` variants) write into a slice you already own instead of allocating a fresh one per call:
+This binding depends on `google/uuid` for the `uuid.UUID` type itself — it's already
+in your import graph, and it already ships working `NewV6()`/`NewV7()` functions of
+its own. Two real, checked-against-its-actual-source reasons to reach for this
+binding's generators instead:
 
-```go
-dst := make([]uuid.UUID, 1000)
-for {
-    if err := hyperuuid.FillV7(dst); err != nil { /* ... */ }
-    // reuse dst next iteration — nothing allocated
-}
-```
+1. **Node ID privacy.** `google/uuid`'s `NewV6()` defaults to a real network
+   interface's MAC address for the node ID field when one is available (see its own
+   [`version6.go`](https://github.com/google/uuid/blob/master/version6.go) —
+   `setNodeInterface`), which is exactly the hardware-identity leak RFC 9562 §6.9
+   recommends against. `hyperuuid.NewV6`/`NewV6BatchAt` always use a random node ID
+   with the multicast bit set, the same way this project's v6 works in every other
+   binding.
+2. **Explicit, testable timestamps.** `google/uuid`'s `NewV6`/`NewV7` always read the
+   system clock internally with no way to inject a specific instant. Every time-based
+   generator here — `NewV6At`, `NewV7At`, and both batch variants — takes
+   `unixMillis` as an explicit parameter, so tests can assert against a fixed RFC
+   test vector instead of the wall clock, and the same call works identically
+   compiled to `wasm32`, which has no OS clock of its own.
 
-Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]byte`, so a `[]uuid.UUID` is contiguous 16-byte records in exactly the RFC order the native core writes — the batch lands directly in your slice with **no intermediate buffer and no per-element conversion**. (C# and Java can't do that; their UUID types aren't RFC byte order, so they must rebuild every element.)
-
-`go test -bench=. -benchmem ./go/...`, 1000 UUIDs per op:
-
-| method | ns/op | B/op | allocs/op |
-| --- | ---: | ---: | ---: |
-| `NewV7At` x1000 individually | 138,646 | 16,000 | 1000 |
-| `NewV7BatchAt(1000)` | 22,989 | 16,384 | 1 |
-| `FillV7At` into an existing slice | 18,355 | **0** | **0** |
-| `FillV7BytesAt` into an existing buffer | 17,629 | **0** | **0** |
-
-`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 4% of each other, since neither converts; the byte form exists for convenience, not speed.
-
-`NewV6BatchAt`/`NewV7BatchAt` now delegate to the fills, so the array-returning API is a single allocation with no intermediate copy — existing callers got faster without changing a line.
-
-### Raw-byte SQL-order transforms
-
-`V6/V7ToSqlOrderBytes` and `V6/V7FromSqlOrderBytes` apply the same native permutation as `V7ToSqlOrder` in place on a caller's 16-byte slice. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo now makes against the one native implementation.
+(`google/uuid`'s own `NewV7()` *does* implement a real monotonic sub-millisecond
+sequence — worth knowing if you're comparing the two, since a naively-random v7
+generator would not.) Both libraries produce spec-valid, mutually interoperable
+UUIDs; picking one over the other for v6/v7 generation is about these two
+properties and, if your other services are in a different language, using the one
+engine that's byte-for-byte identical everywhere.
 
 ## Benchmarks
 

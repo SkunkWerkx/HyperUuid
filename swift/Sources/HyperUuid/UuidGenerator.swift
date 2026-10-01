@@ -6,10 +6,13 @@ import Foundation
 /// style shim (see `DynamicLibrary.swift`).
 ///
 /// This package bundles a native build for every platform (see `NativePlatform`) and picks
-/// the right one at compile time.
+/// the right one at compile time. Every call `throws`: ``Error`` when a native call ran and
+/// failed, ``NativeLibraryError`` when the library itself couldn't be loaded — a question
+/// ``isAvailable`` answers up front, without a `do`/`catch`.
 public enum UuidGenerator {
-    /// An error returned when a native UUID generation call fails.
-    public enum Error: Swift.Error, CustomStringConvertible {
+    /// An error returned when a native UUID generation call fails. A library that couldn't
+    /// be loaded at all is ``NativeLibraryError`` instead.
+    public enum Error: Swift.Error, CustomStringConvertible, LocalizedError {
         /// The native random source failed; `code` is the native call's raw return code.
         case randomSourceFailure(code: Int32)
         /// The Unix millisecond timestamp doesn't fit the timestamp field being generated.
@@ -17,6 +20,7 @@ public enum UuidGenerator {
         /// A destination buffer's length wasn't a whole number of 16-byte UUIDs.
         case bufferNotWholeUUIDs(count: Int)
 
+        /// What was refused, in one line.
         public var description: String {
             switch self {
             case .randomSourceFailure(let code):
@@ -27,6 +31,10 @@ public enum UuidGenerator {
                 return "hyperuuid: destination length must be a multiple of 16 (one whole UUID per 16 bytes); got \(count)"
             }
         }
+
+        /// The same text as ``description``, so `localizedDescription` names the failure too
+        /// instead of Foundation's generic "The operation couldn't be completed".
+        public var errorDescription: String? { description }
     }
 
     private typealias UuidNewV4Fn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Int32
@@ -43,11 +51,13 @@ public enum UuidGenerator {
     private typealias UuidV7ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias UuidV6ToSqlOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias UuidV6ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
+    private typealias VersionFn = @convention(c) () -> UInt32
 
-    // A class, deliberately: `loaded()` used to copy this 13-field struct out of the
-    // `Result` on every single call. A reference is one retain.
+    // A class, deliberately: `loaded()` used to copy this struct — one function pointer per
+    // native export — out of the `Result` on every single call. A reference is one retain.
     private final class LoadedLibrary {
         let library: DynamicLibrary
+        let origin: DynamicLibrary.Origin
         let newV4: UuidNewV4Fn
         let newV5: UuidNewV5Fn
         let newV6: UuidNewV6Fn
@@ -60,18 +70,22 @@ public enum UuidGenerator {
         let v7ToRfcOrder: UuidV7ToRfcOrderFn
         let v6ToSqlOrder: UuidV6ToSqlOrderFn
         let v6ToRfcOrder: UuidV6ToRfcOrderFn
+        let version: VersionFn
 
-        init(library: DynamicLibrary, newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
+        init(library: DynamicLibrary, origin: DynamicLibrary.Origin, newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
              newV6: UuidNewV6Fn, v6UnixMillis: UuidV6UnixMillisFn, newV6Batch: UuidNewV6BatchFn,
              newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
              v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
-             v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn) {
+             v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn,
+             version: VersionFn) {
             self.library = library
+            self.origin = origin
             self.newV4 = newV4; self.newV5 = newV5
             self.newV6 = newV6; self.v6UnixMillis = v6UnixMillis; self.newV6Batch = newV6Batch
             self.newV7 = newV7; self.v7UnixMillis = v7UnixMillis; self.newV7Batch = newV7Batch
             self.v7ToSqlOrder = v7ToSqlOrder; self.v7ToRfcOrder = v7ToRfcOrder
             self.v6ToSqlOrder = v6ToSqlOrder; self.v6ToRfcOrder = v6ToRfcOrder
+            self.version = version
         }
     }
 
@@ -106,14 +120,15 @@ public enum UuidGenerator {
     }
 
     // Swift initializes `static let`s lazily and exactly once, thread-safely — the same
-    // "loaded on first use" behavior the Java binding gets from `by lazy` / `object`. Unlike
-    // Kotlin, that initializer can't itself `throw`, so failures are captured in a `Result`
-    // and re-surfaced as a normal `throws` from `loaded()` rather than crashing the process.
+    // "loaded on first use" behavior the Java binding gets from its class's static
+    // initializers. A `static let` initializer can't itself `throw`, so failures are captured
+    // in a `Result` and re-surfaced as a normal `throws` from `loaded()` rather than
+    // crashing the process.
     private static let loadResult: Result<LoadedLibrary, Swift.Error> = Result { try load() }
 
     private static func load() throws -> LoadedLibrary {
-        let tempPath = try extractNativeLibrary()
-        let library = try DynamicLibrary(path: tempPath)
+        let (path, origin) = try DynamicLibrary.locateBundled()
+        let library = try DynamicLibrary(path: path)
         let newV4 = unsafeBitCast(try library.symbol("uuid_new_v4"), to: UuidNewV4Fn.self)
         let newV5 = unsafeBitCast(try library.symbol("uuid_new_v5"), to: UuidNewV5Fn.self)
         let newV6 = unsafeBitCast(try library.symbol("uuid_new_v6"), to: UuidNewV6Fn.self)
@@ -134,12 +149,14 @@ public enum UuidGenerator {
             try library.symbol("uuid_v6_to_sql_order"), to: UuidV6ToSqlOrderFn.self)
         let v6ToRfcOrder = unsafeBitCast(
             try library.symbol("uuid_v6_to_rfc_order"), to: UuidV6ToRfcOrderFn.self)
+        let version = unsafeBitCast(try library.symbol("hyperuuid_version"), to: VersionFn.self)
         return LoadedLibrary(
-            library: library, newV4: newV4, newV5: newV5,
+            library: library, origin: origin, newV4: newV4, newV5: newV5,
             newV6: newV6, v6UnixMillis: v6UnixMillis, newV6Batch: newV6Batch,
             newV7: newV7, v7UnixMillis: v7UnixMillis, newV7Batch: newV7Batch,
             v7ToSqlOrder: v7ToSqlOrder, v7ToRfcOrder: v7ToRfcOrder,
-            v6ToSqlOrder: v6ToSqlOrder, v6ToRfcOrder: v6ToRfcOrder)
+            v6ToSqlOrder: v6ToSqlOrder, v6ToRfcOrder: v6ToRfcOrder,
+            version: version)
     }
 
     private static func loaded() throws -> LoadedLibrary {
@@ -149,31 +166,33 @@ public enum UuidGenerator {
         }
     }
 
-    /// Extracts this platform's bundled native library (an SPM resource, which may not
-    /// already be a plain filesystem path depending on how the package was packaged) to a
-    /// temp file, mirroring the Go/Java bindings' approach. The temp file is deliberately
-    /// never removed — same best-effort tradeoff as Kotlin's `deleteOnExit`/Go's approach.
-    private static func extractNativeLibrary() throws -> String {
-        let libNameURL = URL(fileURLWithPath: NativePlatform.libraryFileName)
-        guard
-            let resourceURL = Bundle.module.url(
-                forResource: libNameURL.deletingPathExtension().lastPathComponent,
-                withExtension: libNameURL.pathExtension,
-                subdirectory: "NativeLibs/\(NativePlatform.rid)"
-            )
-        else {
-            throw DynamicLibraryError.openFailed(
-                path: "NativeLibs/\(NativePlatform.rid)/\(NativePlatform.libraryFileName)",
-                reason: "resource not found (unsupported platform, or this package was built without a native library for it)"
-            )
-        }
+    /// Whether the bundled native library loaded and exports the ABI this binding was
+    /// built against — the twelve `uuid_*` functions and `hyperuuid_version` — the probe a
+    /// consumer with a fallback gates on, so a load failure never has to be caught at a
+    /// call site. Drives the same lazy, once-only load every other call does, so it costs
+    /// nothing after the first answer; never throws and never traps, a missing resource
+    /// directory included. `true` exactly when ``nativeVersion()`` would succeed.
+    public static var isAvailable: Bool {
+        if case .success = loadResult { return true }
+        return false
+    }
 
-        let data = try Data(contentsOf: resourceURL)
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("libhyperuuid-\(UUID().uuidString)")
-            .appendingPathExtension(libNameURL.pathExtension)
-        try data.write(to: tempURL)
-        return tempURL.path
+    /// Where the load found the library — internal, for the test suite to pin that it came
+    /// out of the resource bundle rather than the build machine's source-tree fallback.
+    static func nativeLibraryOrigin() throws -> DynamicLibrary.Origin {
+        try loaded().origin
+    }
+
+    /// Unix-epoch milliseconds off a `Date`, for the doors that take one. `UInt64(_:)` traps
+    /// on a negative, NaN or infinite `Double`, and none of those is a caller bug worth a
+    /// crash: a pre-1970 date is ``Error/timestampOutOfRange`` like any other timestamp the
+    /// field can't hold. A date too far in the future to trap on is passed through for the
+    /// native core to refuse with the same error.
+    private static func unixMillis(of date: Date) throws -> UInt64 {
+        let millis = date.timeIntervalSince1970 * 1000
+        // NaN fails both comparisons; 2⁶⁴ is the first value `UInt64(_:)` can't take.
+        guard millis >= 0, millis < 0x1p64 else { throw Error.timestampOutOfRange }
+        return UInt64(millis)
     }
 
     /// Creates a random UUID version 4 (RFC 9562 §5.4).
@@ -194,6 +213,7 @@ public enum UuidGenerator {
     /// primitive the `String` and `[UInt8]` forms wrap, for a caller already holding a buffer.
     public static func newV5(namespace: UUID, name: UnsafeRawBufferPointer) throws -> UUID {
         let l = try loaded()
+        // An empty buffer may carry a nil base address; the ABI never dereferences at len 0.
         let (rc, out) = withBytes(of: namespace) { ns in
             withOut { l.newV5(ns, name.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt32(name.count), $0) }
         }
@@ -226,13 +246,15 @@ public enum UuidGenerator {
 
     /// Creates a time-sortable UUID version 6 (RFC 9562 §5.6) using the current time.
     public static func newV6() throws -> UUID {
-        try newV6(unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try newV6(unixMillis: unixMillis(of: Date()))
     }
 
     /// Creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a `Date` — pulls the
-    /// Unix-epoch milliseconds off `date` and mints it through `newV6(unixMillis:)`.
+    /// Unix-epoch milliseconds off `date` and mints it through `newV6(unixMillis:)`. A date
+    /// before 1970, or one that isn't a finite instant at all, throws
+    /// ``Error/timestampOutOfRange`` like any other timestamp the field can't hold.
     public static func newV6(_ date: Date) throws -> UUID {
-        try newV6(unixMillis: UInt64(date.timeIntervalSince1970 * 1000))
+        try newV6(unixMillis: unixMillis(of: date))
     }
 
     /// Recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's
@@ -252,7 +274,11 @@ public enum UuidGenerator {
     /// Creates `count` time-sortable version 6 UUIDs sharing one Unix-epoch millisecond
     /// timestamp capture — one native call and one random-bytes fetch instead of `count` of
     /// each. `clock_seq` and `node` are independently random per item.
+    ///
+    /// - Precondition: `count` is not negative — a caller bug, the same one
+    ///   `Array(repeating:count:)` traps on. Zero is an empty array.
     public static func newV6Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
+        precondition(count >= 0, "count must not be negative; got \(count)")
         guard count > 0 else { return [] }
         // The result array is the destination: one native call writes every UUID in place,
         // with no scratch buffer and no per-element construction — the fill's own path.
@@ -263,7 +289,7 @@ public enum UuidGenerator {
 
     /// Creates `count` time-sortable version 6 UUIDs sharing the current time.
     public static func newV6Batch(count: Int) throws -> [UUID] {
-        try newV6Batch(count: count, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try newV6Batch(count: count, unixMillis: unixMillis(of: Date()))
     }
 
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond
@@ -280,13 +306,15 @@ public enum UuidGenerator {
 
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.
     public static func newV7() throws -> UUID {
-        try newV7(unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try newV7(unixMillis: unixMillis(of: Date()))
     }
 
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a `Date` — pulls the
-    /// Unix-epoch milliseconds off `date` and mints it through `newV7(unixMillis:)`.
+    /// Unix-epoch milliseconds off `date` and mints it through `newV7(unixMillis:)`. A date
+    /// before 1970, or one that isn't a finite instant at all, throws
+    /// ``Error/timestampOutOfRange`` like any other timestamp the field can't hold.
     public static func newV7(_ date: Date) throws -> UUID {
-        try newV7(unixMillis: UInt64(date.timeIntervalSince1970 * 1000))
+        try newV7(unixMillis: unixMillis(of: date))
     }
 
     /// Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
@@ -320,7 +348,11 @@ public enum UuidGenerator {
     /// Creates `count` time-sortable version 7 UUIDs sharing one Unix-epoch millisecond
     /// timestamp capture and one contiguous block of the monotonic counter — one native call
     /// and one random-bytes fetch instead of `count` of each.
+    ///
+    /// - Precondition: `count` is not negative — a caller bug, the same one
+    ///   `Array(repeating:count:)` traps on. Zero is an empty array.
     public static func newV7Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
+        precondition(count >= 0, "count must not be negative; got \(count)")
         guard count > 0 else { return [] }
         // The result array is the destination: one native call writes every UUID in place,
         // with no scratch buffer and no per-element construction — the fill's own path.
@@ -331,7 +363,7 @@ public enum UuidGenerator {
 
     /// Creates `count` time-sortable version 7 UUIDs sharing the current time.
     public static func newV7Batch(count: Int) throws -> [UUID] {
-        try newV7Batch(count: count, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try newV7Batch(count: count, unixMillis: unixMillis(of: Date()))
     }
 
     /// Converts an RFC 9562-ordered version 7 `uuid` to the byte order SQL Server's
@@ -407,7 +439,7 @@ public enum UuidGenerator {
 
     /// Fills `destination` with version 7 UUIDs sharing the current time.
     public static func fillV7(into destination: UnsafeMutableRawBufferPointer) throws {
-        try fillV7(into: destination, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try fillV7(into: destination, unixMillis: unixMillis(of: Date()))
     }
 
     /// Fills `destination` with time-sortable version 6 UUIDs sharing one `unixMillis`
@@ -420,7 +452,7 @@ public enum UuidGenerator {
 
     /// Fills `destination` with version 6 UUIDs sharing the current time.
     public static func fillV6(into destination: UnsafeMutableRawBufferPointer) throws {
-        try fillV6(into: destination, unixMillis: UInt64(Date().timeIntervalSince1970 * 1000))
+        try fillV6(into: destination, unixMillis: unixMillis(of: Date()))
     }
 
     /// Fills `destination` with version 7 UUIDs, writing straight into the array's storage.
@@ -432,9 +464,21 @@ public enum UuidGenerator {
         try fillUUIDs(into: &destination, unixMillis: unixMillis) { l in l.newV7Batch }
     }
 
+    /// Fills `destination` with version 7 UUIDs sharing the current time, writing straight
+    /// into the array's storage.
+    public static func fillV7(into destination: inout [UUID]) throws {
+        try fillV7(into: &destination, unixMillis: unixMillis(of: Date()))
+    }
+
     /// Fills `destination` with version 6 UUIDs, writing straight into the array's storage.
     public static func fillV6(into destination: inout [UUID], unixMillis: UInt64) throws {
         try fillUUIDs(into: &destination, unixMillis: unixMillis) { l in l.newV6Batch }
+    }
+
+    /// Fills `destination` with version 6 UUIDs sharing the current time, writing straight
+    /// into the array's storage.
+    public static func fillV6(into destination: inout [UUID]) throws {
+        try fillV6(into: &destination, unixMillis: unixMillis(of: Date()))
     }
 
     private static func fill(
@@ -507,5 +551,17 @@ public enum UuidGenerator {
         guard uuid.count == 16 else { throw Error.bufferNotWholeUUIDs(count: uuid.count) }
         let l = try loaded()
         pick(l)(uuid.baseAddress?.assumingMemoryBound(to: UInt8.self))
+    }
+
+    // MARK: - The native library itself
+
+    /// The version of the native `libhyperuuid` this process actually loaded, as
+    /// `major.minor.patch` — the library's own answer (`hyperuuid_version`), not this
+    /// package's tag — so a caller can prove the two agree before minting the first UUID
+    /// and name the mismatch when they don't. Throws only when the library itself couldn't
+    /// load.
+    public static func nativeVersion() throws -> String {
+        let packed = try loaded().version()
+        return "\(packed >> 16).\(packed >> 8 & 0xFF).\(packed & 0xFF)"
     }
 }

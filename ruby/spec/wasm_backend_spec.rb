@@ -21,11 +21,20 @@ RSpec.describe "wasm backend" do
       RbConfig.ruby, "-I", lib, "-r", "hyperuuid", "-e", "print (#{expression})"
     )
     raise "fiddle subprocess failed: #{out}" unless status.success?
+
     out
   end
 
   it "reports the wasm backend" do
     expect(HyperUuid::BACKEND).to eq(:wasm)
+    expect(fiddle_eval("HyperUuid::BACKEND")).to eq("fiddle")
+  end
+
+  it "agrees with the Fiddle backend on the core's version and availability" do
+    expect(HyperUuid.native_version).to eq(HyperUuid::VERSION)
+    expect(fiddle_eval("HyperUuid.native_version")).to eq(HyperUuid.native_version)
+    expect(HyperUuid.available?).to be(true)
+    expect(fiddle_eval("HyperUuid.available?")).to eq("true")
   end
 
   it "agrees with the Fiddle backend on deterministic v5 generation" do
@@ -54,9 +63,18 @@ RSpec.describe "wasm backend" do
 
   it "raises the package's own error classes from the module" do
     expect { HyperUuid.new_v7(2**60) }
-      .to raise_error(HyperUuid::Runtime::TimestampOutOfRangeError)
+      .to raise_error(HyperUuid::TimestampOutOfRangeError, HyperUuid::Runtime::V7_TIMESTAMP_OUT_OF_RANGE)
     expect { HyperUuid.new_v6_batch(1, 0xFFFF_FFFF_FFFF_FFFF) }
-      .to raise_error(HyperUuid::Runtime::TimestampOutOfRangeError)
+      .to raise_error(HyperUuid::TimestampOutOfRangeError, HyperUuid::Runtime::V6_TIMESTAMP_OUT_OF_RANGE)
+  end
+
+  it "names a missing export instead of failing on nil, for a module older than this binding" do
+    # A real module, asked for one export it does not have: the load must fail as a LoadError
+    # that says which export and which file, the way HyperCast's wasm backend already does.
+    stub_const("HyperUuid::Runtime::WasmInstance::EXPORTS",
+               HyperUuid::Runtime::WasmInstance::EXPORTS + [:uuid_new_v8])
+    expect { HyperUuid::Runtime::WasmInstance.new(HyperUuid::Runtime::WASM_MODULE_PATH) }
+      .to raise_error(LoadError, /hyperuuid\.wasm does not export uuid_new_v8 \(a module older than this binding\)/)
   end
 
   it "keeps a batch strictly ascending through the guest's own allocator" do

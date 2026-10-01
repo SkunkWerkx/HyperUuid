@@ -15,13 +15,13 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 getrandom = { version = "0.4.3", default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
-pyo3 = { version = "0.27", features = ["extension-module", "abi3-py39"], optional = true }
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311"], optional = true }
 magnus = { version = "0.8", features = ["rb-sys"], optional = true }
 ext-php-rs = { version = "0.15", optional = true }
 
 # One crate, three optional native-extension entry points instead of three satellite
 # crates each path-depending back on this one. Nothing in a plain `cargo build` (the
-# ctypes/Fiddle/ext-ffi-consumed cdylib every non-extension binding dlopens) changes —
+# Fiddle/ext-ffi-consumed cdylib every non-extension binding dlopens) changes —
 # these are additive, off by default, and only one is ever enabled per build invocation
 # (each produces a different C entry point — PyInit__native, Init_hyperuuid_native, PHP's
 # module struct — under the same crate, not meant to coexist in one binary).
@@ -35,6 +35,14 @@ ext-php-rs = { version = "0.15", optional = true }
 # than relying on the default.
 default = ["std"]
 std = ["getrandom/std"]
+# The no_std wasm static library the NuGet package links into a Blazor WebAssembly app. A
+# static library is a final artifact as far as panics go, so with `std` off it needs the
+# `#[panic_handler]` std would have supplied; this feature is that handler and nothing else
+# (see lib.rs). It exists so that library carries no copy of Rust's standard library: two
+# Hyper* static libraries that each bundled std could not be linked into one wasm module
+# (`duplicate symbol: rust_eh_personality`). Off by default, wasm32 only, and never for an
+# rlib consumer, who supplies a handler of their own.
+wasm-staticlib = []
 python = ["dep:pyo3", "std"]
 ruby = ["dep:magnus", "std"]
 php = ["dep:ext-php-rs", "std"]

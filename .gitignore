@@ -4,13 +4,11 @@
 # .NET
 **/bin/
 **/obj/
-# -p:BaseOutputPath=bin-browser/ for the browser-wasm build (see hyper-pack-nuget.yml) —
-# **/bin/ above doesn't match this, different directory name.
-**/bin-browser/
 **/TestResults/
-# CI (build-nuget.yml) builds and packs these per-RID at pack time; the C# project no longer
-# carries a committed placeholder — keep a local one here for dev/test if you want (see the
-# csproj's runtimes/**/native/* wildcard item), but it's regenerable via `cargo build --release`.
+# The forge stages each RID's native library here at test and pack time (see
+# hyper-build-native.yml and hyper-pack-nuget.yml); nothing under it is committed. Locally
+# the csproj falls back to rust/target/release/ when this RID has nothing staged, so a
+# plain `cargo build --release` is all the dev loop needs.
 csharp/HyperUuid/runtimes/
 
 # Gradle / Java
@@ -20,15 +18,14 @@ csharp/HyperUuid/runtimes/
 # bundles all platforms' natives here at pack time; regenerable locally via
 # `cargo build --release` for local dev/test.
 java/src/main/resources/native/
-# csharp/HyperUuid/build/ is NuGet's real, tracked build/{tfm}/{PackageId}.targets packaging
+# csharp/HyperUuid/build/ is NuGet's real, tracked build/{PackageId}.targets packaging
 # convention (auto-imported into every consumer for the WASM NativeFileReference wiring — see
 # HyperUuid.csproj), not a build output — collides with **/build/ above, which would otherwise
 # silently swallow it. Each directory level needs its own negation; git won't descend into an
 # excluded directory to find a deeper !file re-inclusion, and gitignore rules apply in file
 # order, so this has to come after the rule it's un-ignoring.
 !csharp/HyperUuid/build/
-!csharp/HyperUuid/build/net10.0/
-!csharp/HyperUuid/build/net10.0/HyperUuid.targets
+!csharp/HyperUuid/build/HyperUuid.targets
 
 # Python
 **/__pycache__/

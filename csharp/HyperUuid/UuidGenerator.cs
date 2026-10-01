@@ -16,8 +16,9 @@ namespace HyperUuid;
 /// fallback for longer names — the same pattern the batch methods already use, ported from this
 /// project's own <c>SequentialGuid</c> library). AOT/trimming friendly: <see cref="LibraryImportAttribute"/>
 /// is source-generated (no runtime reflection), so this type publishes cleanly under
-/// <c>PublishAot</c>. Needs a platform-specific native binary — this build ships
-/// <c>linux-arm64</c> only; every other native platform needs its own build.
+/// <c>PublishAot</c>. Needs a platform-specific native binary — the package carries one per
+/// supported RID under <c>runtimes/{rid}/native/</c> (this package's own README's Platform
+/// support section has the list), and <see cref="IsAvailable"/> says whether one resolved.
 /// One compiled assembly covers every platform including <c>browser-wasm</c> (Blazor) — no
 /// separate build. Every native entry point is declared twice, unconditionally: once against
 /// <c>"hyperuuid"</c> (resolved via <c>dlopen</c> on every real native platform), once against
@@ -31,11 +32,17 @@ namespace HyperUuid;
 /// platform can actually reach, same as the old two-build split did — see
 /// <c>HyperUuid.csproj</c>'s packaging targets for exactly how the single build lands in the
 /// NuGet package. Proven working end-to-end in a real headless-browser session — see this
-/// package's own README's WebAssembly (Blazor) section, including a real, currently-open
-/// upstream blocker (dotnet/runtime#132858).
+/// package's own README's WebAssembly (Blazor) section. WebAssembly is .NET 11 and later only.
 /// </remarks>
 public static partial class UuidGenerator
 {
+    [LibraryImport("hyperuuid", EntryPoint = "hyperuuid_version")]
+    private static partial uint hyperuuid_version_native();
+    [LibraryImport("*", EntryPoint = "hyperuuid_version")]
+    private static partial uint hyperuuid_version_browser();
+    private static uint hyperuuid_version() =>
+        OperatingSystem.IsBrowser() ? hyperuuid_version_browser() : hyperuuid_version_native();
+
     [LibraryImport("hyperuuid", EntryPoint = "uuid_new_v4")]
     private static unsafe partial int uuid_new_v4_native(byte* outPtr);
     [LibraryImport("*", EntryPoint = "uuid_new_v4")]
@@ -154,6 +161,18 @@ public static partial class UuidGenerator
                 paramName);
     }
 
+    // A Span<Guid> fill marshals through a byte scratch buffer of Length * 16 bytes; past this
+    // many elements that product no longer fits an int, and no single buffer could hold it.
+    const int MaxGuidsPerFill = int.MaxValue / 16;
+
+    static void RequireFillable(Span<Guid> destination, string paramName)
+    {
+        if (destination.Length > MaxGuidsPerFill)
+            throw new ArgumentException(
+                $"Destination holds {destination.Length} UUIDs; a single fill takes at most {MaxGuidsPerFill}.",
+                paramName);
+    }
+
     static void ThrowOnBatchFailure(int rc, string entryPoint, string outOfRangeMessage)
     {
         if (rc == 0)
@@ -164,6 +183,49 @@ public static partial class UuidGenerator
             _ => new InvalidOperationException($"{entryPoint} failed with code {rc} (random source failure)."),
         };
     }
+
+    static readonly Lazy<Version?> _nativeVersion = new(ProbeNativeVersion, LazyThreadSafetyMode.PublicationOnly);
+
+    // The one place the binding catches: loading is the caller's environment, not their
+    // data, and the point of the probe is to answer "did the native library resolve" without
+    // making the first real UUID the thing that finds out. Every other method lets a load
+    // failure propagate — the Try* forms included, which report the native layer's own
+    // return codes and nothing else.
+    static Version? ProbeNativeVersion()
+    {
+        try
+        {
+            var packed = hyperuuid_version();
+            return new Version((int)(packed >> 16), (int)((packed >> 8) & 0xFF), (int)(packed & 0xFF));
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException
+            or BadImageFormatException or PlatformNotSupportedException or TypeInitializationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <see langword="true"/> when the native library resolved and answered the version
+    /// probe. Probed once, then cached; a <see langword="false"/> is permanent for the
+    /// process. A consumer keeping a managed fallback (<see cref="Guid.NewGuid"/>,
+    /// <see cref="Guid.CreateVersion7()"/>) for platforms the package does not cover gates on
+    /// this instead of catching <see cref="DllNotFoundException"/> around its first call.
+    /// </summary>
+    /// <remarks>
+    /// Also <see langword="false"/> when a library did load but predates the
+    /// <c>hyperuuid_version</c> export (0.3.0 and earlier) — a stale binary beside a newer
+    /// binding is the mismatch this probe exists to name. It says nothing about <em>which</em>
+    /// version answered; that is <see cref="NativeVersion"/>.
+    /// </remarks>
+    public static bool IsAvailable => _nativeVersion.Value is not null;
+
+    /// <summary>
+    /// The native core's own version — <c>major.minor.patch</c> as the library reports it,
+    /// or <see langword="null"/> when it did not load (see <see cref="IsAvailable"/>).
+    /// Compare against this assembly's version to name a mismatch before the first UUID.
+    /// </summary>
+    public static Version? NativeVersion => _nativeVersion.Value;
 
     /// <summary>Well-known namespace UUIDs defined in RFC 9562 Section 6.6.</summary>
     public static class Namespaces
@@ -224,8 +286,29 @@ public static partial class UuidGenerator
         return rc;
     }
 
-    /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a UTF-8 name.</summary>
-    public static unsafe Guid NewV5(Guid namespaceId, string name)
+    /// <summary>
+    /// Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a name,
+    /// hashed as its UTF-8 encoding.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    public static Guid NewV5(Guid namespaceId, string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return NewV5(namespaceId, name.AsSpan());
+    }
+
+    /// <summary>
+    /// Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a name held
+    /// as UTF-16 text, hashed as its UTF-8 encoding — the same result as the <see cref="string"/>
+    /// overload for the same characters, without materializing a <see cref="string"/> first.
+    /// </summary>
+    /// <remarks>
+    /// An empty name is valid: RFC 9562 hashes the namespace followed by zero name bytes. A
+    /// lone surrogate has no UTF-8 encoding and is hashed as U+FFFD, exactly as the
+    /// <see cref="string"/> overload always has; pass bytes to
+    /// <see cref="NewV5(Guid, ReadOnlySpan{byte})"/> when the name is not text.
+    /// </remarks>
+    public static Guid NewV5(Guid namespaceId, ReadOnlySpan<char> name)
     {
         var maxByteCount = System.Text.Encoding.UTF8.GetMaxByteCount(name.Length);
         Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
@@ -244,22 +327,27 @@ public static partial class UuidGenerator
         }
     }
 
-    /// <summary>Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name bytes.</summary>
+    /// <summary>
+    /// Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name
+    /// bytes — hashed exactly as given, with no encoding step and no validation, so a name
+    /// that is not text at all is as good as one that is. An empty name is valid.
+    /// </summary>
     public static unsafe Guid NewV5(Guid namespaceId, ReadOnlySpan<byte> name)
     {
         Span<byte> ns = stackalloc byte[16];
         namespaceId.TryWriteBytes(ns, bigEndian: true, out _);
         Span<byte> outBuf = stackalloc byte[16];
 
-        int rc;
+        // No return code to translate: version 5 is a hash of the caller's own bytes, with no
+        // random source and no timestamp, so the native call has no failure mode and always
+        // returns 0 (see rust/src/ffi.rs). An empty name crosses as a null pointer, which the
+        // core never dereferences when the length is 0.
         fixed (byte* nsPtr = ns)
         fixed (byte* namePtr = name)
         fixed (byte* outPtr = outBuf)
         {
-            rc = uuid_new_v5(nsPtr, name.IsEmpty ? null : namePtr, (uint)name.Length, outPtr);
+            uuid_new_v5(nsPtr, name.IsEmpty ? null : namePtr, (uint)name.Length, outPtr);
         }
-        if (rc != 0)
-            throw new InvalidOperationException($"uuid_new_v5 failed with code {rc}.");
         return new Guid(outBuf, bigEndian: true);
     }
 
@@ -278,6 +366,17 @@ public static partial class UuidGenerator
     /// unlike version 7, there is no monotonic counter, so calls within the same millisecond
     /// are not guaranteed to sort in creation order.
     /// </summary>
+    /// <remarks>
+    /// The v6 timestamp field counts from the 1582 Gregorian epoch and could hold an instant
+    /// before 1970, but this API is Unix-millisecond only, on purpose: a negative
+    /// <paramref name="unixMilliseconds"/> is rejected rather than encoded, the same floor
+    /// <see cref="NewV7(long)"/> has.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="unixMilliseconds"/> is negative, or past what the 60-bit v6 timestamp
+    /// field can hold (around the year 5236).
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The native random source failed.</exception>
     public static Guid NewV6(long unixMilliseconds)
     {
         var rc = CoreNewV6(unixMilliseconds, out var result);
@@ -286,7 +385,7 @@ public static partial class UuidGenerator
             throw rc switch
             {
                 2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
-                    "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field."),
+                    "Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field."),
                 _ => new InvalidOperationException($"uuid_new_v6 failed with code {rc} (random source failure)."),
             };
         }
@@ -296,8 +395,8 @@ public static partial class UuidGenerator
     /// <summary>
     /// Non-throwing counterpart to <see cref="NewV6(long)"/> — returns <see langword="false"/> for
     /// both failure modes the native layer reports (random-source failure, and a
-    /// <paramref name="unixMilliseconds"/> that doesn't fit the 60-bit v6 timestamp field) rather
-    /// than throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
+    /// <paramref name="unixMilliseconds"/> that is negative or doesn't fit the 60-bit v6 timestamp
+    /// field) rather than throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
     /// <c>Result</c>-style call site.
     /// </summary>
     public static bool TryNewV6(long unixMilliseconds, out Guid result) =>
@@ -327,6 +426,12 @@ public static partial class UuidGenerator
     /// 9562 bit layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early
     /// timestamp", so the caller is responsible for checking that first if it matters.
     /// </summary>
+    /// <remarks>
+    /// Saturates to 0 for an embedded timestamp before 1970. That is a legitimate v6 value —
+    /// the field counts from 1582 — but one only another generator can have minted, since
+    /// <see cref="NewV6(long)"/> rejects a negative timestamp; it reads back as the Unix epoch
+    /// rather than as a negative count, matching this API's Unix-millisecond-only surface.
+    /// </remarks>
     public static unsafe long V6UnixMillis(Guid uuid)
     {
         Span<byte> bytes = stackalloc byte[16];
@@ -342,6 +447,7 @@ public static partial class UuidGenerator
     /// Unlike <see cref="V7Timestamp"/>, this can't throw <see cref="ArgumentOutOfRangeException"/>:
     /// v6's 60-bit tick count, offset from the 1582 UUID epoch rather than 1970, tops out
     /// around the year 5236 — well short of <see cref="DateTimeOffset"/>'s own year-9999 ceiling.
+    /// A timestamp before 1970 reads back as the Unix epoch; see <see cref="V6UnixMillis"/>.
     /// </summary>
     public static DateTimeOffset V6Timestamp(Guid uuid) =>
         DateTimeOffset.FromUnixTimeMilliseconds(V6UnixMillis(uuid));
@@ -351,18 +457,29 @@ public static partial class UuidGenerator
     /// timestamp capture — one native call and one random-bytes fetch instead of
     /// <paramref name="destination"/>'s length worth of each.
     /// </summary>
-    public static void FillV6(Span<Guid> destination, long unixMilliseconds) =>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="destination"/> is longer than a single fill takes (more than
+    /// <c>int.MaxValue / 16</c> elements).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="unixMilliseconds"/> is out of range (see <see cref="NewV6(long)"/>).
+    /// </exception>
+    public static void FillV6(Span<Guid> destination, long unixMilliseconds)
+    {
+        RequireFillable(destination, nameof(destination));
         ThrowOnBatchFailure(CoreFillV6(destination, unixMilliseconds), "uuid_new_v6_batch",
-            "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field.");
+            "Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field.");
+    }
 
     /// <summary>
     /// Non-throwing counterpart to <see cref="FillV6(Span{Guid}, long)"/> — returns
     /// <see langword="false"/> instead of throwing when the native call reports a random-source
-    /// failure or an out-of-range <paramref name="unixMilliseconds"/>. On failure
+    /// failure or an out-of-range <paramref name="unixMilliseconds"/>, and for a
+    /// <paramref name="destination"/> too long for a single fill. On failure
     /// <paramref name="destination"/> is left untouched. See <see cref="TryNewV4"/> for why.
     /// </summary>
     public static bool TryFillV6(Span<Guid> destination, long unixMilliseconds) =>
-        CoreFillV6(destination, unixMilliseconds) == 0;
+        destination.Length <= MaxGuidsPerFill && CoreFillV6(destination, unixMilliseconds) == 0;
 
     /// <summary>
     /// Fills <paramref name="destination"/> with raw RFC 9562-ordered version 6 UUID bytes —
@@ -390,7 +507,7 @@ public static partial class UuidGenerator
     {
         RequireWholeUuids(destination, nameof(destination));
         ThrowOnBatchFailure(CoreFillV6Bytes(destination, unixMilliseconds), "uuid_new_v6_batch",
-            "Unix millisecond timestamp does not fit the 60-bit v6 timestamp field.");
+            "Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field.");
     }
 
     /// <summary>
@@ -459,8 +576,13 @@ public static partial class UuidGenerator
     /// unlike version 7, there is no monotonic counter, so items are not guaranteed to sort
     /// in creation order.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="count"/> is negative, or <paramref name="unixMilliseconds"/> is out of
+    /// range (see <see cref="NewV6(long)"/>).
+    /// </exception>
     public static Guid[] NewV6Batch(int count, long unixMilliseconds)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
         var result = new Guid[count];
         FillV6(result, unixMilliseconds);
         return result;
@@ -556,6 +678,8 @@ public static partial class UuidGenerator
     /// this reads the version nibble itself first, so a caller doesn't need to already know (or
     /// separately check) which version <paramref name="uuid"/> is before asking — delegates
     /// straight to whichever of those two methods applies, no bit-layout logic duplicated here.
+    /// Both of their edges come with it: a v6 timestamp before 1970 reads back as the Unix
+    /// epoch, and a v7 timestamp past year 9999 throws <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public static unsafe DateTimeOffset? GetTimestamp(Guid uuid)
     {
@@ -746,18 +870,29 @@ public static partial class UuidGenerator
     /// and one random-bytes fetch instead of <paramref name="destination"/>'s length worth of
     /// each.
     /// </summary>
-    public static void FillV7(Span<Guid> destination, long unixMilliseconds) =>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="destination"/> is longer than a single fill takes (more than
+    /// <c>int.MaxValue / 16</c> elements).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+    /// </exception>
+    public static void FillV7(Span<Guid> destination, long unixMilliseconds)
+    {
+        RequireFillable(destination, nameof(destination));
         ThrowOnBatchFailure(CoreFillV7(destination, unixMilliseconds), "uuid_new_v7_batch",
             "Unix millisecond timestamp must be non-negative and fit within 48 bits.");
+    }
 
     /// <summary>
     /// Non-throwing counterpart to <see cref="FillV7(Span{Guid}, long)"/> — returns
     /// <see langword="false"/> instead of throwing when the native call reports a random-source
-    /// failure or an out-of-range <paramref name="unixMilliseconds"/>. On failure
+    /// failure or an out-of-range <paramref name="unixMilliseconds"/>, and for a
+    /// <paramref name="destination"/> too long for a single fill. On failure
     /// <paramref name="destination"/> is left untouched. See <see cref="TryNewV4"/> for why.
     /// </summary>
     public static bool TryFillV7(Span<Guid> destination, long unixMilliseconds) =>
-        CoreFillV7(destination, unixMilliseconds) == 0;
+        destination.Length <= MaxGuidsPerFill && CoreFillV7(destination, unixMilliseconds) == 0;
 
     /// <summary>
     /// Fills <paramref name="destination"/> with raw RFC 9562-ordered version 7 UUID bytes —
@@ -852,8 +987,13 @@ public static partial class UuidGenerator
     /// Creates an array of <paramref name="count"/> time-sortable version 7 UUIDs sharing one
     /// timestamp capture.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="count"/> is negative, or <paramref name="unixMilliseconds"/> is negative
+    /// or does not fit within 48 bits.
+    /// </exception>
     public static Guid[] NewV7Batch(int count, long unixMilliseconds)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
         var result = new Guid[count];
         FillV7(result, unixMilliseconds);
         return result;

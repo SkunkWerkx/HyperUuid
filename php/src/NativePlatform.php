@@ -5,30 +5,75 @@ declare(strict_types=1);
 namespace HyperUuid;
 
 /**
- * Maps the running PHP_OS_FAMILY / php_uname('m') to the RID-style directory (matching the
- * other bindings' runtimes/{rid}/native/ / native/{rid}/ convention) and native library
- * filename to load.
+ * Maps the running process to the RID-style directory (matching the other bindings'
+ * runtimes/{rid}/native/ / native/{rid}/ convention) and native library filename to load.
+ *
+ * @internal FFI plumbing, not part of the public API — PHP has no package-private visibility.
  */
 final class NativePlatform
 {
+    /** Non-instantiable — static resolution only. */
+    private function __construct()
+    {
+    }
+
     /** @return array{0: string, 1: string} [$rid, $libraryFileName] */
     public static function ridAndLibraryName(): array
     {
-        // php_uname('m') mirrors the OS's own reported string verbatim — Windows reports
-        // "ARM64" (uppercase, matching PROCESSOR_ARCHITECTURE), unlike Linux/Darwin's
-        // lowercase "aarch64"/"arm64" — so this must be case-insensitive. Confirmed by
-        // hitting exactly this bug on a real windows-11-arm GHA runner: it silently fell
-        // through to the win-x64 branch and tried to dlopen the wrong .dll.
-        $machine = strtolower(php_uname('m'));
-        $isArm = str_contains($machine, 'arm64') || str_contains($machine, 'aarch64');
+        return self::resolve(PHP_OS_FAMILY, php_uname('m'), PHP_INT_SIZE, PHP_OS_FAMILY === 'Linux' && self::isMusl());
+    }
 
-        return match (PHP_OS_FAMILY) {
-            'Windows' => $isArm ? ['win-arm64', 'hyperuuid.dll'] : ['win-x64', 'hyperuuid.dll'],
-            'Darwin' => $isArm ? ['osx-arm64', 'libhyperuuid.dylib'] : ['osx-x64', 'libhyperuuid.dylib'],
-            'Linux' => $isArm ? ['linux-arm64', 'libhyperuuid.so'] : ['linux-x64', 'libhyperuuid.so'],
+    /**
+     * The mapping itself, as a pure function of what the process reports, so the whole table
+     * is testable from any one platform.
+     *
+     * Windows is `win-x64` whatever the hardware: PHP has never shipped a native Windows
+     * ARM64 build, so on ARM hardware it is an x64 process under emulation — while
+     * php_uname('m') reports the *machine* ("ARM64"), which is not what a DLL has to match.
+     * Everywhere else the machine string is matched exactly (case-insensitively), so an
+     * architecture this package carries no library for is a clear error here rather than a
+     * wrong-architecture dlopen failure later.
+     *
+     * @param string $osFamily PHP_OS_FAMILY
+     * @param string $machine php_uname('m')
+     * @param int $intSize PHP_INT_SIZE — 8 for the 64-bit process every bundled library needs
+     * @param bool $musl whether the process runs on musl libc (Linux only)
+     * @return array{0: string, 1: string} [$rid, $libraryFileName]
+     */
+    public static function resolve(string $osFamily, string $machine, int $intSize, bool $musl): array
+    {
+        if ($intSize !== 8) {
+            throw new \RuntimeException('hyperuuid: unsupported platform — a 64-bit PHP is required');
+        }
+        if ($osFamily === 'Windows') {
+            return ['win-x64', 'hyperuuid.dll'];
+        }
+
+        $arch = match (strtolower($machine)) {
+            'x86_64', 'amd64' => 'x64',
+            'aarch64', 'arm64' => 'arm64',
             default => throw new \RuntimeException(
-                'hyperuuid: unsupported platform PHP_OS_FAMILY=' . PHP_OS_FAMILY
+                "hyperuuid: unsupported platform — no native library for architecture '{$machine}'"
             ),
         };
+
+        return match ($osFamily) {
+            'Darwin' => ["osx-{$arch}", 'libhyperuuid.dylib'],
+            'Linux' => [($musl ? 'linux-musl-' : 'linux-') . $arch, 'libhyperuuid.so'],
+            default => throw new \RuntimeException(
+                "hyperuuid: unsupported platform PHP_OS_FAMILY={$osFamily}"
+            ),
+        };
+    }
+
+    /**
+     * Whether this process runs on musl libc (Alpine) rather than glibc: true when the
+     * process has a musl loader mapped. The same rule every binding in this repo uses; an
+     * unreadable /proc/self/maps means glibc.
+     */
+    private static function isMusl(): bool
+    {
+        $maps = @file_get_contents('/proc/self/maps');
+        return $maps !== false && (str_contains($maps, 'ld-musl-') || str_contains($maps, 'libc.musl-'));
     }
 }

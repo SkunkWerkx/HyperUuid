@@ -1,0 +1,9 @@
+<Project>
+  <!-- NuGet imports build/ only into a project that references this package directly. A
+       Blazor WebAssembly app that reaches it through a class library gets the managed
+       assembly and none of the wasm wiring, so the native core is never linked into the app
+       that actually runs in the browser. buildTransitive/ is the folder NuGet flows to every
+       project downstream of the reference; this file hands those projects the same targets
+       a direct consumer imports, so there is one copy of the wiring to keep right. -->
+  <Import Project="$(MSBuildThisFileDirectory)../build/HyperUuid.targets" />
+</Project>

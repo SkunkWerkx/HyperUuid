@@ -6,8 +6,11 @@ Returns stdlib ``uuid.UUID`` objects. For v5's namespace argument, use the RFC 9
 Section 6.6 well-known namespaces already in the standard library:
 ``uuid.NAMESPACE_DNS``, ``NAMESPACE_URL``, ``NAMESPACE_OID``, ``NAMESPACE_X500``.
 
-Ships as real platform-specific wheels (linux/macOS/Windows, x64/arm64) built by
-``maturin`` — no compiler needed to install.
+Ships as real platform-specific abi3 wheels (linux glibc and musl, macOS, Windows; x64 and
+arm64) built by ``maturin`` — no compiler needed to install. The same core also rides inside
+every wheel as a ``wasm32-wasip1`` module, which ``wasmtime-py`` can run in-process
+(``pip install hyperuuid[wasm]``, ``HYPERUUID_WASM=1``); see ``_wasm``. The package is typed:
+``py.typed`` ships beside it, with a stub for the extension module.
 """
 
 from __future__ import annotations
@@ -16,15 +19,28 @@ import datetime
 import uuid as _uuid
 
 import os as _os
+from operator import index as _index
+from typing import TYPE_CHECKING
+
+#: Which backend this process loaded: ``"native"`` (the PyO3 extension) or ``"wasm"`` (the
+#: same core as a wasm32-wasip1 module under wasmtime-py). Informational — every function in
+#: this module behaves identically on both; the test suite runs against each.
+BACKEND: str
 
 # --- backend selection -----------------------------------------------------------------
 # `_native` is the PyO3 extension: the Rust core linked straight into CPython, the backend
 # every published wheel ships. `_wasm` is the same core compiled to wasm32-wasip1 and run
 # inside this process by wasmtime-py (see `_wasm.py` for how the crossing works and what it
 # costs). HYPERUUID_WASM=1 forces the wasm backend; otherwise it is the fallback for an
-# interpreter no wheel matches, taken only when `wasmtime` is importable — a plain
-# `pip install hyperuuid[wasm]` on an unsupported platform is the whole opt-in.
-if _os.environ.get("HYPERUUID_WASM"):
+# install whose extension cannot be imported, taken only when `wasmtime` is importable. It
+# does not widen where pip can install the package: only wheels are published, so an
+# interpreter no wheel matches gets nothing to fall back *from*.
+#
+# A type checker reads the first branch and nothing else: `_native.pyi` is the one typed
+# description of the surface both backends present.
+if TYPE_CHECKING:
+    from . import _native
+elif _os.environ.get("HYPERUUID_WASM"):
     from . import _wasm as _native
 
     BACKEND = "wasm"
@@ -45,15 +61,11 @@ else:
 
         BACKEND = "wasm"
 
-#: Which backend this process loaded: ``"native"`` (the PyO3 extension) or ``"wasm"`` (the
-#: same core as a wasm32-wasip1 module under wasmtime-py). Informational — every function in
-#: this module behaves identically on both; the test suite runs against each.
-BACKEND: str
-
 _native._bind()
 
 __all__ = [
     "BACKEND",
+    "native_version",
     "new_v4",
     "new_v5",
     "new_v6",
@@ -80,17 +92,69 @@ NIL = _uuid.UUID(bytes=bytes(16))
 MAX = _uuid.UUID(bytes=b"\xff" * 16)
 
 
-def _unix_millis_from(value: int | datetime.datetime | None) -> int | None:
-    """Convert ``value`` to a Unix-epoch millisecond int: ``None`` passes through (``_native``
-    itself defaults that to the current time), a ``datetime.datetime`` is converted exactly
-    via ``timestamp()`` (no float rounding — multiplied and rounded in one step), and an
-    ``int`` (a raw millisecond count) passes through unchanged. Shared by every
-    ``new_v6``/``new_v7``/batch door below so a caller can pass either a ``datetime.datetime``
-    or a raw millisecond count interchangeably.
+_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+_MILLISECOND = datetime.timedelta(milliseconds=1)
+_U64_MAX = (1 << 64) - 1
+_U32_MAX = (1 << 32) - 1
+# The core's own words for a timestamp its field cannot hold. A value that does not even fit
+# the u64 the core takes is the same caller bug, so it raises the same error from here.
+_V6_OUT_OF_RANGE = "unix_millis does not fit the 60-bit v6 timestamp field"
+_V7_OUT_OF_RANGE = "unix_millis must be non-negative and fit within 48 bits"
+
+
+def _unix_millis_from(value: int | datetime.datetime | None, out_of_range: str) -> int | None:
+    """Convert ``value`` to a Unix-epoch millisecond int: ``None`` passes through (the backend
+    defaults that to the current time), a ``datetime.datetime`` is converted in exact integer
+    arithmetic and truncated to the millisecond — no float in between, so a time 0.9 ms into a
+    millisecond stays in it rather than rounding into the next — and an ``int`` (a raw
+    millisecond count) passes through unchanged. A naive ``datetime`` is read as local time,
+    exactly as ``datetime.timestamp()`` reads it. Shared by every ``new_v6``/``new_v7``/batch
+    door below so a caller can pass either a ``datetime.datetime`` or a raw millisecond count
+    interchangeably.
+
+    Validated here, once, rather than in each backend: anything that is not an integer or a
+    ``datetime`` is a ``TypeError``, and an integer the core's unsigned 64-bit parameter
+    cannot carry is the ``ValueError`` (``out_of_range``) the core itself raises for a
+    timestamp past its field — one exception per caller bug, on both backends.
     """
+    if value is None:
+        return None
     if isinstance(value, datetime.datetime):
-        return round(value.timestamp() * 1000)
+        if value.utcoffset() is None:
+            value = value.astimezone()
+        value = (value - _EPOCH) // _MILLISECOND
+    else:
+        try:
+            value = _index(value)
+        except TypeError:
+            raise TypeError(
+                f"unix_millis must be an int, a datetime.datetime or None, not {type(value).__name__}"
+            ) from None
+    if not 0 <= value <= _U64_MAX:
+        raise ValueError(out_of_range)
     return value
+
+
+def _count_from(count: int) -> int:
+    """Validate a batch ``count`` once, for both backends: an integer from 0 to 4294967295,
+    the range of the core's own unsigned 32-bit batch parameter. Anything else is refused
+    here rather than narrowed into a batch of some other size.
+    """
+    try:
+        count = _index(count)
+    except TypeError:
+        raise TypeError(f"count must be an int, not {type(count).__name__}") from None
+    if not 0 <= count <= _U32_MAX:
+        raise ValueError("count must be between 0 and 4294967295")
+    return count
+
+
+def native_version() -> str:
+    """Return the version of the Rust core this process actually loaded, as
+    ``"major.minor.patch"`` — decoded from the same packed ``hyperuuid_version`` export
+    every other binding probes, on whichever backend :data:`BACKEND` names.
+    """
+    return _native.native_version()
 
 
 def new_v4() -> _uuid.UUID:
@@ -103,6 +167,8 @@ def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
 
     The same ``(namespace, name)`` pair always produces the same UUID. ``name`` may
     be ``str`` (encoded as UTF-8) or raw ``bytes``.
+
+    :raises TypeError: if ``name`` is neither ``str`` nor ``bytes``.
     """
     return _native.new_v5(namespace, name)
 
@@ -115,8 +181,12 @@ def new_v6(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     millisecond timestamp to embed a specific time instead. ``clock_seq`` and ``node`` are
     randomly generated on every call — unlike version 7, there is no monotonic counter, so
     calls within the same millisecond are not guaranteed to sort in creation order.
+
+    :raises TypeError: if ``unix_millis`` is not an int, a ``datetime.datetime`` or ``None``.
+    :raises ValueError: if ``unix_millis`` is negative or does not fit the 60-bit v6
+        timestamp field.
     """
-    return _native.new_v6(_unix_millis_from(unix_millis))
+    return _native.new_v6(_unix_millis_from(unix_millis, _V6_OUT_OF_RANGE))
 
 
 def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
@@ -138,8 +208,16 @@ def new_v6_batch(count: int, unix_millis: int | datetime.datetime | None = None)
 
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
     millisecond timestamp to embed a specific time instead.
+
+    :raises TypeError: if ``count`` is not an int, or ``unix_millis`` is not an int, a
+        ``datetime.datetime`` or ``None``.
+    :raises ValueError: if ``count`` is outside 0 to 4294967295, or ``unix_millis`` is
+        negative or does not fit the 60-bit v6 timestamp field.
+    :raises MemoryError: if a batch of ``count`` UUIDs cannot be allocated.
     """
-    return _native.new_v6_batch(count, _unix_millis_from(unix_millis))
+    return _native.new_v6_batch(
+        _count_from(count), _unix_millis_from(unix_millis, _V6_OUT_OF_RANGE)
+    )
 
 
 def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
@@ -147,8 +225,12 @@ def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
 
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
     millisecond timestamp (non-negative, fitting in 48 bits) to embed a specific time instead.
+
+    :raises TypeError: if ``unix_millis`` is not an int, a ``datetime.datetime`` or ``None``.
+    :raises ValueError: if ``unix_millis`` is negative or does not fit the 48-bit
+        ``unix_ts_ms`` field.
     """
-    return _native.new_v7(_unix_millis_from(unix_millis))
+    return _native.new_v7(_unix_millis_from(unix_millis, _V7_OUT_OF_RANGE))
 
 
 def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
@@ -188,8 +270,16 @@ def new_v7_batch(count: int, unix_millis: int | datetime.datetime | None = None)
 
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
     millisecond timestamp to embed a specific time instead.
+
+    :raises TypeError: if ``count`` is not an int, or ``unix_millis`` is not an int, a
+        ``datetime.datetime`` or ``None``.
+    :raises ValueError: if ``count`` is outside 0 to 4294967295, or ``unix_millis`` is
+        negative or does not fit the 48-bit ``unix_ts_ms`` field.
+    :raises MemoryError: if a batch of ``count`` UUIDs cannot be allocated.
     """
-    return _native.new_v7_batch(count, _unix_millis_from(unix_millis))
+    return _native.new_v7_batch(
+        _count_from(count), _unix_millis_from(unix_millis, _V7_OUT_OF_RANGE)
+    )
 
 
 def v7_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
@@ -270,17 +360,21 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     bytes are the destination, not a step on the way to objects.
 
     ``len(buffer)`` must be a multiple of 16 — one whole UUID per 16 bytes. A zero-length
-    buffer is a no-op. Defaults to the current time; pass a ``datetime.datetime`` or a
-    Unix-epoch millisecond timestamp to embed a specific time instead.
+    buffer writes nothing (the timestamp is still checked, as it is for a batch of zero).
+    Defaults to the current time; pass a ``datetime.datetime`` or a Unix-epoch millisecond
+    timestamp to embed a specific time instead.
 
-    ``bytearray`` specifically, not ``memoryview`` or NumPy arrays: the general writable
-    buffer protocol needs ``Py_buffer``, which only entered CPython's stable ABI in 3.11, and
-    this extension is built ``abi3-py39`` so a single wheel serves every supported Python.
+    ``bytearray`` specifically, not ``memoryview`` or NumPy arrays, for now: the general
+    writable buffer protocol needs ``Py_buffer``, which entered CPython's stable ABI in 3.11.
+    That is this extension's floor (``abi3-py311``), so the wider form is possible and not
+    built yet.
 
-    :raises ValueError: if ``len(buffer)`` is not a multiple of 16, or ``unix_millis`` does
-        not fit the 48-bit ``unix_ts_ms`` field.
+    :raises TypeError: if ``buffer`` is not a ``bytearray``, or ``unix_millis`` is not an int,
+        a ``datetime.datetime`` or ``None``.
+    :raises ValueError: if ``len(buffer)`` is not a multiple of 16, or ``unix_millis`` is
+        negative or does not fit the 48-bit ``unix_ts_ms`` field.
     """
-    _native.fill_v7_bytes(buffer, _unix_millis_from(unix_millis))
+    _native.fill_v7_bytes(buffer, _unix_millis_from(unix_millis, _V7_OUT_OF_RANGE))
 
 
 def fill_v6(buffer: bytearray, unix_millis: int | datetime.datetime | None = None) -> None:
@@ -293,7 +387,9 @@ def fill_v6(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     monotonic counter, so items minted within the same millisecond are not guaranteed to sort
     in creation order.
 
-    :raises ValueError: if ``len(buffer)`` is not a multiple of 16, or ``unix_millis`` does
-        not fit the 60-bit v6 timestamp field.
+    :raises TypeError: if ``buffer`` is not a ``bytearray``, or ``unix_millis`` is not an int,
+        a ``datetime.datetime`` or ``None``.
+    :raises ValueError: if ``len(buffer)`` is not a multiple of 16, or ``unix_millis`` is
+        negative or does not fit the 60-bit v6 timestamp field.
     """
-    _native.fill_v6_bytes(buffer, _unix_millis_from(unix_millis))
+    _native.fill_v6_bytes(buffer, _unix_millis_from(unix_millis, _V6_OUT_OF_RANGE))

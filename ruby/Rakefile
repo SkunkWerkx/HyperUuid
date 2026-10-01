@@ -3,7 +3,7 @@ require "yard"
 
 GEMSPEC = Bundler.load_gemspec("hyperuuid.gemspec")
 
-# Doc-comment enforcement for the real public API surface (hyperuuid.rb, uuid.rb,
+# Doc-comment enforcement for the real public API surface (hyperuuid.rb, errors.rb, uuid.rb,
 # namespaces.rb) — native_platform.rb and runtime.rb are internal FFI plumbing, the same
 # public/internal boundary the Java binding gets from language-level package-private. `yard
 # stats`/`YARD::CLI::Stats` always rediscovers files from lib/**/*.rb on its own regardless of
@@ -11,7 +11,7 @@ GEMSPEC = Bundler.load_gemspec("hyperuuid.gemspec")
 # going through that CLI, and exits non-zero on any undocumented object.
 task :"docs:check" do
   YARD::Registry.clear
-  YARD.parse(["lib/hyperuuid.rb", "lib/hyperuuid/uuid.rb", "lib/hyperuuid/namespaces.rb"])
+  YARD.parse(["lib/hyperuuid.rb", "lib/hyperuuid/errors.rb", "lib/hyperuuid/uuid.rb", "lib/hyperuuid/namespaces.rb"])
 
   undocumented = YARD::Registry.all.select { |obj| obj.docstring.nil? || obj.docstring.empty? }
   total = YARD::Registry.all.size
@@ -32,9 +32,10 @@ end
 # repo's rust/ and ruby/ are siblings in a shared monorepo, not that layout, and CI's own
 # `build-native` job already runs `cargo build --release --features ruby` for Magnus testing
 # (hyper-build-native.yml), producing the exact same artifact this needs — so this task just
-# expects that binary already staged at lib/hyperuuid_native.{so,bundle} (by an earlier CI
-# step, or by hand locally) and packages a real platform gem around it directly via plain
-# RubyGems stdlib (Gem::Platform/Gem::Package), no extra build-tool dependency at all.
+# expects those binaries already staged at lib/hyperuuid/<minor>/hyperuuid_native.{so,bundle},
+# one per entry in ABIS below (by release.yml's packing step, or locally by `rake
+# native:dev` under each Ruby), and packages a real platform gem around them directly via
+# plain RubyGems stdlib (Gem::Platform/Gem::Package), no extra build-tool dependency at all.
 namespace :native do
   # The Ruby minor ABIs a platform gem ships, and the whole reason it's a "fat" gem: a
   # Magnus extension is bound to one Ruby ABI, with no `abi3` equivalent to collapse the
@@ -46,8 +47,8 @@ namespace :native do
   #
   # 4.0 is primary: the current release, what every other binding's leg runs against. 3.4 is
   # the compatibility floor and leaves this list when it goes EOL on 2028-03-31, joining
-  # 3.2 (already EOL 2026-03-31) and 3.3 (2027-03-31) on the universal Fiddle gem. Dropping
-  # an ABI never strands a consumer — it only costs them the fast path.
+  # 3.3 (the gemspec's own floor, EOL 2027-03-31) on the universal Fiddle gem. Dropping an
+  # ABI never strands a consumer — it only costs them the fast path.
   ABIS = %w[3.4 4.0].freeze
 
   # Exclusive upper bound for required_ruby_version: the next minor after ABIS.last, whose
@@ -67,11 +68,11 @@ namespace :native do
     spec = GEMSPEC.dup
     spec.platform = Gem::Platform.new(platform)
     spec.files = spec.files + libs
-    # Narrower than the gemspec's own `>= 3.2`, deliberately: this gem is only correct on the
+    # Narrower than the gemspec's own `>= 3.3`, deliberately: this gem is only correct on the
     # ABIs actually in the box, and every other Ruby must resolve the universal
     # "ruby"-platform gem and its Fiddle backend instead — which is exactly what RubyGems
     # does when required_ruby_version excludes it. Leaving the gemspec's floor here would
-    # advertise these extensions to 3.2/3.3 consumers they cannot work on. Relying on
+    # advertise these extensions to 3.3 consumers they cannot work on. Relying on
     # lib/hyperuuid.rb's LoadError rescue to catch that is not enough: Windows fails the load
     # cleanly (the extension imports x64-ucrt-ruby<minor>.dll by name), but Linux extensions
     # don't link libruby at all — the symbols resolve from the host process, so a wrong-ABI
@@ -81,5 +82,33 @@ namespace :native do
     require "rubygems/package"
     mkdir_p "pkg"
     Gem::Package.build(spec, false, false, "pkg/#{spec.full_name}.gem")
+  end
+
+  # The local dev loop for the Magnus backend: builds the extension for the Ruby running
+  # this task and stages it where lib/hyperuuid.rb looks first, so a plain `bundle exec rspec`
+  # afterwards runs on BACKEND == :native. `cargo ruby-ext` (rust/.cargo/config.toml) does the
+  # build, into rust/target/ruby/ — never over the plain cdylib in rust/target/release/ that
+  # the Fiddle backend and every other binding's dev loop dlopen. Cargo names its output
+  # libhyperuuid.{so,dylib}; `require` needs hyperuuid_native.<DLEXT>, because Ruby derives the
+  # Init_ function it calls from the file's name. The copy below is that rename, and it is
+  # the step `cargo ruby-ext` on its own never did.
+  #
+  # RUBY is handed to the build explicitly: rb-sys binds against whichever interpreter it
+  # names and rebuilds when it changes, so running this task again under a second Ruby
+  # stages a second ABI beside the first instead of a wrong-ABI file over it. Linux and
+  # macOS only — the Windows extensions need the gnullvm targets and linker flags in the
+  # forge's build-magnus.sh.
+  task :dev do
+    abort "rake native:dev covers Linux and macOS; Windows builds go through the forge's build-magnus.sh" if
+      Gem.win_platform?
+
+    rust = File.expand_path("../rust", __dir__)
+    sh({ "RUBY" => RbConfig.ruby }, "cargo", "ruby-ext", chdir: rust)
+
+    built = File.join(rust, "target/ruby/release", "libhyperuuid.#{RUBY_PLATFORM.include?('darwin') ? 'dylib' : 'so'}")
+    staged = "lib/hyperuuid/#{RUBY_VERSION[/\d+\.\d+/]}/hyperuuid_native.#{RbConfig::CONFIG['DLEXT']}"
+    mkdir_p File.dirname(staged)
+    cp built, staged
+    puts "staged #{staged} for Ruby #{RUBY_VERSION} — HyperUuid::BACKEND is now :native under this Ruby"
   end
 end

@@ -11,6 +11,18 @@ one by hand; CI's own `build-native` job does the same per-leg during in-repo te
 overwriting whichever platform's file matches that leg — harmless, since it's the same build
 either way.
 
+Six RIDs, and deliberately not the `linux-musl-x64`/`linux-musl-arm64` pair the other
+bindings carry: Swift's musl target links fully statically and has no dynamic loader to open
+a shared library with, so a musl build of `libhyperuuid` here would be shipped to every consumer
+and loadable by none. `NativePlatform.swift` stops a musl build at a compile-time `#error`
+instead. Covering musl would mean linking the core statically (a SwiftPM binary
+static-library target, SE-0482, Swift 6.2 and later) rather than adding files here; that is
+deferred, not ruled out.
+
+At run time the library is opened in place, from wherever SwiftPM staged this directory
+(`HyperUuid_HyperUuid.resources` beside the build products, `.bundle` on macOS) — see the binding
+README's "Loading and deployment" for what that means for a deployed executable.
+
 ## Verifying provenance
 
 These are compiled binaries committed to git, which is the least inspectable thing in this

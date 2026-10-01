@@ -19,11 +19,25 @@ name: Stage native binaries after merge
 # workflow_dispatch exists purely to dry-run this against an arbitrary already-green commit
 # without needing a real PR merge — pass the exact SHA whose ci.yml run you want to pull from.
 
+#
+# A third trigger covers the one rust/ change that never arrives as a PR: a release's
+# version bump. The libraries embed the crate version, prepare-release.yml direct-pushes the
+# bump and dispatches ci.yml against it, and when that dispatched run completes on master
+# this workflow stages its output — so the commit a human then tags carries libraries that
+# report the version being released. (Any hand-dispatched ci.yml run on master stages the
+# same way, which is also the manual route when master needs restaging for another reason.)
+# PR runs are deliberately not picked up here: an unmerged PR's libraries have no business
+# on master, and the merged case is the pull_request trigger's job.
+
 on:
   pull_request:
     types: [closed]
     paths:
       - "rust/**"
+  workflow_run:
+    workflows: ["CI — build native, build wasm, test every binding"]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
     inputs:
       head_sha:
@@ -33,7 +47,12 @@ on:
 
 jobs:
   stage-native-binaries:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -43,15 +62,15 @@ jobs:
       - name: Resolve the source commit
         id: source
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "sha=${{ inputs.head_sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          fi
+          case "${{ github.event_name }}" in
+            workflow_dispatch) echo "sha=${{ inputs.head_sha }}" >> "$GITHUB_OUTPUT" ;;
+            workflow_run)      echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT" ;;
+            *)                 echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.base.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref }}
 
       - name: Find that commit's own ci.yml run
         id: find
@@ -106,6 +125,8 @@ jobs:
           declare -A LIB_NAMES=(
             [linux-x64]=libhyperuuid.so
             [linux-arm64]=libhyperuuid.so
+            [linux-musl-x64]=libhyperuuid.so
+            [linux-musl-arm64]=libhyperuuid.so
             [osx-x64]=libhyperuuid.dylib
             [osx-arm64]=libhyperuuid.dylib
             [win-x64]=hyperuuid.dll
@@ -134,12 +155,24 @@ jobs:
             echo "$(sha256sum "$src" | cut -d' ' -f1)  $rid/${LIB_NAMES[$rid]}" >> digests.txt
           done
 
+          # Not every tree takes every RID. Swift's musl target links fully statically and
+          # has no dynamic loader, so a musl library under NativeLibs would ship to every
+          # SwiftPM consumer and load for none. PHP on Windows is an x64 process even on
+          # ARM hardware, so an ARM64 DLL under php/ can never be loaded; the one that
+          # earlier stagings committed there is removed.
+          #
+          # install -m 755 rather than cp: download-artifact does not preserve modes, and
+          # the two repos' committed libraries had drifted to different ones.
           for dest_root in php/src/native swift/Sources/HyperUuid/NativeLibs go/native; do
             for rid in "${!LIB_NAMES[@]}"; do
+              case "$dest_root:$rid" in
+                swift/*:linux-musl-*|php/*:win-arm64) continue ;;
+              esac
               mkdir -p "$dest_root/$rid"
-              cp "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest_root/$rid/"
+              install -m 755 "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest_root/$rid/${LIB_NAMES[$rid]}"
             done
           done
+          git rm -r --quiet --ignore-unmatch php/src/native/win-arm64
 
           wasm=artifacts/wasm-wasip1-module/hyperuuid.wasm
           echo "::group::verify wasm32-wasip1"
@@ -151,7 +184,7 @@ jobs:
           echo "::endgroup::"
           echo "$(sha256sum "$wasm" | cut -d' ' -f1)  wasm32-wasip1/hyperuuid.wasm" >> digests.txt
           mkdir -p go/native/wasm32-wasip1
-          cp "$wasm" go/native/wasm32-wasip1/
+          install -m 755 "$wasm" go/native/wasm32-wasip1/hyperuuid.wasm
 
           echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -175,4 +208,4 @@ jobs:
             -m "chore: stage native binaries from ci.yml run $RUN_ID ($SOURCE_SHA)" \
             -m "Build provenance verified with \`gh attestation verify\` before staging." \
             -m "sha256:" -m "$(cat digests.txt)"
-          git push origin HEAD:${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.pull_request.base.ref }}
+          git push origin HEAD:${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}

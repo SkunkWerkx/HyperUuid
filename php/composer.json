@@ -1,7 +1,8 @@
 {
     "name": "skunkwerkx/hyperuuid",
-    "description": "RFC 9562 UUID v4/v5/v7 generation — direct native FFI into a Rust core, no runtime bridge.",
+    "description": "RFC 9562 UUID v4/v5/v6/v7 generation — direct native FFI into a Rust core, no runtime bridge.",
     "type": "library",
+    "keywords": ["uuid", "guid", "rfc9562", "uuidv4", "uuidv5", "uuidv6", "uuidv7", "ffi", "rust"],
     "license": "MIT",
     "authors": [
         {
@@ -9,8 +10,12 @@
         }
     ],
     "homepage": "https://github.com/SkunkWerkx/HyperUuid",
+    "support": {
+        "issues": "https://github.com/SkunkWerkx/HyperUuid/issues",
+        "source": "https://github.com/SkunkWerkx/HyperUuid"
+    },
     "require": {
-        "php": ">=8.1",
+        "php": ">=8.2",
         "ext-ffi": "*"
     },
     "require-dev": {

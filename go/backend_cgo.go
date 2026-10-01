@@ -42,6 +42,7 @@ typedef int32_t (*fn_new_v6_v7)(uint64_t, uint8_t*);
 typedef uint64_t (*fn_unix_millis)(const uint8_t*);
 typedef int32_t (*fn_new_batch)(uint64_t, uint32_t, uint8_t*);
 typedef void (*fn_sql_order)(uint8_t*);
+typedef uint32_t (*fn_version)(void);
 
 // A UUID crosses BY VALUE in both directions. Every single-UUID door used to hand the
 // core `&out[0]` of a Go local, and any Go pointer passed to a cgo call escapes to the
@@ -49,55 +50,53 @@ typedef void (*fn_sql_order)(uint8_t*);
 // the call shape. It was a floor for pointer-passing, not for the ABI: the shims below
 // keep the 16 bytes on the C stack and return them as a struct, so no Go pointer crosses
 // for anything but a caller's own slice (the v5 name, a batch destination).
-typedef struct { uint8_t b[16]; } hc_uuid;
-typedef struct { hc_uuid id; int32_t code; } hc_result;
+typedef struct { uint8_t b[16]; } hu_uuid;
+typedef struct { hu_uuid id; int32_t code; } hu_result;
 
-static hc_result call_new_v4(void *fn) {
-	hc_result r;
+static hu_result call_new_v4(void *fn) {
+	hu_result r;
 	r.code = ((fn_new_v4)fn)(r.id.b);
 	return r;
 }
-static hc_result call_new_v5(void *fn, hc_uuid ns, const uint8_t *name, uint32_t name_len) {
-	hc_result r;
+static hu_result call_new_v5(void *fn, hu_uuid ns, const uint8_t *name, uint32_t name_len) {
+	hu_result r;
 	r.code = ((fn_new_v5)fn)(ns.b, name, name_len, r.id.b);
 	return r;
 }
-static hc_result call_new_v6_v7(void *fn, uint64_t unix_millis) {
-	hc_result r;
+static hu_result call_new_v6_v7(void *fn, uint64_t unix_millis) {
+	hu_result r;
 	r.code = ((fn_new_v6_v7)fn)(unix_millis, r.id.b);
 	return r;
 }
-static uint64_t call_unix_millis(void *fn, hc_uuid uuid) {
+static uint64_t call_unix_millis(void *fn, hu_uuid uuid) {
 	return ((fn_unix_millis)fn)(uuid.b);
 }
 static int32_t call_new_batch(void *fn, uint64_t unix_millis, uint32_t count, uint8_t *out) {
 	return ((fn_new_batch)fn)(unix_millis, count, out);
 }
-static hc_uuid call_sql_order(void *fn, hc_uuid uuid) {
+static hu_uuid call_sql_order(void *fn, hu_uuid uuid) {
 	((fn_sql_order)fn)(uuid.b);
 	return uuid;
 }
 static void call_sql_order_bytes(void *fn, uint8_t *uuid) {
 	((fn_sql_order)fn)(uuid);
 }
+static uint32_t call_version(void *fn) {
+	return ((fn_version)fn)();
+}
 */
 import "C"
 
 import (
 	"fmt"
-	"sync"
 	"unsafe"
 
 	"github.com/google/uuid"
 )
 
-var (
-	initOnce sync.Once
-	initErr  error
-
-	symNewV4, symNewV5, symNewV6, symNewV7, symV6UnixMillis, symV7UnixMillis,
-	symNewV6Batch, symNewV7Batch, symV7ToSql, symV7ToRfc, symV6ToSql, symV6ToRfc unsafe.Pointer
-)
+var symNewV4, symNewV5, symNewV6, symNewV7, symV6UnixMillis, symV7UnixMillis,
+	symNewV6Batch, symNewV7Batch, symV7ToSql, symV7ToRfc, symV6ToSql, symV6ToRfc,
+	symVersion unsafe.Pointer
 
 // dlsymOrErr looks up name in the already-dlopen'd handle, wrapping dlerror()'s C string into
 // a Go error on failure.
@@ -106,71 +105,74 @@ func dlsymOrErr(handle unsafe.Pointer, name string) (unsafe.Pointer, error) {
 	defer C.free(unsafe.Pointer(cName))
 	sym := C.dlsym(handle, cName)
 	if sym == nil {
-		return nil, fmt.Errorf("hyperuuid: symbol %s not found in native library: %s", name, C.GoString(C.dlerror()))
+		return nil, fmt.Errorf("symbol %s not found in native library: %s", name, C.GoString(C.dlerror()))
 	}
 	return sym, nil
 }
 
-// ensureLoaded extracts this platform's embedded native library to a temp file and dlopen's
-// it via cgo, exactly once.
-func ensureLoaded() error {
-	initOnce.Do(func() {
-		path, err := extractNativeLib()
+// loadBackend extracts this platform's embedded native library to a temp file and dlopen's
+// it via cgo. ensureLoaded (load.go) runs it exactly once.
+func loadBackend() error {
+	path, err := extractNativeLib()
+	if err != nil {
+		return err
+	}
+
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+	// RTLD_LOCAL: every symbol is resolved through this handle, so nothing needs the
+	// library's exports in the process-wide namespace.
+	handle := C.dlopen(cPath, C.RTLD_NOW|C.RTLD_LOCAL)
+	if handle == nil {
+		return fmt.Errorf("dlopen failed: %s", C.GoString(C.dlerror()))
+	}
+
+	var symErr error
+	sym := func(name string) unsafe.Pointer {
+		if symErr != nil {
+			return nil
+		}
+		p, err := dlsymOrErr(handle, name)
 		if err != nil {
-			initErr = err
-			return
+			symErr = err
+			return nil
 		}
+		return p
+	}
 
-		cPath := C.CString(path)
-		defer C.free(unsafe.Pointer(cPath))
-		handle := C.dlopen(cPath, C.RTLD_NOW|C.RTLD_GLOBAL)
-		if handle == nil {
-			initErr = fmt.Errorf("hyperuuid: dlopen failed: %s", C.GoString(C.dlerror()))
-			return
-		}
+	newV4 := sym("uuid_new_v4")
+	newV5 := sym("uuid_new_v5")
+	newV6 := sym("uuid_new_v6")
+	v6UnixMillis := sym("uuid_v6_unix_millis")
+	newV6Batch := sym("uuid_new_v6_batch")
+	newV7 := sym("uuid_new_v7")
+	v7UnixMillis := sym("uuid_v7_unix_millis")
+	newV7Batch := sym("uuid_new_v7_batch")
+	v7ToSql := sym("uuid_v7_to_sql_order")
+	v7ToRfc := sym("uuid_v7_to_rfc_order")
+	v6ToSql := sym("uuid_v6_to_sql_order")
+	v6ToRfc := sym("uuid_v6_to_rfc_order")
+	version := sym("hyperuuid_version")
+	if symErr != nil {
+		return symErr
+	}
 
-		sym := func(name string) unsafe.Pointer {
-			if initErr != nil {
-				return nil
-			}
-			p, symErr := dlsymOrErr(handle, name)
-			if symErr != nil {
-				initErr = symErr
-				return nil
-			}
-			return p
-		}
-
-		newV4 := sym("uuid_new_v4")
-		newV5 := sym("uuid_new_v5")
-		newV6 := sym("uuid_new_v6")
-		v6UnixMillis := sym("uuid_v6_unix_millis")
-		newV6Batch := sym("uuid_new_v6_batch")
-		newV7 := sym("uuid_new_v7")
-		v7UnixMillis := sym("uuid_v7_unix_millis")
-		newV7Batch := sym("uuid_new_v7_batch")
-		v7ToSql := sym("uuid_v7_to_sql_order")
-		v7ToRfc := sym("uuid_v7_to_rfc_order")
-		v6ToSql := sym("uuid_v6_to_sql_order")
-		v6ToRfc := sym("uuid_v6_to_rfc_order")
-		if initErr != nil {
-			return
-		}
-
-		symNewV4, symNewV5, symNewV6, symNewV7 = newV4, newV5, newV6, newV7
-		symV6UnixMillis, symV7UnixMillis = v6UnixMillis, v7UnixMillis
-		symNewV6Batch, symNewV7Batch = newV6Batch, newV7Batch
-		symV7ToSql, symV7ToRfc, symV6ToSql, symV6ToRfc = v7ToSql, v7ToRfc, v6ToSql, v6ToRfc
-	})
-	return initErr
+	symNewV4, symNewV5, symNewV6, symNewV7 = newV4, newV5, newV6, newV7
+	symV6UnixMillis, symV7UnixMillis = v6UnixMillis, v7UnixMillis
+	symNewV6Batch, symNewV7Batch = newV6Batch, newV7Batch
+	symV7ToSql, symV7ToRfc, symV6ToSql, symV6ToRfc = v7ToSql, v7ToRfc, v6ToSql, v6ToRfc
+	symVersion = version
+	// One real call through the ABI, so Available means "answered", not "resolved".
+	nativeVersion = uint32(C.call_version(symVersion))
+	return nil
 }
 
-func toGo(r C.hc_result) (uuid.UUID, int32) {
+func toGo(r C.hu_result) (uuid.UUID, int32) {
 	return *(*uuid.UUID)(unsafe.Pointer(&r.id)), int32(r.code)
 }
 
-func toC(id uuid.UUID) C.hc_uuid {
-	return *(*C.hc_uuid)(unsafe.Pointer(&id))
+func toC(id uuid.UUID) C.hu_uuid {
+	return *(*C.hu_uuid)(unsafe.Pointer(&id))
 }
 
 func newV4() (uuid.UUID, int32) { return toGo(C.call_new_v4(symNewV4)) }

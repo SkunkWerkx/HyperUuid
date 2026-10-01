@@ -19,12 +19,15 @@ func extractNativeLib() (string, error) {
 	resourcePath := "native/" + t.rid + "/" + t.libName
 	data, err := nativeFS.ReadFile(resourcePath)
 	if err != nil {
-		return "", fmt.Errorf("hyperuuid: %s not found in embedded native libs (unsupported platform, or this module was built without a native library for it): %w", resourcePath, err)
+		// A supported platform whose directory simply isn't in this version of the module (a
+		// linux-musl-* build, in a version from before those were staged) lands here, with the
+		// missing path named, rather than on a dlopen error.
+		return "", fmt.Errorf("%s not found in embedded native libs (this version of the module carries no native library for %s): %w", resourcePath, t.rid, err)
 	}
 
 	tmp, err := os.CreateTemp("", "libhyperuuid-*-"+t.libName)
 	if err != nil {
-		return "", fmt.Errorf("hyperuuid: creating temp file for native library: %w", err)
+		return "", fmt.Errorf("creating temp file for native library: %w", err)
 	}
 	_, writeErr := tmp.Write(data)
 	closeErr := tmp.Close()
@@ -32,10 +35,10 @@ func extractNativeLib() (string, error) {
 	// path — Windows enforces exclusive file access far more strictly than Unix, and
 	// LoadLibrary fails outright while a write handle on the same file is still open.
 	if writeErr != nil {
-		return "", fmt.Errorf("hyperuuid: writing native library to temp file: %w", writeErr)
+		return "", fmt.Errorf("writing native library to temp file: %w", writeErr)
 	}
 	if closeErr != nil {
-		return "", fmt.Errorf("hyperuuid: closing temp file for native library: %w", closeErr)
+		return "", fmt.Errorf("closing temp file for native library: %w", closeErr)
 	}
 
 	return tmp.Name(), nil

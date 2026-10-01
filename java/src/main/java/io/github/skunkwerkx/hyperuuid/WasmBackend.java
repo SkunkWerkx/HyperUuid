@@ -13,9 +13,10 @@ import org.graalvm.polyglot.io.ByteSequence;
 /**
  * The Rust core as a {@code wasm32-wasip1} module, run inside the JVM by
  * <a href="https://www.graalvm.org/webassembly/">GraalWasm</a>. No native binary, no
- * {@code java.lang.foreign}: the same twelve {@code uuid_*} exports {@link UuidGenerator}
- * downcalls into natively are called through the polyglot API instead, on the module bundled
- * at {@code /native/wasm32-wasip1/hyperuuid.wasm}.
+ * {@code java.lang.foreign} downcall: the twelve {@code uuid_*} functions and
+ * {@code hyperuuid_version} that {@link UuidGenerator} downcalls into natively are called
+ * through the polyglot API instead, on the module bundled at
+ * {@code /native/wasm32-wasip1/hyperuuid.wasm}.
  *
  * <p><b>Memory protocol.</b> A wasm guest only sees its own linear memory, so nothing here
  * can hand the core a pointer into a Java array the way the FFM path pins a {@code byte[]}.
@@ -47,6 +48,12 @@ import org.graalvm.polyglot.io.ByteSequence;
 final class WasmBackend implements Backend {
     static final String RESOURCE_PATH = "/native/wasm32-wasip1/hyperuuid.wasm";
 
+    // What a consumer who selected this backend without its optional dependencies is told.
+    // A compile-time constant, so UuidGenerator can name it without loading this class.
+    static final String GRAALWASM_MISSING = "hyperuuid: the wasm backend needs GraalWasm on the "
+            + "classpath — add org.graalvm.polyglot:polyglot and org.graalvm.polyglot:wasm "
+            + "(the latter is a POM-type dependency)";
+
     private static final ByteOrder BIG_ENDIAN = ByteOrder.BIG_ENDIAN;
 
     private final Context context;
@@ -71,6 +78,7 @@ final class WasmBackend implements Backend {
     private final Value v7ToRfcOrderFn;
     private final Value v6ToSqlOrderFn;
     private final Value v6ToRfcOrderFn;
+    private final Value versionFn;
 
     // Sixteen bytes read back from the guest per single-UUID door; guarded by the same
     // monitor as every call, so one array serves the process.
@@ -95,9 +103,15 @@ final class WasmBackend implements Backend {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        context = Context.newBuilder("wasm")
-                .option("wasm.Builtins", "wasi_snapshot_preview1")
-                .build();
+        try {
+            context = Context.newBuilder("wasm")
+                    .option("wasm.Builtins", "wasi_snapshot_preview1")
+                    .build();
+        } catch (IllegalArgumentException | IllegalStateException noWasmLanguage) {
+            // The polyglot API is on the classpath but nothing behind it can run wasm: the
+            // half-added dependency, org.graalvm.polyglot:polyglot without :wasm.
+            throw new IllegalStateException(GRAALWASM_MISSING, noWasmLanguage);
+        }
         Value instance = context.eval(Source.newBuilder("wasm", ByteSequence.create(module), "hyperuuid").buildLiteral())
                 .newInstance();
         exports = instance.getMember("exports");
@@ -116,6 +130,7 @@ final class WasmBackend implements Backend {
         v7ToRfcOrderFn = export("uuid_v7_to_rfc_order");
         v6ToSqlOrderFn = export("uuid_v6_to_sql_order");
         v6ToRfcOrderFn = export("uuid_v6_to_rfc_order");
+        versionFn = export("hyperuuid_version");
         scratchIn = malloc(16);
         scratchOut = malloc(16);
     }
@@ -187,7 +202,12 @@ final class WasmBackend implements Backend {
         return fn.execute(args).asInt();
     }
 
-    // ---- the twelve exports, with UuidGenerator's exact error contract ------------------
+    // ---- the version probe, and the twelve exports with UuidGenerator's exact error contract
+
+    @Override
+    public synchronized int version() {
+        return versionFn.execute().asInt();
+    }
 
     @Override
     public synchronized UUID newV4() {
@@ -344,6 +364,10 @@ final class WasmBackend implements Backend {
 
     /** Runs a batch export into the bulk buffer and returns its guest address. */
     private int fillBatch(Value fn, String name, int count, long unixMillis, String outOfRangeMessage) {
+        // UuidGenerator has already checked this for every caller that takes a count; held
+        // here too because this is the line that multiplies, and the guest would take a
+        // wrapped product as a buffer far smaller than the batch it then writes.
+        UuidGenerator.requireBatchCount(count);
         int out = bulk(count * 16);
         int rc = call(fn, unixMillis, count, out);
         if (rc == 2) {

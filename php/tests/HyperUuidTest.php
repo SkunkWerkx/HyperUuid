@@ -8,6 +8,7 @@ use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
 use HyperUuid\TimestampOutOfRangeException;
 use HyperUuid\Uuid;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class HyperUuidTest extends TestCase
@@ -488,12 +489,20 @@ final class HyperUuidTest extends TestCase
 
     public function testNewV7BatchBytesAgreesWithTheObjectForm(): void
     {
+        // Two separate batches, so the values differ — what must agree is everything the
+        // two doors share: the layout, the embedded timestamp, and one counter sequence
+        // (the object batch, minted second, continues above the byte batch).
         $bytes = HyperUuid::newV7BatchBytes(16, self::RFC_TEST_VECTOR_MS);
         $fromObjects = HyperUuid::newV7Batch(16, self::RFC_TEST_VECTOR_MS);
+        $previous = '';
         for ($i = 0; $i < 16; $i++) {
             $fromBytes = new Uuid(substr($bytes, $i * 16, 16));
             self::assertSame($fromObjects[$i]->version(), $fromBytes->version(), "item {$i}");
+            self::assertSame($fromObjects[$i]->variant(), $fromBytes->variant(), "item {$i}");
+            self::assertSame(self::embeddedMillis($fromObjects[$i]), self::embeddedMillis($fromBytes), "item {$i}");
+            $previous = $fromBytes->bytes();
         }
+        self::assertGreaterThan(0, strcmp($fromObjects[0]->bytes(), $previous));
     }
 
     public function testNewV6BatchBytesReturnsVersion6(): void
@@ -514,5 +523,204 @@ final class HyperUuidTest extends TestCase
         $ms = (int) ((float) $ts->format('U.u') * 1000);
         self::assertGreaterThanOrEqual($before - 1000, $ms);
         self::assertLessThanOrEqual($after + 1000, $ms);
+    }
+
+    public function testV6OverflowTimestampThrows(): void
+    {
+        $this->expectException(TimestampOutOfRangeException::class);
+        HyperUuid::newV6(PHP_INT_MAX);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function batchDoors(): iterable
+    {
+        yield 'newV6Batch' => ['newV6Batch'];
+        yield 'newV7Batch' => ['newV7Batch'];
+        yield 'newV6BatchBytes' => ['newV6BatchBytes'];
+        yield 'newV7BatchBytes' => ['newV7BatchBytes'];
+    }
+
+    #[DataProvider('batchDoors')]
+    public function testANegativeBatchCountIsACallerBug(string $door): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('count must be between 0 and 4294967295, got -1');
+        HyperUuid::$door(-1, self::RFC_TEST_VECTOR_MS);
+    }
+
+    #[DataProvider('batchDoors')]
+    public function testABatchCountWiderThan32BitsIsACallerBug(string $door): void
+    {
+        // The C ABI's count is a uint32_t — without the guard this would truncate to 0.
+        $this->expectException(\InvalidArgumentException::class);
+        HyperUuid::$door(0x1_0000_0000, self::RFC_TEST_VECTOR_MS);
+    }
+
+    public function testBatchBytesCountZeroReturnsAnEmptyString(): void
+    {
+        self::assertSame('', HyperUuid::newV6BatchBytes(0, self::RFC_TEST_VECTOR_MS));
+        self::assertSame('', HyperUuid::newV7BatchBytes(0, self::RFC_TEST_VECTOR_MS));
+    }
+
+    public function testParseAcceptsTheHyphenatedFormInEitherCase(): void
+    {
+        $lower = Uuid::parse('6ba7b810-9dad-11d1-80b4-00c04fd430c8');
+        $upper = Uuid::parse('6BA7B810-9DAD-11D1-80B4-00C04FD430C8');
+        self::assertTrue($lower->equals($upper));
+        self::assertSame('6ba7b810-9dad-11d1-80b4-00c04fd430c8', (string) $upper);
+        self::assertSame(hex2bin('6ba7b8109dad11d180b400c04fd430c8'), $lower->bytes());
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function malformedUuidStrings(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'unhyphenated' => ['6ba7b8109dad11d180b400c04fd430c8'];
+        yield 'hyphens in the wrong places' => ['6ba7b81-09dad-11d1-80b4-00c04fd430c8'];
+        yield 'extra hyphens' => ['6ba7-b810-9dad-11d1-80b4-00c04fd430c8'];
+        yield 'braced' => ['{6ba7b810-9dad-11d1-80b4-00c04fd430c8}'];
+        yield 'urn prefix' => ['urn:uuid:6ba7b810-9dad-11d1-80b4-00c04fd430c8'];
+        yield 'non-hex digit' => ['6ba7b810-9dad-11d1-80b4-00c04fd430cg'];
+        yield 'too short' => ['6ba7b810-9dad-11d1-80b4-00c04fd430c'];
+        yield 'too long' => ['6ba7b810-9dad-11d1-80b4-00c04fd430c80'];
+        yield 'trailing newline' => ["6ba7b810-9dad-11d1-80b4-00c04fd430c8\n"];
+        yield 'surrounding whitespace' => [' 6ba7b810-9dad-11d1-80b4-00c04fd430c8 '];
+    }
+
+    #[DataProvider('malformedUuidStrings')]
+    public function testParseRejectsEverythingButTheHyphenatedForm(string $string): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Uuid::parse($string);
+    }
+
+    public function testConstructorRejectsAnythingButSixteenBytes(): void
+    {
+        foreach (['', str_repeat("\x00", 15), str_repeat("\x00", 17)] as $bytes) {
+            try {
+                new Uuid($bytes);
+                self::fail('a ' . \strlen($bytes) . '-byte value should have been rejected');
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testJsonEncodesAsTheHyphenatedString(): void
+    {
+        $id = Uuid::parse('6ba7b810-9dad-11d1-80b4-00c04fd430c8');
+        self::assertSame('"6ba7b810-9dad-11d1-80b4-00c04fd430c8"', json_encode($id));
+        self::assertSame('{"id":"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}', json_encode(['id' => $id]));
+        self::assertInstanceOf(\Stringable::class, $id);
+    }
+
+    public function testFromSqlOrderRejectsAVersionOtherThanSixOrSeven(): void
+    {
+        $sqlOrdered = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
+        $this->expectException(\InvalidArgumentException::class);
+        $sqlOrdered->fromSqlOrder(4);
+    }
+
+    public function testFromSqlOrderThrowsWhenNeitherInverseDecodes(): void
+    {
+        // Nil decodes to version 0 under both inverses, so there is nothing to detect.
+        $this->expectException(\InvalidArgumentException::class);
+        Uuid::nil()->fromSqlOrder();
+    }
+
+    public function testNewV6AndV7EmbedADateTimesMilliseconds(): void
+    {
+        // Sub-second precision survives to the millisecond, and no further.
+        $dt = new \DateTimeImmutable('2022-02-22T19:22:22.123456Z');
+        $expected = $dt->getTimestamp() * 1000 + 123;
+        self::assertSame($expected, self::millis(HyperUuid::newV6($dt)->timestamp()));
+        self::assertSame($expected, self::embeddedMillis(HyperUuid::newV7($dt)));
+    }
+
+    public function testNativeVersionNamesTheLoadedLibrary(): void
+    {
+        self::assertSame(self::crateVersion(), HyperUuid::nativeVersion());
+    }
+
+    public function testIsAvailableIsTheNonThrowingProbe(): void
+    {
+        self::assertTrue(HyperUuid::isAvailable());
+        // Cached and idempotent — the second answer is the first, no reload.
+        self::assertTrue(HyperUuid::isAvailable());
+    }
+
+    public function testIsAvailableAnswersFalseWhenFfiIsDisabled(): void
+    {
+        // ffi.enable=0 refuses the FFI API even on the CLI, which is exactly what a
+        // restricted web SAPI looks like from inside the binding.
+        self::assertSame('unavailable ffi', self::probe(\dirname(__DIR__) . '/src', '-d', 'ffi.enable=0'));
+    }
+
+    public function testIsAvailableAnswersFalseWhenTheExtensionIsMissing(): void
+    {
+        // -n drops every ini file, and with them a shared ext-ffi. A PHP with ext-ffi
+        // compiled in statically has nothing to drop, so there is nothing to prove there.
+        $answer = self::probe(\dirname(__DIR__) . '/src', '-n');
+        if (str_ends_with($answer, ' ffi')) {
+            self::markTestSkipped('ext-ffi is compiled into this PHP and cannot be unloaded');
+        }
+        self::assertSame('unavailable no-ffi', $answer);
+    }
+
+    public function testIsAvailableAnswersFalseWhenTheLibraryIsMissing(): void
+    {
+        // A copy of the binding with no native/ directory beside it, far from any cargo
+        // build the development fallback could find.
+        $root = sys_get_temp_dir() . '/hyperuuid-probe-' . bin2hex(random_bytes(6));
+        $src = $root . '/php/src';
+        mkdir($src, 0o777, true);
+        try {
+            foreach (glob(\dirname(__DIR__) . '/src/*.php') as $file) {
+                copy($file, $src . '/' . basename($file));
+            }
+            self::assertSame('unavailable ffi', self::probe($src));
+        } finally {
+            array_map('unlink', glob($src . '/*.php'));
+            rmdir($src);
+            rmdir($root . '/php');
+            rmdir($root);
+        }
+    }
+
+    /**
+     * Runs tests/fixtures/probe.php in a child PHP — the only way to observe a process in
+     * which the binding cannot load — and returns what it printed.
+     */
+    private static function probe(string $src, string ...$phpFlags): string
+    {
+        $process = proc_open(
+            [PHP_BINARY, ...$phpFlags, __DIR__ . '/fixtures/probe.php', $src],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        self::assertSame(0, proc_close($process), "probe failed: {$stdout}{$stderr}");
+        return $stdout;
+    }
+
+    /** The crate's own manifest version, walked up to from here. */
+    private static function crateVersion(): string
+    {
+        $dir = __DIR__;
+        // Stop when dirname() stops moving, not at '/': a Windows root is 'C:\\', never '/'.
+        for ($parent = \dirname($dir); $parent !== $dir; $dir = $parent, $parent = \dirname($dir)) {
+            $candidate = $dir . '/rust/Cargo.toml';
+            if (is_file($candidate)) {
+                self::assertSame(
+                    1,
+                    preg_match('/^version\s*=\s*"([^"]+)"/m', file_get_contents($candidate), $match),
+                    'rust/Cargo.toml carries no package version'
+                );
+                return $match[1];
+            }
+        }
+        self::fail('rust/Cargo.toml not found');
     }
 }

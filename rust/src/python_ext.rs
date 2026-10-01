@@ -1,7 +1,7 @@
 //! The Python backend: this crate linked straight into a CPython extension module via
 //! PyO3. A call here is an ordinary `METH_FASTCALL` extension call into a direct Rust
 //! call — no dlopen, no C-ABI hop, no per-call boxing, no ctypes marshalling. Ported from
-//! HyperCast's proven `hypercast_native` pattern.
+//! HyperCast's proven `hypercast._native` pattern.
 //!
 //! UUID construction uses the fastuuid-style fast path — `UUID.__new__` plus
 //! `object.__setattr__` of the `int` and `is_safe` slots — because `UUID.__init__`'s
@@ -13,9 +13,11 @@
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{
+    PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
+};
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyBytes, PyDateTime, PyList, PyTzInfo};
+use pyo3::types::{PyByteArray, PyBytes, PyDateTime, PyList, PyString, PyTzInfo};
 
 use crate::{v4, v5, v6, v7, Uuid};
 
@@ -27,7 +29,7 @@ static IS_SAFE_UNKNOWN: OnceLock<Py<PyAny>> = OnceLock::new();
 fn cached<'py>(py: Python<'py>, cell: &'static OnceLock<Py<PyAny>>) -> PyResult<&'py Bound<'py, PyAny>> {
     cell.get()
         .map(|value| value.bind(py))
-        .ok_or_else(|| PyRuntimeError::new_err("hyperuuid_native used before _bind"))
+        .ok_or_else(|| PyRuntimeError::new_err("hyperuuid._native used before _bind"))
 }
 
 /// Builds a stdlib `uuid.UUID` from 16 RFC-ordered bytes via the pinned fast path.
@@ -58,26 +60,42 @@ fn new_v4(py: Python<'_>) -> PyResult<Py<PyAny>> {
     make_uuid(py, *id.as_bytes())
 }
 
-#[derive(FromPyObject)]
+/// A v5 name: `str` (its cached UTF-8, borrowed) or `bytes` — a zero-copy view into the
+/// caller's own object either way.
 enum Name<'py> {
-    #[pyo3(transparent)]
-    Str(Bound<'py, pyo3::types::PyString>),
-    #[pyo3(transparent)]
+    Str(Bound<'py, PyString>),
     Bytes(Bound<'py, PyBytes>),
+}
+
+// Hand-written rather than `#[derive(FromPyObject)]`: the derived two-variant extractor
+// tries `Str` first, and a failed variant is not free — it builds a `TypeError` with a
+// formatted message and a cause chain, which the next variant's success then throws away.
+// That was about a microsecond on every `bytes` name, as much as the hash itself. Checking
+// the type tag directly costs nothing on either path.
+impl<'py> FromPyObject<'_, 'py> for Name<'py> {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+        if let Ok(text) = obj.cast::<PyString>() {
+            Ok(Name::Str(text.to_owned()))
+        } else if let Ok(bytes) = obj.cast::<PyBytes>() {
+            Ok(Name::Bytes(bytes.to_owned()))
+        } else {
+            // PyO3 prefixes the argument name, so new_v5 raises
+            // "argument 'name': must be str or bytes" — the wasm backend's own words.
+            Err(PyTypeError::new_err("must be str or bytes"))
+        }
+    }
 }
 
 #[pyfunction]
 fn new_v5(py: Python<'_>, namespace: Bound<'_, PyAny>, name: Name<'_>) -> PyResult<Py<PyAny>> {
     let namespace = Uuid::from_bytes(uuid_bytes(&namespace)?);
-    // to_str() needs non-limited-API access, unavailable under abi3-py39; to_cow() is the
-    // abi3-safe equivalent, but returns an owned Cow rather than borrowing directly from
-    // `text` the way to_str() did, so the Cow needs its own binding to outlive the match.
-    let name_owned;
+    // to_str() borrows the str's own cached UTF-8 with no copy. It is in the limited API from
+    // 3.10, below this extension's floor (abi3-py311); under the old abi3-py39 build the
+    // only option was to_cow(), which encoded and copied the name on every call.
     let name_bytes: &[u8] = match &name {
-        Name::Str(text) => {
-            name_owned = text.to_cow()?;
-            name_owned.as_bytes()
-        }
+        Name::Str(text) => text.to_str()?.as_bytes(),
         Name::Bytes(bytes) => bytes.as_bytes(),
     };
     make_uuid(py, *v5::new_v5(namespace, name_bytes).as_bytes())
@@ -119,11 +137,28 @@ fn batch_list<'py>(py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyList>> 
     Ok(list)
 }
 
+/// The zeroed destination for a `count`-UUID batch, 16 bytes each.
+///
+/// `count` arrives as a `u32` because that is the core's own batch parameter: taking a
+/// `usize` and narrowing it mints a different number of UUIDs than the caller asked for
+/// (`2**32 + 1` used to come back as one). The allocation is fallible for the same reason
+/// the count is typed — `vec![0; n]` aborts the whole interpreter when the allocator says
+/// no, where an oversized request is the caller's to hear about as a `MemoryError`.
+fn batch_buffer(count: u32) -> PyResult<Vec<u8>> {
+    let too_large = || PyMemoryError::new_err(format!("cannot allocate a batch of {count} UUIDs"));
+    // u32::MAX * 16 fits a 64-bit usize, not a 32-bit one.
+    let len = (count as usize).checked_mul(16).ok_or_else(too_large)?;
+    let mut raw = Vec::new();
+    raw.try_reserve_exact(len).map_err(|_| too_large())?;
+    raw.resize(len, 0);
+    Ok(raw)
+}
+
 #[pyfunction]
 #[pyo3(signature = (count, unix_millis = None))]
-fn new_v6_batch(py: Python<'_>, count: usize, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
-    let mut raw = vec![0u8; count * 16];
-    match v6::new_v6_batch(millis_or_now(unix_millis), count as u32, &mut raw) {
+fn new_v6_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
+    let mut raw = batch_buffer(count)?;
+    match v6::new_v6_batch(millis_or_now(unix_millis), count, &mut raw) {
         Ok(()) => Ok(batch_list(py, &raw)?.into_any().unbind()),
         Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis does not fit the 60-bit v6 timestamp field",
@@ -134,9 +169,9 @@ fn new_v6_batch(py: Python<'_>, count: usize, unix_millis: Option<u64>) -> PyRes
 
 #[pyfunction]
 #[pyo3(signature = (count, unix_millis = None))]
-fn new_v7_batch(py: Python<'_>, count: usize, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
-    let mut raw = vec![0u8; count * 16];
-    match v7::new_v7_batch(millis_or_now(unix_millis), count as u32, &mut raw) {
+fn new_v7_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
+    let mut raw = batch_buffer(count)?;
+    match v7::new_v7_batch(millis_or_now(unix_millis), count, &mut raw) {
         Ok(()) => Ok(batch_list(py, &raw)?.into_any().unbind()),
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis must be non-negative and fit within 48 bits",
@@ -232,10 +267,14 @@ fn _bind(py: Python<'_>) -> PyResult<()> {
     Ok(())
 }
 
-// Name must match module-name's last segment in pyproject.toml ("hyperuuid._native") —
-// PyO3 generates a PyInit_<name> symbol from this function's own name, and maturin/Python's
-// import machinery look for PyInit__native specifically (confirmed via a real build warning,
-// not assumed).
+/// This library's version as `"major.minor.patch"`, decoded from the same packed
+/// `hyperuuid_version` export every other binding probes.
+#[pyfunction]
+fn native_version() -> String {
+    let packed = crate::hyperuuid_version();
+    format!("{}.{}.{}", packed >> 16, (packed >> 8) & 0xff, packed & 0xff)
+}
+
 /// Fills a `bytearray` with raw RFC 9562-ordered UUID bytes, 16 per UUID.
 ///
 /// This is the destination-buffer path, and it never constructs a single `uuid.UUID`. That is
@@ -245,10 +284,10 @@ fn _bind(py: Python<'_>) -> PyResult<()> {
 /// with none of that. Measured at ~32x faster for a 1000-UUID batch, which lands it on the
 /// same native ceiling the Go and C# bindings hit.
 ///
-/// `bytearray` specifically, not the general writable buffer protocol: `PyBuffer` requires
-/// `Py_buffer`, which only entered CPython's stable ABI in 3.11, and this extension is built
-/// `abi3-py39` so one wheel serves every supported Python. Supporting `memoryview`, `mmap` or
-/// NumPy arrays here would mean raising the abi3 floor to 3.11 and dropping that.
+/// `bytearray` specifically, not the general writable buffer protocol, for now: `PyBuffer`
+/// requires `Py_buffer`, which entered CPython's stable ABI in 3.11. That is this
+/// extension's floor (`abi3-py311`), so `memoryview`, `mmap` and NumPy arrays are possible
+/// here and simply not built yet.
 fn fill_bytes_impl(
     buffer: &Bound<'_, PyByteArray>,
     unix_millis: Option<u64>,
@@ -260,10 +299,13 @@ fn fill_bytes_impl(
             "buffer length must be a multiple of 16 (one whole UUID per 16 bytes)",
         ));
     }
-    if len == 0 {
-        return Ok(());
-    }
-    let count = (len / 16) as u32;
+    // A zero-length buffer goes through too: the core writes nothing for a count of 0 but
+    // still checks the timestamp, so an empty fill and an empty batch reject alike.
+    // The core's batch count is a u32; a buffer past that (64 GiB) is refused, never narrowed
+    // into a fill that silently stops short.
+    let count = u32::try_from(len / 16).map_err(|_| {
+        PyValueError::new_err("buffer holds more UUIDs than one batch can mint (4294967295)")
+    })?;
     let millis = millis_or_now(unix_millis);
 
     // SAFETY: this slice aliases the bytearray's storage, so it must not be held across
@@ -304,6 +346,10 @@ fn fill_v6_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> P
     fill_bytes_impl(buffer, unix_millis, false)
 }
 
+// Name must match module-name's last segment in pyproject.toml ("hyperuuid._native") —
+// PyO3 generates a PyInit_<name> symbol from this function's own name, and maturin/Python's
+// import machinery look for PyInit__native specifically (confirmed via a real build warning,
+// not assumed).
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(new_v4, m)?)?;
@@ -320,6 +366,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(v6_from_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_to_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_from_sql_order, m)?)?;
+    m.add_function(wrap_pyfunction!(native_version, m)?)?;
     m.add_function(wrap_pyfunction!(_bind, m)?)?;
     Ok(())
 }

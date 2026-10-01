@@ -41,6 +41,17 @@
 //         cargo check --no-default-features --target thumbv7em-none-eabi
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// The panic handler for the one no_std artifact this crate links itself: the wasm static
+// library behind the `wasm-staticlib` feature (Cargo.toml has why it exists). Built with
+// `panic = "abort"`, so a panic is a trap: the wasm `unreachable` instruction, which the
+// host sees as a RuntimeError rather than as a corrupted return value. Never compiled for a
+// bare-metal rlib consumer, who brings a handler of their own, nor with `std`, which has one.
+#[cfg(all(feature = "wasm-staticlib", not(feature = "std"), target_arch = "wasm32"))]
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
+    core::arch::wasm32::unreachable()
+}
+
 mod ffi;
 mod timestamp;
 mod uuid;
@@ -56,6 +67,7 @@ mod ruby_ext;
 #[cfg(feature = "php")]
 mod php_ext;
 
+pub use ffi::hyperuuid_version;
 pub use timestamp::Timestamp;
 pub use uuid::{ParseUuidError, Uuid};
 
@@ -77,6 +89,28 @@ pub fn get_timestamp(uuid: &Uuid) -> Option<Timestamp> {
 mod tests {
     use super::*;
     use core::str::FromStr;
+
+    #[test]
+    fn version_export_packs_the_crate_version() {
+        let packed = hyperuuid_version();
+        let text = format!("{}.{}.{}", packed >> 16, (packed >> 8) & 0xFF, packed & 0xFF);
+        assert_eq!(text, env!("CARGO_PKG_VERSION"));
+    }
+
+    // The C ABI's own contract: an empty v5 name may cross as a null pointer, which is what
+    // C#, Go and Ruby's Fiddle backend hand over for a zero-length name.
+    #[test]
+    fn v5_export_accepts_a_null_pointer_for_an_empty_name() {
+        let mut out = [0u8; 16];
+        let rc = ffi::uuid_new_v5(
+            v5::namespace::DNS.as_bytes().as_ptr(),
+            core::ptr::null(),
+            0,
+            out.as_mut_ptr(),
+        );
+        assert_eq!(rc, 0);
+        assert_eq!(Uuid::from_bytes(out), v5::new_v5(v5::namespace::DNS, b""));
+    }
 
     #[test]
     fn v4_has_version_and_variant_bits_set() {

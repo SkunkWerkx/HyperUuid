@@ -3,12 +3,84 @@ package hyperuuid
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ---- The load probes -----------------------------------------------------------------
+
+func TestAvailableAndLoadErrorAgree(t *testing.T) {
+	if err := LoadError(); err != nil {
+		t.Fatalf("the embedded core should load on every CI leg: %v", err)
+	}
+	if !Available() {
+		t.Fatal("Available() is false while LoadError() is nil")
+	}
+	// Cached: the second answer is the same one, not a second probe.
+	if !Available() || LoadError() != nil {
+		t.Fatal("availability flipped between probes")
+	}
+}
+
+func TestNativeVersionMatchesTheCrate(t *testing.T) {
+	// The expectation is the crate's own manifest, walked up to from the test directory, so
+	// a release bump never leaves a stale literal here.
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		text, readErr := os.ReadFile(filepath.Join(dir, "rust", "Cargo.toml"))
+		if readErr == nil {
+			for _, line := range strings.Split(string(text), "\n") {
+				line = strings.TrimRight(line, "\r")
+				if rest, ok := strings.CutPrefix(line, "version = \""); ok {
+					want := rest[:strings.IndexByte(rest, '"')]
+					got, err := NativeVersion()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got != want {
+						t.Fatalf("got %q, rust/Cargo.toml says %q", got, want)
+					}
+					return
+				}
+			}
+			t.Fatal("no version line in rust/Cargo.toml")
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("rust/Cargo.toml not found above the test directory")
+		}
+		dir = parent
+	}
+}
+
+// A load failure can't be provoked in-process without poisoning the once-per-process
+// outcome every other test depends on, so this pins the one function that shapes it: the
+// sentinel is findable, the reason is still findable, and the message carries both.
+func TestLoadFailureWrapsErrNativeUnavailableAroundTheReason(t *testing.T) {
+	if loadFailure(nil) != nil {
+		t.Fatal("a successful load must stay nil")
+	}
+	reason := errors.New("dlopen failed: no such file")
+	err := loadFailure(reason)
+	if !errors.Is(err, ErrNativeUnavailable) {
+		t.Fatalf("got %v, want it to wrap ErrNativeUnavailable", err)
+	}
+	if !errors.Is(err, reason) {
+		t.Fatalf("got %v, want it to wrap the reason", err)
+	}
+	if want := "hyperuuid: native library unavailable: dlopen failed: no such file"; err.Error() != want {
+		t.Fatalf("got %q, want %q", err.Error(), want)
+	}
+}
 
 func TestV4HasVersionAndVariantBits(t *testing.T) {
 	id, err := NewV4()
@@ -106,6 +178,60 @@ func TestV5DifferentNamespacesDiffer(t *testing.T) {
 	}
 	if dns == url {
 		t.Errorf("got equal UUIDs for different namespaces: %s", dns)
+	}
+}
+
+// The raw-byte door is the primary one — NewV5String is a conversion in front of it — and
+// a name is bytes, not text: nothing requires it to be valid UTF-8. google/uuid's NewSHA1 is
+// the same RFC 9562 §5.5 construction in pure Go, so it stands in as the oracle.
+func TestV5RawBytesAgreeWithTheStringFormAndGoogleUuid(t *testing.T) {
+	fromBytes, err := NewV5(NamespaceDNS, []byte("www.example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromString, err := NewV5String(NamespaceDNS, "www.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromBytes != fromString {
+		t.Errorf("NewV5 gave %s, NewV5String gave %s", fromBytes, fromString)
+	}
+
+	binary := []byte{0x00, 0xff, 0xfe, 0x80, 0x00, 0x7f}
+	got, err := NewV5(NamespaceOID, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := uuid.NewSHA1(NamespaceOID, binary); got != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+	if got.Version() != 5 || got.Variant() != uuid.RFC4122 {
+		t.Errorf("version %d variant %v, want 5 / RFC4122", got.Version(), got.Variant())
+	}
+}
+
+// An empty name is valid — it hashes the namespace alone — and crosses the ABI as a NULL
+// pointer with a zero length, which the core must not dereference. nil, an empty slice and
+// the empty string are the same name.
+func TestV5EmptyNameIsValid(t *testing.T) {
+	want := uuid.NewSHA1(NamespaceDNS, nil)
+
+	fromNil, err := NewV5(NamespaceDNS, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromEmpty, err := NewV5(NamespaceDNS, []byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromString, err := NewV5String(NamespaceDNS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for form, got := range map[string]uuid.UUID{"nil": fromNil, "empty slice": fromEmpty, "empty string": fromString} {
+		if got != want {
+			t.Errorf("%s: got %s, want %s", form, got, want)
+		}
 	}
 }
 
@@ -214,6 +340,31 @@ func TestV6BatchOverflowTimestampErrors(t *testing.T) {
 	_, err := NewV6BatchAt(1, 0xFFFF_FFFF_FFFF_FFFF)
 	if !errors.Is(err, ErrTimestampOutOfRange) {
 		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
+	}
+}
+
+// Version 6's ceiling is its own, and lower than version 7's: the 60-bit count of 100 ns
+// ticks since 1582-10-15 holds 103,072,857,660,684 Unix milliseconds and not one more —
+// well inside the 48 bits version 7 accepts.
+func TestV6TimestampCeilingIsItsOwn(t *testing.T) {
+	const maxV6Ms uint64 = 103_072_857_660_684
+	if _, err := NewV6At(maxV6Ms); err != nil {
+		t.Errorf("the largest version 6 timestamp was rejected: %v", err)
+	}
+	if _, err := NewV6At(maxV6Ms + 1); !errors.Is(err, ErrTimestampOutOfRange) {
+		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
+	}
+	if _, err := NewV7At(maxV6Ms + 1); err != nil {
+		t.Errorf("version 7 should still accept it: %v", err)
+	}
+}
+
+func TestBatchRejectsANegativeCount(t *testing.T) {
+	if _, err := NewV6BatchAt(-1, rfcTestVectorMs); !errors.Is(err, ErrNegativeCount) {
+		t.Errorf("got %v, want ErrNegativeCount", err)
+	}
+	if _, err := NewV7BatchAt(-1, rfcTestVectorMs); !errors.Is(err, ErrNegativeCount) {
+		t.Errorf("got %v, want ErrNegativeCount", err)
 	}
 }
 

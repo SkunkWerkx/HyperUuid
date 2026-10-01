@@ -1,25 +1,29 @@
 name: CI — build native, build wasm, test every binding
 
 # The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
-# pipeline — 6 real-hardware legs, the Rust core built fresh per leg, every binding's
-# suite run against it. Ruby's suite runs twice (forced Fiddle fallback + Magnus extension
-# backend); Python has no fallback — PyO3 only, via maturin develop.
+# pipeline — 6 real-hardware legs plus the two musl RIDs in Alpine containers, the Rust core
+# built fresh per leg, every binding's suite run against it. Ruby's suite runs twice (forced
+# Fiddle fallback + Magnus extension backend); Python has no fallback — PyO3 only, staged
+# and tested per leg.
 #
-# CI's job is build, test, and upload reusable artifacts — nothing version-specific. Every
-# native leg builds+tests fresh, and the raw, version-agnostic outputs (the plain FFI
-# libhyperuuid.so/.dylib/.dll, the compiled Ruby Magnus extension) get uploaded here for
-# later reuse. What deliberately does NOT happen here: anything that bakes a version number
-# into a shippable package (a PyPI wheel's own filename/metadata, a .nupkg, a .gem) — CI runs
-# long before any release tag exists, so there's no correct version to bake in yet. That
-# packing happens once, for real, in release.yml, at actual tag time, when the version is
-# genuinely known — see release.yml's own header for the full shape (find-ci-run reuses this
-# file's version-agnostic artifacts; the version-sensitive packing happens fresh there).
+# CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
+# fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
+# Magnus extension) get uploaded here for later reuse. What deliberately does NOT happen
+# here: anything that bakes a version number into a shippable package's own filename or
+# metadata (a PyPI wheel, a .nupkg, a .gem). That packing happens once, in release.yml, at
+# tag time.
+#
+# The native libraries are not version-agnostic, though: each reports the crate version it
+# was built at (`hyperuuid_version()`). So the run a release reuses has to be one that ran
+# against the version-bump commit, which is why prepare-release.yml dispatches this
+# workflow after it pushes the bump — see release.yml's find-ci-run for the gate.
 #
 # No push trigger, deliberately (not because master is branch-protected — checked via
 # `gh api repos/.../branches/master/protection`, it isn't, despite this having been assumed
 # here before): a stray run rebuilding/retesting on every trivial direct push (stage-native-
 # binaries.yml's own binary-refresh commits included) would just be wasted compute for a
-# result nobody's waiting on.
+# result nobody's waiting on. The version bump is the one push that does need a run, and
+# prepare-release.yml asks for it explicitly.
 
 on:
   pull_request:
@@ -60,10 +64,9 @@ jobs:
       # rustc build and a runner's differ in hash and size), so rebuild-and-compare isn't a
       # check a consumer can actually perform. The permissions block above is what makes it
       # work; without those scopes the step fails rather than silently skipping.
-      # HyperForge's own default (8.0.x) stays put for other repos — HyperUuid.csproj's floor
-      # is net10.0 specifically because net8.0's WASM P/Invoke-table generator scans the wrong
-      # (non-browser) copy of a multi-RID-asset package, an upstream bug fixed in .NET 10 (see
-      # HyperUuid.targets' own comment for the full real-headless-Chromium-verified story).
+      # HyperForge's own default (8.0.x) stays put for other repos. HyperUuid's package floor
+      # is net10.0, the current LTS; Blazor WebAssembly is supported on .NET 11 and later only
+      # (HyperUuid.targets has the reason).
       dotnet_version: "10.0.x"
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
       # A jar has no per-platform package selection like NuGet's RID folders, and the
@@ -120,6 +123,30 @@ jobs:
           RUSTFLAGS: --cfg getrandom_backend="custom"
         run: cargo check --no-default-features --target thumbv7em-none-eabi
 
+      # The stronger half of the claim, ported from HyperCast: the crate publishes
+      # `no-std::no-alloc`, so a bare-metal consumer supplies an entropy backend and a panic
+      # handler and no `#[global_allocator]`. The cargo check above does NOT cover that.
+      # Without `extern crate alloc` declared, `Vec` and friends aren't in scope and any
+      # accidental use already fails it; but adding the declaration deliberately would
+      # compile clean, because `cargo check` never links and a missing allocator only ever
+      # surfaces at link time — which for an rlib never comes. So the regression to guard is
+      # the declaration itself.
+      #
+      # Anchored to the start of a line on purpose: lib.rs explains, in a comment, that there
+      # is no `extern crate alloc` here, and an unanchored grep reads that sentence as the
+      # thing it forbids. The three extension modules are excluded: each sits behind a
+      # feature that pulls in std anyway.
+      - name: assert the core links no allocator
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          if grep -rnE '^[[:space:]]*extern crate alloc' src \
+               --exclude=python_ext.rs --exclude=ruby_ext.rs --exclude=php_ext.rs; then
+            echo '::error::The core declared "extern crate alloc". hyperuuid publishes the no-std::no-alloc category (see rust/README.md no_std section) — either drop the allocation or update that claim.' >&2
+            exit 1
+          fi
+          echo "no allocator dependency in the core"
+
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
   # #![deny(missing_docs)]), applied here with the closest per-language equivalent. Each is
@@ -147,7 +174,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - run: pip install ruff==0.16.5
