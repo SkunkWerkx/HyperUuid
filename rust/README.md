@@ -163,12 +163,12 @@ build invocation — each generates a different C entry point under the same cra
 meant to coexist in one binary:
 
 ```sh
-cargo build --release --features python  # -> PyInit__native
-cargo build --release --features ruby    # -> Init_hyperuuid_native
-cargo build --release --features php     # -> get_module
+cargo build --release --features python  # -> PyInit__native (normally via maturin in python/)
+cargo ruby                               # -> Init_hyperuuid_native, in target/ruby/release/
+cargo php                                # -> get_module, in target/php/release/
 ```
 
-Each produces `target/release/libhyperuuid.{so,dylib}` (`hyperuuid.dll` on Windows) — the
+Each produces `libhyperuuid.{so,dylib}` (`hyperuuid.dll` on Windows), under `target/release/` for the raw `--features` form and under its own directory for the aliases — the
 interpreter-specific loading/staging (module naming, `.pyd`/`.bundle` renaming, etc.) is this
 repo's Python/Ruby/PHP packages' job, not this crate's; verified to work from the published
 crate itself, not just an in-repo checkout — `cargo build --manifest-path` against a fresh
@@ -180,8 +180,10 @@ is one) silently replaces the plain cdylib that every other binding's dev loop l
 extension build still exports the `hyperuuid_*` symbols, but it also carries undefined
 interpreter symbols that only resolve inside a CPython (or Ruby, or PHP) process, so the
 next `./gradlew test` or `dotnet test` fails at native load with something unhelpful about a
-missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. CI never
-hits this — each leg builds in its own job.
+missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. The `cargo ruby` and
+`cargo php` aliases in `.cargo/config.toml` avoid it by building into `target/ruby/` and
+`target/php/`, and `python/.cargo/config.toml` does the same for maturin (`python/target/`).
+CI never hits this — each leg builds in its own job.
 
 ## Verifying provenance
 

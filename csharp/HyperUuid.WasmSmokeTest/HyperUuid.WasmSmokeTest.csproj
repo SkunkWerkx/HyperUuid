@@ -1,29 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- WebAssembly is .NET 11 and later only. -->
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
     <StaticWebAssetSpaFallbackEnabled>true</StaticWebAssetSpaFallbackEnabled>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="11.0.0-rc.1.26425.128" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Gateway" Version="11.0.0-rc.1.26425.128" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- SPIKE, not the real shape yet: references HyperUuid.csproj for the managed
-         UuidGenerator surface, but does NOT pull in its runtimes/**/native/* native assets
-         (those are the 6 real per-platform builds; wasm needs its own). -->
+    <!-- The managed binding, through its real public surface: this app declares no P/Invokes
+         of its own, because UuidGenerator declares every entry point twice (hyperuuid for
+         dlopen platforms, and * for the statically linked wasm module) and picks at the call
+         site with OperatingSystem.IsBrowser(). -->
     <ProjectReference Include="../HyperUuid/HyperUuid.csproj" />
-    <!-- The wasm32-unknown-emscripten STATIC LIBRARY build of the same Rust core (built via
-         "cargo rustc", crate-type staticlib, not the default cdylib): NativeFileReference
-         needs an unlinked .a it can link INTO the final combined build alongside the runtime's
-         own .a files, not an already-linked, complete .wasm module. -->
-    <NativeFileReference Include="../../rust/target/wasm32-unknown-emscripten/release/libhyperuuid.a" />
   </ItemGroup>
+
+  <!-- What a NuGet consumer gets for free and a ProjectReference does not: the package's
+       build/{tfm}/HyperUuid.targets is only auto-imported from a restored package. Importing
+       it by hand means this app links through the shipped NativeFileReference,
+       EmccExportedFunction and exception-handling wiring rather than a copy of it, so a
+       missing export fails here at runtime exactly as it would for a real Blazor consumer.
+
+       Needs the wasm32-unknown-emscripten staticlib staged where the targets file looks for
+       it, csharp/HyperUuid/runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a, which
+       is gitignored like every other runtimes/ asset. check.sh stages it. -->
+  <Import Project="../HyperUuid/build/net10.0/HyperUuid.targets" />
 
 </Project>

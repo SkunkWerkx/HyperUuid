@@ -173,3 +173,7 @@ dependencies {
 ```
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
+
+## License
+
+[MIT](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)

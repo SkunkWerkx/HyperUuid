@@ -138,7 +138,7 @@ HyperUuid::BACKEND =
     # Two layouts, and both have to work. A released platform gem is a "fat" gem carrying one
     # extension per supported Ruby ABI under lib/hyperuuid/<minor>/ (see the Rakefile's
     # native:gem task for why an ABI-per-file is unavoidable — Magnus has no `abi3`
-    # equivalent). CI's in-job staging and a local `cargo build --release --features ruby`
+    # equivalent). CI's in-job staging and a local `cargo ruby` (rust/.cargo/config.toml)
     # instead drop a single extension flat at lib/. Trying the versioned path first and the
     # flat one second means neither has to know the other exists.
     #

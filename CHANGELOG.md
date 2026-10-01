@@ -9,8 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Test and dev-loop setup learned while porting the WASM lineup to HyperCast, carried back.
-Nothing a consumer installs changes.
+Test and dev-loop setup learned while porting the WASM lineup to HyperCast, carried back,
+plus one fix to what the C# package ships for Blazor WebAssembly on .NET 11.
 
 ### Added
 
@@ -32,7 +32,23 @@ Nothing a consumer installs changes.
   `fiddle_library_available?` sees the in-repo build too. Same dev trap as HyperCast's
   README already documents: an extension-feature build overwrites the plain cdylib, and the
   fallback will dlopen it and fail on unresolved `Py*` symbols until a plain
-  `cargo build --release` puts it back. *(dev only)*
+  `cargo build --release` puts it back. `cargo ruby` and `cargo php` (aliases in
+  `rust/.cargo/config.toml`) and `python/.cargo/config.toml` now build the extensions into
+  their own target directories, so that no longer happens. *(dev only)*
+- **A browser proof of the C# WebAssembly package.** `csharp/HyperUuid.WasmSmokeTest` is
+  rewritten to import the shipped `build/net10.0/HyperUuid.targets` and call v4, v5, v6, v7
+  and a 1000-id batch through the public `UuidGenerator` API (it previously declared its
+  own P/Invokes and no longer worked). `./check.sh` publishes it, loads it in headless
+  Chromium and requires `PASS`. *(dev only)*
+
+### Fixed
+
+- **C# — Blazor WebAssembly on .NET 11 failed in the browser.** .NET 11 links browser-wasm
+  with the new exception-handling encoding while the precompiled Rust standard library
+  inside the static library uses the legacy one; the link succeeded and the browser then
+  refused the module (`module uses a mix of legacy and new exception handling
+  instructions`). `HyperUuid.targets` now appends Binaryen's translate-to-exnref pass to the
+  SDK's post-link `wasm-opt`. WebAssembly is documented as .NET 11 and later only.
 
 ## [0.3.0] — 2026-09-03
 

@@ -158,13 +158,13 @@ bit of single-call latency anyway, here's how to build and load it yourself:
    ```sh
    git clone https://github.com/SkunkWerkx/HyperUuid
    cd HyperUuid/rust
-   cargo build --release --features php
+   cargo php
    ```
-   Produces `target/release/libhyperuuid.so` (`.dylib` on macOS; Windows isn't supported —
+   Produces `target/php/release/libhyperuuid.so` (`.dylib` on macOS; Windows isn't supported —
    `ext-php-rs`'s Windows path needs a nightly-only Rust feature, confirmed via a real E0554
    build failure on stable, so every CI leg here builds Linux/macOS only).
-3. **Load it** — either add `extension=/absolute/path/to/target/release/libhyperuuid.so` to
-   `php.ini`, or pass it ad hoc: `php -d extension=/absolute/path/to/target/release/libhyperuuid.so your_script.php`.
+3. **Load it** — either add `extension=/absolute/path/to/target/php/release/libhyperuuid.so` to
+   `php.ini`, or pass it ad hoc: `php -d extension=/absolute/path/to/target/php/release/libhyperuuid.so your_script.php`.
    Verify with `php -m | grep hyperuuid`.
 4. **Call it.** This extension is a benchmark spike, not a polished second backend, so it
    exposes flat functions taking/returning raw 16-byte binary strings — not this package's
@@ -261,3 +261,7 @@ ships. (Found the hard way: an earlier tag published cleanly but threw a real
 `composer require skunkwerkx/hyperuuid` pulling straight from Packagist, generating real UUIDs.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
+
+## License
+
+[MIT](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)

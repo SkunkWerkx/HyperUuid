@@ -225,3 +225,7 @@ own — this is the GitHub/Sigstore transparency-log route, checked with `gh att
 verify`, the same route every other artifact in this project uses. See
 [csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for why
 some artifacts here need `--signer-repo` and this one doesn't.
+
+## License
+
+[MIT](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)

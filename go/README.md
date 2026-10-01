@@ -335,3 +335,7 @@ gh attestation verify go/native/linux-x64/libhyperuuid.so \
 
 See [csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance)
 for more on why `--signer-repo` is needed for some artifacts here and not others.
+
+## License
+
+[MIT](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)

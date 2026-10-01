@@ -7,6 +7,7 @@
 # -p:BaseOutputPath=bin-browser/ for the browser-wasm build (see hyper-pack-nuget.yml) —
 # **/bin/ above doesn't match this, different directory name.
 **/bin-browser/
+**/TestResults/
 # CI (build-nuget.yml) builds and packs these per-RID at pack time; the C# project no longer
 # carries a committed placeholder — keep a local one here for dev/test if you want (see the
 # csproj's runtimes/**/native/* wildcard item), but it's regenerable via `cargo build --release`.
@@ -93,7 +94,7 @@ python/src/hyperuuid_native.pyd
 python/src/hyperuuid/_native.abi3.so
 python/src/hyperuuid/_native.pyd
 # Staged Magnus extension for local dev/test (built from the core crate's `ruby` feature —
-# `cargo build --release --features ruby` — since the satellite crate that used to live in
+# `cargo ruby` — since the satellite crate that used to live in
 # ruby/native/ was folded into it; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so
 ruby/lib/hyperuuid_native.bundle

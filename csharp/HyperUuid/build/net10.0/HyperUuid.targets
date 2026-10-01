@@ -56,4 +56,17 @@
     <EmccExportedFunction Include="_uuid_v6_to_sql_order" />
     <EmccExportedFunction Include="_uuid_v6_to_rfc_order" />
   </ItemGroup>
+
+  <!-- .NET 11 and later link browser-wasm with the new (exnref) exception-handling encoding,
+       while the Rust standard library and compiler_builtins inside the emscripten staticlib
+       are precompiled with the legacy one. The link succeeds and the SDK's wasm-opt passes the
+       mix through, then the browser refuses to compile the module: "module uses a mix of
+       legacy and new exception handling instructions". Binaryen's translate-to-exnref pass
+       rewrites the legacy instructions into the new encoding so the module is uniform.
+       Appended to the SDK's own post-link wasm-opt step through @(WasmOptConfigurationFlags).
+       WebAssembly support is .NET 11 and later only, so there is no gate on the target
+       framework. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <WasmOptConfigurationFlags Include="--translate-to-exnref" />
+  </ItemGroup>
 </Project>

@@ -167,3 +167,7 @@ registry, SwiftPM has no packing step of its own — whatever's literally in the
 the resolved tag is what a consumer's build bundles as resources.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
+
+## License
+
+[MIT](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)

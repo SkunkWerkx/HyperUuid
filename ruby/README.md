@@ -257,3 +257,7 @@ MSVC, so it does. A local build says nothing about that step unless its host tri
 the runner's.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
+
+## License
+
+[MIT](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
