@@ -1,0 +1,4 @@
+# Keep the PyO3 build out of rust/target/, so it cannot overwrite the plain cdylib
+# that Ruby/Java/C#/Go/PHP/Swift load from rust/target/release/.
+[build]
+target-dir = "target"

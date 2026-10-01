@@ -30,3 +30,14 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 # same way every other target section here already relies on.
 [target.wasm32-wasip1]
 rustflags = ["-C", "link-arg=--export=malloc", "-C", "link-arg=--export=free"]
+
+# Local-dev builds of the extension features, each in its own target dir. The ruby and php
+# features produce a differently-shaped libhyperuuid.so (Init_hyperuuid_native / the PHP module
+# entry point) at the same path as the plain cdylib that Fiddle, ctypes-free FFI, P/Invoke,
+# FFM, cgo and PHP's ext-ffi all dlopen from target/release/, so building one over the other
+# silently breaks the rest. `cargo ruby` / `cargo php` keep them apart; the python feature
+# gets the same isolation from python/.cargo/config.toml, since maturin runs cargo from there.
+# Output lands in target/ruby/release/ and target/php/release/.
+[alias]
+ruby = "build --release --features ruby --target-dir target/ruby"
+php = "build --release --features php --target-dir target/php"
