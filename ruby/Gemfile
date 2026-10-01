@@ -1,8 +1,15 @@
+# frozen_string_literal: true
+
 source "https://rubygems.org"
 
 gemspec
 
-gem "rspec", "~> 3.13"
+# The test and benchmark gems; rake and yard are the gemspec's own development
+# dependencies, since `rake build` and `rake docs:check` are part of packaging the gem.
+group :development do
+  gem "benchmark-ips", "~> 2.15"
+  gem "rspec", "~> 3.13"
+end
 
 # The WebAssembly backend's engine, and nothing else needs it: HYPERUUID_WASM=1 runs the
 # suite through lib/hyperuuid/wasm_runtime.rb, which requires this gem. Its own group rather
@@ -12,5 +19,5 @@ gem "rspec", "~> 3.13"
 # consumer of the gem never sees this file; they install wasmtime themselves if they want
 # the backend, and the gem itself stays at zero third-party dependencies.
 group :wasm do
-  gem "wasmtime", "~> 47.0"
+  gem "wasmtime", "~> 48.0"
 end

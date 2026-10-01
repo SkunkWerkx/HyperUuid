@@ -1,0 +1,106 @@
+<Project>
+  <!-- Auto-imported into every consuming project via NuGet's build/{PackageId}.targets
+       convention (and, through buildTransitive/, into projects that reach this package
+       through another project's reference) — a .targets file (not .props) specifically because it needs
+       $(RuntimeIdentifier) already resolved, which for a Blazor WebAssembly project only
+       happens after that project's own Sdk.targets import; a .props file (imported before the
+       project body) would run too early to see it.
+
+       This is the piece that makes WASM support genuinely zero-effort for a consumer: without
+       it, NuGet's runtimes/browser-wasm/nativeassets/{tfm}/ package convention is real (see
+       NuGet.Client's ManagedCodeConventions.cs — the "NativeLibraries" PatternSet), and the
+       WASM SDK's own WasmApp.Common.targets really does auto-promote any @(NativeLibrary) item
+       into @(NativeFileReference) — but restore doesn't actually populate @(NativeLibrary) from
+       a plain PackageReference's nativeassets folder the way it does runtimes/{rid}/native/ for
+       ordinary P/Invoke. Without this file, the browser-wasm build succeeds but throws
+       DllNotFoundException("*") at runtime because the native code never got linked in at all.
+
+       NativeFileReference alone isn't the whole story, though — confirmed the hard way with a
+       real PackageReference-only consumer in a real headless-Chromium session, not assumed:
+       linking libhyperuuid.a in (which the above accomplishes) does NOT make its functions
+       resolvable via LibraryImport("*") at runtime. The WASM SDK's emcc invocation only
+       exports the runtime's own baseline functions (malloc, free, math intrinsics, ...) via
+       @(EmccExportedFunction) — it does not scan P/Invoke declarations in the app's own
+       assembly OR any referenced assembly/package to discover what else needs exporting
+       (see dotnet/runtime's WasmApp.Common.targets: EmccExportedFunction's defaults come from
+       wasm-props.json, not from a P/Invoke scan). So every native function UuidGenerator.cs
+       P/Invokes has to be listed explicitly here too, Emscripten-style with a leading
+       underscore, or it links in but stays invisible to "*" resolution.
+
+       Two floors, and they are different on purpose. The package targets net10.0, which is
+       what every native platform needs. This file sits directly under build/, with no
+       target-framework folder, because it does its own gating below: a folder would only
+       repeat a decision the conditions already make. (The staticlib's directory is still
+       spelled nativeassets/net10.0/; the path below names it directly, so that spelling is
+       only a folder name, not something NuGet selects by.)
+       WebAssembly is .NET 11 and later only: the exception-handling translation further down
+       is .NET 11 toolchain behavior, and the browser proof (HyperUuid.WasmSmokeTest) targets
+       net11.0 and nothing older. NuGet imports this file into a net10.0 Blazor WebAssembly
+       project all the same, since a targets file in build/ applies to every framework, so the
+       wiring is gated on the consuming project's own target framework rather than left to
+       apply everywhere: below .NET 11 nothing here is linked or exported, and the target at
+       the bottom of this file says so in the build output instead of leaving a consumer to
+       find out in the browser.
+
+       The gate reads $(TargetFramework), not $(TargetFrameworkVersion): the former is the
+       project's own property and is set wherever this file is imported from, while the
+       latter is only derived once Sdk.targets runs. A restored package is imported after
+       that, but HyperUuid.WasmSmokeTest imports this file by hand from its project body,
+       before it, and has to take the same branch a real consumer does. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <_HyperUuidWasmSupported>false</_HyperUuidWasmSupported>
+    <_HyperUuidWasmSupported Condition="'$(TargetFramework)' != '' And $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">true</_HyperUuidWasmSupported>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_HyperUuidWasmSupported)' == 'true'">
+    <NativeFileReference Include="$(MSBuildThisFileDirectory)../runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a" />
+    <EmccExportedFunction Include="_hyperuuid_version" />
+    <EmccExportedFunction Include="_uuid_new_v4" />
+    <EmccExportedFunction Include="_uuid_new_v5" />
+    <EmccExportedFunction Include="_uuid_new_v6" />
+    <EmccExportedFunction Include="_uuid_v6_unix_millis" />
+    <EmccExportedFunction Include="_uuid_new_v6_batch" />
+    <EmccExportedFunction Include="_uuid_new_v7" />
+    <EmccExportedFunction Include="_uuid_v7_unix_millis" />
+    <EmccExportedFunction Include="_uuid_new_v7_batch" />
+    <EmccExportedFunction Include="_uuid_v7_to_sql_order" />
+    <EmccExportedFunction Include="_uuid_v7_to_rfc_order" />
+    <EmccExportedFunction Include="_uuid_v6_to_sql_order" />
+    <EmccExportedFunction Include="_uuid_v6_to_rfc_order" />
+  </ItemGroup>
+
+  <!-- .NET 11 and later link browser-wasm with the new (exnref) exception-handling encoding,
+       while Rust's precompiled core and compiler_builtins inside the emscripten staticlib use
+       the legacy one (the staticlib is built without std, and that did not change this:
+       re-tested, and the browser still refuses the module without the pass). The link succeeds and the SDK's wasm-opt passes the
+       mix through, then the browser refuses to compile the module: "module uses a mix of
+       legacy and new exception handling instructions". Binaryen's translate-to-exnref pass
+       rewrites the legacy instructions into the new encoding so the module is uniform.
+       Appended to the SDK's own post-link wasm-opt step through @(WasmOptConfigurationFlags).
+       Under the same gate as the link itself: an older toolchain links the legacy encoding
+       throughout and has nothing to translate.
+
+       Exclude names the item list itself, so the flag is added once however many packages
+       ask for it: an app that references both HyperUuid and HyperCast imports both files,
+       and without this wasm-opt was handed the pass twice. -->
+  <ItemGroup Condition="'$(_HyperUuidWasmSupported)' == 'true'">
+    <WasmOptConfigurationFlags Include="--translate-to-exnref" Exclude="@(WasmOptConfigurationFlags)" />
+  </ItemGroup>
+
+  <!-- The other half of the gate above. A browser-wasm project below .NET 11 still restores
+       against this package, but the native core is deliberately not linked into it. What
+       happens next depends on the consumer's own toolchain, which is why this says it out
+       loud first: where the wasm-tools workload relinks the runtime, the P/Invoke table
+       still names every "*" entry point and wasm-ld stops on undefined uuid_* symbols (seen
+       for real, by forcing this branch on a net11.0 publish); where nothing relinks, the app
+       builds, UuidGenerator.IsAvailable is false in the browser and every generator call
+       throws. A warning rather than an error, because that second shape is a legitimate one
+       for an app that gates on IsAvailable and keeps a managed fallback, and because a code
+       is something NoWarn and WarningsAsErrors both understand. -->
+  <Target Name="_HyperUuidWarnWasmNeedsNet11"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(TargetFramework)' != '' And '$(_HyperUuidWasmSupported)' != 'true'">
+    <Warning Code="HYPERUUID001"
+             Text="HyperUuid's WebAssembly support needs .NET 11 or later, and this project targets $(TargetFramework), so the native core is not linked into this build. Where the wasm-tools workload relinks the runtime, the link fails on undefined uuid_* symbols; otherwise UuidGenerator.IsAvailable is false in the browser and every generator call throws. Target net11.0 or later." />
+  </Target>
+</Project>

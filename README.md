@@ -5,6 +5,8 @@
 [![NuGet](https://img.shields.io/nuget/v/HyperUuid.svg)](https://www.nuget.org/packages/HyperUuid)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.skunkwerkx/hyperuuid.svg)](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid)
 [![PyPI](https://img.shields.io/pypi/v/hyperuuid.svg)](https://pypi.org/project/hyperuuid/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/SkunkWerkx/HyperUuid/go.svg)](https://pkg.go.dev/github.com/SkunkWerkx/HyperUuid/go)
+[![Swift Package](https://img.shields.io/github/v/tag/SkunkWerkx/HyperUuid?label=swift%20package&sort=semver)](https://github.com/SkunkWerkx/HyperUuid/tags)
 [![RubyGems](https://img.shields.io/gem/v/hyperuuid.svg)](https://rubygems.org/gems/hyperuuid)
 [![Packagist](https://img.shields.io/packagist/v/skunkwerkx/hyperuuid.svg)](https://packagist.org/packages/skunkwerkx/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -36,7 +38,7 @@ id = HyperUuid.new_v7
 id.timestamp
 ```
 
-Every binding follows the same shape — `new_v4`/`new_v5`/`new_v6`/`new_v7`, batch variants for v6/v7, timestamp extraction for v6/v7, and the RFC's `Nil`/`Max` constants. See each language's own README (linked in the table below) for its exact idiom and install instructions.
+Every binding follows the same shape — `new_v4`/`new_v5`/`new_v6`/`new_v7`, batch variants for v6/v7, timestamp extraction for v6/v7, the RFC's `Nil`/`Max` constants, and a probe that says whether the native core loaded and which version it is (`UuidGenerator.IsAvailable`/`NativeVersion` in C#, and the same pair in each language's idiom), so a consumer with a fallback gates on the probe rather than catching a load failure. See each language's own README (linked in the table below) for its exact idiom and install instructions.
 
 ## The scoreboard
 
@@ -45,7 +47,7 @@ Cutting to the chase, by language — real numbers, no adjustment for story, ful
 | Language | Generation vs. the platform's own call | The platform's own call |
 | --- | --- | --- |
 | [Rust](rust/) | **13-16x faster** (v6/v7) | the `uuid` crate |
-| [Java](java/) | **5-9x faster** | `UUID.randomUUID()` |
+| [Java](java/) | **11-17x faster** | `UUID.randomUUID()` |
 | [C#](csharp/) | **5.7-8.3x faster** | `Guid.NewGuid()` |
 | [Ruby](ruby/) | **1.9-2.9x faster** | `SecureRandom.uuid` |
 | [Python](python/) | **1.6-4.2x faster** | `uuid.uuid4()`-`uuid7()` |
@@ -54,10 +56,10 @@ Cutting to the chase, by language — real numbers, no adjustment for story, ful
 | [Go](go/) | slower per call — [the control group](#the-control-group-go) | `google/uuid` |
 
 - **[C#](csharp/)** — 5.7-8.3x faster than `Guid.NewGuid()`, zero allocation on every call, and the only way to get a v7 with a real monotonic counter before .NET 9 — even on .NET 9+, `Guid.CreateVersion7()` still has no counter at all.
-- **[Java](java/)** — 5-9x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5, v6, or v7. Proven under GraalVM Native Image too, not just the JVM.
+- **[Java](java/)** — 11-17x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5, v6, or v7. Proven under GraalVM Native Image too, not just the JVM.
 - **[Rust](rust/)** — this *is* the engine. 13-16x faster than the `uuid` crate on v6/v7, allocation-free, asserted by a real counting-allocator test, not just claimed.
 - **[Swift](swift/)** — every call beats `Foundation.UUID()` outright, while also being the only way to get v5/v6/v7 in Swift at all — Foundation only ever does v4.
-- **[Python](python/)** — a clean sweep since the PyO3 native backend: 1.6x faster than `uuid.uuid4()`, 2.5x faster than `uuid.uuid5()`, **4.2x faster than 3.14's own `uuid.uuid6()`/`uuid.uuid7()`**, and timestamp extraction — previously an outright loss — now 2.5-2.8x faster than `UUID.time`. On 3.9-3.13, where stdlib has no v6/v7 at all, it's not even a comparison.
+- **[Python](python/)** — a clean sweep since the PyO3 native backend: 1.6x faster than `uuid.uuid4()`, 2.5x faster than `uuid.uuid5()`, **4.2x faster than 3.14's own `uuid.uuid6()`/`uuid.uuid7()`**, and timestamp extraction — previously an outright loss — now 2.5-2.8x faster than `UUID.time`. On 3.11-3.13, where stdlib has no v6/v7 at all, it's not even a comparison.
 - **[Ruby](ruby/)** — the same mechanism swap as Python, same result: **2.8-2.9x faster than `SecureRandom.uuid`** for v4 and fixed-timestamp v6/v7, 1.9x for v5 — and `SecureRandom.uuid` only ever does random v4 anyway. This README used to call the Ruby gap "structural, not a bug to fix"; the receipts in [ruby/README](ruby/) print the correction.
 - **[PHP](php/)** — generation beats a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation) by 1.9-2x — the whole native round trip costs less than PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 48-74x. Still the only zero-Composer-dependency way to generate v4-v7 in PHP at all.
 
@@ -69,7 +71,7 @@ The scoreboard above wasn't free, and the mechanism behind it is the actual find
 
 **Direct FFI, where the crossing floor is already nanoseconds.** C#'s `P/Invoke` and Java's FFM cost single-digit nanoseconds per call; PHP's built-in `ext-ffi` measures ~105ns. At those floors the engine's own speed dominates, so those bindings call the C ABI directly — and any remaining slowness is *wrapper*, which gets dieted, not excused. PHP is the proof: its per-call cost dropped from ~570ns to ~305ns purely by deleting wrapper (static scratch reused across calls, inputs crossing as zero-copy `const char *` strings) — no mechanism change at all, and that diet alone is what pushed it past the naive inline v4.
 
-**A native extension, where the FFI mechanism itself was the cost.** CPython's `ctypes` used to price every call at ~1µs of interpreted marshalling; Ruby's `Fiddle` still does, at ~1.6µs. No diet fixes that — the mechanism is the bill. So those two bindings link the Rust core *directly into the language VM* as an ordinary native extension (PyO3, Magnus), turning the crossing into a plain C function call. The two bindings part ways from there: PyO3 ships one `abi3` wheel per platform that covers every CPython 3.9+ on that platform, so `pip` always resolves a native wheel and the `ctypes` fallback was dropped entirely — nothing left for it to buy. Magnus has no stable-ABI story across Ruby versions the way `abi3` gives PyO3 (a precompiled platform gem is tied to one Ruby minor version), so Ruby's gems are *fat* — one compiled extension per supported Ruby minor inside each platform gem — and Ruby keeps a real `Fiddle` fallback for whatever falls outside that grid: auto-selected on any platform/Ruby combination without a prebuilt Magnus gem, which today means Ruby 3.2/3.3, musl, and anything exotic — with the same test suite running green against both backends and cross-backend agreement pinned by tests, so the fallback is never a second implementation that can drift.
+**A native extension, where the FFI mechanism itself was the cost.** CPython's `ctypes` used to price every call at ~1µs of interpreted marshalling; Ruby's `Fiddle` still does, at ~1.6µs. No diet fixes that — the mechanism is the bill. So those two bindings link the Rust core *directly into the language VM* as an ordinary native extension (PyO3, Magnus), turning the crossing into a plain C function call. The two bindings part ways from there: PyO3 ships one `abi3` wheel per platform that covers every CPython 3.11+ on that platform, so `pip` always resolves a native wheel and the `ctypes` fallback was dropped entirely — nothing left for it to buy. Magnus has no stable-ABI story across Ruby versions the way `abi3` gives PyO3 (a precompiled platform gem is tied to one Ruby minor version), so Ruby's gems are *fat* — one compiled extension per supported Ruby minor inside each platform gem — and Ruby keeps a real `Fiddle` fallback for whatever falls outside that grid: auto-selected on any platform/Ruby combination without a prebuilt Magnus gem, which today means Ruby 3.3, musl, and anything exotic — with the same test suite running green against both backends and cross-backend agreement pinned by tests, so the fallback is never a second implementation that can drift.
 
 Which leaves exactly one language where neither strategy applies — and that's not an accident.
 
@@ -97,24 +99,32 @@ v1 (classic time-based, leaks a MAC-derived node ID) and v3 (MD5 name-based) are
 
 ## State of the union
 
-Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s `build-native` matrix builds the Rust core fresh on each of 6 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library — not just that it compiles.
+Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s `build-native` matrix builds the Rust core fresh on each of 6 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library — not just that it compiles. A second job does the same for the two musl RIDs inside real Alpine containers, on the language's own official `*-alpine` image.
 
-| Language | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | --- |
-| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [crates.io](https://crates.io/crates/hyperuuid) |
-| [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://www.nuget.org/packages/HyperUuid) |
-| [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven Central](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid) |
-| [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `go get` (git tag) |
-| [Swift](swift/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `.package(url:)` (git tag) |
-| [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [RubyGems](https://rubygems.org/gems/hyperuuid) |
-| [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | — | [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid) |
-| [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [PyPI](https://pypi.org/project/hyperuuid/) |
+| Language | linux-x64 | linux-arm64 | linux-musl-x64 | linux-musl-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | --- |
+| [Rust](rust/) (core) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [crates.io](https://crates.io/crates/hyperuuid) |
+| [C#](csharp/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [NuGet](https://www.nuget.org/packages/HyperUuid) |
+| [Java](java/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Maven Central](https://central.sonatype.com/artifact/io.github.skunkwerkx/hyperuuid) |
+| [Go](go/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `go get` (git tag) |
+| [Swift](swift/) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | `.package(url:)` (git tag) |
+| [Ruby](ruby/) | ✅ | ✅ | Fiddle | Fiddle | ✅ | ✅ | ✅ | ✅ | [RubyGems](https://rubygems.org/gems/hyperuuid) |
+| [PHP](php/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid) |
+| [Python](python/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [PyPI](https://pypi.org/project/hyperuuid/) |
 
-PHP skips win-arm64 deliberately: PHP has never shipped a native Windows ARM64 build, so it always runs under x64 emulation there regardless of host CPU — already exercised for real by the win-x64 leg.
+The three cells that are not a plain ✅, and why each is deliberate:
+
+- **PHP on win-arm64.** PHP has never shipped a native Windows ARM64 build, so it runs as an x64 process there regardless of host CPU and loads the win-x64 library — already exercised for real by the win-x64 leg.
+- **Swift on musl.** Swift's musl target links fully statically and has no dynamic loader, so there is no library it could open; the binding refuses to compile for it with a message that says so. Deferred, not impossible: linking the core in statically, as a SwiftPM binary static-library target (SE-0482, Swift 6.2 and later), would cover it and is not built yet.
+- **Ruby on musl.** There is no musl Magnus platform gem, so Alpine runs the Fiddle backend over the musl library, which is the suite CI runs there. Through 0.3.0 that cell was simply broken: RubyGems installs the `*-linux` gem on Alpine, and it carried only a glibc library.
+
+The musl libraries are built so that they depend on musl's libc and nothing else — the unwinder is linked statically — which is what lets them load on a bare `alpine`, `python:alpine` or `golang:alpine` image with no `libgcc` installed. The glibc libraries need glibc 2.34 or newer.
+
+**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is .NET 10, JDK 25, Go 1.26, Python 3.11, Ruby 3.3 and PHP 8.2, and the musl job runs the PHP, Ruby and Python suites on those oldest versions as well as the newest.
 
 Every leg also builds the core as a `wasm32-wasip1` module and runs the Java, Ruby and Python suites a second time through their in-process wasm backends, and the Go suite the same way on the non-Windows legs (wasmtime-go is cgo throughout and has no win-arm64 build) — see [WebAssembly](#webassembly).
 
-**Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt and aarch64-mingw-ucrt, each gem fat across Ruby 3.4 and 4.0 since a Magnus extension is tied to one Ruby minor) with an automatic fallback to a universal, zero-compile pure-Fiddle gem for everything outside that grid — Ruby 3.2/3.3, musl. Go's embedded native libraries and Swift's `NativeLibs` are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
+**Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected for linux-x64/arm64, osx-x64/arm64, x64-mingw-ucrt and aarch64-mingw-ucrt, each gem fat across Ruby 3.4 and 4.0 since a Magnus extension is tied to one Ruby minor) with an automatic fallback to a universal, zero-compile pure-Fiddle gem for everything outside that grid — Ruby 3.3, and musl, where it runs over the musl build of the core. Go's embedded native libraries and Swift's `NativeLibs` are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
 
 ## Provenance
 
@@ -144,8 +154,8 @@ WebAssembly meets a binding in one of two directions, and they share nothing mec
 
 - **The core runs as wasm inside the binding.** The process stays native. The Rust core
   arrives as a `wasm32-wasip1` module, `hyperuuid.wasm`, and a wasm engine the ecosystem
-  already has runs it in-process: no `dlopen`, no per-platform binary, the same twelve
-  C-ABI exports. The engine is an optional dependency the consumer adds only if they want
+  already has runs it in-process: no `dlopen`, no per-platform binary, the same C-ABI
+  exports (the twelve `uuid_*` functions and `hyperuuid_version`). The engine is an optional dependency the consumer adds only if they want
   this path.
 - **The binding is compiled to wasm.** The whole consumer app becomes a wasm module
   (Blazor, a `wasm32` Rust crate) and the Rust core has to be linked into that build by the
@@ -193,8 +203,9 @@ Three footnotes to those rows. On a stock JDK GraalWasm has no JIT and runs the 
 interpreted, with a startup warning; the JIT numbers need a GraalVM JDK or a Native Image
 build. Python's 6.2 µs goes underneath wasmtime-py's public call, which re-fetches the function
 type per call and costs 38 µs; the bare crossing is 3.1 µs. And Python's automatic fallback is
-theoretical today: every wheel and the sdist carry the PyO3 extension, so in practice you set
-the variable. A pure-Python wheel carrying only the wasm backend would change that and is not
+theoretical today: every wheel carries the PyO3 extension and no sdist is published, so an
+interpreter with no matching wheel gets no install at all and in practice you set the
+variable. A pure-Python wheel carrying only the wasm backend would change that and is not
 built yet.
 
 Two facts every one of those four shares, both learned the hard way in the same afternoon.
@@ -263,7 +274,7 @@ The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any pla
 
 ### Batch generation vs. an equivalent loop
 
-`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Batch*`, `cargo bench` (`rust/benches/`), `go test -bench=. -benchmem ./go/...`:
+`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Batch*`, `cargo bench` (from `rust/`), `go test -bench=. -benchmem ./...` (from `go/`):
 
 | Binding | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
@@ -278,7 +289,7 @@ The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any pla
 
 Go's two native backends tell different stories here, and both are worth knowing before picking where to put your hot path (the wasmtime-go backend behind `-tags hyperuuid_wasm` has its own numbers in the [Go README](go/#webassembly-wasmtime-go)). Every individual purego call does 4-7 heap allocations (252-360 B/op via `go test -bench=. -benchmem`) — unlike Rust and C#, which are both genuinely zero-allocation per call — almost certainly `unsafe.Pointer` arguments crossing into purego's dynamically-generated call trampolines defeating Go's escape analysis. Batch generation collapses ~5000 of those allocations into 7, which is why purego's batch win looks the largest of any binding. Since 2026-08-27, darwin/linux builds default to a real cgo backend instead (`go/backend_cgo.go`, purego remaining the automatic fallback on Windows and any `CGO_ENABLED=0` build — see `go/README.md` for the full tradeoff and why Windows stays on purego unconditionally): cgo cuts per-call allocations to zero (one for v5, Go's own `[]byte(name)`) and individual calls 3-4x faster outright, which *shrinks* the batch-vs-individual gap rather than widening it, since batch generation was already amortizing most of the cost purego was paying per call. Net effect: cgo wins for individual-call-heavy workloads, purego and cgo land in the same place for batch-heavy ones — and batch is exactly where [the control group](#the-control-group-go) stops being the exception.
 
-Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and asserts zero allocations, then asserts the batch functions' scratch buffer *does* allocate, confirming it's the one deliberate exception documented in `v6.rs`/`v7.rs`.
+Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and around both batch functions, and asserts zero allocations for all of them. The batch functions used to be the one documented exception; they now draw their entropy through the caller's own buffer, which is what lets the crate build without `alloc` at all.
 
 ### Skipping object construction entirely
 
@@ -289,16 +300,16 @@ The batch doors above still hand back a collection of the language's own UUID ty
 | PHP | 2260 µs | **21.9 µs** | **103x** | `newV7BatchBytes` |
 | Python | 650 µs | **18.5 µs** | **35x** | `fill_v7(bytearray)` |
 | Ruby | 370 µs | **24.1 µs** | **15x** | `new_v7_batch_bytes` |
-| Swift | 77.0 µs | **16.0 µs** | **4.8x** | `fillV7(into: raw bytes)` |
-| Java | 31.7 µs | **18.8 µs** | 1.7x | `fillV7(byte[])` |
+| Java | 26.1 µs | **17.9 µs** | 1.5x | `fillV7(byte[])` |
 | Go | 23.0 µs | **17.6 µs** | 1.3x, and 0 allocs | `FillV7BytesAt` |
 | C# | 21.9 µs | **18.2 µs** | 1.2x, and 0 allocs | `FillV7(Span<byte>)` |
+| Swift | 17 µs | **16 µs** | 1.1x | `fillV7(into: raw bytes)` |
 
 Read the right-hand column, not the speedup column: **every binding converges on roughly 18–24 µs per 1000 UUIDs**, because that is what the work actually costs. The native call was never the bottleneck in any of them. What varied was the price each language charges to wrap those 16000 bytes in a thousand objects — 2.2 ms of it in PHP, essentially none in Go.
 
-Swift and Java are the instructive middle. Neither is an interpreted language, yet Swift gains 4.8x — it was paying for a result array plus a per-element `UUID(rfcBytes:)` construction, and dropping both matters. Java gains only ~1.5x, and the reason is visible in its own numbers: filling a `UUID[]` measures 27.7 µs against `newV7Batch`'s 26.1 µs, statistically identical, because `java.util.UUID` is two `long`s and every element has to be rebuilt regardless of who allocated the array. Only its `byte[]` form escapes that. The dividing line is not compiled-versus-interpreted; it is whether the language's UUID type is already RFC-ordered bytes.
+Java is the instructive middle. It is not an interpreted language, yet it gains 1.5x where Go, C# and Swift gain almost nothing, and the reason is visible in its own numbers: filling a `UUID[]` measures 27.7 µs against `newV7Batch`'s 26.1 µs, statistically identical, because `java.util.UUID` is two `long`s and every element has to be rebuilt regardless of who allocated the array. Only its `byte[]` form escapes that. The dividing line is not compiled-versus-interpreted; it is whether the language's UUID type is already RFC-ordered bytes.
 
-That also explains why Go and C# barely move: they were already at the floor. Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
+That also explains why Go, C# and Swift barely move: they are already at the floor. (Swift was not, through 0.2: `newV7Batch` measured 86 µs while it paid for a scratch buffer and a per-element `UUID(rfcBytes:)` construction, and 0.3.0's carrier rewrite brought it to 17 µs.) Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
 
 **One caveat, and it inverts the advice** — documented on every method in the three dynamic bindings, because getting it wrong is a pessimization: this is only faster if bytes are the *destination*. In Python, filling a buffer and then building `uuid.UUID` objects from it measures ~1210 µs, roughly twice as slow as `new_v7_batch`, because the extension constructs them through a faster path internally than anything callable from Python. Use the byte forms for a bind parameter, a wire format, or a bulk `COPY` — not as a step on the way to objects.
 
@@ -310,10 +321,27 @@ That also explains why Go and C# barely move: they were already at the floor. Th
 - **Monotonically increasing v7** — a process-global counter (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls
 - **Batch generation** — `*Batch`/`*_batch` for v6/v7 amortizes timestamp capture, counter reservation, and the random-bytes fetch across the whole batch
 - **SQL Server byte ordering** — `*ToSqlOrder`/`*_to_sql_order` for both v6 and v7, computed once in the Rust core and exported to every binding, verified against the real `System.Data.SqlTypes.SqlGuid` comparator
-- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path. The one deliberate exception is opt-in: Java, Ruby, Python and Go can each run the same core as a `wasm32-wasip1` module inside the process (GraalWasm, wasmtime) for a platform with no native build, still the same twelve exports, still the same test suite — see [WebAssembly](#webassembly)
+- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`/`purego`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path. The one deliberate exception is opt-in: Java, Ruby, Python and Go can each run the same core as a `wasm32-wasip1` module inside the process (GraalWasm, wasmtime) for a platform with no native build, still the same exports, still the same test suite — see [WebAssembly](#webassembly)
 - **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
 - **AOT-friendly** — C# publishes cleanly under `PublishAot`; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
-- **CI-proven, not CI-claimed** — 6 real-hardware platforms × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch, and the Java/Ruby/Python/Go suites a second time on every leg through a freshly-built `wasm32-wasip1` module
+- **CI-proven, not CI-claimed** — 6 real-hardware platforms plus two musl RIDs in Alpine containers × 8 language/runtime targets, each running that language's actual test suite against a freshly-built native library on every dispatch, and the Java/Ruby/Python/Go suites a second time on every leg through a freshly-built `wasm32-wasip1` module
+
+## Layout
+
+```
+rust/       the core: one cdylib, twelve uuid_* exports plus hyperuuid_version, allocation-free and no_std
+csharp/     the .NET 10 binding: UuidGenerator over LibraryImport, AOT smoke test, Blazor wasm on .NET 11+
+java/       the JDK 25+ binding: FFM + GraalWasm backends, Native Image smoke test
+python/     the 3.11+ binding: PyO3 native extension (abi3 wheels) + wasmtime backend
+swift/      the SwiftPM binding: dlopen + @convention(c) over the bundled library
+go/         the Go binding: cgo + purego + wasmtime-go backends
+ruby/       the 3.3+ binding: Magnus extension + Fiddle fallback + wasmtime backend
+php/        the 8.2+ binding: ext-ffi
+```
+
+## Why "Hyper"
+
+The SkunkWerkx Hyper* series — HyperUuid, [HyperCast](https://github.com/SkunkWerkx/HyperCast) — owes its founding attitude to Casey Muratori and his recent YouTube talks on what "premature optimization" actually meant. Knuth's line gets quoted as a license to never care; Muratori's point is that most slow software was never *optimized badly* — it was **pessimized by default**: allocations nobody needed, layers nobody asked for, work done and thrown away on every call. These libraries are that argument, practiced: allocation-free cores, no runtime bridge, no reflection, fast paths for the common shape — and every performance claim a measured receipt, because the other half of taking performance seriously is refusing to assert it.
 
 ## Contributing
 

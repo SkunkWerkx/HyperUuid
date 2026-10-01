@@ -2,3 +2,14 @@
 # that Ruby/Java/C#/Go/PHP/Swift load from rust/target/release/.
 [build]
 target-dir = "target"
+
+# musl: an extension module is a cdylib, and Rust's musl targets default to a static C
+# runtime, which cannot produce one ("cannot produce cdylib ... as the target does not
+# support these crate types"). maturin 1.15 does not add this itself when the host *is* musl
+# — an Alpine container building its own wheel — so it is spelled out here for the build
+# that runs from this directory.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]

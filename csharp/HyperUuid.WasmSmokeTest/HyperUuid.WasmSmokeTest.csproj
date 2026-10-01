@@ -31,6 +31,6 @@
        Needs the wasm32-unknown-emscripten staticlib staged where the targets file looks for
        it, csharp/HyperUuid/runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a, which
        is gitignored like every other runtimes/ asset. check.sh stages it. -->
-  <Import Project="../HyperUuid/build/net10.0/HyperUuid.targets" />
+  <Import Project="../HyperUuid/build/HyperUuid.targets" />
 
 </Project>

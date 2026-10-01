@@ -106,8 +106,8 @@ cargo build --release --target wasm32-wasip1
 ```
 
 That config adds two linker flags for this target only, `--export=malloc` and
-`--export=free`, so the module's exports are the twelve `uuid_*` functions from `ffi.rs`
-plus wasi-libc's allocator. A wasm host cannot hand this library a pointer into its own
+`--export=free`, so the module's exports are the twelve `uuid_*` functions and
+`hyperuuid_version` from `ffi.rs` plus wasi-libc's allocator. A wasm host cannot hand this library a pointer into its own
 memory, so every embedder — GraalWasm inside the Java binding, wasmtime inside the Ruby,
 Python and Go ones — asks the guest for the buffer it will fill and reads the result back
 out of the exported `memory`. The exported allocator is what makes that safe: dlmalloc
@@ -117,7 +117,13 @@ allocation. The module imports five `wasi_snapshot_preview1` functions (`random_
 wasi-libc's `environ_*`, `fd_write` and `proc_exit`) and nothing else; there is no clock,
 because `now_v7` is compiled out on `wasm32` and every other door takes the host's
 timestamp. `ffi.rs` itself is untouched by any of this; on every native target the C ABI is
-still exactly the twelve exports.
+still exactly those thirteen exports.
+
+The C# binding's Blazor WebAssembly support takes a second wasm build, the
+`wasm32-unknown-emscripten` static library its NuGet package links into the app:
+`cargo wasm-staticlib`, which leaves Rust's standard library out of it (the `wasm-staticlib`
+feature supplies the panic handler in its place), so it can be linked into one app beside
+HyperCast's.
 
 ## `no_std`
 
@@ -164,8 +170,8 @@ meant to coexist in one binary:
 
 ```sh
 cargo build --release --features python  # -> PyInit__native (normally via maturin in python/)
-cargo ruby                               # -> Init_hyperuuid_native, in target/ruby/release/
-cargo php                                # -> get_module, in target/php/release/
+cargo ruby-ext                           # -> Init_hyperuuid_native, in target/ruby/release/ (ruby/'s `rake native:dev` runs this and stages the result)
+cargo php-ext                            # -> get_module, in target/php/release/
 ```
 
 Each produces `libhyperuuid.{so,dylib}` (`hyperuuid.dll` on Windows), under `target/release/` for the raw `--features` form and under its own directory for the aliases — the
@@ -177,11 +183,11 @@ crate itself, not just an in-repo checkout — `cargo build --manifest-path` aga
 **Local dev trap worth knowing:** "each produces `target/release/libhyperuuid.so`" means
 *the same file* — so a `--features python` build (or a `maturin build` in `python/`, which
 is one) silently replaces the plain cdylib that every other binding's dev loop loads. The
-extension build still exports the `hyperuuid_*` symbols, but it also carries undefined
+extension build still exports the `uuid_*` symbols, but it also carries undefined
 interpreter symbols that only resolve inside a CPython (or Ruby, or PHP) process, so the
 next `./gradlew test` or `dotnet test` fails at native load with something unhelpful about a
-missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. The `cargo ruby` and
-`cargo php` aliases in `.cargo/config.toml` avoid it by building into `target/ruby/` and
+missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. The `cargo ruby-ext` and
+`cargo php-ext` aliases in `.cargo/config.toml` avoid it by building into `target/ruby/` and
 `target/php/`, and `python/.cargo/config.toml` does the same for maturin (`python/target/`).
 CI never hits this — each leg builds in its own job.
 

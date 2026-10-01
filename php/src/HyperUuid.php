@@ -10,12 +10,54 @@ namespace HyperUuid;
  * no runtime bridge, no extra Composer dependency. Bundles a native build for every
  * supported platform (see NativePlatform) and picks the right one at runtime, the same
  * trick the Go/Java bindings use since Composer has no per-platform native selection.
+ * {@see isAvailable()} is the probe a consumer with a fallback gates on, and
+ * {@see nativeVersion()} names the library that actually loaded.
  */
 final class HyperUuid
 {
+    private static ?bool $available = null;
+
     /** Non-instantiable — static factory methods only. */
     private function __construct()
     {
+    }
+
+    /**
+     * Whether libhyperuuid resolved for this platform and exports the ABI this binding was
+     * built against — the probe a consumer with a fallback gates on. Attempts the same load
+     * every generator makes, but never throws: a missing ext-ffi, an `ffi.enable` setting
+     * that restricts FFI for this SAPI, a missing or unloadable library, an unsupported
+     * platform, or a stale library that lacks a symbol this binding declares all answer
+     * false. The answer is cached for the request; true exactly when
+     * {@see nativeVersion()} succeeds.
+     *
+     * @return bool true when every generator can be called; false when the first one would throw
+     */
+    public static function isAvailable(): bool
+    {
+        if (self::$available !== null) {
+            return self::$available;
+        }
+        try {
+            Runtime::nativeVersion();
+            return self::$available = true;
+        } catch (\Throwable) {
+            return self::$available = false;
+        }
+    }
+
+    /**
+     * The version of the native library that actually loaded, as "major.minor.patch" —
+     * the core's own manifest version, read through the zero-argument probe it exports, so
+     * a host can prove the library it resolved is the one this binding was written against
+     * before minting the first UUID. Throws when no library resolves; {@see isAvailable()}
+     * is the non-throwing form.
+     *
+     * @return string the native library's semantic version as "major.minor.patch"
+     */
+    public static function nativeVersion(): string
+    {
+        return Runtime::nativeVersion();
     }
 
     /**
@@ -84,10 +126,11 @@ final class HyperUuid
      * Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI
      * call and one random-bytes fetch instead of `count` of each. Defaults to the current time.
      *
-     * @param int $count how many UUIDs to create
+     * @param int $count how many UUIDs to create, 0 to 4294967295
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return list<Uuid> `count` new version 6 UUIDs
+     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
      */
     public static function newV6Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
@@ -118,10 +161,11 @@ final class HyperUuid
      * contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
      * instead of `count` of each. Defaults to the current time.
      *
-     * @param int $count how many UUIDs to create
+     * @param int $count how many UUIDs to create, 0 to 4294967295
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return list<Uuid> `count` new version 7 UUIDs
+     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
      */
     public static function newV7Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
@@ -148,10 +192,11 @@ final class HyperUuid
      *
      * Slice it with `substr($bytes, $i * 16, 16)`, which is what newV7Batch does internally.
      *
-     * @param int $count how many UUIDs to create
+     * @param int $count how many UUIDs to create, 0 to 4294967295
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return string `$count * 16` bytes: `$count` version 7 UUIDs in RFC 9562 order
+     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
      */
     public static function newV7BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {
@@ -167,10 +212,11 @@ final class HyperUuid
      * monotonic counter, so items minted in the same millisecond are not guaranteed to sort
      * in creation order.
      *
-     * @param int $count how many UUIDs to create
+     * @param int $count how many UUIDs to create, 0 to 4294967295
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return string `$count * 16` bytes: `$count` version 6 UUIDs in RFC 9562 order
+     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
      */
     public static function newV6BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {

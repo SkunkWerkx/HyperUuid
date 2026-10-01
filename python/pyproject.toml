@@ -1,5 +1,7 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+# 1.9 is the first maturin with full PEP 639 support — the SPDX `license` string and the
+# top-level `license-files` below. An older one does not build this file.
+requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -13,16 +15,22 @@ license = "MIT"
 # no better. Same reason rust/ carries its own — git stores one blob for all of them.
 license-files = ["LICENSE"]
 authors = [{ name = "Brian Buvinghausen" }]
-requires-python = ">=3.9"
+# 3.11 floor: 3.9 reached end of life in October 2025 and 3.10 does on 2026-10-31. The
+# extension is built abi3-py311, so one wheel per platform covers the whole floor-and-up range — the
+# same floor HyperCast has.
+requires-python = ">=3.11"
 dependencies = []
 keywords = ["uuid", "rfc9562", "guid", "identifier", "pyo3"]
+# No `License ::` classifier: PEP 639 deprecates them in favour of the `license` expression
+# above, and the two are not meant to be declared together.
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 
 [project.urls]
@@ -31,11 +39,13 @@ Repository = "https://github.com/SkunkWerkx/HyperUuid"
 Issues = "https://github.com/SkunkWerkx/HyperUuid/issues"
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+# mypy is what tests/test_typing.py checks a consumer with; that one test skips without it.
+test = ["pytest>=8.0", "mypy>=1.11"]
 bench = ["pyperf>=2.6"]
-# The wasm32-wasip1 build of the same core, run in-process by wasmtime-py — the backend for
-# an interpreter no `_native` wheel matches (see README's WebAssembly section). Optional
-# because a matching wheel needs nothing at all, and wasmtime is a ~10 MB runtime.
+# The wasm32-wasip1 build of the same core, run in-process by wasmtime-py — the backend
+# HYPERUUID_WASM=1 forces, and the fallback when the `_native` extension fails to import (see
+# README's WebAssembly section). Optional because the extension needs nothing at all, and
+# wasmtime is a ~10 MB runtime.
 wasm = ["wasmtime>=47"]
 
 [tool.maturin]

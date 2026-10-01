@@ -2,7 +2,8 @@
 
 // This backend runs the Rust core as a WebAssembly module inside the Go process, through
 // github.com/bytecodealliance/wasmtime-go, instead of dlopen'ing a native build. The module
-// is the same C-ABI surface ffi.rs exports, compiled for wasm32-wasip1 and embedded from
+// is the same C-ABI surface ffi.rs exports — the twelve uuid_* functions and
+// hyperuuid_version — compiled for wasm32-wasip1 and embedded from
 // native/wasm32-wasip1/hyperuuid.wasm alongside the per-platform shared libraries. It is the
 // inverse of what the root README's WebAssembly table calls Go's "Structural" blocker: that
 // row is about compiling *this Go module* to wasm, which neither cgo nor purego can do; this
@@ -59,6 +60,9 @@ type wasmCore struct {
 	newV4, newV5, newV6, newV7, v6UnixMillis, v7UnixMillis,
 	newV6Batch, newV7Batch, v7ToSql, v7ToRfc, v6ToSql, v6ToRfc *wasmtime.Func
 
+	// hyperuuid_version takes nothing and cannot fail; called once, at load.
+	version *wasmtime.Func
+
 	// Sixteen bytes in and sixteen out, malloc'd once for the single-UUID doors — the same
 	// per-thread scratch the Java binding keeps, collapsed to one pair because every call
 	// here already holds mu.
@@ -71,57 +75,62 @@ type wasmCore struct {
 	bufLen int
 }
 
-var (
-	initOnce sync.Once
-	initErr  error
-	core     *wasmCore
-)
+var core *wasmCore
 
-// ensureLoaded instantiates the embedded wasm module exactly once. The name and signature
-// match the native backends so uuidgen.go needs no knowledge of which one it got.
-func ensureLoaded() error {
-	initOnce.Do(func() {
-		core, initErr = newWasmCore()
-	})
-	return initErr
+// loadBackend instantiates the embedded wasm module. ensureLoaded (load.go) runs it exactly
+// once; the name and signature match the native backends' so nothing above this file needs
+// to know which one it got.
+func loadBackend() error {
+	c, err := newWasmCore()
+	if err != nil {
+		return err
+	}
+	// One real call into the guest, so Available means "answered", not "resolved".
+	v, err := c.version.Call(c.store)
+	if err != nil {
+		return fmt.Errorf("hyperuuid_version trapped inside the wasm core: %w", err)
+	}
+	packed, _ := v.(int32)
+	core, nativeVersion = c, uint32(packed)
+	return nil
 }
 
 func newWasmCore() (*wasmCore, error) {
 	wasm, err := nativeFS.ReadFile(wasmModulePath)
 	if err != nil {
-		return nil, fmt.Errorf("hyperuuid: %s not found in embedded native libs: %w", wasmModulePath, err)
+		return nil, fmt.Errorf("%s not found in embedded native libs (this module was built without the wasm32-wasip1 module): %w", wasmModulePath, err)
 	}
 
 	engine := wasmtime.NewEngine()
 	module, err := wasmtime.NewModule(engine, wasm)
 	if err != nil {
-		return nil, fmt.Errorf("hyperuuid: compiling wasm module: %w", err)
+		return nil, fmt.Errorf("compiling wasm module: %w", err)
 	}
 	// The module imports five WASI preview1 functions (random_get for entropy, and the
 	// environ/fd_write/proc_exit set wasi-libc's startup and panic paths reference); an
 	// empty WasiConfig satisfies them — no files, no env, nothing inherited.
 	linker := wasmtime.NewLinker(engine)
 	if err := linker.DefineWasi(); err != nil {
-		return nil, fmt.Errorf("hyperuuid: defining WASI imports: %w", err)
+		return nil, fmt.Errorf("defining WASI imports: %w", err)
 	}
 	store := wasmtime.NewStore(engine)
 	store.SetWasi(wasmtime.NewWasiConfig())
 	instance, err := linker.Instantiate(store, module)
 	if err != nil {
-		return nil, fmt.Errorf("hyperuuid: instantiating wasm module: %w", err)
+		return nil, fmt.Errorf("instantiating wasm module: %w", err)
 	}
 
 	c := &wasmCore{store: store}
 	memExport := instance.GetExport(store, "memory")
 	if memExport == nil || memExport.Memory() == nil {
-		return nil, fmt.Errorf("hyperuuid: wasm module exports no memory")
+		return nil, fmt.Errorf("wasm module exports no memory")
 	}
 	c.mem = memExport.Memory()
 
 	fn := func(name string) (*wasmtime.Func, error) {
 		f := instance.GetFunc(store, name)
 		if f == nil {
-			return nil, fmt.Errorf("hyperuuid: export %s not found in wasm module", name)
+			return nil, fmt.Errorf("export %s not found in wasm module", name)
 		}
 		return f, nil
 	}
@@ -136,6 +145,7 @@ func newWasmCore() (*wasmCore, error) {
 		{"uuid_new_v6_batch", &c.newV6Batch}, {"uuid_new_v7_batch", &c.newV7Batch},
 		{"uuid_v7_to_sql_order", &c.v7ToSql}, {"uuid_v7_to_rfc_order", &c.v7ToRfc},
 		{"uuid_v6_to_sql_order", &c.v6ToSql}, {"uuid_v6_to_rfc_order", &c.v6ToRfc},
+		{"hyperuuid_version", &c.version},
 	}
 	for _, e := range exports {
 		f, err := fn(e.name)
@@ -154,15 +164,17 @@ func newWasmCore() (*wasmCore, error) {
 	return c, nil
 }
 
-// alloc asks the guest allocator for n bytes and returns the guest address.
+// alloc asks the guest allocator for n bytes and returns the guest address. Its errors carry
+// no package prefix: at load they are wrapped by ErrNativeUnavailable, and the per-call
+// sites below add their own.
 func (c *wasmCore) alloc(n int) (int32, error) {
 	v, err := c.malloc.Call(c.store, int32(n))
 	if err != nil {
-		return 0, fmt.Errorf("hyperuuid: guest malloc(%d) trapped: %w", n, err)
+		return 0, fmt.Errorf("guest malloc(%d) trapped: %w", n, err)
 	}
 	p, _ := v.(int32)
 	if p == 0 {
-		return 0, fmt.Errorf("hyperuuid: guest malloc(%d) returned null", n)
+		return 0, fmt.Errorf("guest malloc(%d) returned null", n)
 	}
 	return p, nil
 }
@@ -174,7 +186,7 @@ func (c *wasmCore) scratch(n int) (int32, error) {
 	}
 	if c.buf != 0 {
 		if _, err := c.free.Call(c.store, c.buf); err != nil {
-			return 0, fmt.Errorf("hyperuuid: guest free trapped: %w", err)
+			return 0, fmt.Errorf("guest free trapped: %w", err)
 		}
 		c.buf, c.bufLen = 0, 0
 	}
@@ -242,7 +254,7 @@ func newV5(ns uuid.UUID, name []byte) (uuid.UUID, int32) {
 	if len(name) > 0 {
 		p, err := c.scratch(len(name))
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("hyperuuid: %v", err))
 		}
 		copy(c.data()[p:int(p)+len(name)], name)
 		namePtr = p
@@ -292,7 +304,7 @@ func batch(f *wasmtime.Func, name string, unixMillis uint64, count uint32, out u
 	n := int(count) * 16
 	p, err := c.scratch(n)
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("hyperuuid: %v", err))
 	}
 	rc := c.call(f, name, millisArg(unixMillis), int32(count), p)
 	if rc == 0 {

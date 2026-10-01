@@ -21,8 +21,13 @@ dependencies {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_22
-    targetCompatibility = JavaVersion.VERSION_22
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+// The library's own floor, enforced the same way it is there.
+tasks.withType<JavaCompile>().configureEach {
+    options.release = 25
 }
 
 jmh {
@@ -45,6 +50,10 @@ jmh {
     warmupForks.set(0)
     timeOnIteration.set("1s")
     warmup.set("1s")
+    // Allocation per call is a receipt here, not a claim — the same role [MemoryDiagnoser]
+    // plays for the C# suite. gc.alloc.rate.norm is the B/op column the README quotes, so
+    // the plain `:benchmarks:jmh` the README names as its reproduction has to print it.
+    profilers.set(listOf("gc"))
     // UuidGenerator's FFM downcalls are a "restricted method" — the JMH-forked JVM needs the
     // same opt-in the library's own test task already sets.
     jvmArgsAppend.add("--enable-native-access=ALL-UNNAMED")

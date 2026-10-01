@@ -6,18 +6,25 @@ name: Prepare release
 # match (cargo publish --locked fails on a stale one). Python needs nothing here: pyproject.toml
 # declares its version dynamic, sourced straight from rust/Cargo.toml.
 #
-# PHP, Swift, and Go get nothing from this workflow — they have no version field of their
-# own (Packagist/SwiftPM/Go modules all resolve straight from the git tag), and their
-# committed native binaries are kept fresh independently by stage-native-binaries.yml on
-# every rust/-touching merge, unrelated to a version bump.
+# PHP, Swift, and Go have no version field of their own (Packagist/SwiftPM/Go modules all
+# resolve straight from the git tag), but they are not untouched by a bump: the native
+# libraries committed for them embed the crate version (`hyperuuid_version()`), so they have to
+# be rebuilt from the bump commit and restaged before a tag can be cut.
 #
-# Deliberately a direct push straight to master, not a PR: same reasoning as
-# stage-native-binaries.yml — the diff here is mechanical, not something a review
-# meaningfully improves, and this exists specifically to avoid paying for another full
-# ci.yml matrix run over a version-string change (see release.yml's own find-ci-run, which
-# is built to walk back past exactly this kind of commit to the last real ci.yml run). This
-# workflow does not tag anything — that's a deliberate, separate, human action once
-# master's state looks right.
+# That is why this workflow ends by dispatching ci.yml against the commit it just pushed.
+# It used to stop at the push, on the reasoning that a version-string change needs no
+# rebuild — true until the library started reporting its own version, and the cause of
+# HyperCast 0.3.0 shipping libraries that say 0.2.0. The order of a release is now:
+#
+#   1. this workflow: bump every manifest, push, dispatch ci.yml on the bump commit;
+#   2. ci.yml goes green, and its completion triggers stage-native-binaries.yml, which
+#      commits that run's libraries on top of the bump;
+#   3. a human tags that staging commit, and release.yml refuses any tag whose ci.yml run
+#      or committed libraries were built at a different version.
+#
+# Still a direct push straight to master, not a PR: the diff is mechanical, not something
+# a review meaningfully improves. This workflow does not tag anything — that stays a
+# deliberate, separate, human action once master's state looks right.
 
 on:
   workflow_dispatch:
@@ -32,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # gh workflow run: the bump commit needs a ci.yml run of its own (see the header).
+      actions: write
     steps:
       - uses: actions/checkout@v7
 
@@ -71,6 +80,7 @@ jobs:
         run: git diff --stat
 
       - name: Commit and push if anything actually changed
+        id: push
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -85,3 +95,17 @@ jobs:
           fi
           git commit -m "chore: prepare v$VERSION"
           git push origin HEAD:master
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # workflow_dispatch is one of the two events a GITHUB_TOKEN is allowed to raise, so
+      # this needs no PAT. ci.yml has no push trigger on purpose; this is the one push that
+      # must be built, because it is the first commit whose native libraries will report
+      # the new version. stage-native-binaries.yml picks the run up when it completes.
+      - name: Run ci.yml against the bump commit
+        if: steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref master
+          echo "::notice::ci.yml dispatched on master. When it is green, stage-native-binaries.yml commits its libraries; tag THAT commit."

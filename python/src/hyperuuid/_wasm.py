@@ -1,14 +1,16 @@
 """The WebAssembly backend: the same Rust core, compiled to ``wasm32-wasip1`` and run inside
 CPython by `wasmtime-py <https://github.com/bytecodealliance/wasmtime-py>`_ instead of linked
 in as a compiled extension. Nothing here is a second implementation — every call below lands
-in the identical ``uuid_*`` C-ABI export the PyO3 extension and every other binding in this
-repo call, just across a guest/host memory boundary rather than a direct function call.
+in the identical C-ABI export (the twelve ``uuid_*`` functions and ``hyperuuid_version``) the
+PyO3 extension and every other binding in this repo call, just across a guest/host memory
+boundary rather than a direct function call.
 
 Selected by ``hyperuuid`` itself (see ``__init__``): ``HYPERUUID_WASM=1`` forces it, and it is
-the automatic fallback when no ``_native`` wheel matches the running interpreter and
-``wasmtime`` is importable. It exposes exactly the surface ``__init__`` consumes from
-``_native`` — same names, same argument shapes, same exception types and messages, the same
-fast-constructed ``uuid.UUID`` objects — so the package above it never knows which one it got.
+the automatic fallback when the ``_native`` extension cannot be imported and ``wasmtime`` is
+importable. It exposes exactly the surface ``__init__`` consumes from ``_native`` — same
+names, same argument shapes, same exception types, the same fast-constructed ``uuid.UUID``
+objects — so the package above it never knows which one it got. ``_native.pyi`` is the typed
+description of that surface, and a test holds both backends to it.
 
 Three things about the crossing are load-bearing:
 
@@ -36,6 +38,7 @@ from __future__ import annotations
 
 import ctypes
 import datetime
+import operator
 import threading
 import time
 import uuid as _uuid
@@ -67,6 +70,7 @@ _SIGNATURES = {
     "uuid_v7_to_rfc_order": ((_I32,), None),
     "uuid_v6_to_sql_order": ((_I32,), None),
     "uuid_v6_to_rfc_order": ((_I32,), None),
+    "hyperuuid_version": ((), _I32),
     "malloc": ((_I32,), _I32),
     "free": ((_I32,), None),
 }
@@ -96,14 +100,25 @@ def _now_millis() -> int:
 
 def _u64(unix_millis: int | None) -> int:
     """``None`` means now; otherwise the value must be a ``u64``, matching PyO3's extraction
-    of ``Option<u64>`` (a negative or 65-bit int fails there with ``OverflowError`` before the
-    core ever sees it — reproduced here so the two backends reject identically).
+    of ``Option<u64>``: a non-integer is a ``TypeError`` and a negative or 65-bit int an
+    ``OverflowError``, before the core ever sees it. ``hyperuuid`` itself validates both
+    before calling either backend (and raises ``ValueError`` for the range), so this is the
+    private surface keeping the extension's shape, not the public contract.
     """
     if unix_millis is None:
         return _now_millis()
-    value = int(unix_millis)
+    value = operator.index(unix_millis)
     if not 0 <= value < 1 << 64:
         raise OverflowError("unix_millis must fit in an unsigned 64-bit integer")
+    return value
+
+
+def _u32(count: int) -> int:
+    """A batch count as the core's ``u32`` — the same shape as :func:`_u64`, for the same
+    reason: PyO3 extracts the extension's ``count: u32`` this way."""
+    value = operator.index(count)
+    if not 0 <= value < 1 << 32:
+        raise OverflowError("count must fit in an unsigned 32-bit integer")
     return value
 
 
@@ -153,7 +168,11 @@ class _Guest:
     # --- guest memory ---------------------------------------------------------------
 
     def _malloc(self, size: int) -> int:
-        ptr = self._call["malloc"](size)
+        # The guest's size_t is 32 bits and the call slot takes its image without a range
+        # check, so a size past it would wrap into a small allocation the batch then
+        # overruns. And the result is an address, not a signed number: masked, so a block in
+        # the upper half of the guest's 4 GiB does not come back negative.
+        ptr = self._call["malloc"](size) & 0xFFFF_FFFF if size < 1 << 32 else 0
         if ptr == 0:
             raise MemoryError(f"hyperuuid: guest malloc({size}) failed")
         # Growing the guest memory can relocate it on the host side, and malloc is the only
@@ -169,10 +188,14 @@ class _Guest:
     def _write(self, ptr: int, data: bytes) -> None:
         ctypes.memmove(self._base + ptr, data, len(data))
 
+    # Both regrowths forget the old block before asking for the new one. If that malloc
+    # fails, the MemoryError leaves no pointer behind to a block the guest has already taken
+    # back — the next, smaller request allocates afresh instead of writing into freed memory.
     def _name_buffer(self, size: int) -> int:
         if size > self._name_cap:
             if self._name_ptr:
                 self._call["free"](self._name_ptr)
+                self._name_ptr, self._name_cap = 0, 0
             self._name_ptr, self._name_cap = self._malloc(size), size
         return self._name_ptr
 
@@ -180,6 +203,7 @@ class _Guest:
         if size > self._batch_cap:
             if self._batch_ptr:
                 self._call["free"](self._batch_ptr)
+                self._batch_ptr, self._batch_cap = 0, 0
             self._batch_ptr, self._batch_cap = self._malloc(size), size
         return self._batch_ptr
 
@@ -301,7 +325,9 @@ def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
     if isinstance(name, str):
         name = name.encode("utf-8")
     elif not isinstance(name, bytes):
-        raise TypeError("name must be str or bytes")
+        # The extension's own words: its extractor says "must be str or bytes" and PyO3
+        # prefixes the argument name.
+        raise TypeError("argument 'name': must be str or bytes")
     guest = _get()
     with _lock:
         guest._write(guest._in, namespace.int.to_bytes(16, "big"))
@@ -324,15 +350,14 @@ def new_v7(unix_millis: int | None = None) -> _uuid.UUID:
 
 
 def _batch_raw(name: str, count: int, unix_millis: int | None) -> bytes:
-    count = int(count)
-    if count < 0:
-        raise OverflowError("can't convert negative int to unsigned")
-    if count == 0:
-        return b""
+    count = _u32(count)
     millis = _u64(unix_millis)
     guest = _get()
     with _lock:
-        out = guest._batch_buffer(count * 16)
+        # A count of 0 still makes the call: the core writes nothing but checks the
+        # timestamp first, so an empty batch rejects a bad one exactly as the extension does.
+        # It needs a valid address and no room, which the scratch gives it.
+        out = guest._batch_buffer(count * 16) if count else guest._out
         rc = guest.call(name, millis, count, out)
         if rc == 0:
             return guest._read(out, count * 16)
@@ -359,11 +384,13 @@ def _fill_bytes(name: str, buffer: bytearray, unix_millis: int | None) -> None:
     length = len(buffer)
     if length % 16 != 0:
         raise ValueError("buffer length must be a multiple of 16 (one whole UUID per 16 bytes)")
-    if length == 0:
-        return
     # The guest cannot write into the caller's bytearray the way the extension does, so this
-    # is one guest batch plus one copy out — still no uuid.UUID objects anywhere.
-    buffer[:] = _batch_raw(name, length // 16, unix_millis)
+    # is one guest batch plus one copy out — still no uuid.UUID objects anywhere. A buffer
+    # too long for the guest's 32-bit address space surfaces as the MemoryError it is.
+    count = length // 16
+    if count >= 1 << 32:
+        raise ValueError("buffer holds more UUIDs than one batch can mint (4294967295)")
+    buffer[:] = _batch_raw(name, count, unix_millis)
 
 
 def fill_v7_bytes(buffer: bytearray, unix_millis: int | None = None) -> None:
@@ -419,3 +446,12 @@ def v6_to_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
 def v6_from_sql_order(uuid_value: _uuid.UUID) -> _uuid.UUID:
     """SQL Server order back to RFC order, version 6."""
     return _reorder("uuid_v6_to_rfc_order", uuid_value)
+
+
+def native_version() -> str:
+    """This library's version as ``"major.minor.patch"``, decoded from the packed
+    ``hyperuuid_version`` export of the wasm module actually loaded."""
+    guest = _get()
+    with _lock:
+        packed = guest.call("hyperuuid_version")
+    return f"{packed >> 16}.{(packed >> 8) & 0xFF}.{packed & 0xFF}"

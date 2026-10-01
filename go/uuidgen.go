@@ -11,6 +11,10 @@
 // This module bundles a native build for every supported platform (see currentTarget) and
 // loads the right one at runtime, the same trick the Java binding uses since neither a Go
 // module nor a .jar has NuGet-style per-RID package selection.
+//
+// Nothing here panics when that load fails. Every function returns an error wrapping
+// ErrNativeUnavailable instead, and Available, LoadError and NativeVersion (load.go) probe
+// the same once-per-process outcome up front, without generating anything.
 package hyperuuid
 
 import (
@@ -52,15 +56,18 @@ func NewV4() (uuid.UUID, error) {
 }
 
 // NewV5 creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name
-// bytes. The same (namespace, name) pair always produces the same UUID.
+// bytes. The same (namespace, name) pair always produces the same UUID; an empty or nil name
+// is valid and hashes the namespace alone.
 func NewV5(namespace uuid.UUID, name []byte) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	out, rc := newV5(namespace, name)
-	if rc != 0 {
-		return uuid.UUID{}, fmt.Errorf("uuid_new_v5 failed with code %d: %w", rc, ErrRandomSource)
+	if uint64(len(name)) > math.MaxUint32 {
+		return uuid.UUID{}, fmt.Errorf("hyperuuid: name of %d bytes exceeds the native length limit", len(name))
 	}
+	// uuid_new_v5 is pure hashing — no entropy, no clock — and has no failure code: it
+	// returns 0 unconditionally, so there is nothing to map onto an error here.
+	out, _ := newV5(namespace, name)
 	return out, nil
 }
 
@@ -110,10 +117,14 @@ func NewV6Batch(count int) ([]uuid.UUID, error) {
 
 // NewV6BatchAt creates count time-sortable version 6 UUIDs sharing one unixMillis timestamp
 // capture. clock_seq and node are independently random per item — unlike version 7, there is
-// no monotonic counter, so items are not guaranteed to sort in creation order.
+// no monotonic counter, so items are not guaranteed to sort in creation order. A count of 0
+// returns a nil slice; a negative one returns ErrNegativeCount.
 func NewV6BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return nil, err
+	}
+	if count < 0 {
+		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
 	}
 	if count == 0 {
 		return nil, nil
@@ -220,10 +231,14 @@ func NewV7Batch(count int) ([]uuid.UUID, error) {
 }
 
 // NewV7BatchAt creates count time-sortable version 7 UUIDs sharing one unixMillis timestamp
-// capture and one contiguous block of the monotonic counter.
+// capture and one contiguous block of the monotonic counter. A count of 0 returns a nil
+// slice; a negative one returns ErrNegativeCount.
 func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return nil, err
+	}
+	if count < 0 {
+		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
 	}
 	if count == 0 {
 		return nil, nil
@@ -256,9 +271,7 @@ func V7ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	out := id
-	out = v7ToSqlOrder(out)
-	return out, nil
+	return v7ToSqlOrder(id), nil
 }
 
 // V7FromSqlOrder is the inverse of V7ToSqlOrder — converts a SQL-Server-ordered version 7 id
@@ -267,9 +280,7 @@ func V7FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	out := id
-	out = v7ToRfcOrder(out)
-	return out, nil
+	return v7ToRfcOrder(id), nil
 }
 
 // V6ToSqlOrder converts an RFC 9562-ordered version 6 id to the byte order SQL Server's
@@ -296,9 +307,7 @@ func V6ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	out := id
-	out = v6ToSqlOrder(out)
-	return out, nil
+	return v6ToSqlOrder(id), nil
 }
 
 // V6FromSqlOrder is the inverse of V6ToSqlOrder — converts a SQL-Server-ordered version 6 id
@@ -307,9 +316,7 @@ func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 	if err := ensureLoaded(); err != nil {
 		return uuid.UUID{}, err
 	}
-	out := id
-	out = v6ToRfcOrder(out)
-	return out, nil
+	return v6ToRfcOrder(id), nil
 }
 
 // ---- Destination-buffer fills -------------------------------------------------------

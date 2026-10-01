@@ -8,8 +8,9 @@ namespace HyperUuid;
  * A parsed 16-byte RFC 9562 UUID value. Minimal by design — this package has no runtime
  * dependency on ramsey/uuid, the same "no extra dependency" positioning as the Go binding's
  * purego-only/no-cgo approach and the Python binding's dependency-free PyO3 wheels.
+ * Casts to, and JSON-encodes as, the hyphenated hex string.
  */
-final class Uuid
+final class Uuid implements \JsonSerializable, \Stringable
 {
     private readonly string $bytes;
 
@@ -30,7 +31,9 @@ final class Uuid
     }
 
     /**
-     * Parses an 8-4-4-4-12 hyphenated hex UUID string.
+     * Parses an 8-4-4-4-12 hyphenated hex UUID string, in either letter case. Exactly that
+     * shape and nothing else — no braces, no `urn:uuid:` prefix, no unhyphenated or
+     * otherwise-hyphenated hex — the same rule the Rust core's own `Uuid::from_str` applies.
      *
      * @param string $string the UUID string to parse
      * @return self the parsed UUID
@@ -38,11 +41,10 @@ final class Uuid
      */
     public static function parse(string $string): self
     {
-        $hex = str_replace('-', '', $string);
-        if (!preg_match('/\A[0-9a-fA-F]{32}\z/', $hex)) {
+        if (!preg_match('/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i', $string)) {
             throw new \InvalidArgumentException("invalid UUID string: {$string}");
         }
-        return new self(hex2bin($hex));
+        return new self(hex2bin(str_replace('-', '', $string)));
     }
 
     /**
@@ -91,6 +93,17 @@ final class Uuid
             substr($hex, 16, 4),
             substr($hex, 20, 12)
         );
+    }
+
+    /**
+     * The JSON representation — the same hyphenated hex string as {@see __toString()}, so
+     * `json_encode(['id' => $uuid])` carries the UUID rather than an empty object.
+     *
+     * @return string the hyphenated hex string
+     */
+    public function jsonSerialize(): string
+    {
+        return $this->__toString();
     }
 
     /**

@@ -59,4 +59,7 @@ interface Backend {
     void v6ToSqlOrder(byte[] uuid);
 
     void v6FromSqlOrder(byte[] uuid);
+
+    /** The {@code hyperuuid_version} export: the core's version, packed {@code major << 16 | minor << 8 | patch}. */
+    int version();
 }

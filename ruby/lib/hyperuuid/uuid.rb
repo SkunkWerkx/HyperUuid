@@ -23,13 +23,22 @@ module HyperUuid
     # The RFC 9562 §5.10 Max UUID — all 128 bits one.
     MAX = new(("\xFF" * 16).b).freeze
 
-    # Parses an 8-4-4-4-12 hyphenated hex UUID string.
+    # The one text shape .parse accepts: 8-4-4-4-12 hex digits, either case, the four hyphens
+    # exactly where #to_s puts them.
+    HYPHENATED = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
+    private_constant :HYPHENATED
+
+    # Parses an 8-4-4-4-12 hyphenated hex UUID string — exactly the shape #to_s produces, in
+    # either case. Nothing else parses: not the bare 32 hex digits, not hyphens anywhere but
+    # those four positions, not braces or a `urn:uuid:` prefix.
     #
-    # @raise [ArgumentError] if +string+ isn't a valid UUID string.
+    # @raise [ArgumentError] if +string+ isn't a String in that shape.
     def self.parse(string)
-      hex = string.delete("-")
-      raise ArgumentError, "invalid UUID string: #{string.inspect}" unless hex.match?(/\A[0-9a-fA-F]{32}\z/)
-      new([hex].pack("H*"))
+      unless string.is_a?(String) && string.match?(HYPHENATED)
+        raise ArgumentError, "invalid UUID string: #{string.inspect}"
+      end
+
+      new([string.delete("-")].pack("H*"))
     end
 
     # The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6).

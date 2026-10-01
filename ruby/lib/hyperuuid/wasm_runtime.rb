@@ -10,9 +10,10 @@ module HyperUuid
   # Same integration shape as the Magnus extension: on require (after runtime.rb has defined
   # the Fiddle backend) this redefines the `HyperUuid::Runtime` singleton methods **in place**
   # — no delegation layer, no second surface. Everything above Runtime (the `Uuid` class, the
-  # module doors, batch slicing) stays shared byte-for-byte across all three backends, and the
-  # same `Runtime::RandomSourceError` / `Runtime::TimestampOutOfRangeError` classes carry the
-  # same messages.
+  # module doors and their argument checks, batch slicing) stays shared byte-for-byte across
+  # all three backends, and the same `HyperUuid::RandomSourceError` /
+  # `HyperUuid::TimestampOutOfRangeError` classes carry the same messages — literally the
+  # same constants and helper runtime.rb defines for the Fiddle backend.
   #
   # Two things differ from the native backends, both forced by the sandbox:
   #
@@ -47,6 +48,7 @@ module HyperUuid
         uuid_new_v4 uuid_new_v5 uuid_new_v6 uuid_v6_unix_millis uuid_new_v6_batch
         uuid_new_v7 uuid_v7_unix_millis uuid_new_v7_batch
         uuid_v7_to_sql_order uuid_v7_to_rfc_order uuid_v6_to_sql_order uuid_v6_to_rfc_order
+        hyperuuid_version
       ].freeze
 
       def initialize(path)
@@ -68,7 +70,11 @@ module HyperUuid
         instance = linker.instantiate(store, mod)
 
         @memory = instance.export("memory").to_memory
-        @fn = EXPORTS.to_h { |name| [name, instance.export(name.to_s).to_func] }
+        @fn = EXPORTS.to_h do |name|
+          export = instance.export(name.to_s) or
+            raise LoadError, "hyperuuid: #{path} does not export #{name} (a module older than this binding)"
+          [name, export.to_func]
+        end
         @in = malloc(16)
         @out = malloc(16)
       end
@@ -105,7 +111,7 @@ module HyperUuid
       def new_v4
         wasm do |w|
           rc = w.fn(:uuid_new_v4).call(w.out)
-          raise RandomSourceError, "uuid_new_v4 failed with code #{rc}" unless rc.zero?
+          raise random_source_failure("uuid_new_v4") unless rc.zero?
           w.memory.read(w.out, 16)
         end
       end
@@ -125,7 +131,7 @@ module HyperUuid
                 w.fn(:uuid_new_v5).call(w.in, name, name_bytes.bytesize, w.out)
               end
             end
-          raise RandomSourceError, "uuid_new_v5 failed with code #{rc}" unless rc.zero?
+          raise random_source_failure("uuid_new_v5") unless rc.zero?
           w.memory.read(w.out, 16)
         end
       end
@@ -135,8 +141,8 @@ module HyperUuid
           rc = w.fn(:uuid_new_v6).call(i64(unix_millis), w.out)
           case rc
           when 0 then w.memory.read(w.out, 16)
-          when 2 then raise TimestampOutOfRangeError, "unix_millis does not fit the 60-bit v6 timestamp field"
-          else raise RandomSourceError, "uuid_new_v6 failed with code #{rc}"
+          when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
+          else raise random_source_failure("uuid_new_v6")
           end
         end
       end
@@ -155,8 +161,8 @@ module HyperUuid
             rc = w.fn(:uuid_new_v6_batch).call(i64(unix_millis), count, out)
             case rc
             when 0 then w.memory.read(out, count * 16)
-            when 2 then raise TimestampOutOfRangeError, "unix_millis does not fit the 60-bit v6 timestamp field"
-            else raise RandomSourceError, "uuid_new_v6_batch failed with code #{rc}"
+            when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
+            else raise random_source_failure("uuid_new_v6_batch")
             end
           end
         end
@@ -167,8 +173,8 @@ module HyperUuid
           rc = w.fn(:uuid_new_v7).call(i64(unix_millis), w.out)
           case rc
           when 0 then w.memory.read(w.out, 16)
-          when 2 then raise TimestampOutOfRangeError, "unix_millis must fit within the RFC 9562 48-bit field"
-          else raise RandomSourceError, "uuid_new_v7 failed with code #{rc}"
+          when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
+          else raise random_source_failure("uuid_new_v7")
           end
         end
       end
@@ -187,8 +193,8 @@ module HyperUuid
             rc = w.fn(:uuid_new_v7_batch).call(i64(unix_millis), count, out)
             case rc
             when 0 then w.memory.read(out, count * 16)
-            when 2 then raise TimestampOutOfRangeError, "unix_millis must fit within the RFC 9562 48-bit field"
-            else raise RandomSourceError, "uuid_new_v7_batch failed with code #{rc}"
+            when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
+            else raise random_source_failure("uuid_new_v7_batch")
             end
           end
         end
@@ -208,6 +214,10 @@ module HyperUuid
 
       def v6_to_rfc_order(bytes)
         rewrite(:uuid_v6_to_rfc_order, bytes)
+      end
+
+      def packed_version
+        wasm { |w| w.fn(:hyperuuid_version).call }
       end
 
       private
@@ -234,7 +244,9 @@ module HyperUuid
 
       # wasm has no unsigned integers: a u64 crosses as an i64. The core's own range checks
       # (48-bit v7, 60-bit v6) still see the exact value the caller passed, they just see
-      # it through a two's-complement reinterpretation on the way in and back.
+      # it through a two's-complement reinterpretation on the way in and back. Exact only
+      # for a value that is a u64 to begin with, which the doors in hyperuuid.rb guarantee
+      # before any backend is called.
       def i64(value)
         value >= 2**63 ? value - 2**64 : value
       end

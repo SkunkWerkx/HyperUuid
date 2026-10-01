@@ -1,6 +1,8 @@
 // Local-dev-only proof that UuidGenerator's FFM downcalls survive GraalVM Native Image
-// ahead-of-time compilation — mirrors csharp/HyperUuid.AotSmokeTest (also not wired into
-// CI, just something a developer runs by hand): `./gradlew :aot-smoke-test:nativeRun`.
+// ahead-of-time compilation — mirrors csharp/HyperUuid.AotSmokeTest. Not wired into CI on
+// the Java side, just something a developer runs by hand under a GraalVM JAVA_HOME:
+// `./gradlew :aot-smoke-test:nativeRun`. `./gradlew :aot-smoke-test:run` is the same program
+// on an ordinary JVM.
 plugins {
     application
     id("org.graalvm.buildtools.native") version "1.1.10"
@@ -26,11 +28,26 @@ dependencies {
 
 application {
     mainClass.set("io.github.skunkwerkx.hyperuuid.aotsmoketest.Main")
+    // `:aot-smoke-test:run` is the same program on an ordinary JVM: with the flag a consumer
+    // passes (README.md's "Native access"), and with -Pwasm selecting the wasm backend
+    // exactly as it does for the native binary below.
+    applicationDefaultJvmArgs = buildList {
+        add("--enable-native-access=ALL-UNNAMED")
+        if (project.hasProperty("wasm")) {
+            add("-Dhyperuuid.backend=wasm")
+            add("-Dpolyglot.engine.WarnInterpreterOnly=false")
+        }
+    }
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_22
-    targetCompatibility = JavaVersion.VERSION_22
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+// The library's own floor, enforced the same way it is there.
+tasks.withType<JavaCompile>().configureEach {
+    options.release = 25
 }
 
 graalvmNative {

@@ -7,7 +7,25 @@ git tree at a tagged commit *is* the published package, so the native binaries h
 here for real, not be staged in transiently by CI. Regenerate locally with
 `cargo build --release` in `rust/` and copy the result in if you need to update one by hand;
 CI's own `build-native` job does the same per-leg during in-repo testing, overwriting whichever
-platform's file matches that leg — harmless, since it's the same build either way.
+platform's file matches that leg — harmless, since it's the same build either way. When a
+platform's file is absent the binding falls back to `rust/target/release/`, so a development
+checkout can also just delete the stale one.
+
+## Which library loads
+
+`NativePlatform.php` picks the directory from the running process:
+
+| RID | Platform |
+| --- | --- |
+| `linux-x64`, `linux-arm64` | Linux on glibc 2.34 or newer |
+| `linux-musl-x64`, `linux-musl-arm64` | Linux on musl (Alpine) — detected by a musl loader in `/proc/self/maps` |
+| `osx-x64`, `osx-arm64` | macOS |
+| `win-x64` | Windows, including ARM hardware |
+
+There is no `win-arm64` for PHP by design: PHP has never shipped a native Windows ARM64
+build, so on ARM hardware it is an x64 process under emulation and can only load the x64
+DLL. A 32-bit PHP, any other architecture and any other OS family are an
+unsupported-platform error.
 
 ## Verifying provenance
 

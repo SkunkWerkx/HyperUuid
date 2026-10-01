@@ -1,12 +1,14 @@
 package io.github.skunkwerkx.hyperuuid;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,6 +18,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -440,6 +445,147 @@ class UuidGeneratorTest {
     void sqlOrderBytesRejectsAWrongSizedBuffer() {
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v7ToSqlOrder(new byte[15]));
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v6FromSqlOrder(new byte[17]));
+    }
+
+    // ---- The v5 name, in every form it can arrive -------------------------------------
+
+    @Test
+    void v5OfTheEmptyNameHashesTheNamespaceAlone() {
+        // The one input that crosses as the ABI's NULL — there are no bytes to pin — so it
+        // gets its own vector: Python's uuid.uuid5(uuid.NAMESPACE_DNS, "").
+        UUID expected = UUID.fromString("4ebd0208-8328-5d69-8c44-ec50939c0967");
+        assertEquals(expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, ""));
+        assertEquals(expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, new byte[0]));
+    }
+
+    @Test
+    void v5OverloadsAgreeOnTheSameBytes() {
+        String name = "www.example.com";
+        UUID expected = UUID.fromString("2ed6657d-e927-568b-95e1-2665a8aea6a2");
+        assertEquals(expected,
+                UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name, StandardCharsets.US_ASCII));
+        // The charset is part of the name: the same text in another encoding is another UUID.
+        assertNotEquals(expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name, StandardCharsets.UTF_16LE));
+    }
+
+    // ---- Batch sizes and timestamps the core cannot be handed ---------------------------
+
+    @Test
+    void v6OverflowTimestampThrows() {
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6(Long.MAX_VALUE));
+    }
+
+    @Test
+    void batchCountOutsideWhatOneBatchCanCarryIsRejected() {
+        // count * 16 is the size of the buffer the core fills. Negative counts, and counts
+        // whose product no longer fits an int — 1 << 28 wraps it to exactly zero — have to
+        // be refused before that multiplication, not discovered by the core writing past
+        // a buffer that came out too small.
+        int[] refused = {
+            -1, Integer.MIN_VALUE, -(1 << 28),
+            UuidGenerator.MAX_BATCH + 1, 1 << 28, (1 << 28) + 1, Integer.MAX_VALUE,
+        };
+        for (int count : refused) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> UuidGenerator.newV7Batch(count, RFC_TEST_VECTOR_MS), "v7 count " + count);
+            assertThrows(IllegalArgumentException.class,
+                    () -> UuidGenerator.newV6Batch(count, RFC_TEST_VECTOR_MS), "v6 count " + count);
+            assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV7Batch(count), "v7 count " + count);
+            assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6Batch(count), "v6 count " + count);
+            assertThrows(IllegalArgumentException.class,
+                    () -> UuidGenerator.requireBatchCount(count), "count " + count);
+        }
+        // The same check guards a UUID[] destination's length; an array that long is not
+        // something a test should allocate, so the limit itself is what is pinned here.
+        assertEquals(Integer.MAX_VALUE / 16, UuidGenerator.MAX_BATCH);
+        UuidGenerator.requireBatchCount(UuidGenerator.MAX_BATCH);
+        UuidGenerator.requireBatchCount(0);
+    }
+
+    @Test
+    void fillRejectsATimestampItsVersionCannotHold() {
+        long past48Bits = 0x0001_0000_0000_0000L;
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(new UUID[4], past48Bits));
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(new UUID[4], -1L));
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV6(new UUID[4], Long.MAX_VALUE));
+
+        // The raw-byte forms too, and a refused fill leaves the caller's buffer alone.
+        byte[] raw = new byte[64];
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(raw, past48Bits));
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV6(raw, Long.MAX_VALUE));
+        assertArrayEquals(new byte[64], raw);
+    }
+
+    @Test
+    void fillV6BytesWritesWholeRfcOrderedUuids() {
+        int count = 16;
+        byte[] raw = new byte[count * 16];
+        UuidGenerator.fillV6(raw, RFC_TEST_VECTOR_MS);
+        for (int i = 0; i < count; i++) {
+            UUID id = RfcBytes.fromRfcBytes(raw, i * 16);
+            assertEquals(6, id.version(), "item " + i + " version");
+            assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v6UnixMillis(id), "item " + i + " timestamp");
+        }
+    }
+
+    // ---- The core itself ----------------------------------------------------------------
+
+    @Test
+    void nativeVersionIsThisBindingsOwn() {
+        // The probe decodes the packed major.minor.patch of the core actually loaded — the
+        // platform library or the wasm module — which must be the one this binding is built
+        // against: build.gradle.kts hands its own version to the test JVM, and rust/Cargo.toml
+        // moves with it.
+        // A CI override may append a prerelease tag (a -ci.N suffix, per build.gradle.kts); the
+        // core carries only major.minor.patch, so compare that much.
+        var expected = System.getProperty("hyperuuid.version").split("-", 2)[0];
+        assertEquals(expected, UuidGenerator.nativeVersion());
+    }
+
+    @Test
+    void isAvailableAgreesWithNativeVersion() {
+        // The suite only ever runs with a core staged, so the probe says so — and it says so
+        // by the same crossing nativeVersion() makes, so the two cannot disagree.
+        assertTrue(UuidGenerator.isAvailable());
+        assertDoesNotThrow(UuidGenerator::nativeVersion);
+    }
+
+    @Test
+    void doorsStayCorrectAcrossThreadsOnPerThreadScratch() throws Exception {
+        // The per-call confined arena became per-thread scratch (UuidGenerator.Scratch), which
+        // turns "thread-confined" from a structural guarantee into a claim — so prove it. Each
+        // thread mints and reads back values only it knows, thousands of times; any
+        // cross-thread bleed of the 16-byte in/out segments surfaces as a timestamp, a
+        // name-based UUID or a byte order that belongs to another thread.
+        int threads = 8;
+        int iterations = 2_000;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        List<Future<?>> running = new ArrayList<>();
+        try {
+            for (int t = 0; t < threads; t++) {
+                int id = t;
+                running.add(pool.submit(() -> {
+                    for (int i = 0; i < iterations; i++) {
+                        long mine = RFC_TEST_VECTOR_MS + id * 1_000_000L + i;
+                        UUID v7 = UuidGenerator.newV7(mine);
+                        assertEquals(mine, UuidGenerator.v7UnixMillis(v7));
+                        assertEquals(v7, UuidGenerator.v7FromSqlOrder(UuidGenerator.v7ToSqlOrder(v7)));
+                        UUID v6 = UuidGenerator.newV6(mine);
+                        assertEquals(mine, UuidGenerator.v6UnixMillis(v6));
+                        String name = "thread-" + id + "-item-" + i;
+                        assertEquals(
+                                UuidGenerator.newV5(UuidGenerator.Namespaces.URL, name),
+                                UuidGenerator.newV5(UuidGenerator.Namespaces.URL, name));
+                    }
+                }));
+            }
+            for (Future<?> task : running) {
+                task.get();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
 }

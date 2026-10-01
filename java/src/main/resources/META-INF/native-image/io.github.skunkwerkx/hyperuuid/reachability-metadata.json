@@ -88,6 +88,10 @@
             "allowHeapAccess": true
           }
         }
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": []
       }
     ]
   }

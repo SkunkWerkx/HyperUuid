@@ -21,7 +21,7 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 # allocator on this target is dlmalloc behind them); exporting them costs nothing and keeps
 # ffi.rs's "plain pointers, no allocator protocol" contract untouched for every native
 # platform. Linker flags rather than #[no_mangle] shims, so the C ABI surface stays exactly
-# the twelve uuid_* exports on every other target.
+# the twelve uuid_* exports plus hyperuuid_version on every other target.
 #
 # Using the guest's allocator, rather than a host-picked offset past the data segments, is
 # load-bearing: dlmalloc claims the tail of the initial memory on first use, and a batch call
@@ -31,13 +31,46 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 [target.wasm32-wasip1]
 rustflags = ["-C", "link-arg=--export=malloc", "-C", "link-arg=--export=free"]
 
+# musl (Alpine): every *-linux-musl target defaults to a statically linked C runtime, and
+# under that default rustc cannot produce a cdylib at all — it warns "dropping unsupported
+# crate type `cdylib`" and builds only the rlib, exiting 0. Turning crt-static off is what
+# makes `cargo build` on Alpine yield libhyperuuid.so, dynamically linked against musl's libc
+# like any other shared library there.
+#
+# This is the dev-loop half. The library CI ships additionally links the unwinder statically
+# (the forge's musl-native/build-musl.sh, which sets RUSTFLAGS and so supersedes these
+# sections), because a plain build keeps a NEEDED entry for libgcc_s.so.1 — absent from the
+# bare `alpine`, `python:*-alpine` and `golang:*-alpine` images, where it fails to load.
+# A build made with only the flag below needs `apk add libgcc` wherever it runs.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+# wasm32-unknown-emscripten is built for one thing: the static library the NuGet package
+# links into a Blazor WebAssembly app (`cargo wasm-staticlib`, below). That library is built
+# without Rust's standard library, and a no_std artifact cannot unwind, so panics abort on
+# this target — rustc refuses the build otherwise ("unwinding panics are not supported
+# without std"). A panic is then the wasm `unreachable` trap from lib.rs's handler.
+[target.wasm32-unknown-emscripten]
+rustflags = ["-C", "panic=abort"]
+
 # Local-dev builds of the extension features, each in its own target dir. The ruby and php
 # features produce a differently-shaped libhyperuuid.so (Init_hyperuuid_native / the PHP module
 # entry point) at the same path as the plain cdylib that Fiddle, ctypes-free FFI, P/Invoke,
 # FFM, cgo and PHP's ext-ffi all dlopen from target/release/, so building one over the other
-# silently breaks the rest. `cargo ruby` / `cargo php` keep them apart; the python feature
+# silently breaks the rest. `cargo ruby-ext` / `cargo php-ext` keep them apart; the python feature
 # gets the same isolation from python/.cargo/config.toml, since maturin runs cargo from there.
 # Output lands in target/ruby/release/ and target/php/release/.
 [alias]
-ruby = "build --release --features ruby --target-dir target/ruby"
-php = "build --release --features php --target-dir target/php"
+ruby-ext = "build --release --features ruby --target-dir target/ruby"
+php-ext = "build --release --features php --target-dir target/php"
+# The Blazor WebAssembly static library: libhyperuuid.a for wasm32-unknown-emscripten, with no
+# copy of Rust's standard library inside it. `rustc --crate-type staticlib` rather than a
+# [lib] entry, because the override is for this one invocation — every other build of this
+# crate wants the cdylib. `--no-default-features --features wasm-staticlib` is what leaves
+# std out and supplies the panic handler in its place; two Hyper* libraries that each
+# carried std could not be linked into one app (`duplicate symbol: rust_eh_personality`).
+# Output: target/wasm32-unknown-emscripten/release/libhyperuuid.a.
+wasm-staticlib = "rustc --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features wasm-staticlib"

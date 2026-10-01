@@ -5,13 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
-    <!-- The real, committed version, bumped and re-verified against a real scratch project
-         pulling straight from nuget.org before every tag — full history in git log for this
-         file. 0.0.6: eliminated the separate browser-wasm build entirely (see
-         UuidGenerator.cs's own remarks) — one compiled assembly for every platform now,
-         verified byte-identical across two independent from-scratch builds, the leading
-         suspect for every prior release's failing NuGet health checks. nuget-org-pack packs
-         this as-is, no CI-side override, ahead of the coordinated v0.1.0 release. -->
+    <!-- The committed version prepare-release.yml bumps — the same single mechanical sweep
+         that keeps every binding's manifest in lockstep with rust/Cargo.toml. Packed as-is,
+         no CI-side override; UuidGenerator.NativeVersion reports the core's own, so a test
+         pins the two together. -->
     <Version>0.3.0</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
@@ -90,14 +87,30 @@
          ProjectReference (as used by HyperUuid.Tests) doesn't get the deps.json-driven
          runtimes/{RID}/native probing that only kicks in for an actual consumed NuGet package,
          but every native library load DOES probe the assembly's own directory. Platform-generic
-         on purpose — CI runs this same project on 5 different RIDs, each with only its own
-         single native file present, so this can't be hardcoded to one of them. Deliberately
-         doesn't match runtimes/browser-wasm/nativeassets/ (different folder name, "nativeassets"
-         not "native") — that asset needs the real NativeFileReference wiring below, not a flat
-         copy; nothing loads it via dlopen. -->
-    <None Include="runtimes/**/native/*" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Auto-imported into every consuming project via NuGet's build/{tfm}/{PackageId}.targets
-         convention — see the file itself for why this is required at all (NuGet's
+         on purpose — CI runs this same project on every RID the package carries (the six
+         desktop ones and the two musl ones, linux-musl-x64 and linux-musl-arm64), each leg with
+         only its own single native file present, so this can't be hardcoded to one of them.
+         Deliberately doesn't match runtimes/browser-wasm/nativeassets/ (different folder name,
+         "nativeassets" not "native") — that asset needs the real NativeFileReference wiring
+         below, not a flat copy; nothing loads it via dlopen.
+
+         Two spellings of the one copy, because flattening is only safe for a single RID: once
+         more than one is staged (the pack job stages all of them, and a dev box can easily
+         hold a glibc and a musl build side by side), libhyperuuid.so from linux-x64,
+         linux-arm64 and both musl RIDs all flatten to the same output filename and whichever
+         copies last wins. So when this SDK's own RID is among the staged ones, only that one
+         is flattened — on Alpine the SDK's RID is linux-musl-x64, so the musl build is the one
+         that lands; everything-flattened stays the fallback for a leg whose SDK RID differs
+         from the one RID it staged. -->
+    <None Include="runtimes/$(NETCoreSdkRuntimeIdentifier)/native/*"
+          Condition="Exists('runtimes/$(NETCoreSdkRuntimeIdentifier)/native')"
+          Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="runtimes/**/native/*"
+          Condition="!Exists('runtimes/$(NETCoreSdkRuntimeIdentifier)/native')"
+          Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Auto-imported into every consuming project via NuGet's build/{PackageId}.targets
+         convention, and into projects that reach the package through another project via
+         buildTransitive/ — see the file itself for why this is required at all (NuGet's
          runtimes/{rid}/nativeassets/ package convention is real, and the WASM SDK really does
          auto-promote @(NativeLibrary) into @(NativeFileReference), but restore doesn't
          populate @(NativeLibrary) from a plain PackageReference's nativeassets folder the way
@@ -105,6 +118,29 @@
          assumed). Without this file, a real NuGet consumer's browser-wasm build succeeds but
          throws DllNotFoundException("*") at runtime. -->
     <None Include="build/**" Pack="true" PackagePath="build" />
+    <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive" />
+    <!-- Local dev loop, the same one HyperCast's csproj carries: when the Rust core has been
+         built in-repo (a release-profile cargo build in rust/), copy that fresh native library
+         straight to the output so tests and benchmarks run against it without any packaging
+         step. CI's runtimes/ layout above takes over for real packages; both patterns copy to
+         the output root, where native library resolution always probes.
+
+         Only when this SDK's own RID has NOT been placed under runtimes/ explicitly. Both
+         items link to the same output filename, and PreserveNewest lets the newer one win —
+         which in CI would be the wrong one, since cargo runs in the same job before the C#
+         leg does. Explicit placement is the signal that someone else already staged the
+         right bytes. The RID test also keeps the two C libraries apart: on Alpine the SDK's
+         RID is linux-musl-x64, so a staged musl build is never displaced by whatever sits in
+         rust/target/release. -->
+    <None Include="../../rust/target/release/libhyperuuid.so"
+          Condition="Exists('../../rust/target/release/libhyperuuid.so') And !Exists('runtimes/$(NETCoreSdkRuntimeIdentifier)/native/libhyperuuid.so')"
+          Link="libhyperuuid.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="../../rust/target/release/libhyperuuid.dylib"
+          Condition="Exists('../../rust/target/release/libhyperuuid.dylib') And !Exists('runtimes/$(NETCoreSdkRuntimeIdentifier)/native/libhyperuuid.dylib')"
+          Link="libhyperuuid.dylib" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="../../rust/target/release/hyperuuid.dll"
+          Condition="Exists('../../rust/target/release/hyperuuid.dll') And !Exists('runtimes/$(NETCoreSdkRuntimeIdentifier)/native/hyperuuid.dll')"
+          Link="hyperuuid.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
 </Project>

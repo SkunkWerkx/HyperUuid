@@ -8,3 +8,9 @@ missing_docs:
   # would flag files that were never meant to be documented API in the first place. `error`
   # (not `warning`) so this fails a plain `swiftlint lint` too, not just `--strict`.
   error: [public, open]
+  # Off, where SwiftLint's default is on: the default skips every type with an inheritance
+  # clause — and everything declared inside it — on the theory that its docs are inherited.
+  # Here that clause is `: Error, CustomStringConvertible, LocalizedError`, which hands no
+  # member a doc comment, so the default exempted both public error types — their cases and
+  # their `description` — from the rule this file exists to enforce.
+  excludes_inherited_types: false

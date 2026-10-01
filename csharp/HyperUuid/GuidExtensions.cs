@@ -58,9 +58,15 @@ public static class GuidExtensions
         /// UUID whose embedded timestamp lands past year 9999, which
         /// <see cref="DateTimeOffset"/> cannot represent. That is inherited from
         /// <see cref="UuidGenerator.V7Timestamp"/> and is deliberately not swallowed into
-        /// <see langword="null"/>: a v7 UUID from the year 12000 genuinely does carry a
+        /// <see langword="null"/>: a v7 UUID from the year 10500 genuinely does carry a
         /// timestamp, so reporting "no timestamp" would be a lie about the value rather than a
         /// description of it.
+        /// </para>
+        /// <para>
+        /// The opposite edge is quiet rather than loud: a v6 UUID whose embedded timestamp
+        /// predates 1970 — legitimate, since the v6 field counts from 1582, but only another
+        /// generator can have minted it — reads back as the Unix epoch, inherited from
+        /// <see cref="UuidGenerator.V6UnixMillis"/>.
         /// </para>
         /// </remarks>
         /// <example>

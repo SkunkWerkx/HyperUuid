@@ -9,11 +9,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Test and dev-loop setup learned while porting the WASM lineup to HyperCast, carried back,
-plus one fix to what the C# package ships for Blazor WebAssembly on .NET 11.
+Three themes. *A load probe everywhere*: the core now reports its own version, and every
+binding fronts it with an availability check, the pair HyperCast already had. *musl*:
+`linux-musl-x64` and `linux-musl-arm64` are built, attested and shipped, so Alpine gets a
+native library instead of a glibc one that cannot load. *Only supported runtimes*: every
+floor that had reached end of life is raised, and the floors are now tested. Around those,
+the fixes from a full audit of all eight bindings, and the test and dev-loop setup carried
+back from HyperCast's wasm port.
 
 ### Added
 
+- **`hyperuuid_version` — the load probe, in the core and in every binding.** A
+  zero-argument export returning the core's version packed `major << 16 | minor << 8 |
+  patch`, the same shape as `hypercast_version`, so a host can prove the library it loaded
+  is the one its binding was built against before minting anything. Each binding fronts it
+  with a check that never throws and the loaded version as text: C#
+  `UuidGenerator.IsAvailable`/`NativeVersion`, Java `isAvailable()`/`nativeVersion()`, Go
+  `Available()`/`LoadError()`/`NativeVersion()` with `ErrNativeUnavailable` for
+  `errors.Is`, Swift `isAvailable`/`nativeVersion()` with a public `NativeLibraryError`,
+  Ruby `HyperUuid.available?`/`native_version`, PHP `HyperUuid::isAvailable()`/
+  `nativeVersion()`, Python `native_version()`, and `hyperuuid::hyperuuid_version()` in
+  Rust. On every backend, wasm included. A library that predates the export (0.3.0 and
+  earlier) reads as unavailable. *(every package)*
+- **musl (Alpine): `linux-musl-x64` and `linux-musl-arm64`.** Built inside an Alpine
+  container with the unwinder linked statically, so the library depends on musl's libc and
+  nothing else and loads on a bare `alpine`, `python:alpine` or `golang:alpine` image. In
+  the NuGet package, the jar, the gems, `go/native/` and `php/src/native/`, and as
+  `musllinux_1_2` wheels. Each binding resolves it for a process that has a musl loader
+  mapped; Ruby runs on its Fiddle backend there. Through 0.3.0 Alpine got the glibc library,
+  which does not load under musl. Swift ships no musl build: its musl target links fully
+  statically and has no dynamic loader. *(every package but Swift)*
+- **C# — `NewV5(Guid, ReadOnlySpan<char>)`.** The `string` overload's path for a name held
+  as a slice; nothing is materialized first. *(NuGet)*
+- **Java — `Automatic-Module-Name: io.github.skunkwerkx.hyperuuid`**, and a README section
+  on `--enable-native-access`. *(Maven Central)*
+- **Go — `ErrNegativeCount`.** The batch functions return it for a negative count instead of
+  panicking in `make`. `Example*` tests for pkg.go.dev, and the zero-allocation claims held
+  by `testing.AllocsPerRun` tests. *(`go get`)*
+- **Swift — `fillV6(into:)`/`fillV7(into:)` over an `inout [UUID]` at the current time**,
+  which the raw-buffer forms already had. *(`.package(url:)`)*
+- **PHP — `Uuid` implements `JsonSerializable`**, so `json_encode` carries the string
+  instead of `{}`. *(Packagist)*
+- **Python — the package is typed.** `py.typed` ships with a stub for the extension module,
+  so mypy and pyright see `uuid.UUID` and `datetime` instead of `Any`; a test type-checks a
+  consumer under `mypy --strict`. *(PyPI)*
+- **Ruby — `rake native:dev`.** Builds the Magnus extension for the running Ruby and stages
+  it where `require` looks, the step `cargo ruby-ext` alone never did. *(dev only)*
+- **The declared floors are tested, and so is every wheel.** CI's new musl job runs the PHP,
+  Ruby and Python suites on the oldest version each package declares as well as the newest;
+  the Go purego backend now runs on Linux and macOS, where only cgo did; and the release
+  installs each wheel and calls into it before anything is published. *(dev only)*
+- **The AOT and browser smoke tests cross every native entry point** in C#, and Java's AOT
+  smoke test calls every public method; each covered about half before, while claiming
+  more. *(dev only)*
 - **A repeatable Native Image proof of the wasm path.** `./gradlew :aot-smoke-test:nativeRun
   -Pwasm` puts GraalWasm on the smoke test's classpath and runs the binary with
   `-Dhyperuuid.backend=wasm`; the binary prints which backend it took. The 0.3.0 receipt for
@@ -32,17 +80,105 @@ plus one fix to what the C# package ships for Blazor WebAssembly on .NET 11.
   `fiddle_library_available?` sees the in-repo build too. Same dev trap as HyperCast's
   README already documents: an extension-feature build overwrites the plain cdylib, and the
   fallback will dlopen it and fail on unresolved `Py*` symbols until a plain
-  `cargo build --release` puts it back. `cargo ruby` and `cargo php` (aliases in
+  `cargo build --release` puts it back. `cargo ruby-ext` and `cargo php-ext` (aliases in
   `rust/.cargo/config.toml`) and `python/.cargo/config.toml` now build the extensions into
   their own target directories, so that no longer happens. *(dev only)*
 - **A browser proof of the C# WebAssembly package.** `csharp/HyperUuid.WasmSmokeTest` is
-  rewritten to import the shipped `build/net10.0/HyperUuid.targets` and call v4, v5, v6, v7
+  rewritten to import the shipped `build/HyperUuid.targets` and call v4, v5, v6, v7
   and a 1000-id batch through the public `UuidGenerator` API (it previously declared its
   own P/Invokes and no longer worked). `./check.sh` publishes it, loads it in headless
   Chromium and requires `PASS`. *(dev only)*
 
+### Changed
+
+- **Only upstream-supported runtimes.** PHP's floor is 8.2 (8.1 ended 2025-12-31), Ruby's is
+  3.3 (3.2 ended 2026-03-31), and Java's is JDK 25 (22, 23 and 24 are end of life; 25 is the
+  first LTS with the final FFM API, and the jar is compiled `--release 25`). A consumer on
+  an older runtime keeps resolving 0.3.0. *(Packagist, RubyGems, Maven Central)*
+- **Python — the floor is 3.11.** CPython 3.9 reached end of life in October 2025 and 3.10
+  does on 2026-10-31, so `requires-python` is `>=3.11` and the wheels are built
+  `abi3-py311`: still one wheel per platform, covering every CPython from 3.11 up, and the
+  same floor HyperCast has. A 3.9 or 3.10 interpreter keeps resolving 0.3.0. A floor past
+  3.10 also puts `PyUnicode_AsUTF8AndSize` in the stable ABI, so `new_v5` with a `str` name now hashes the string's own UTF-8 in place
+  instead of encoding and copying it on every call. *(PyPI)*
+- **A release rebuilds the native libraries at the version it ships.** The libraries now
+  report their own version, so the last green CI run from before the version bump is no
+  longer reusable: `prepare-release` dispatches CI on the bump commit, staging follows that
+  run automatically, and `release.yml` refuses a tag whose CI run or committed libraries
+  were built at any other version. *(release machinery)*
+- **An architecture with no native build is no longer taken for x64.** Go and PHP report an
+  unsupported platform, Swift refuses to compile for it, and Java resolves to no native
+  build and falls back to wasm, as its README always said it would; Java also falls back
+  when a bundled library will not load. PHP on Windows always loads the x64 library, since
+  PHP there is an x64 process even on ARM hardware. *(Maven Central, `go get`,
+  `.package(url:)`, Packagist)*
+- **Caller errors are the same exception on every backend, and name the mistake.**
+  Out-of-range timestamps and batch counts, wrong argument types and null names were
+  whatever the backend happened to raise: `NullReferenceException` and `OverflowException`
+  in C#, `RangeError`/`NoMemoryError` or a silent wrap in Ruby, `OverflowError` or silent
+  coercion in Python, an FFI error in PHP. Each binding now checks once, above its backends.
+  Ruby's exceptions are `HyperUuid::TimestampOutOfRangeError`/`RandomSourceError` (the
+  `Runtime::` names remain as aliases). *(NuGet, RubyGems, PyPI, Packagist)*
+- **`Uuid.parse` takes the 8-4-4-4-12 form only** in Ruby and PHP, matching the core. Both
+  used to delete every hyphen first, so bare and misplaced-hyphen strings parsed.
+  *(RubyGems, Packagist)*
+- **Python — a `datetime` is truncated to its millisecond**, where it was rounded through a
+  float and could stamp a UUID up to half a millisecond late. *(PyPI)*
+- **Swift and Go open the native library `RTLD_LOCAL`**, and Swift opens it in place: every
+  process used to copy it to a fresh temp file and leave it behind. A negative Swift batch
+  count is a precondition failure, not an empty array. *(`.package(url:)`, `go get`)*
+- **C# — a Blazor WebAssembly project below .NET 11 gets warning `HYPERUUID001` and no
+  native link**, instead of the wasm wiring applying to every browser project. *(NuGet)*
+
 ### Fixed
 
+- **C# — a Blazor WebAssembly app could not use HyperUuid and HyperCast together.** Each
+  package's wasm static library bundled its own copy of Rust's standard library, and the
+  two collided at link time: `wasm-ld: duplicate symbol: rust_eh_personality`. The library
+  is now built without std (`cargo wasm-staticlib`: `--no-default-features` plus a
+  `wasm-staticlib` feature that supplies the panic handler std would have, with panics
+  aborting on that target), so there is nothing to collide. Proven by linking both packed
+  packages into one Blazor app and running it in headless Chromium; CI fails the build if
+  the library ever defines `rust_eh_personality` again. *(NuGet, `hyperuuid` crate)*
+- **C# — a Blazor WebAssembly app that reached the package through a class library got no
+  native link at all.** NuGet imports `build/` only into a project that references a package
+  directly, so an app depending on a library that depends on HyperUuid received the managed
+  assembly and none of the wasm wiring. The package now also ships `buildTransitive/`,
+  which flows to every project downstream, and an app using both HyperUuid and HyperCast is
+  handed the exception-handling translation flag once instead of twice. The file now sits at `build/HyperUuid.targets`, with no target-framework folder, since it gates itself. Proven with
+  a packed `.nupkg`, a class library and a Blazor app in headless Chromium. *(NuGet)*
+- **An empty v5 name crossed the C ABI as a null pointer.** C#, Go, Ruby's Fiddle backend
+  and Swift's raw-buffer form hand over null for a zero-length name, and `uuid_new_v5` built
+  a slice from it, which is undefined behaviour. The export no longer touches the pointer
+  when the length is zero, and every binding pins the empty-name vector. *(every package)*
+- **Java — a batch count past `Integer.MAX_VALUE / 16` wrote past a Java array.**
+  `count * 16` wrapped to a small or zero length while the core still wrote the full batch.
+  Such a count, or a negative one, is `IllegalArgumentException` on both backends.
+  *(Maven Central)*
+- **Python — `new_v6_batch`/`new_v7_batch` narrowed `count` to 32 bits.** `2**32 + 1`
+  minted one UUID and returned it as the batch, and a count the allocator refused aborted
+  the interpreter. Out of range is `ValueError`, unallocatable is `MemoryError`. On the wasm
+  backend a failed buffer regrow left a dangling guest pointer. *(PyPI)*
+- **Python — a `bytes` name cost about a microsecond more than a `str` one in `new_v5`.**
+  The derived PyO3 extractor built and discarded a `TypeError` on every `bytes` call; a
+  hand-written one checks the type directly. *(PyPI)*
+- **Swift — `newV6(_: Date)`/`newV7(_: Date)` trapped on a date before 1970**, and a missing
+  resource bundle crashed the process through SwiftPM's generated accessor. The first throws
+  `timestampOutOfRange`; the second is a thrown `NativeLibraryError` and
+  `isAvailable == false`, with the deployment requirement documented. *(`.package(url:)`)*
+- **Go — a core missing a symbol panicked on the purego backend** and left the package
+  half-initialised; it is a load error, as on cgo. `NewV5` could report `ErrRandomSource`,
+  which version 5 cannot produce. *(`go get`)*
+- **Ruby — on Alpine, 0.3.0 loaded the glibc library and the first call raised
+  `Fiddle::DLError`**; the wasm backend failed with `NoMethodError` on a module missing an
+  export. *(RubyGems)*
+- **Java — selecting wasm without GraalWasm now says what to add.** The message naming the
+  two artifacts existed but was unreachable. *(Maven Central)*
+- **Docs that had drifted from the code.** C#'s shipped XML docs said the build "ships
+  linux-arm64 only"; the Python READMEs described an sdist that is not published; the root
+  README still said the batch functions allocate; Go's and PHP's READMEs gave commands and
+  paths that do not exist. PHP's README now says how to enable FFI under a web SAPI.
+  *(docs only)*
 - **C# — Blazor WebAssembly on .NET 11 failed in the browser.** .NET 11 links browser-wasm
   with the new exception-handling encoding while the precompiled Rust standard library
   inside the static library uses the legacy one; the link succeeded and the browser then
