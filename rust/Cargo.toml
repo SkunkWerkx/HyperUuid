@@ -35,14 +35,16 @@ ext-php-rs = { version = "0.15", optional = true }
 # than relying on the default.
 default = ["std"]
 std = ["getrandom/std"]
-# The no_std wasm static library the NuGet package links into a Blazor WebAssembly app. A
+# The no_std static libraries, for the two hosts that link the core in rather than load it:
+# a Blazor WebAssembly app (the NuGet package, wasm32-unknown-emscripten) and a Swift
+# executable with no dynamic loader (Swift's static Linux SDK on musl, and its wasm SDK). A
 # static library is a final artifact as far as panics go, so with `std` off it needs the
 # `#[panic_handler]` std would have supplied; this feature is that handler and nothing else
-# (see lib.rs). It exists so that library carries no copy of Rust's standard library: two
-# Hyper* static libraries that each bundled std could not be linked into one wasm module
-# (`duplicate symbol: rust_eh_personality`). Off by default, wasm32 only, and never for an
-# rlib consumer, who supplies a handler of their own.
-wasm-staticlib = []
+# (see lib.rs). It exists so those libraries carry no copy of Rust's standard library: two
+# Hyper* static libraries that each bundled std could not be linked into one program
+# (`duplicate symbol: rust_eh_personality`). Off by default, and never for an rlib consumer,
+# who supplies a handler of their own.
+staticlib = []
 python = ["dep:pyo3", "std"]
 ruby = ["dep:magnus", "std"]
 php = ["dep:ext-php-rs", "std"]
@@ -72,3 +74,12 @@ harness = false
 [profile.release]
 lto = true
 codegen-units = 1
+
+# The profile the `staticlib` feature's libraries are built with (`cargo staticlib`, in
+# .cargo/config.toml): release, plus panics that abort. A no_std artifact cannot unwind —
+# rustc refuses the build otherwise ("unwinding panics are not supported without std") —
+# and a profile carries that to every dependency on every target, where a per-target
+# rustflags entry would have to be repeated for each one.
+[profile.staticlib]
+inherits = "release"
+panic = "abort"

@@ -69,8 +69,14 @@ php-ext = "build --release --features php --target-dir target/php"
 # The Blazor WebAssembly static library: libhyperuuid.a for wasm32-unknown-emscripten, with no
 # copy of Rust's standard library inside it. `rustc --crate-type staticlib` rather than a
 # [lib] entry, because the override is for this one invocation — every other build of this
-# crate wants the cdylib. `--no-default-features --features wasm-staticlib` is what leaves
+# crate wants the cdylib. `--no-default-features --features staticlib` is what leaves
 # std out and supplies the panic handler in its place; two Hyper* libraries that each
 # carried std could not be linked into one app (`duplicate symbol: rust_eh_personality`).
 # Output: target/wasm32-unknown-emscripten/release/libhyperuuid.a.
-wasm-staticlib = "rustc --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features wasm-staticlib"
+wasm-staticlib = "rustc --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features staticlib"
+# The same no_std static library for any other target: `cargo staticlib --target <triple>`.
+# The Swift binding links one per Linux and WebAssembly triple; the forge's
+# swift-static/build-swift-static.sh runs this for each and stages the result into
+# swift/HyperUuidCore.artifactbundle. Built on the `staticlib` profile (Cargo.toml), which is
+# release plus `panic = "abort"`. Output: target/<triple>/staticlib/libhyperuuid.a.
+staticlib = "rustc --profile staticlib --crate-type staticlib --no-default-features --features staticlib"

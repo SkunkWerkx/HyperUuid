@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0",
+  "artifacts": {
+    "HyperUuidCore": {
+      "type": "staticLibrary",
+      "version": "0.3.0",
+      "variants": [
+        {
+          "path": "x86_64-unknown-linux-gnu/libhyperuuid.a",
+          "supportedTriples": ["x86_64-unknown-linux-gnu"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "aarch64-unknown-linux-gnu/libhyperuuid.a",
+          "supportedTriples": ["aarch64-unknown-linux-gnu"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "x86_64-swift-linux-musl/libhyperuuid.a",
+          "supportedTriples": ["x86_64-swift-linux-musl"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "aarch64-swift-linux-musl/libhyperuuid.a",
+          "supportedTriples": ["aarch64-swift-linux-musl"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "wasm32-unknown-wasip1/libhyperuuid.a",
+          "supportedTriples": ["wasm32-unknown-wasip1"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,14 +1,18 @@
 import Foundation
 
+#if canImport(HyperUuidCore)
+import HyperUuidCore
+#endif
+
 /// RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7 time-sortable) calling directly
-/// into the native `libhyperuuid` shared library via `dlopen`/`dlsym` (or the Windows
-/// equivalent) plus an `@convention(c)` function-pointer cast — no runtime bridge, no cgo-
-/// style shim (see `DynamicLibrary.swift`).
+/// into the native `hyperuuid` core through `@convention(c)` function pointers — no runtime
+/// bridge, no cgo-style shim.
 ///
-/// This package bundles a native build for every platform (see `NativePlatform`) and picks
-/// the right one at compile time. Every call `throws`: ``Error`` when a native call ran and
-/// failed, ``NativeLibraryError`` when the library itself couldn't be loaded — a question
-/// ``isAvailable`` answers up front, without a `do`/`catch`.
+/// On Linux and WebAssembly the core is linked into the executable, so it is always there.
+/// On macOS and Windows it is a shared library bundled with this package and opened on first
+/// use (see `NativePlatform` and `DynamicLibrary`). Every call `throws`: ``Error`` when a
+/// native call ran and failed, ``NativeLibraryError`` when the shared library couldn't be
+/// loaded — a question ``isAvailable`` answers up front, without a `do`/`catch`.
 public enum UuidGenerator {
     /// An error returned when a native UUID generation call fails. A library that couldn't
     /// be loaded at all is ``NativeLibraryError`` instead.
@@ -55,9 +59,9 @@ public enum UuidGenerator {
 
     // A class, deliberately: `loaded()` used to copy this struct — one function pointer per
     // native export — out of the `Result` on every single call. A reference is one retain.
-    private final class LoadedLibrary {
-        let library: DynamicLibrary
-        let origin: DynamicLibrary.Origin
+    // Immutable once built, and C function pointers carry no state of their own.
+    private final class LoadedLibrary: Sendable {
+        let origin: NativeLibraryOrigin
         let newV4: UuidNewV4Fn
         let newV5: UuidNewV5Fn
         let newV6: UuidNewV6Fn
@@ -72,13 +76,12 @@ public enum UuidGenerator {
         let v6ToRfcOrder: UuidV6ToRfcOrderFn
         let version: VersionFn
 
-        init(library: DynamicLibrary, origin: DynamicLibrary.Origin, newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
+        init(origin: NativeLibraryOrigin, newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
              newV6: UuidNewV6Fn, v6UnixMillis: UuidV6UnixMillisFn, newV6Batch: UuidNewV6BatchFn,
              newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
              v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
              v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn,
              version: VersionFn) {
-            self.library = library
             self.origin = origin
             self.newV4 = newV4; self.newV5 = newV5
             self.newV6 = newV6; self.v6UnixMillis = v6UnixMillis; self.newV6Batch = newV6Batch
@@ -126,6 +129,20 @@ public enum UuidGenerator {
     // crashing the process.
     private static let loadResult: Result<LoadedLibrary, Swift.Error> = Result { try load() }
 
+    #if canImport(HyperUuidCore)
+    // Linked in: the C declarations are the table, and there is nothing to find or open.
+    private static func load() throws -> LoadedLibrary {
+        LoadedLibrary(
+            origin: .staticallyLinked, newV4: uuid_new_v4, newV5: uuid_new_v5,
+            newV6: uuid_new_v6, v6UnixMillis: uuid_v6_unix_millis, newV6Batch: uuid_new_v6_batch,
+            newV7: uuid_new_v7, v7UnixMillis: uuid_v7_unix_millis, newV7Batch: uuid_new_v7_batch,
+            v7ToSqlOrder: uuid_v7_to_sql_order, v7ToRfcOrder: uuid_v7_to_rfc_order,
+            v6ToSqlOrder: uuid_v6_to_sql_order, v6ToRfcOrder: uuid_v6_to_rfc_order,
+            version: hyperuuid_version)
+    }
+    #else
+    // `DynamicLibrary` never closes its handle, so the function pointers resolved here stay
+    // valid for the life of the process without this holding the library object itself.
     private static func load() throws -> LoadedLibrary {
         let (path, origin) = try DynamicLibrary.locateBundled()
         let library = try DynamicLibrary(path: path)
@@ -151,13 +168,14 @@ public enum UuidGenerator {
             try library.symbol("uuid_v6_to_rfc_order"), to: UuidV6ToRfcOrderFn.self)
         let version = unsafeBitCast(try library.symbol("hyperuuid_version"), to: VersionFn.self)
         return LoadedLibrary(
-            library: library, origin: origin, newV4: newV4, newV5: newV5,
+            origin: origin, newV4: newV4, newV5: newV5,
             newV6: newV6, v6UnixMillis: v6UnixMillis, newV6Batch: newV6Batch,
             newV7: newV7, v7UnixMillis: v7UnixMillis, newV7Batch: newV7Batch,
             v7ToSqlOrder: v7ToSqlOrder, v7ToRfcOrder: v7ToRfcOrder,
             v6ToSqlOrder: v6ToSqlOrder, v6ToRfcOrder: v6ToRfcOrder,
             version: version)
     }
+    #endif
 
     private static func loaded() throws -> LoadedLibrary {
         switch loadResult {
@@ -166,20 +184,23 @@ public enum UuidGenerator {
         }
     }
 
-    /// Whether the bundled native library loaded and exports the ABI this binding was
-    /// built against — the twelve `uuid_*` functions and `hyperuuid_version` — the probe a
-    /// consumer with a fallback gates on, so a load failure never has to be caught at a
-    /// call site. Drives the same lazy, once-only load every other call does, so it costs
-    /// nothing after the first answer; never throws and never traps, a missing resource
-    /// directory included. `true` exactly when ``nativeVersion()`` would succeed.
+    /// Whether the native core is usable: always `true` on Linux and WebAssembly, where it
+    /// is linked into the executable; on macOS and Windows, whether the bundled shared
+    /// library loaded and exports the ABI this binding was built against — the twelve
+    /// `uuid_*` functions and `hyperuuid_version`. The probe a consumer with a fallback gates
+    /// on, so a load failure never has to be caught at a call site. Drives the same lazy,
+    /// once-only load every other call does, so it costs nothing after the first answer;
+    /// never throws and never traps, a missing resource directory included. `true` exactly
+    /// when ``nativeVersion()`` would succeed.
     public static var isAvailable: Bool {
         if case .success = loadResult { return true }
         return false
     }
 
-    /// Where the load found the library — internal, for the test suite to pin that it came
-    /// out of the resource bundle rather than the build machine's source-tree fallback.
-    static func nativeLibraryOrigin() throws -> DynamicLibrary.Origin {
+    /// Where the core came from — internal, for the test suite to pin that it was linked in,
+    /// or that it came out of the resource bundle rather than the build machine's
+    /// source-tree fallback.
+    static func nativeLibraryOrigin() throws -> NativeLibraryOrigin {
         try loaded().origin
     }
 

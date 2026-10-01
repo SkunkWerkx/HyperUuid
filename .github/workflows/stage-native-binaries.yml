@@ -53,7 +53,7 @@ jobs:
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       # gh attestation verify reads this repo's attestations before any binary is committed.
@@ -101,6 +101,17 @@ jobs:
         with:
           name: wasm-wasip1-module
           path: artifacts/wasm-wasip1-module
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # The Swift binding's static libraries: on Linux and WebAssembly it links the core in
+      # from swift/HyperUuidCore.artifactbundle rather than loading a shared library, and a
+      # SwiftPM consumer gets whatever archives are committed there. Same verify-then-stage
+      # gate as the rest.
+      - uses: actions/download-artifact@v8
+        with:
+          name: swift-static
+          path: artifacts/swift-static
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
@@ -155,9 +166,10 @@ jobs:
             echo "$(sha256sum "$src" | cut -d' ' -f1)  $rid/${LIB_NAMES[$rid]}" >> digests.txt
           done
 
-          # Not every tree takes every RID. Swift's musl target links fully statically and
-          # has no dynamic loader, so a musl library under NativeLibs would ship to every
-          # SwiftPM consumer and load for none. PHP on Windows is an x64 process even on
+          # Not every tree takes every RID. Swift links the core in on Linux — glibc and musl
+          # alike, from the static libraries staged further down — so a Linux shared library
+          # under NativeLibs would ship to every SwiftPM consumer and be loaded by none; only
+          # macOS and Windows go there. PHP on Windows is an x64 process even on
           # ARM hardware, so an ARM64 DLL under php/ can never be loaded; the one that
           # earlier stagings committed there is removed.
           #
@@ -166,13 +178,17 @@ jobs:
           for dest_root in php/src/native swift/Sources/HyperUuid/NativeLibs go/native; do
             for rid in "${!LIB_NAMES[@]}"; do
               case "$dest_root:$rid" in
-                swift/*:linux-musl-*|php/*:win-arm64) continue ;;
+                swift/*:linux-*|php/*:win-arm64) continue ;;
               esac
               mkdir -p "$dest_root/$rid"
               install -m 755 "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest_root/$rid/${LIB_NAMES[$rid]}"
             done
           done
           git rm -r --quiet --ignore-unmatch php/src/native/win-arm64
+          # Swift links the core in on Linux now, so the shared libraries earlier stagings
+          # committed under NativeLibs for linux-x64 and linux-arm64 are loaded by nothing.
+          git rm -r --quiet --ignore-unmatch \
+            swift/Sources/HyperUuid/NativeLibs/linux-x64 swift/Sources/HyperUuid/NativeLibs/linux-arm64
 
           wasm=artifacts/wasm-wasip1-module/hyperuuid.wasm
           echo "::group::verify wasm32-wasip1"
@@ -185,6 +201,31 @@ jobs:
           echo "$(sha256sum "$wasm" | cut -d' ' -f1)  wasm32-wasip1/hyperuuid.wasm" >> digests.txt
           mkdir -p go/native/wasm32-wasip1
           install -m 755 "$wasm" go/native/wasm32-wasip1/hyperuuid.wasm
+
+          # The Swift binding's static libraries, one per triple. All five or none: a bundle
+          # whose info.json names an archive that is not there fails every consumer's build.
+          # info.json itself is generated text naming those five paths and the crate version;
+          # it rides along unattested, readable in the diff.
+          bundle=swift/HyperUuidCore.artifactbundle
+          archives=(artifacts/swift-static/*/libhyperuuid.a)
+          if [ "${#archives[@]}" != 5 ]; then
+            echo "::error::Expected five static libraries in the swift-static artifact, found ${#archives[@]}."
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            triple="$(basename "$(dirname "$archive")")"
+            echo "::group::verify swift-static $triple"
+            if ! gh attestation verify "$archive" \
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+              echo "::error::No valid build provenance for the $triple static library — refusing to commit it."
+              exit 1
+            fi
+            echo "::endgroup::"
+            echo "$(sha256sum "$archive" | cut -d' ' -f1)  swift-static/$triple/libhyperuuid.a" >> digests.txt
+            mkdir -p "$bundle/$triple"
+            install -m 644 "$archive" "$bundle/$triple/libhyperuuid.a"
+          done
+          install -m 644 artifacts/swift-static/info.json "$bundle/info.json"
 
           echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -199,7 +240,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add php/src/native swift/Sources/HyperUuid/NativeLibs go/native
+          git add php/src/native swift/Sources/HyperUuid/NativeLibs swift/HyperUuidCore.artifactbundle go/native
           if git diff --cached --quiet; then
             echo "::notice::Staged binaries are byte-identical to what's already committed — nothing to push."
             exit 0

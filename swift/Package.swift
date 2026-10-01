@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
@@ -7,14 +7,26 @@ let package = Package(
         .library(name: "HyperUuid", targets: ["HyperUuid"])
     ],
     targets: [
-        // Bundles every platform's native build under NativeLibs/{rid}/{lib} (see the
-        // Go/Java bindings for the same reason) since SwiftPM's real binary-distribution
-        // mechanism (a binaryTarget/XCFramework) is Apple-only and can't cover
-        // win-x64/win-arm64/linux-x64/linux-arm64. NativePlatform.swift picks the right
-        // resource path at compile time; DynamicLibrary.swift dlopen/dlsym's (or
-        // LoadLibraryW/GetProcAddress's, on Windows) it at runtime.
+        // The native core as static libraries, one per triple (SE-0482, which is what sets
+        // the tools version above): glibc and musl Linux on x86_64 and arm64, and WASI.
+        // Where SwiftPM finds a variant for the triple being built, the core is linked into
+        // the consumer's executable and nothing has to ship beside it — the only way to
+        // reach the static Linux SDK and WebAssembly at all, neither of which can open a
+        // shared library.
+        .binaryTarget(
+            name: "HyperUuidCore",
+            path: "HyperUuidCore.artifactbundle"
+        ),
+        // macOS and Windows load a shared library instead, bundled under
+        // NativeLibs/{rid}/{lib} as a resource: the bundle above has no variant for them,
+        // and the platform condition keeps SwiftPM from warning about that on every build.
+        // NativePlatform.swift picks the resource at compile time; DynamicLibrary.swift
+        // dlopen/dlsym's (or LoadLibraryW/GetProcAddress's, on Windows) it at run time.
         .target(
             name: "HyperUuid",
+            dependencies: [
+                .target(name: "HyperUuidCore", condition: .when(platforms: [.linux, .wasi]))
+            ],
             resources: [.copy("NativeLibs")]
         ),
         .testTarget(

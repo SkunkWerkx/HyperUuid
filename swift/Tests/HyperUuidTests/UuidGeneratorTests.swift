@@ -6,8 +6,12 @@ import XCTest
 final class UuidGeneratorTests: XCTestCase {
     /// The core crate's own `version = "..."` from `rust/Cargo.toml`, found by walking up
     /// from this file — so the version assertion follows a release bump instead of going
-    /// stale on it.
-    private static let crateVersion: String = {
+    /// stale on it. `nil` only under WASI, where the test module runs sandboxed with no view
+    /// of the source tree.
+    private static let crateVersion: String? = {
+        #if os(WASI)
+        return nil
+        #else
         var dir = URL(fileURLWithPath: #filePath)
         while true {
             let manifest = dir.appendingPathComponent("rust/Cargo.toml")
@@ -24,12 +28,20 @@ final class UuidGeneratorTests: XCTestCase {
             dir = parent
         }
         fatalError("rust/Cargo.toml not found above \(#filePath)")
+        #endif
     }()
 
     // MARK: - The native library itself
 
     func testNativeVersionIsTheLoadedLibrarysOwn() throws {
-        XCTAssertEqual(try UuidGenerator.nativeVersion(), Self.crateVersion)
+        let version = try UuidGenerator.nativeVersion()
+        if let crateVersion = Self.crateVersion {
+            XCTAssertEqual(version, crateVersion)
+        } else {
+            let fields = version.split(separator: ".", omittingEmptySubsequences: false)
+            XCTAssertEqual(fields.count, 3, "expected major.minor.patch, got \(version)")
+            XCTAssertTrue(fields.allSatisfy { UInt8($0) != nil }, "expected major.minor.patch, got \(version)")
+        }
     }
 
     func testIsAvailableAgreesWithTheLoad() throws {
@@ -37,13 +49,20 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertNoThrow(try UuidGenerator.nativeVersion())
     }
 
-    func testNativeLibraryLoadsFromTheResourceBundle() throws {
+    func testTheNativeCoreComesFromWhereADeployedBinaryHasIt() throws {
+        #if os(Linux) || os(WASI)
+        // Linked into the executable: nothing to find, so nothing to leave behind.
+        XCTAssertEqual(try UuidGenerator.nativeLibraryOrigin(), .staticallyLinked)
+        #else
         // The resource directory is the only place a deployed binary has. The source-tree
         // fallback would keep every other test here green on the build machine even if
         // the bundle lookup stopped working, so the origin is pinned on its own.
         XCTAssertEqual(try UuidGenerator.nativeLibraryOrigin(), .resourceBundle)
+        #endif
     }
 
+    // The two ways a load can fail exist only where there is a load: macOS and Windows.
+    #if os(macOS) || os(Windows)
     func testAMissingLibraryIsANativeLibraryErrorACallerCanMatch() {
         let missing = "/nonexistent/\(NativePlatform.libraryFileName)"
         XCTAssertThrowsError(try DynamicLibrary(path: missing)) { error in
@@ -68,6 +87,7 @@ final class UuidGeneratorTests: XCTestCase {
             XCTAssertEqual(name, "uuid_no_such_export")
         }
     }
+    #endif
 
     func testGeneratorErrorsDescribeThemselvesThroughLocalizedDescription() {
         let error: Swift.Error = UuidGenerator.Error.bufferNotWholeUUIDs(count: 17)
