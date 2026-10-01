@@ -20,8 +20,9 @@ static-library target, SE-0482, Swift 6.2 and later) rather than adding files he
 deferred, not ruled out.
 
 At run time the library is opened in place, from wherever SwiftPM staged this directory
-(`HyperUuid_HyperUuid.resources` beside the build products, `.bundle` on macOS) — see the binding
-README's "Loading and deployment" for what that means for a deployed executable.
+(`HyperUuid_HyperUuid.bundle` beside the build products, or `HyperUuid_HyperUuid.resources` on Linux
+and Windows before Swift 6.4) — see the binding README's "Loading and deployment" for what
+that means for a deployed executable.
 
 ## Verifying provenance
 

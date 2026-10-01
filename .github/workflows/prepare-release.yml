@@ -36,7 +36,7 @@ on:
 
 jobs:
   prepare-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       # gh workflow run: the bump commit needs a ci.yml run of its own (see the header).

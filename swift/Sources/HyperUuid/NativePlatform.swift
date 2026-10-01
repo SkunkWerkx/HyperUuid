@@ -46,14 +46,17 @@ enum NativePlatform {
     #error("hyperuuid: unsupported platform — the Swift binding bundles native builds for glibc Linux, macOS and Windows on x86_64 and arm64 only")
     #endif
 
-    /// The directory SwiftPM stages this target's resources into, `{package}_{target}` with
-    /// the platform's own suffix: a `.bundle` on macOS, a plain `.resources` directory
-    /// everywhere else. The generated `Bundle.module` accessor knows the same name, but it
-    /// `fatalError`s when the directory is absent, so `DynamicLibrary.locateBundled()` looks
-    /// for it by name instead.
+    /// The directory SwiftPM stages this target's resources into: `{package}_{target}` plus a
+    /// suffix that depends on the build system as well as the platform. Swift Build — SwiftPM's
+    /// default from Swift 6.4 — writes a `.bundle` everywhere; the build system before it
+    /// wrote a `.bundle` on macOS and a plain `.resources` directory on Linux and Windows,
+    /// and is still there behind `--build-system native`. A toolchain produces only one of
+    /// the two, so off macOS both names are looked for. The generated `Bundle.module`
+    /// accessor knows which, but it `fatalError`s when the directory is absent, so
+    /// `DynamicLibrary.locateBundled()` looks for it by name instead.
     #if os(macOS)
-    static let resourceBundleName = "HyperUuid_HyperUuid.bundle"
+    static let resourceBundleNames = ["HyperUuid_HyperUuid.bundle"]
     #else
-    static let resourceBundleName = "HyperUuid_HyperUuid.resources"
+    static let resourceBundleNames = ["HyperUuid_HyperUuid.bundle", "HyperUuid_HyperUuid.resources"]
     #endif
 }

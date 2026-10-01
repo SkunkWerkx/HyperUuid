@@ -111,7 +111,7 @@ jobs:
   #
   # Static analysis only, no native build needed, so this doesn't depend on build-native.
   check-no-std:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -155,7 +155,7 @@ jobs:
   # public/internal boundary those three languages get for free from the compiler. Static
   # analysis only, no native build needed, so these don't depend on build-native.
   lint-docs-go:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -171,7 +171,7 @@ jobs:
         run: revive -config revive.toml ./...
 
   lint-docs-python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -182,7 +182,7 @@ jobs:
         run: ruff check src
 
   lint-docs-php:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
@@ -195,7 +195,7 @@ jobs:
         run: vendor/bin/phpcs
 
   lint-docs-ruby:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
@@ -207,38 +207,23 @@ jobs:
         run: bundle exec rake docs:check
 
   lint-docs-swift:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: SwiftyLab/setup-swift@v1.14.0
-        with:
-          swift-version: "6.3"
+      # `swiftlint-static`, not the `swiftlint` beside it in the same download. The dynamic
+      # binary links libxml2.so.2, which Ubuntu 26.04 no longer ships (it carries
+      # libxml2.so.16), and wants a Swift toolchain's libsourcekitdInProc.so found for it as
+      # well. The static one needs neither, so this job installs no Swift at all. It cannot
+      # run SourceKit-backed rules, and does not have to: `missing_docs`, the only rule
+      # swift/.swiftlint.yml enables, is syntax-only and reports the same violations from
+      # both binaries.
       - name: Install SwiftLint
         run: |
           set -euo pipefail
-          curl -sL -o swiftlint.zip \
+          curl -sSfL -o swiftlint.zip \
             https://github.com/realm/SwiftLint/releases/download/0.65.1/swiftlint_linux_amd64.zip
           mkdir swiftlint_bin
           unzip -q swiftlint.zip -d swiftlint_bin
       - name: Lint
         working-directory: swift
-        run: |
-          set -euo pipefail
-          # swiftlint's precompiled binary needs the installed toolchain's own
-          # libsourcekitdInProc.so — its path isn't a fixed, documented convention across
-          # setup-swift installs, so locate it relative to the swift binary SwiftyLab/setup-swift
-          # actually put on PATH (e.g. /opt/hostedtoolcache/swift-<ver>/<ver>/x86_64/usr/bin/swift,
-          # confirmed from a real run's log) rather than a blind whole-filesystem `find /`, which
-          # hung for minutes scanning a GH-hosted runner's huge preinstalled toolchain set.
-          swift_bin="$(command -v swift)"
-          echo "swift binary: $swift_bin"
-          toolchain_usr="$(dirname "$(dirname "$swift_bin")")"
-          echo "toolchain usr dir: $toolchain_usr"
-          lib_path="$(find "$toolchain_usr" -name libsourcekitdInProc.so 2>/dev/null | head -1)"
-          echo "libsourcekitdInProc.so: ${lib_path:-not found}"
-          if [ -z "$lib_path" ]; then
-            echo "::error::libsourcekitdInProc.so not found under $toolchain_usr" >&2
-            exit 1
-          fi
-          export LINUX_SOURCEKIT_LIB_PATH="$(dirname "$lib_path")"
-          ../swiftlint_bin/swiftlint lint --strict Sources
+        run: ../swiftlint_bin/swiftlint-static lint --strict Sources

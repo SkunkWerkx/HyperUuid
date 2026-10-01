@@ -123,10 +123,11 @@ Batch generation amortizes the native call over the whole batch, and no longer p
 
 ## Requirements
 
-- **Swift.** Tested on Swift 6.3 — every CI leg runs `swift test` on it. The manifests
-  declare `swift-tools-version:5.9`: that is the floor SwiftPM will accept and the oldest
-  language version the sources are written against, but no CI leg builds on it, so anything
-  below 6.3 is declared rather than proven.
+- **Swift.** Tested on Swift 6.4 — every CI leg runs `swift test` on it, and the Linux legs
+  run it a second time with `--build-system native`, the build system Swift 6.3 and earlier
+  use. The manifests declare `swift-tools-version:5.9`: that is the floor SwiftPM will accept
+  and the oldest language version the sources are written against, but no CI leg builds on
+  it, so anything below 6.4 is declared rather than proven.
 - **Platforms.** glibc Linux, macOS and Windows, each on x86_64 and arm64 — the six native
   builds under `NativeLibs/`. No `platforms:` floor is declared, so macOS takes SwiftPM's
   default deployment target.
@@ -144,16 +145,19 @@ Batch generation amortizes the native call over the whole batch, and no longer p
 ## Loading and deployment
 
 The native library travels as a SwiftPM resource. `swift build` stages `NativeLibs/` into a
-directory named `HyperUuid_HyperUuid.resources` (`HyperUuid_HyperUuid.bundle` on macOS) beside
-the built products, and the first call `dlopen`s this platform's library straight out of it —
-nothing is extracted, copied or left behind in a temp directory.
+directory beside the built products, and the first call `dlopen`s this platform's library
+straight out of it — nothing is extracted, copied or left behind in a temp directory. The
+directory's name depends on the toolchain: `HyperUuid_HyperUuid.bundle` on Swift 6.4 and later
+(and on macOS with any version), `HyperUuid_HyperUuid.resources` on Linux and Windows with Swift
+6.3 and earlier or with `--build-system native`. The loader accepts either.
 
 **That directory has to ship with your executable.** A deployment that copies only the binary
 — the usual multi-stage Dockerfile — has no native library to load:
 
 ```dockerfile
 COPY --from=build /src/.build/release/MyServer /app/
-COPY --from=build /src/.build/release/HyperUuid_HyperUuid.resources /app/HyperUuid_HyperUuid.resources
+# Swift 6.4 and later. On 6.3 and earlier the directory is HyperUuid_HyperUuid.resources.
+COPY --from=build /src/.build/release/HyperUuid_HyperUuid.bundle /app/HyperUuid_HyperUuid.bundle
 ```
 
 The loader looks beside the executable first, then in the main bundle's resources, which is
