@@ -23,7 +23,10 @@ impl Timestamp {
     /// Builds a [`Timestamp`] from Unix-epoch seconds and sub-second nanoseconds — the same
     /// two values [`Timestamp::to_unix`] returns, so the pair round-trips.
     pub const fn from_unix(seconds: u64, subsec_nanos: u32) -> Self {
-        Self { seconds, subsec_nanos }
+        Self {
+            seconds,
+            subsec_nanos,
+        }
     }
 
     /// Returns the Unix-epoch seconds and sub-second nanoseconds this timestamp represents.
@@ -34,7 +37,10 @@ impl Timestamp {
     /// Builds a [`Timestamp`] from a millisecond count since the Unix epoch — the unit every
     /// creation/extraction function in this crate actually works in.
     pub const fn from_unix_millis(millis: u64) -> Self {
-        Self { seconds: millis / 1000, subsec_nanos: ((millis % 1000) as u32) * 1_000_000 }
+        Self {
+            seconds: millis / 1000,
+            subsec_nanos: ((millis % 1000) as u32) * 1_000_000,
+        }
     }
 
     /// Collapses this timestamp down to the millisecond count [`crate::v6::new_v6_at`]/

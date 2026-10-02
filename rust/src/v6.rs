@@ -15,7 +15,6 @@ const MAX_60_BIT: u64 = 0x0FFF_FFFF_FFFF_FFFF;
 /// Random octets each version 6 UUID needs: `clock_seq` (2) plus `node` (6).
 const RAND_BYTES_PER_ITEM: usize = 8;
 
-
 /// An error returned when minting a version 6 UUID fails.
 ///
 /// Non-exhaustive, so a failure mode added later is not a breaking change.
@@ -35,7 +34,10 @@ impl core::fmt::Display for NewV6Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::TimestampOutOfRange => {
-                write!(f, "unix millisecond timestamp does not fit the 60-bit v6 timestamp field")
+                write!(
+                    f,
+                    "unix millisecond timestamp does not fit the 60-bit v6 timestamp field"
+                )
             }
             Self::Random(e) => write!(f, "random source failed: {e}"),
             Self::BufferTooSmall => write!(f, "output buffer is shorter than count * 16 bytes"),

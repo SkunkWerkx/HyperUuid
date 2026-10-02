@@ -72,12 +72,12 @@ pub mod v5;
 pub mod v6;
 pub mod v7;
 
+#[cfg(feature = "php")]
+mod php_ext;
 #[cfg(feature = "python")]
 mod python_ext;
 #[cfg(feature = "ruby")]
 mod ruby_ext;
-#[cfg(feature = "php")]
-mod php_ext;
 
 pub use ffi::hyperuuid_version;
 pub use timestamp::Timestamp;
@@ -106,7 +106,12 @@ mod tests {
     #[test]
     fn version_export_packs_the_crate_version() {
         let packed = hyperuuid_version();
-        let text = format!("{}.{}.{}", packed >> 16, (packed >> 8) & 0xFF, packed & 0xFF);
+        let text = format!(
+            "{}.{}.{}",
+            packed >> 16,
+            (packed >> 8) & 0xFF,
+            packed & 0xFF
+        );
         assert_eq!(text, env!("CARGO_PKG_VERSION"));
     }
 
@@ -223,7 +228,9 @@ mod tests {
 
     #[test]
     fn v7_same_millisecond_batch_is_monotonically_ordered() {
-        let ids: Vec<Uuid> = (0..100).map(|_| v7::new_v7(RFC_TEST_VECTOR_MS).unwrap()).collect();
+        let ids: Vec<Uuid> = (0..100)
+            .map(|_| v7::new_v7(RFC_TEST_VECTOR_MS).unwrap())
+            .collect();
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(ids, sorted);
@@ -233,8 +240,14 @@ mod tests {
     fn a_timestamp_past_u64_millis_is_out_of_range_not_wrapped() {
         let far = Timestamp::from_unix(u64::MAX / 1000 + 1, 0);
         assert_eq!(far.to_unix_millis(), u64::MAX);
-        assert_eq!(v6::new_v6_at(far).unwrap_err(), v6::NewV6Error::TimestampOutOfRange);
-        assert_eq!(v7::new_v7_at(far).unwrap_err(), v7::NewV7Error::TimestampOutOfRange);
+        assert_eq!(
+            v6::new_v6_at(far).unwrap_err(),
+            v6::NewV6Error::TimestampOutOfRange
+        );
+        assert_eq!(
+            v7::new_v7_at(far).unwrap_err(),
+            v7::NewV7Error::TimestampOutOfRange
+        );
     }
 
     #[test]
@@ -328,8 +341,7 @@ mod tests {
     fn v6_batch_matches_single_call_generation() {
         let mut out = vec![0u8; 5 * 16];
         v6::new_v6_batch(RFC_TEST_VECTOR_MS, 5, &mut out).unwrap();
-        for chunk in out.chunks_exact(16) {
-            let bytes: [u8; 16] = chunk.try_into().unwrap();
+        for &bytes in out.as_chunks::<16>().0 {
             let id = Uuid::from_bytes(bytes);
             assert_eq!(id.version(), 6);
             assert!(id.is_rfc9562_variant());
@@ -342,7 +354,7 @@ mod tests {
         let mut out = vec![0u8; 100 * 16];
         v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut out).unwrap();
         let ids: std::collections::HashSet<[u8; 16]> =
-            out.chunks_exact(16).map(|c| c.try_into().unwrap()).collect();
+            out.as_chunks::<16>().0.iter().copied().collect();
         assert_eq!(ids.len(), 100);
     }
 
@@ -371,8 +383,7 @@ mod tests {
     fn v7_batch_matches_single_call_generation() {
         let mut out = vec![0u8; 5 * 16];
         v7::new_v7_batch(RFC_TEST_VECTOR_MS, 5, &mut out).unwrap();
-        for chunk in out.chunks_exact(16) {
-            let bytes: [u8; 16] = chunk.try_into().unwrap();
+        for &bytes in out.as_chunks::<16>().0 {
             let id = Uuid::from_bytes(bytes);
             assert_eq!(id.version(), 7);
             assert!(id.is_rfc9562_variant());
@@ -385,8 +396,10 @@ mod tests {
         let mut out = vec![0u8; 1000 * 16];
         v7::new_v7_batch(RFC_TEST_VECTOR_MS, 1000, &mut out).unwrap();
         let ids: Vec<Uuid> = out
-            .chunks_exact(16)
-            .map(|c| Uuid::from_bytes(c.try_into().unwrap()))
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|&c| Uuid::from_bytes(c))
             .collect();
         let mut sorted = ids.clone();
         sorted.sort();
@@ -403,7 +416,8 @@ mod tests {
         let after = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
 
         let mut ids = vec![before];
-        ids.extend(batch.chunks_exact(16).map(|c| Uuid::from_bytes(c.try_into().unwrap())));
+        let (batch_ids, _) = batch.as_chunks::<16>();
+        ids.extend(batch_ids.iter().map(|&c| Uuid::from_bytes(c)));
         ids.push(after);
 
         let mut sorted = ids.clone();
@@ -480,13 +494,19 @@ mod tests {
     fn v7_sql_order_round_trips() {
         let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
         let sql = v7::to_sql_order(&id);
-        assert_ne!(sql, id, "a real timestamp/counter should actually move bytes around");
+        assert_ne!(
+            sql, id,
+            "a real timestamp/counter should actually move bytes around"
+        );
         assert_eq!(v7::to_rfc_order(&sql), id);
     }
 
     #[test]
     fn v7_sql_order_zero_and_max_round_trip() {
-        for id in [v7::new_v7(0).unwrap(), v7::new_v7(v7::MAX_UNIX_MILLIS).unwrap()] {
+        for id in [
+            v7::new_v7(0).unwrap(),
+            v7::new_v7(v7::MAX_UNIX_MILLIS).unwrap(),
+        ] {
             assert_eq!(v7::to_rfc_order(&v7::to_sql_order(&id)), id);
         }
     }
@@ -515,7 +535,8 @@ mod tests {
     /// [`v7::to_sql_order`]: no real SQL Server available in this crate's test suite, so this
     /// stands in for it, the same role Svartalfheim's own tests use the real `SqlGuid` for.
     fn sql_guid_cmp(a: &[u8; 16], b: &[u8; 16]) -> std::cmp::Ordering {
-        const SIGNIFICANCE_ORDER: [usize; 16] = [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3];
+        const SIGNIFICANCE_ORDER: [usize; 16] =
+            [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3];
         for &i in &SIGNIFICANCE_ORDER {
             match a[i].cmp(&b[i]) {
                 std::cmp::Ordering::Equal => continue,
@@ -528,15 +549,23 @@ mod tests {
     #[test]
     fn v7_sql_order_sorts_by_creation_order_under_sqlguid_comparison() {
         // Increasing timestamps, one per millisecond...
-        let mut ids: Vec<Uuid> = (0..200).map(|i| v7::new_v7(1_000_000 + i).unwrap()).collect();
+        let mut ids: Vec<Uuid> = (0..200)
+            .map(|i| v7::new_v7(1_000_000 + i).unwrap())
+            .collect();
         // ...plus a same-millisecond run, so the counter (not just the timestamp) has to sort
         // correctly too.
         ids.extend((0..200).map(|_| v7::new_v7(5_000_000).unwrap()));
 
-        let sql: Vec<[u8; 16]> = ids.iter().map(|id| *v7::to_sql_order(id).as_bytes()).collect();
+        let sql: Vec<[u8; 16]> = ids
+            .iter()
+            .map(|id| *v7::to_sql_order(id).as_bytes())
+            .collect();
         let mut sorted = sql.clone();
         sorted.sort_by(sql_guid_cmp);
-        assert_eq!(sql, sorted, "SqlGuid-order comparison of SQL-ordered bytes must match creation order");
+        assert_eq!(
+            sql, sorted,
+            "SqlGuid-order comparison of SQL-ordered bytes must match creation order"
+        );
     }
 
     /// Proves [`v7::unix_millis`] isn't just reading back what our own [`v7::new_v7`] wrote —
@@ -548,20 +577,32 @@ mod tests {
     fn v7_timestamp_extracts_from_the_external_uuid_crates_native_generator() {
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let external = ::uuid::Uuid::now_v7();
-        let after = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
 
         let ours = Uuid::from_bytes(*external.as_bytes());
         let got = v7::unix_millis(&ours);
-        assert!(got >= before && got <= after, "got {got}, want within [{before}, {after}]");
+        assert!(
+            got >= before && got <= after,
+            "got {got}, want within [{before}, {after}]"
+        );
     }
 
     #[test]
     fn v6_sql_order_round_trips() {
         let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
         let sql = v6::to_sql_order(&id);
-        assert_ne!(sql, id, "a real timestamp should actually move bytes around");
+        assert_ne!(
+            sql, id,
+            "a real timestamp should actually move bytes around"
+        );
         assert_eq!(v6::to_rfc_order(&sql), id);
     }
 
@@ -569,7 +610,10 @@ mod tests {
     fn v6_sql_order_zero_and_a_large_timestamp_round_trip() {
         // 100_000_000_000_000 ms (~year 5138) is comfortably under v6's 60-bit tick ceiling
         // (~year 5236) without needing that exact boundary constant here.
-        for id in [v6::new_v6(0).unwrap(), v6::new_v6(100_000_000_000_000).unwrap()] {
+        for id in [
+            v6::new_v6(0).unwrap(),
+            v6::new_v6(100_000_000_000_000).unwrap(),
+        ] {
             assert_eq!(v6::to_rfc_order(&v6::to_sql_order(&id)), id);
         }
     }
@@ -594,19 +638,28 @@ mod tests {
     #[test]
     fn get_timestamp_returns_none_for_non_time_based_versions() {
         assert_eq!(get_timestamp(&v4::new_v4().unwrap()), None);
-        assert_eq!(get_timestamp(&v5::new_v5(v5::namespace::DNS, b"test")), None);
+        assert_eq!(
+            get_timestamp(&v5::new_v5(v5::namespace::DNS, b"test")),
+            None
+        );
     }
 
     #[test]
     fn get_timestamp_matches_v6_unix_millis() {
         let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        assert_eq!(get_timestamp(&id), Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)));
+        assert_eq!(
+            get_timestamp(&id),
+            Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS))
+        );
     }
 
     #[test]
     fn get_timestamp_matches_v7_unix_millis() {
         let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
-        assert_eq!(get_timestamp(&id), Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)));
+        assert_eq!(
+            get_timestamp(&id),
+            Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS))
+        );
     }
 
     #[test]
@@ -646,10 +699,18 @@ mod tests {
         // guaranteed to sort in creation order even in plain RFC order, so this only
         // exercises strictly increasing timestamps, where the timestamp alone determines
         // order with no tie to break.
-        let ids: Vec<Uuid> = (0..300).map(|i| v6::new_v6(1_000_000 + i).unwrap()).collect();
-        let sql: Vec<[u8; 16]> = ids.iter().map(|id| *v6::to_sql_order(id).as_bytes()).collect();
+        let ids: Vec<Uuid> = (0..300)
+            .map(|i| v6::new_v6(1_000_000 + i).unwrap())
+            .collect();
+        let sql: Vec<[u8; 16]> = ids
+            .iter()
+            .map(|id| *v6::to_sql_order(id).as_bytes())
+            .collect();
         let mut sorted = sql.clone();
         sorted.sort_by(sql_guid_cmp);
-        assert_eq!(sql, sorted, "SqlGuid-order comparison of SQL-ordered bytes must match creation order");
+        assert_eq!(
+            sql, sorted,
+            "SqlGuid-order comparison of SQL-ordered bytes must match creation order"
+        );
     }
 }

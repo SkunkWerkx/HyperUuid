@@ -5,7 +5,7 @@
 //! allocation-count assertions that back this crate's "allocation-free" claim empirically
 //! rather than just in a doc comment.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use hyperuuid::{v4, v5, v6, v7};
 use std::hint::black_box;
 
@@ -18,8 +18,12 @@ fn bench_single_item(c: &mut Criterion) {
     group.bench_function("v5", |b| {
         b.iter(|| v5::new_v5(v5::namespace::DNS, black_box(b"www.example.com")))
     });
-    group.bench_function("v6", |b| b.iter(|| v6::new_v6(black_box(RFC_TEST_VECTOR_MS)).unwrap()));
-    group.bench_function("v7", |b| b.iter(|| v7::new_v7(black_box(RFC_TEST_VECTOR_MS)).unwrap()));
+    group.bench_function("v6", |b| {
+        b.iter(|| v6::new_v6(black_box(RFC_TEST_VECTOR_MS)).unwrap())
+    });
+    group.bench_function("v7", |b| {
+        b.iter(|| v7::new_v7(black_box(RFC_TEST_VECTOR_MS)).unwrap())
+    });
     group.finish();
 }
 
@@ -95,19 +99,33 @@ fn bench_timestamp_extraction(c: &mut Criterion) {
     let mut group = c.benchmark_group("timestamp_extraction");
 
     let hyperuuid_v6 = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-    group.bench_function("hyperuuid_v6", |b| b.iter(|| v6::unix_millis(black_box(&hyperuuid_v6))));
+    group.bench_function("hyperuuid_v6", |b| {
+        b.iter(|| v6::unix_millis(black_box(&hyperuuid_v6)))
+    });
 
     let uuid_crate_v6 = uuid::Uuid::now_v6(&[0, 0, 0, 0, 0, 0]);
-    group.bench_function("uuid_crate_v6", |b| b.iter(|| black_box(&uuid_crate_v6).get_timestamp()));
+    group.bench_function("uuid_crate_v6", |b| {
+        b.iter(|| black_box(&uuid_crate_v6).get_timestamp())
+    });
 
     let hyperuuid_v7 = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
-    group.bench_function("hyperuuid_v7", |b| b.iter(|| v7::unix_millis(black_box(&hyperuuid_v7))));
+    group.bench_function("hyperuuid_v7", |b| {
+        b.iter(|| v7::unix_millis(black_box(&hyperuuid_v7)))
+    });
 
     let uuid_crate_v7 = uuid::Uuid::now_v7();
-    group.bench_function("uuid_crate_v7", |b| b.iter(|| black_box(&uuid_crate_v7).get_timestamp()));
+    group.bench_function("uuid_crate_v7", |b| {
+        b.iter(|| black_box(&uuid_crate_v7).get_timestamp())
+    });
 
     group.finish();
 }
 
-criterion_group!(benches, bench_single_item, bench_vs_uuid_crate, bench_timestamp_extraction, bench_batch);
+criterion_group!(
+    benches,
+    bench_single_item,
+    bench_vs_uuid_crate,
+    bench_timestamp_extraction,
+    bench_batch
+);
 criterion_main!(benches);

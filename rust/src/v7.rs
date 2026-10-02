@@ -13,7 +13,6 @@ const COUNTER_MASK: u32 = 0x03FF_FFFF;
 /// Random octets each version 7 UUID needs: `rand_b`'s trailing 48 bits (octets 10-15).
 const RAND_BYTES_PER_ITEM: usize = 6;
 
-
 /// An error returned when minting a version 7 UUID fails.
 ///
 /// Non-exhaustive, so a failure mode added later is not a breaking change.
@@ -222,17 +221,40 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
 /// default `std` feature, which is the same situation one step further out — no OS at all to
 /// read a clock from. Call [`new_v7`] there with a timestamp supplied by the host instead.
 #[cfg(all(feature = "std", not(target_arch = "wasm32")))]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn now_v7() -> Result<Uuid, NewV7Error> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     // A clock set before 1970, or one so far ahead its milliseconds overflow a u64, is out of
     // range rather than a panic — the same answer new_v7 gives a timestamp past the field.
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok())
-        .ok_or(NewV7Error::TimestampOutOfRange)?;
-    new_v7(millis)
+    new_v7(system_millis().ok_or(NewV7Error::TimestampOutOfRange)?)
+}
+
+/// The wall clock in Unix-epoch milliseconds, or `None` if it can't be read or is out of range.
+///
+/// std's `SystemTime::now` unwraps `clock_gettime` on Unix, a panic path `#[no_panic]` can't
+/// see past, so the call is made directly and a failure comes back as `None` instead.
+#[cfg(all(feature = "std", unix))]
+fn system_millis() -> Option<u64> {
+    // SAFETY: `timespec` is plain integers, for which all zeroes is a valid value, and
+    // `clock_gettime` writes only through the pointer it is given.
+    let mut ts: libc::timespec = unsafe { core::mem::zeroed() };
+    if unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut ts) } != 0 {
+        return None;
+    }
+    let secs = u64::try_from(ts.tv_sec).ok()?;
+    let nanos = u64::try_from(ts.tv_nsec).ok()?;
+    secs.checked_mul(1000)?.checked_add(nanos / 1_000_000)
+}
+
+/// The wall clock in Unix-epoch milliseconds, or `None` if it is out of range.
+///
+/// std's Windows clock read can't fail, so std is used as is; CI's `check-no-panic` job links
+/// this on Windows too, which is what holds that up.
+#[cfg(all(feature = "std", not(unix), not(target_arch = "wasm32")))]
+fn system_millis() -> Option<u64> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(elapsed.as_millis()).ok()
 }
 
 /// Extracts the Unix-epoch millisecond timestamp embedded in a version 7 UUID.

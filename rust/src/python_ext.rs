@@ -20,15 +20,13 @@
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pyo3::exceptions::{
-    PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
-};
+use pyo3::exceptions::{PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::ffi;
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyList, PyString};
 
-use crate::{v4, v5, v6, v7, Uuid};
+use crate::{Uuid, v4, v5, v6, v7};
 
 static UUID_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
 static IS_SAFE_UNKNOWN: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -36,7 +34,10 @@ static DATETIME_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
 static UTC: OnceLock<Py<PyAny>> = OnceLock::new();
 static SIXTY_FOUR: OnceLock<Py<PyAny>> = OnceLock::new();
 
-fn cached<'py>(py: Python<'py>, cell: &'static OnceLock<Py<PyAny>>) -> PyResult<&'py Bound<'py, PyAny>> {
+fn cached<'py>(
+    py: Python<'py>,
+    cell: &'static OnceLock<Py<PyAny>>,
+) -> PyResult<&'py Bound<'py, PyAny>> {
     cell.get()
         .map(|value| value.bind(py))
         .ok_or_else(|| PyRuntimeError::new_err("hyperuuid._native used before _bind"))
@@ -56,7 +57,10 @@ fn int_from_be_bytes<'py>(py: Python<'py>, bytes: [u8; 16]) -> PyResult<Bound<'p
     // SAFETY: `text` is NUL-terminated ASCII; the call returns a new reference, or null with
     // an exception set.
     unsafe {
-        Bound::from_owned_ptr_or_err(py, ffi::PyLong_FromString(text.as_ptr().cast(), std::ptr::null_mut(), 16))
+        Bound::from_owned_ptr_or_err(
+            py,
+            ffi::PyLong_FromString(text.as_ptr().cast(), std::ptr::null_mut(), 16),
+        )
     }
 }
 
@@ -70,10 +74,18 @@ fn make_uuid(py: Python<'_>, bytes: [u8; 16]) -> PyResult<Py<PyAny>> {
     // `object.__setattr__` calls — both check their arguments and report failure by
     // return value with an exception set.
     unsafe {
-        let instance = Bound::from_owned_ptr_or_err(py, ffi::PyType_GenericAlloc(class.as_ptr().cast(), 0))?;
-        if ffi::PyObject_GenericSetAttr(instance.as_ptr(), intern!(py, "int").as_ptr(), value.as_ptr()) != 0
-            || ffi::PyObject_GenericSetAttr(instance.as_ptr(), intern!(py, "is_safe").as_ptr(), is_safe.as_ptr())
-                != 0
+        let instance =
+            Bound::from_owned_ptr_or_err(py, ffi::PyType_GenericAlloc(class.as_ptr().cast(), 0))?;
+        if ffi::PyObject_GenericSetAttr(
+            instance.as_ptr(),
+            intern!(py, "int").as_ptr(),
+            value.as_ptr(),
+        ) != 0
+            || ffi::PyObject_GenericSetAttr(
+                instance.as_ptr(),
+                intern!(py, "is_safe").as_ptr(),
+                is_safe.as_ptr(),
+            ) != 0
         {
             return Err(PyErr::fetch(py));
         }
@@ -115,7 +127,8 @@ fn now_millis() -> u64 {
 
 #[pyfunction]
 fn new_v4(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let id = v4::new_v4().map_err(|_| PyRuntimeError::new_err("uuid_new_v4: random source failure"))?;
+    let id =
+        v4::new_v4().map_err(|_| PyRuntimeError::new_err("uuid_new_v4: random source failure"))?;
     make_uuid(py, *id.as_bytes())
 }
 
@@ -173,7 +186,9 @@ fn new_v6(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
             "unix_millis does not fit the 60-bit v6 timestamp field",
         )),
         Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-        Err(_) => Err(PyRuntimeError::new_err("uuid_new_v6: random source failure")),
+        Err(_) => Err(PyRuntimeError::new_err(
+            "uuid_new_v6: random source failure",
+        )),
     }
 }
 
@@ -186,14 +201,16 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
             "unix_millis must be non-negative and fit within 48 bits",
         )),
         Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-        Err(_) => Err(PyRuntimeError::new_err("uuid_new_v7: random source failure")),
+        Err(_) => Err(PyRuntimeError::new_err(
+            "uuid_new_v7: random source failure",
+        )),
     }
 }
 
 fn batch_list<'py>(py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyList>> {
     let list = PyList::empty(py);
-    for chunk in raw.chunks_exact(16) {
-        list.append(make_uuid(py, chunk.try_into().unwrap())?)?;
+    for chunk in raw.as_chunks::<16>().0 {
+        list.append(make_uuid(py, *chunk)?)?;
     }
     Ok(list)
 }
@@ -225,7 +242,9 @@ fn new_v6_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
             "unix_millis does not fit the 60-bit v6 timestamp field",
         )),
         Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-        Err(_) => Err(PyRuntimeError::new_err("uuid_new_v6_batch: random source failure")),
+        Err(_) => Err(PyRuntimeError::new_err(
+            "uuid_new_v6_batch: random source failure",
+        )),
     }
 }
 
@@ -239,7 +258,9 @@ fn new_v7_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
             "unix_millis must be non-negative and fit within 48 bits",
         )),
         Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-        Err(_) => Err(PyRuntimeError::new_err("uuid_new_v7_batch: random source failure")),
+        Err(_) => Err(PyRuntimeError::new_err(
+            "uuid_new_v7_batch: random source failure",
+        )),
     }
 }
 
@@ -255,7 +276,11 @@ fn civil_from_days(days: i64) -> (i64, u8, u8) {
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_shifted = (5 * day_of_year + 2) / 153;
     let day = (day_of_year - (153 * month_shifted + 2) / 5 + 1) as u8;
-    let month = (if month_shifted < 10 { month_shifted + 3 } else { month_shifted - 9 }) as u8;
+    let month = (if month_shifted < 10 {
+        month_shifted + 3
+    } else {
+        month_shifted - 9
+    }) as u8;
     (year + i64::from(month <= 2), month, day)
 }
 
@@ -268,7 +293,9 @@ fn millis_datetime(py: Python<'_>, millis: u64) -> PyResult<Py<PyAny>> {
     if year > 9_999 {
         // datetime cannot represent year 10000+, and the RFC's 48-bit field legitimately
         // reaches 10889.
-        return Err(PyOverflowError::new_err("embedded timestamp is past datetime's year-9999 ceiling"));
+        return Err(PyOverflowError::new_err(
+            "embedded timestamp is past datetime's year-9999 ceiling",
+        ));
     }
     let (hour, rest) = (second_of_day / 3_600, second_of_day % 3_600);
     let (minute, second) = (rest / 60, rest % 60);
@@ -309,12 +336,18 @@ fn v7_unix_millis(uuid_value: Bound<'_, PyAny>) -> PyResult<u64> {
 
 #[pyfunction]
 fn v6_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    millis_datetime(py, v6::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
+    millis_datetime(
+        py,
+        v6::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)),
+    )
 }
 
 #[pyfunction]
 fn v7_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    millis_datetime(py, v7::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
+    millis_datetime(
+        py,
+        v7::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)),
+    )
 }
 
 macro_rules! order_fns {
@@ -340,10 +373,20 @@ order_fns! {
 fn _bind(py: Python<'_>) -> PyResult<()> {
     let uuid_module = py.import("uuid")?;
     let _ = UUID_CLASS.set(uuid_module.getattr("UUID")?.unbind());
-    let _ = IS_SAFE_UNKNOWN.set(uuid_module.getattr("SafeUUID")?.getattr("unknown")?.unbind());
+    let _ = IS_SAFE_UNKNOWN.set(
+        uuid_module
+            .getattr("SafeUUID")?
+            .getattr("unknown")?
+            .unbind(),
+    );
     let datetime_module = py.import("datetime")?;
     let _ = DATETIME_CLASS.set(datetime_module.getattr("datetime")?.unbind());
-    let _ = UTC.set(datetime_module.getattr("timezone")?.getattr("utc")?.unbind());
+    let _ = UTC.set(
+        datetime_module
+            .getattr("timezone")?
+            .getattr("utc")?
+            .unbind(),
+    );
     let _ = SIXTY_FOUR.set(64u8.into_pyobject(py)?.into_any().unbind());
     Ok(())
 }
@@ -353,7 +396,12 @@ fn _bind(py: Python<'_>) -> PyResult<()> {
 #[pyfunction]
 fn native_version() -> String {
     let packed = crate::hyperuuid_version();
-    format!("{}.{}.{}", packed >> 16, (packed >> 8) & 0xff, packed & 0xff)
+    format!(
+        "{}.{}.{}",
+        packed >> 16,
+        (packed >> 8) & 0xff,
+        packed & 0xff
+    )
 }
 
 /// Fills a `bytearray` with raw RFC 9562-ordered UUID bytes, 16 per UUID.
@@ -403,7 +451,9 @@ fn fill_bytes_impl(
                 "unix_millis must be non-negative and fit within 48 bits",
             )),
             Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-            Err(_) => Err(PyRuntimeError::new_err("uuid_new_v7_batch: random source failure")),
+            Err(_) => Err(PyRuntimeError::new_err(
+                "uuid_new_v7_batch: random source failure",
+            )),
         }
     } else {
         match v6::new_v6_batch(millis, count, out) {
@@ -412,7 +462,9 @@ fn fill_bytes_impl(
                 "unix_millis does not fit the 60-bit v6 timestamp field",
             )),
             Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-            Err(_) => Err(PyRuntimeError::new_err("uuid_new_v6_batch: random source failure")),
+            Err(_) => Err(PyRuntimeError::new_err(
+                "uuid_new_v6_batch: random source failure",
+            )),
         }
     }
 }

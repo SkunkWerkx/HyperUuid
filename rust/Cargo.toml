@@ -26,6 +26,11 @@ magnus = { version = "0.8", features = ["rb-sys"], optional = true }
 ext-php-rs = { version = "0.15", optional = true }
 no-panic = { version = "0.1", optional = true }
 
+# `now_v7` reads the clock with `clock_gettime` itself rather than through std, whose
+# `SystemTime::now` unwraps the call (see v7.rs). Already in the graph through getrandom.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2.189", default-features = false }
+
 # One crate, three optional native-extension entry points instead of three satellite
 # crates each path-depending back on this one. Nothing in a plain `cargo cdylib` (the
 # Fiddle/ext-ffi-consumed shared library every non-extension binding dlopens) changes —
@@ -60,9 +65,8 @@ php = ["dep:ext-php-rs", "std"]
 # generation, parsing and conversion function and every C export carries `#[no_panic]` under
 # this feature, which turns any panic path the optimizer leaves in into an undefined symbol.
 # The proof only happens when a release-optimized binary that calls the function is linked,
-# so it is run by building `examples/no_panic.rs` (CI's check-no-panic job). `now_v7` is the
-# one exception: std's own `SystemTime::now` unwraps the OS clock call, which this crate
-# cannot reach into.
+# so it is run by building `examples/no_panic.rs` (CI's check-no-panic job, on Linux and
+# Windows, since `now_v7` reads the clock differently on each).
 no-panic = ["dep:no-panic"]
 
 [dev-dependencies]

@@ -747,6 +747,7 @@ dependencies = [
  "criterion",
  "ext-php-rs",
  "getrandom",
+ "libc",
  "magnus",
  "no-panic",
  "pyo3",
