@@ -9,6 +9,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-02
+
+Three themes. *Proven panic-free*: every public function in the crate and every C export
+is checked at link time, and the panics that check turned up are fixed — among them a
+36-character string with a stray hyphen that made `Uuid::from_str` index past its input,
+and a short batch buffer that panicked instead of returning an error. *A twentieth the
+size*: the shared library every binding loads no longer carries Rust's standard library,
+and link-time optimization finally reaches it, so linux-x64 goes from 427 KB to 19 KB.
+*Python's wheels are tested before they ship*: they are built, installed and attested on
+every CI run, and the release publishes those exact files. One change breaks Rust code
+that matches on the batch errors exhaustively (see the upgrade note); every other package
+is a drop-in.
+
 ### Added
 
 - **Rust — the public API is proven panic-free at link time.** A new `no-panic` feature puts
@@ -30,30 +43,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **The native libraries no longer carry Rust's standard library, and are a twentieth the
-  size.** `cargo cdylib` now builds the shared library every binding loads `#![no_std]`,
-  with the same abort-on-panic handler the static libraries already had. What std added
-  was its runtime — the unwinder, the backtrace symbolizer and the allocator — which no C
-  ABI export can reach: linux-x64 goes from 346,840 bytes to 19,448, and depends on libc
-  alone, so the musl builds no longer need libgcc_s. The exports are the same 13 symbols
-  over the same code: every one takes its timestamp from the caller, and `getrandom` reads
-  the OS entropy source the same way without std. The exports are proved panic-free, so
-  the abort handler is never even linked. The wasm32-wasip1 module keeps std, whose
-  allocator its hosts call into (and is built with the new `cargo wasm-module` alias), and
-  the Python, Ruby and PHP extensions keep std and unwinding, so a panic in one still
-  surfaces as a host exception. *(every package that carries a native library)*
-- **Rust — the shared library is built by naming its crate type, not listed in the
-  manifest.** `[lib]` now declares only the rlib, and the library every binding loads is
-  built with `cargo cdylib` (an alias for `cargo rustc --release --crate-type cdylib`), the
-  way the static libraries already were. In this repository `cargo cdylib` replaces
-  `cargo build --release` in every dev loop, and `cargo wasm-module` builds the
-  wasm32-wasip1 module; a plain `cargo build` now produces the rlib and no shared library.
-  The fix below is the reason. *(crates.io, and every dev loop)*
-- **The native libraries are smaller.** Cargo only passes `-C lto` for a cdylib built as an
-  invocation's one crate type, so `lto = true` never reached the plain library while the
-  manifest listed `["cdylib", "rlib"]`. The linux-x64 library is 356,440 bytes against
-  432,152, at the same speed (v4, v5 and v7 through the C ABI, alternating runs, within noise).
+- **The native libraries are a twentieth the size.** The shared library every binding
+  loads is now built `#![no_std]`, with the same abort-on-panic handler the static
+  libraries already had. What std added was its runtime — the unwinder, the backtrace
+  symbolizer and the allocator — which no C ABI export can reach. And link-time
+  optimization now reaches it: Cargo only passes `-C lto` for a cdylib built as an
+  invocation's one crate type, so `lto = true` never applied while the manifest listed
+  `["cdylib", "rlib"]` (see the next entry). As shipped, linux-x64 goes from 426,856 bytes
+  to 19,048 (346,544 with LTO alone) and win-x64 from 124,928 to 17,920, and the Linux
+  libraries depend on libc alone, so the musl builds no longer need libgcc_s. The exports
+  are the same 13 symbols over the same code: every one takes its timestamp from the
+  caller, and `getrandom` reads the OS entropy source the same way without std. They are
+  proved panic-free, so the abort handler is never even linked. The LTO step alone was
+  measured at the same speed (v4, v5 and v7 through the C ABI, alternating runs, within
+  noise). The wasm32-wasip1
+  module keeps std, whose allocator its hosts call into, and the Python, Ruby and PHP
+  extensions keep std and unwinding, so a panic in one still surfaces as a host exception.
   *(every package that carries a native library)*
+- **Rust — the shared library is built by naming its crate type, not listed in the
+  manifest.** `[lib]` now declares only the rlib, which is what fixes `default-features =
+  false` (see Fixed). The library every binding loads is built with `cargo cdylib` (an
+  alias for `cargo rustc --release --crate-type cdylib` with std off and the `cdylib`
+  feature on), the way the static libraries already were; the new `cdylib` feature is that build's no_std panic
+  handler, off by default and never for an rlib consumer. In this repository `cargo cdylib`
+  replaces `cargo build --release` in every dev loop, and the new `cargo wasm-module` builds
+  the wasm32-wasip1 module; a plain `cargo build` now produces the rlib and no shared
+  library. *(crates.io, and every dev loop)*
 - **Python — the wheels are built, installed and attested in CI, and the release publishes
   them unchanged.** Through 0.4.0 they were built in `release.yml` at the tag, so the first
   time a wheel was ever installed was after other registries had published; 0.4.0's osx-x64
@@ -68,7 +83,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workflows and PHP's own tests out of the archive Packagist serves: 2.6 MB against
   3.5 as downloaded, 6.1 MB against 8.5 unpacked. `go/` stays in, because
   the Go module proxy builds its zip from the same kind of archive. *(Packagist)*
-
 - **Rust — the crate is rustfmt-clean and CI keeps it that way.** `cargo fmt` had drifted
   across most of `src`, the tests, the benchmarks and the no-panic example; it is applied
   throughout, and a new `check-fmt` job runs `cargo fmt --check` on every PR. The
@@ -108,8 +122,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrade note
 
-The Rust crate is the one package with a breaking change, and the reason this is 0.5.0
-rather than 0.4.1: `NewV6Error` and `NewV7Error` gained a variant and became
+The Rust crate is the one package with a breaking change, and the reason this is a minor
+release rather than a patch: `NewV6Error` and `NewV7Error` gained a variant and became
 `#[non_exhaustive]`, so a `match` on either one outside the crate needs a wildcard arm. Every
 other binding is a drop-in: the C ABI only gained a return code no binding can receive, and
 the bindings' own APIs are unchanged.
@@ -730,7 +744,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.0...v0.2.1
