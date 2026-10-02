@@ -160,9 +160,6 @@ jobs:
   # prerequisite "prepare release" is responsible for, not automatic just because this job
   # runs.
   nuget-org-pack:
-    # 0.4.0 recovery: this leg already published 0.4.0 (run 36961860416); gated so the
-    # rerun that publishes PyPI does not push a duplicate. Remove once PyPI is out.
-    if: false
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
     # attest-build-provenance signs with an OIDC token and records the result; a reusable
@@ -183,9 +180,6 @@ jobs:
   # this job's own login step below already does a fresh OIDC exchange, so the extra job was
   # dead weight and got removed rather than un-paused into a no-op.)
   nuget-org-publish:
-    # 0.4.0 recovery: this leg already published 0.4.0 (run 36961860416); gated so the
-    # rerun that publishes PyPI does not push a duplicate. Remove once PyPI is out.
-    if: false
     needs: nuget-org-pack
     runs-on: ubuntu-26.04
     permissions:
@@ -336,9 +330,6 @@ jobs:
   # push`), so this only actually works once hyperuuid.gemspec's version is bumped past
   # whatever's already published — a real prerequisite "prepare release" is responsible for.
   rubygems-publish:
-    # 0.4.0 recovery: this leg already published 0.4.0 (run 36961860416); gated so the
-    # rerun that publishes PyPI does not push a duplicate. Remove once PyPI is out.
-    if: false
     needs: find-ci-run
     runs-on: ubuntu-26.04
     permissions:
@@ -746,9 +737,6 @@ jobs:
   # — cargo publish --locked fails on a stale self-referential lock entry), a real
   # prerequisite, not automatic just because this gate is gone.
   pack-crates:
-    # 0.4.0 recovery: this leg already published 0.4.0 (run 36961860416); gated so the
-    # rerun that publishes PyPI does not push a duplicate. Remove once PyPI is out.
-    if: false
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
     # Handed down to the reusable workflow, which attests what it publishes and cannot
@@ -770,9 +758,6 @@ jobs:
   # io.github.skunkwerkx:hyperuuid:0.0.1, a real prerequisite, not automatic just because
   # this gate is gone.
   maven-publish:
-    # 0.4.0 recovery: this leg already published 0.4.0 (run 36961860416); gated so the
-    # rerun that publishes PyPI does not push a duplicate. Remove once PyPI is out.
-    if: false
     needs: find-ci-run
     uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@master
     # Handed down to the reusable workflow, which attests what it publishes and cannot
