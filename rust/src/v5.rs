@@ -35,6 +35,7 @@ pub mod namespace {
 /// Creates a deterministic UUID version 5 from a namespace UUID and raw name bytes.
 ///
 /// The same `(namespace, name)` pair always produces the same UUID.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v5(namespace: Uuid, name: &[u8]) -> Uuid {
     let mut hasher = Sha1::new();
     hasher.update(namespace.as_bytes());

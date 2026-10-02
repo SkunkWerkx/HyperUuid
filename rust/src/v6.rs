@@ -17,13 +17,18 @@ const RAND_BYTES_PER_ITEM: usize = 8;
 
 
 /// An error returned when minting a version 6 UUID fails.
+///
+/// Non-exhaustive, so a failure mode added later is not a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NewV6Error {
     /// `unix_millis`, converted to 100-nanosecond Gregorian-epoch ticks, doesn't fit the
     /// 60-bit timestamp field.
     TimestampOutOfRange,
     /// The system's random source failed while generating `clock_seq`/`node`.
     Random(getrandom::Error),
+    /// The batch output buffer is shorter than `count * 16` bytes.
+    BufferTooSmall,
 }
 
 impl core::fmt::Display for NewV6Error {
@@ -33,6 +38,7 @@ impl core::fmt::Display for NewV6Error {
                 write!(f, "unix millisecond timestamp does not fit the 60-bit v6 timestamp field")
             }
             Self::Random(e) => write!(f, "random source failed: {e}"),
+            Self::BufferTooSmall => write!(f, "output buffer is shorter than count * 16 bytes"),
         }
     }
 }
@@ -46,6 +52,7 @@ impl core::error::Error for NewV6Error {}
 /// §6.9 recommends randomizing the node ID anyway to avoid leaking hardware identity. The
 /// node ID's multicast bit is set to flag it as random rather than a real MAC, the same
 /// convention v1 implementations use.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v6(unix_millis: u64) -> Result<Uuid, NewV6Error> {
     let ticks_since_epoch = unix_millis
         .checked_mul(10_000)
@@ -81,6 +88,7 @@ pub fn new_v6(unix_millis: u64) -> Result<Uuid, NewV6Error> {
 /// Creates a new UUID version 6 from a [`Timestamp`] instead of a raw millisecond count —
 /// pulls the Unix-epoch milliseconds off `timestamp` and mints it through [`new_v6`], so it's
 /// the exact same UUID [`new_v6(timestamp.to_unix_millis())`](new_v6) would produce.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v6_at(timestamp: Timestamp) -> Result<Uuid, NewV6Error> {
     new_v6(timestamp.to_unix_millis())
 }
@@ -94,10 +102,12 @@ pub fn new_v6_at(timestamp: Timestamp) -> Result<Uuid, NewV6Error> {
 /// — not on the heap and not on the stack. That is what lets this crate build with no
 /// allocator rather than merely without `std`.
 ///
-/// A `count` of 0 is a no-op success. Same errors as [`new_v6`]. The entropy is drawn before
-/// any item is assembled, so on [`NewV6Error::Random`] no UUID has been written at all — but
-/// the front of `out` may hold partial entropy from the failed draw, so treat the buffer as
-/// clobbered rather than untouched.
+/// A `count` of 0 is a no-op success. Same errors as [`new_v6`], plus
+/// [`NewV6Error::BufferTooSmall`] when `out` is shorter than `count * 16` bytes. The entropy
+/// is drawn before any item is assembled, so on [`NewV6Error::Random`] no UUID has been
+/// written at all — but the front of `out` may hold partial entropy from the failed draw, so
+/// treat the buffer as clobbered rather than untouched.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), NewV6Error> {
     let ticks_since_epoch = unix_millis
         .checked_mul(10_000)
@@ -111,8 +121,12 @@ pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
     // Narrowed once, up front, so the entropy fill and the per-item writes below both stay
     // inside exactly the region this call owns. That matters more than it used to: the fill
     // now writes through `out` itself, and a caller's oversized buffer must keep its tail
-    // untouched.
-    let out = &mut out[..count as usize * 16];
+    // untouched. A buffer shorter than that region is an error rather than an out-of-bounds
+    // panic, and `checked_mul` because `u32::MAX * 16` overflows a 32-bit `usize`.
+    let out = (count as usize)
+        .checked_mul(16)
+        .and_then(|len| out.get_mut(..len))
+        .ok_or(NewV6Error::BufferTooSmall)?;
 
     let time_high = (ticks_since_epoch >> 28) as u32;
     let time_mid = ((ticks_since_epoch >> 12) & 0xFFFF) as u16;
@@ -158,6 +172,7 @@ pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
 /// Extracts the Unix-epoch millisecond timestamp embedded in a version 6 UUID. Saturates to
 /// 0 for a (legitimately RFC-valid) pre-1970 Gregorian timestamp, matching this module's
 /// Unix-millisecond-only API surface.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn unix_millis(uuid: &Uuid) -> u64 {
     let b = uuid.as_bytes();
     let time_high = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as u64;
@@ -195,6 +210,7 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
 /// ties don't, by the RFC's own v6 design, not a limitation introduced here.
 ///
 /// Meaningful only for a genuine version 6 UUID.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn to_sql_order(uuid: &Uuid) -> Uuid {
     let rfc = uuid.as_bytes();
     let mut sql = [0u8; 16];
@@ -219,6 +235,7 @@ pub fn to_sql_order(uuid: &Uuid) -> Uuid {
 
 /// Inverse of [`to_sql_order`] — converts a SQL-Server-ordered version 6 UUID's bytes back to
 /// RFC 9562 order.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn to_rfc_order(uuid: &Uuid) -> Uuid {
     let sql = uuid.as_bytes();
     let mut rfc = [0u8; 16];

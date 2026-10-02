@@ -41,7 +41,13 @@ impl Timestamp {
     /// [`crate::v7::new_v7_at`] actually pass along to [`crate::v6::new_v6`]/
     /// [`crate::v7::new_v7`] — truncates any sub-millisecond precision this crate doesn't
     /// track, matching [`Timestamp::from_unix_millis`]'s own rounding-down direction.
+    ///
+    /// Saturates at `u64::MAX` for a timestamp past what a millisecond count can hold, which
+    /// both generators reject as out of range. Plain arithmetic panicked there in a debug
+    /// build and, in a release one, wrapped into a valid-looking but wrong timestamp.
     pub const fn to_unix_millis(&self) -> u64 {
-        self.seconds * 1000 + (self.subsec_nanos / 1_000_000) as u64
+        self.seconds
+            .saturating_mul(1000)
+            .saturating_add((self.subsec_nanos / 1_000_000) as u64)
     }
 }

@@ -86,6 +86,7 @@ impl fmt::Display for ParseUuidError {
 impl FromStr for Uuid {
     type Err = ParseUuidError;
 
+    #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.as_bytes();
         if s.len() != 36 || s[8] != b'-' || s[13] != b'-' || s[18] != b'-' || s[23] != b'-' {
@@ -101,19 +102,17 @@ impl FromStr for Uuid {
             }
         }
 
+        // Where each byte's two hex digits start. The hyphens sit at fixed offsets, so every
+        // pair does too, and a hyphen anywhere else is simply a non-hex digit. Skipping
+        // hyphens wherever they fell instead let one in the last group shift the pairing,
+        // so the final pair started at offset 35 and read past the end of the string.
+        const PAIRS: [usize; 16] = [0, 2, 4, 6, 9, 11, 14, 16, 19, 21, 24, 26, 28, 30, 32, 34];
+
         let mut bytes = [0u8; 16];
-        let mut out = 0usize;
-        let mut i = 0usize;
-        while i < s.len() {
-            if s[i] == b'-' {
-                i += 1;
-                continue;
-            }
-            let hi = hex_val(s[i]).ok_or(ParseUuidError)?;
-            let lo = hex_val(s[i + 1]).ok_or(ParseUuidError)?;
-            bytes[out] = (hi << 4) | lo;
-            out += 1;
-            i += 2;
+        for (byte, &at) in bytes.iter_mut().zip(PAIRS.iter()) {
+            let hi = hex_val(s[at]).ok_or(ParseUuidError)?;
+            let lo = hex_val(s[at + 1]).ok_or(ParseUuidError)?;
+            *byte = (hi << 4) | lo;
         }
 
         Ok(Self(bytes))

@@ -172,6 +172,7 @@ fn new_v6(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
         Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis does not fit the 60-bit v6 timestamp field",
         )),
+        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err("uuid_new_v6: random source failure")),
     }
 }
@@ -184,6 +185,7 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis must be non-negative and fit within 48 bits",
         )),
+        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err("uuid_new_v7: random source failure")),
     }
 }
@@ -222,6 +224,7 @@ fn new_v6_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
         Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis does not fit the 60-bit v6 timestamp field",
         )),
+        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err("uuid_new_v6_batch: random source failure")),
     }
 }
@@ -235,6 +238,7 @@ fn new_v7_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis must be non-negative and fit within 48 bits",
         )),
+        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err("uuid_new_v7_batch: random source failure")),
     }
 }
@@ -398,6 +402,7 @@ fn fill_bytes_impl(
             Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
                 "unix_millis must be non-negative and fit within 48 bits",
             )),
+            Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
             Err(_) => Err(PyRuntimeError::new_err("uuid_new_v7_batch: random source failure")),
         }
     } else {
@@ -406,6 +411,7 @@ fn fill_bytes_impl(
             Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
                 "unix_millis does not fit the 60-bit v6 timestamp field",
             )),
+            Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
             Err(_) => Err(PyRuntimeError::new_err("uuid_new_v6_batch: random source failure")),
         }
     }

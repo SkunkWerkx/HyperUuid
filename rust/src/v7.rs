@@ -15,12 +15,17 @@ const RAND_BYTES_PER_ITEM: usize = 6;
 
 
 /// An error returned when minting a version 7 UUID fails.
+///
+/// Non-exhaustive, so a failure mode added later is not a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NewV7Error {
     /// `unix_millis` was negative-equivalent-out-of-range or exceeded [`MAX_UNIX_MILLIS`].
     TimestampOutOfRange,
     /// The system's random source failed while generating `rand_a`/`rand_b`.
     Random(getrandom::Error),
+    /// The batch output buffer is shorter than `count * 16` bytes.
+    BufferTooSmall,
 }
 
 impl core::fmt::Display for NewV7Error {
@@ -30,6 +35,7 @@ impl core::fmt::Display for NewV7Error {
                 write!(f, "unix millisecond timestamp must fit within 48 bits")
             }
             Self::Random(e) => write!(f, "random source failed: {e}"),
+            Self::BufferTooSmall => write!(f, "output buffer is shorter than count * 16 bytes"),
         }
     }
 }
@@ -84,6 +90,7 @@ fn counter() -> &'static AtomicU32 {
 /// The timestamp is supplied by the caller rather than read from the clock, so this
 /// function has no platform-specific time dependency and works identically compiled
 /// natively or to `wasm32`.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v7(unix_millis: u64) -> Result<Uuid, NewV7Error> {
     if unix_millis > MAX_UNIX_MILLIS {
         return Err(NewV7Error::TimestampOutOfRange);
@@ -120,6 +127,7 @@ pub fn new_v7(unix_millis: u64) -> Result<Uuid, NewV7Error> {
 /// Creates a new UUID version 7 from a [`Timestamp`] instead of a raw millisecond count —
 /// pulls the Unix-epoch milliseconds off `timestamp` and mints it through [`new_v7`], so it's
 /// the exact same UUID [`new_v7(timestamp.to_unix_millis())`](new_v7) would produce.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v7_at(timestamp: Timestamp) -> Result<Uuid, NewV7Error> {
     new_v7(timestamp.to_unix_millis())
 }
@@ -133,11 +141,13 @@ pub fn new_v7_at(timestamp: Timestamp) -> Result<Uuid, NewV7Error> {
 /// caller's own buffer with no scratch space at all — not on the heap and not on the stack.
 /// That is what lets this crate build with no allocator rather than merely without `std`.
 ///
-/// A `count` of 0 is a no-op success. Same errors as [`new_v7`]. The entropy is drawn before
-/// any item is assembled, so on [`NewV7Error::Random`] no UUID has been written at all — but
-/// the front of `out` may hold partial entropy from the failed draw, so treat the buffer as
-/// clobbered rather than untouched. A very large `count` can still wrap the 26-bit counter
-/// mid-batch, the same wrap-boundary caveat individual calls already carry.
+/// A `count` of 0 is a no-op success. Same errors as [`new_v7`], plus
+/// [`NewV7Error::BufferTooSmall`] when `out` is shorter than `count * 16` bytes. The entropy
+/// is drawn before any item is assembled, so on [`NewV7Error::Random`] no UUID has been
+/// written at all — but the front of `out` may hold partial entropy from the failed draw, so
+/// treat the buffer as clobbered rather than untouched. A very large `count` can still wrap
+/// the 26-bit counter mid-batch, the same wrap-boundary caveat individual calls already carry.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), NewV7Error> {
     if unix_millis > MAX_UNIX_MILLIS {
         return Err(NewV7Error::TimestampOutOfRange);
@@ -149,8 +159,12 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
     // Narrowed once, up front, so the entropy fill and the per-item writes below both stay
     // inside exactly the region this call owns. That matters more than it used to: the fill
     // now writes through `out` itself, and a caller's oversized buffer must keep its tail
-    // untouched.
-    let out = &mut out[..count as usize * 16];
+    // untouched. A buffer shorter than that region is an error rather than an out-of-bounds
+    // panic, and `checked_mul` because `u32::MAX * 16` overflows a 32-bit `usize`.
+    let out = (count as usize)
+        .checked_mul(16)
+        .and_then(|len| out.get_mut(..len))
+        .ok_or(NewV7Error::BufferTooSmall)?;
 
     // Reserves [base+1, base+count] in this one call, continuing the same global sequence a
     // series of individual fetch_add(1) calls would have produced (matching new_v7's own
@@ -211,14 +225,18 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
 pub fn now_v7() -> Result<Uuid, NewV7Error> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // A clock set before 1970, or one so far ahead its milliseconds overflow a u64, is out of
+    // range rather than a panic — the same answer new_v7 gives a timestamp past the field.
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock is before the Unix epoch")
-        .as_millis() as u64;
+        .ok()
+        .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok())
+        .ok_or(NewV7Error::TimestampOutOfRange)?;
     new_v7(millis)
 }
 
 /// Extracts the Unix-epoch millisecond timestamp embedded in a version 7 UUID.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn unix_millis(uuid: &Uuid) -> u64 {
     let b = uuid.as_bytes();
     ((b[0] as u64) << 40)
@@ -252,6 +270,7 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
 ///
 /// Meaningful only for a genuine version 7 UUID — same convention as [`unix_millis`], the
 /// caller is responsible for checking that first if it matters.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn to_sql_order(uuid: &Uuid) -> Uuid {
     let rfc = uuid.as_bytes();
 
@@ -287,6 +306,7 @@ pub fn to_sql_order(uuid: &Uuid) -> Uuid {
 
 /// Inverse of [`to_sql_order`] — converts a SQL-Server-ordered version 7 UUID's bytes back to
 /// RFC 9562 order.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn to_rfc_order(uuid: &Uuid) -> Uuid {
     let sql = uuid.as_bytes();
 

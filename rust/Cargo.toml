@@ -1,6 +1,6 @@
 [package]
 name = "hyperuuid"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
 license = "MIT"
@@ -24,6 +24,7 @@ sha1 = { version = "0.11.0", default-features = false }
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311"], optional = true }
 magnus = { version = "0.8", features = ["rb-sys"], optional = true }
 ext-php-rs = { version = "0.15", optional = true }
+no-panic = { version = "0.1", optional = true }
 
 # One crate, three optional native-extension entry points instead of three satellite
 # crates each path-depending back on this one. Nothing in a plain `cargo cdylib` (the
@@ -55,6 +56,14 @@ staticlib = []
 python = ["dep:pyo3", "std"]
 ruby = ["dep:magnus", "std"]
 php = ["dep:ext-php-rs", "std"]
+# Proves at link time that the public API cannot panic, the way `ryu` and `itoa` do: every
+# generation, parsing and conversion function and every C export carries `#[no_panic]` under
+# this feature, which turns any panic path the optimizer leaves in into an undefined symbol.
+# The proof only happens when a release-optimized binary that calls the function is linked,
+# so it is run by building `examples/no_panic.rs` (CI's check-no-panic job). `now_v7` is the
+# one exception: std's own `SystemTime::now` unwraps the OS clock call, which this crate
+# cannot reach into.
+no-panic = ["dep:no-panic"]
 
 [dev-dependencies]
 criterion = "0.8.2"
@@ -63,6 +72,10 @@ uuid = { version = "1", features = ["v4", "v5", "v6", "v7"] }
 [[bench]]
 name = "uuid_benchmarks"
 harness = false
+
+[[example]]
+name = "no_panic"
+required-features = ["no-panic"]
 
 # Size, not speed. Measured on win-x64 (Ruby 3.4, already carrying `-C strip=symbols`): the
 # Magnus extension goes 1,102,336 -> 1,040,384 bytes, -5.6%, with .text 842,336 -> 792,704

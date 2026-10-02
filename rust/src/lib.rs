@@ -89,6 +89,7 @@ pub use uuid::{ParseUuidError, Uuid};
 /// version before asking. Delegates straight to [`v6::unix_millis`]/[`v7::unix_millis`], the
 /// same extraction every binding's own timestamp getter already uses — no bit-layout logic
 /// duplicated here.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn get_timestamp(uuid: &Uuid) -> Option<Timestamp> {
     match uuid.version() {
         6 => Some(Timestamp::from_unix_millis(v6::unix_millis(uuid))),
@@ -229,6 +230,14 @@ mod tests {
     }
 
     #[test]
+    fn a_timestamp_past_u64_millis_is_out_of_range_not_wrapped() {
+        let far = Timestamp::from_unix(u64::MAX / 1000 + 1, 0);
+        assert_eq!(far.to_unix_millis(), u64::MAX);
+        assert_eq!(v6::new_v6_at(far).unwrap_err(), v6::NewV6Error::TimestampOutOfRange);
+        assert_eq!(v7::new_v7_at(far).unwrap_err(), v7::NewV7Error::TimestampOutOfRange);
+    }
+
+    #[test]
     fn v7_increasing_timestamps_sort_in_creation_order() {
         const BASE_MS: u64 = 1_000_000;
         let ids: Vec<Uuid> = (0..10).map(|i| v7::new_v7(BASE_MS + i).unwrap()).collect();
@@ -302,6 +311,20 @@ mod tests {
     }
 
     #[test]
+    fn from_str_rejects_a_misplaced_hyphen_instead_of_panicking() {
+        // 36 bytes with the four fixed hyphens in place, plus a fifth that shifts the last
+        // group's digits; the old parser read one byte past the end of this string.
+        for text in [
+            "00000000-0000-0000-0000--00000000000",
+            "-0000000-0000-0000-0000-000000000000",
+            "00000000-0000-0000-0000-00000000000-",
+        ] {
+            assert_eq!(text.len(), 36);
+            assert_eq!(Uuid::from_str(text), Err(ParseUuidError));
+        }
+    }
+
+    #[test]
     fn v6_batch_matches_single_call_generation() {
         let mut out = vec![0u8; 5 * 16];
         v6::new_v6_batch(RFC_TEST_VECTOR_MS, 5, &mut out).unwrap();
@@ -327,6 +350,14 @@ mod tests {
     fn v6_batch_zero_count_is_a_no_op() {
         let mut out: [u8; 0] = [];
         v6::new_v6_batch(RFC_TEST_VECTOR_MS, 0, &mut out).unwrap();
+    }
+
+    #[test]
+    fn v6_batch_short_buffer_errors_and_leaves_it_untouched() {
+        let mut out = [0xAAu8; 31];
+        let err = v6::new_v6_batch(RFC_TEST_VECTOR_MS, 2, &mut out).unwrap_err();
+        assert_eq!(err, v6::NewV6Error::BufferTooSmall);
+        assert_eq!(out, [0xAAu8; 31]);
     }
 
     #[test]
@@ -428,6 +459,14 @@ mod tests {
     fn v7_batch_zero_count_is_a_no_op() {
         let mut out: [u8; 0] = [];
         v7::new_v7_batch(RFC_TEST_VECTOR_MS, 0, &mut out).unwrap();
+    }
+
+    #[test]
+    fn v7_batch_short_buffer_errors_and_leaves_it_untouched() {
+        let mut out = [0xAAu8; 31];
+        let err = v7::new_v7_batch(RFC_TEST_VECTOR_MS, 2, &mut out).unwrap_err();
+        assert_eq!(err, v7::NewV7Error::BufferTooSmall);
+        assert_eq!(out, [0xAAu8; 31]);
     }
 
     #[test]
