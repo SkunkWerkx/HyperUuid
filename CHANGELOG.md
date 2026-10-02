@@ -9,6 +9,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Rust — the public API is proven panic-free at link time.** A new `no-panic` feature puts
+  [`#[no_panic]`](https://docs.rs/no-panic) on every generation, parsing and conversion
+  function and every C export, and
+  CI's new `check-no-panic` job links a release binary that calls each one
+  (`examples/no_panic.rs`), so a panic path the optimizer cannot remove fails the build and
+  names the function. `v7::now_v7` is the one exception, because std's own `SystemTime::now`
+  unwraps the OS clock call. The feature is off by default and changes no code a consumer
+  runs. *(crates.io)*
+- **Rust — `NewV6Error::BufferTooSmall` and `NewV7Error::BufferTooSmall`**, returned by
+  `new_v6_batch`/`new_v7_batch` when `out` is shorter than `count * 16` bytes, which used to
+  panic (see Fixed). Both enums are now `#[non_exhaustive]`, so a later variant is not a
+  breaking change. *(crates.io)*
+- **C ABI — return code `3`** from `uuid_new_v6_batch`/`uuid_new_v7_batch` when
+  `count * 16` overflows `usize`. Only a 32-bit target can reach it, and only with a count no
+  buffer in its address space could hold, so no binding sees it: each one allocates the
+  buffer before the call. *(every package that carries a native library)*
+
 ### Changed
 
 - **Rust — the shared library is built by naming its crate type, not listed in the
@@ -48,6 +67,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   type, which is why the `thumbv7em` check in CI never saw it. CI now builds a real
   `default-features = false` consumer on the host and for `wasm32-unknown-unknown`.
   *(crates.io)*
+- **Rust — `Uuid::from_str` no longer panics on a stray hyphen.** The parser skipped hyphens
+  wherever they fell, so a 36-character string with an extra one in the last group shifted
+  the hex pairing and read one byte past the end. `00000000-0000-0000-0000--00000000000` is
+  the shortest example. The digit pairs are now read at their fixed offsets, so a misplaced
+  hyphen is just a non-hex digit and the result is `ParseUuidError`. *(crates.io)*
+- **Rust — a short buffer passed to `new_v6_batch`/`new_v7_batch` is an error, not a panic.**
+  It returns the new `BufferTooSmall` and leaves the buffer untouched. The bindings were never
+  exposed: each sizes its own buffer. *(crates.io)*
+- **Rust — `v7::now_v7` no longer panics on a clock set before 1970.** It returns
+  `TimestampOutOfRange`, the same as a clock so far ahead that its milliseconds overflow a
+  `u64` (which used to be silently truncated). *(crates.io)*
+- **Rust — `Timestamp::to_unix_millis` saturates instead of overflowing.** For more than
+  `u64::MAX / 1000` seconds it panicked in a debug build, and in a release build it wrapped
+  into a valid-looking timestamp, so `new_v6_at`/`new_v7_at` minted a UUID for the wrong
+  time. It now saturates at `u64::MAX`, which both generators reject as out of range.
+  *(crates.io)*
+- **Ruby — the native extension cannot panic on an uninitialized exception cache.** It
+  falls back to `RuntimeError` rather than panicking. `init` fills the
+  cache before defining any method, so the fallback is unreachable in practice. *(RubyGems)*
+
+### Upgrade note
+
+The Rust crate is the one package with a breaking change, and the reason this is 0.5.0
+rather than 0.4.1: `NewV6Error` and `NewV7Error` gained a variant and became
+`#[non_exhaustive]`, so a `match` on either one outside the crate needs a wildcard arm. Every
+other binding is a drop-in: the C ABI only gained a return code no binding can receive, and
+the bindings' own APIs are unchanged.
 
 ## [0.4.0] — 2026-10-01
 

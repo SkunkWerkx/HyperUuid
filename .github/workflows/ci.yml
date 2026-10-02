@@ -187,6 +187,24 @@ jobs:
           fi
           echo "no allocator dependency in the core"
 
+  # The crate's generation, parsing and conversion functions and every C export carry
+  # `#[no_panic]` under the `no-panic` feature, the way `ryu` and `itoa` prove theirs: any panic
+  # path the optimizer leaves in becomes an undefined symbol, so the link fails naming the
+  # function. That only happens when a release-optimized binary that calls the function is
+  # linked, and the cdylib does not count (it drops every function no export reaches), so this
+  # builds the example that calls each one. A panic that crossed the C ABI would abort the host
+  # process outright, or trap the wasm instance, rather than surface as an error code. `now_v7`
+  # is left out on purpose: std's own `SystemTime::now` unwraps the clock call. Static analysis
+  # only, so like the job above this doesn't depend on build-native.
+  check-no-panic:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: the public API and the C exports link with no panic path
+        working-directory: rust
+        run: cargo build --release --example no_panic --features no-panic
+
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
   # #![deny(missing_docs)]), applied here with the closest per-language equivalent. Each is

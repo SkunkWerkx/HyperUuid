@@ -5,7 +5,9 @@
 //! every export just takes plain pointers into the caller's own stack- or heap-allocated
 //! buffers — no allocator exports, no protocol beyond "here's a 16-byte buffer, fill it in".
 //!
-//! Return codes: `0` success, `1` random source failure, `2` timestamp out of range.
+//! Return codes: `0` success, `1` random source failure, `2` timestamp out of range, `3` a
+//! batch too large to address (`count * 16` overflows `usize`, which only a 32-bit target can
+//! reach, and where no buffer that size can exist).
 
 use crate::{v4, v5, v6, v7, Uuid};
 use core::slice;
@@ -16,6 +18,7 @@ use core::slice;
 /// nothing, touches nothing: the cheapest possible "did the native library resolve" probe,
 /// and the same shape as HyperCast's `hypercast_version`.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn hyperuuid_version() -> u32 {
     const fn field(text: &str) -> u32 {
         let bytes = text.as_bytes();
@@ -36,6 +39,7 @@ pub extern "C" fn hyperuuid_version() -> u32 {
 /// Writes a random UUID version 4 (RFC 9562 §5.4) to `out_ptr` (16 bytes).
 /// Returns 0 on success, 1 if the random source failed.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v4(out_ptr: *mut u8) -> i32 {
     match v4::new_v4() {
         Ok(uuid) => {
@@ -51,6 +55,7 @@ pub extern "C" fn uuid_new_v4(out_ptr: *mut u8) -> i32 {
 /// from a 16-byte namespace UUID at `ns_ptr` and a `name_len`-byte name at `name_ptr`. A
 /// `name_len` of 0 never dereferences `name_ptr`, so an empty name may cross as null.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v5(
     ns_ptr: *const u8,
     name_ptr: *const u8,
@@ -59,9 +64,7 @@ pub extern "C" fn uuid_new_v5(
 ) -> i32 {
     // SAFETY: caller guarantees `ns_ptr` points to 16 live bytes and `name_ptr`/`name_len`
     // describe a live byte range, per the module contract.
-    let namespace_bytes: [u8; 16] = unsafe { slice::from_raw_parts(ns_ptr, 16) }
-        .try_into()
-        .unwrap();
+    let namespace_bytes: [u8; 16] = unsafe { core::ptr::read(ns_ptr.cast::<[u8; 16]>()) };
     // name_len == 0 never touches name_ptr — several bindings pass null for an empty name
     // (C#'s fixed over an empty span, Go's nil slice, Fiddle's nil), and
     // `slice::from_raw_parts` requires non-null even for a 0-length slice.
@@ -82,6 +85,7 @@ pub extern "C" fn uuid_new_v5(
 /// no clock of its own). `clock_seq` and `node` are randomly generated on every call.
 /// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v6(unix_millis: u64, out_ptr: *mut u8) -> i32 {
     match v6::new_v6(unix_millis) {
         Ok(uuid) => {
@@ -91,6 +95,8 @@ pub extern "C" fn uuid_new_v6(unix_millis: u64, out_ptr: *mut u8) -> i32 {
         }
         Err(v6::NewV6Error::Random(_)) => 1,
         Err(v6::NewV6Error::TimestampOutOfRange) => 2,
+        // Only a batch has a buffer to be short of; mapped anyway rather than panicking.
+        Err(v6::NewV6Error::BufferTooSmall) => 3,
     }
 }
 
@@ -98,32 +104,37 @@ pub extern "C" fn uuid_new_v6(unix_millis: u64, out_ptr: *mut u8) -> i32 {
 /// (16 bytes). Pure bit-shifting over the caller's bytes — meaningful only for a genuine
 /// version 6 UUID; the caller is responsible for checking the version first if that matters.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_v6_unix_millis(uuid_ptr: *const u8) -> u64 {
     // SAFETY: caller guarantees `uuid_ptr` points to 16 live bytes, per the module contract.
-    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }
-        .try_into()
-        .unwrap();
+    let bytes: [u8; 16] = unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) };
     v6::unix_millis(&Uuid::from_bytes(bytes))
 }
 
 /// Writes `count` time-sortable UUID version 6 values to `out_ptr` (`count * 16` bytes),
 /// sharing one `unix_millis` timestamp capture. `clock_seq` and `node` are randomly
 /// generated per item. A `count` of 0 is a no-op success.
-/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
+/// 3 if `count * 16` overflows `usize` (32-bit targets only).
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v6_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32 {
     // count == 0 never touches out_ptr — some callers reasonably pass null/dangling for an
     // empty batch, and `slice::from_raw_parts_mut` requires non-null even for a 0-length slice.
-    let out: &mut [u8] = if count == 0 {
-        &mut []
-    } else {
-        // SAFETY: caller guarantees `out_ptr` points to a live `count * 16`-byte allocation.
-        unsafe { slice::from_raw_parts_mut(out_ptr, count as usize * 16) }
+    // A length that overflows `usize` crosses as an empty slice, which the core rejects as
+    // too small for `count` — code 3, never a wrapped length.
+    let out: &mut [u8] = match (count as usize).checked_mul(16) {
+        Some(len) if len > 0 => {
+            // SAFETY: caller guarantees `out_ptr` points to a live `count * 16`-byte allocation.
+            unsafe { slice::from_raw_parts_mut(out_ptr, len) }
+        }
+        _ => &mut [],
     };
     match v6::new_v6_batch(unix_millis, count, out) {
         Ok(()) => 0,
         Err(v6::NewV6Error::Random(_)) => 1,
         Err(v6::NewV6Error::TimestampOutOfRange) => 2,
+        Err(v6::NewV6Error::BufferTooSmall) => 3,
     }
 }
 
@@ -132,9 +143,10 @@ pub extern "C" fn uuid_new_v6_batch(unix_millis: u64, count: u32, out_ptr: *mut 
 /// See [`v6::to_sql_order`] for the byte-level rationale. Meaningful only for a genuine
 /// version 6 UUID.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_v6_to_sql_order(uuid_ptr: *mut u8) {
     // SAFETY: caller guarantees `uuid_ptr` points to 16 live, writable bytes.
-    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }.try_into().unwrap();
+    let bytes: [u8; 16] = unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) };
     let sql = v6::to_sql_order(&Uuid::from_bytes(bytes));
     unsafe { core::ptr::copy_nonoverlapping(sql.as_bytes().as_ptr(), uuid_ptr, 16) };
 }
@@ -142,9 +154,10 @@ pub extern "C" fn uuid_v6_to_sql_order(uuid_ptr: *mut u8) {
 /// Inverse of [`uuid_v6_to_sql_order`] — rewrites the 16 bytes at `uuid_ptr` in place from
 /// SQL Server order back to RFC 9562 order.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_v6_to_rfc_order(uuid_ptr: *mut u8) {
     // SAFETY: caller guarantees `uuid_ptr` points to 16 live, writable bytes.
-    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }.try_into().unwrap();
+    let bytes: [u8; 16] = unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) };
     let rfc = v6::to_rfc_order(&Uuid::from_bytes(bytes));
     unsafe { core::ptr::copy_nonoverlapping(rfc.as_bytes().as_ptr(), uuid_ptr, 16) };
 }
@@ -154,6 +167,7 @@ pub extern "C" fn uuid_v6_to_rfc_order(uuid_ptr: *mut u8) {
 /// no clock of its own).
 /// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
     match v7::new_v7(unix_millis) {
         Ok(uuid) => {
@@ -163,6 +177,8 @@ pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
         }
         Err(v7::NewV7Error::Random(_)) => 1,
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
+        // Only a batch has a buffer to be short of; mapped anyway rather than panicking.
+        Err(v7::NewV7Error::BufferTooSmall) => 3,
     }
 }
 
@@ -170,32 +186,37 @@ pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
 /// (16 bytes). Pure bit-shifting over the caller's bytes — meaningful only for a genuine
 /// version 7 UUID; the caller is responsible for checking the version first if that matters.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_v7_unix_millis(uuid_ptr: *const u8) -> u64 {
     // SAFETY: caller guarantees `uuid_ptr` points to 16 live bytes, per the module contract.
-    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }
-        .try_into()
-        .unwrap();
+    let bytes: [u8; 16] = unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) };
     v7::unix_millis(&Uuid::from_bytes(bytes))
 }
 
 /// Writes `count` time-sortable UUID version 7 values to `out_ptr` (`count * 16` bytes),
 /// sharing one `unix_millis` timestamp capture and one contiguous block of the monotonic
 /// counter. A `count` of 0 is a no-op success.
-/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
+/// 3 if `count * 16` overflows `usize` (32-bit targets only).
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32 {
     // count == 0 never touches out_ptr — some callers reasonably pass null/dangling for an
     // empty batch, and `slice::from_raw_parts_mut` requires non-null even for a 0-length slice.
-    let out: &mut [u8] = if count == 0 {
-        &mut []
-    } else {
-        // SAFETY: caller guarantees `out_ptr` points to a live `count * 16`-byte allocation.
-        unsafe { slice::from_raw_parts_mut(out_ptr, count as usize * 16) }
+    // A length that overflows `usize` crosses as an empty slice, which the core rejects as
+    // too small for `count` — code 3, never a wrapped length.
+    let out: &mut [u8] = match (count as usize).checked_mul(16) {
+        Some(len) if len > 0 => {
+            // SAFETY: caller guarantees `out_ptr` points to a live `count * 16`-byte allocation.
+            unsafe { slice::from_raw_parts_mut(out_ptr, len) }
+        }
+        _ => &mut [],
     };
     match v7::new_v7_batch(unix_millis, count, out) {
         Ok(()) => 0,
         Err(v7::NewV7Error::Random(_)) => 1,
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
+        Err(v7::NewV7Error::BufferTooSmall) => 3,
     }
 }
 
@@ -204,9 +225,10 @@ pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut 
 /// See [`v7::to_sql_order`] for the byte-level rationale. Meaningful only for a genuine
 /// version 7 UUID.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_v7_to_sql_order(uuid_ptr: *mut u8) {
     // SAFETY: caller guarantees `uuid_ptr` points to 16 live, writable bytes.
-    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }.try_into().unwrap();
+    let bytes: [u8; 16] = unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) };
     let sql = v7::to_sql_order(&Uuid::from_bytes(bytes));
     unsafe { core::ptr::copy_nonoverlapping(sql.as_bytes().as_ptr(), uuid_ptr, 16) };
 }
@@ -214,9 +236,10 @@ pub extern "C" fn uuid_v7_to_sql_order(uuid_ptr: *mut u8) {
 /// Inverse of [`uuid_v7_to_sql_order`] — rewrites the 16 bytes at `uuid_ptr` in place from
 /// SQL Server order back to RFC 9562 order.
 #[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_v7_to_rfc_order(uuid_ptr: *mut u8) {
     // SAFETY: caller guarantees `uuid_ptr` points to 16 live, writable bytes.
-    let bytes: [u8; 16] = unsafe { slice::from_raw_parts(uuid_ptr, 16) }.try_into().unwrap();
+    let bytes: [u8; 16] = unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) };
     let rfc = v7::to_rfc_order(&Uuid::from_bytes(bytes));
     unsafe { core::ptr::copy_nonoverlapping(rfc.as_bytes().as_ptr(), uuid_ptr, 16) };
 }

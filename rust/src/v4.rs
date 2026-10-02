@@ -6,6 +6,7 @@ use crate::Uuid;
 ///
 /// All 122 free bits are random; the version nibble (`0x4`) and variant bits
 /// (`10xxxxxx`) occupy their required positions at octet 6 and octet 8.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v4() -> Result<Uuid, getrandom::Error> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes)?;

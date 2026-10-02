@@ -31,8 +31,17 @@ struct Cached {
 
 static CACHED: OnceLock<Cached> = OnceLock::new();
 
-fn cached() -> &'static Cached {
-    CACHED.get().expect("hyperuuid_native used before init")
+/// The package's exception class, or `RuntimeError` should the cache somehow be empty. `init`
+/// fills it before defining a single method, so the fallback is never taken; it is there so
+/// that an impossible state raises a Ruby exception instead of panicking.
+fn exception_class(
+    ruby: &Ruby,
+    pick: fn(&Cached) -> Opaque<ExceptionClass>,
+) -> ExceptionClass {
+    match CACHED.get() {
+        Some(cached) => ruby.get_inner(pick(cached)),
+        None => ruby.exception_runtime_error(),
+    }
 }
 
 const V6_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis does not fit the 60-bit v6 timestamp field";
@@ -43,13 +52,13 @@ const V7_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis must fit within the RFC 956
 /// ever see a return code, so the OS error this backend could name is left out on purpose.
 fn random_source_error(ruby: &Ruby, export: &'static str) -> Error {
     Error::new(
-        ruby.get_inner(cached().random_source_error),
+        exception_class(ruby, |c| c.random_source_error),
         format!("{export}: the system random source failed"),
     )
 }
 
 fn timestamp_out_of_range(ruby: &Ruby, message: &'static str) -> Error {
-    Error::new(ruby.get_inner(cached().timestamp_out_of_range_error), message)
+    Error::new(exception_class(ruby, |c| c.timestamp_out_of_range_error), message)
 }
 
 /// Borrows the RString's bytes only long enough to copy/parse them — no Ruby calls happen
@@ -88,6 +97,9 @@ fn new_v6(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
         Err(core::v6::NewV6Error::TimestampOutOfRange) => {
             Err(timestamp_out_of_range(ruby, V6_TIMESTAMP_OUT_OF_RANGE))
         }
+        Err(e @ core::v6::NewV6Error::BufferTooSmall) => {
+            Err(Error::new(ruby.exception_arg_error(), e.to_string()))
+        }
         Err(core::v6::NewV6Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v6")),
     }
 }
@@ -106,6 +118,9 @@ fn new_v6_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
         Err(core::v6::NewV6Error::TimestampOutOfRange) => {
             Err(timestamp_out_of_range(ruby, V6_TIMESTAMP_OUT_OF_RANGE))
         }
+        Err(e @ core::v6::NewV6Error::BufferTooSmall) => {
+            Err(Error::new(ruby.exception_arg_error(), e.to_string()))
+        }
         Err(core::v6::NewV6Error::Random(_)) => {
             Err(random_source_error(ruby, "uuid_new_v6_batch"))
         }
@@ -117,6 +132,9 @@ fn new_v7(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
         Ok(uuid) => Ok(uuid_string(ruby, uuid)),
         Err(core::v7::NewV7Error::TimestampOutOfRange) => {
             Err(timestamp_out_of_range(ruby, V7_TIMESTAMP_OUT_OF_RANGE))
+        }
+        Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
+            Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
         Err(core::v7::NewV7Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v7")),
     }
@@ -135,6 +153,9 @@ fn new_v7_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
         Ok(()) => Ok(ruby.str_from_slice(&out)),
         Err(core::v7::NewV7Error::TimestampOutOfRange) => {
             Err(timestamp_out_of_range(ruby, V7_TIMESTAMP_OUT_OF_RANGE))
+        }
+        Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
+            Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
         Err(core::v7::NewV7Error::Random(_)) => {
             Err(random_source_error(ruby, "uuid_new_v7_batch"))
