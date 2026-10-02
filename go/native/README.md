@@ -20,7 +20,7 @@ returns `ErrNativeUnavailable` naming the missing file.
 isn't a per-platform shared library: it's the core compiled as a WebAssembly module, embedded
 by the same `//go:embed native` and loaded only by the `hyperuuid_wasm` build tag's
 wasmtime-go backend (`backend_wasmtime.go`, see the README's WebAssembly section).
-Regenerate it with `cargo cdylib --target wasm32-wasip1` in `rust/` — from inside
+Regenerate it with `cargo wasm-module` in `rust/` — from inside
 `rust/`, not with `--manifest-path`, so `rust/.cargo/config.toml`'s wasip1 linker flags
 (which export the guest's `malloc`/`free`) are picked up — and copy
 `rust/target/wasm32-wasip1/release/hyperuuid.wasm` in.
