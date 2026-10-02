@@ -9,15 +9,15 @@ name: CI — build native, build wasm, test every binding
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
-# Magnus extension) get uploaded here for later reuse. What deliberately does NOT happen
-# here: anything that bakes a version number into a shippable package's own filename or
-# metadata (a PyPI wheel, a .nupkg, a .gem). That packing happens once, in release.yml, at
-# tag time.
+# Magnus extension) get uploaded here for later reuse, as do the eight PyPI wheels, which
+# are built, installed and called into on every run (build-wheels below). The .nupkg and
+# the gems are still packed in release.yml, at tag time, from this run's libraries.
 #
-# The native libraries are not version-agnostic, though: each reports the crate version it
-# was built at (`hyperuuid_version()`). So the run a release reuses has to be one that ran
-# against the version-bump commit, which is why prepare-release.yml dispatches this
-# workflow after it pushes the bump — see release.yml's find-ci-run for the gate.
+# None of it is version-agnostic: each native library reports the crate version it was
+# built at (`hyperuuid_version()`), and a wheel carries it in its file name. So the run a
+# release reuses has to be one that ran against the version-bump commit, which is why
+# prepare-release.yml dispatches this workflow after it pushes the bump — see release.yml's
+# find-ci-run for the gate.
 #
 # No push trigger, deliberately (not because master is branch-protected — checked via
 # `gh api repos/.../branches/master/protection`, it isn't, despite this having been assumed
@@ -90,10 +90,27 @@ jobs:
     with:
       crate: hyperuuid
 
+  # The eight PyPI wheels, on every run rather than only at the tag: built by maturin,
+  # installed on their own platform (the musl ones on a bare Alpine image, osx-x64 under
+  # Rosetta), called into, attested and uploaded as pypi-wheels-{rid}. release.yml
+  # publishes these exact files. A wheel that cannot be installed therefore fails the pull
+  # request; while they were built in release.yml, 0.4.0's osx-x64 wheel failed its first
+  # install with four registries already published.
+  build-wheels:
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
+    # Same two scopes build-native hands down, for the same reason: the forge attests each
+    # wheel and cannot escalate past what this job was granted.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      crate: hyperuuid
+
   # rust/Cargo.toml publishes categories = ["no-std"], and rust/src/lib.rs is #![no_std]
   # whenever its default-on `std` feature is off. `default = ["std"]` means every other cargo
   # invocation in this pipeline compiles the *std* configuration — HyperForge's
-  # `cargo build --release`, its `cargo test --release`, and all three `--features` extension
+  # cdylib build, its `cargo test --release`, and all three `--features` extension
   # builds. Not one of them would notice a `use std::` creeping back into the core (it compiles
   # clean under std — at worst an unused-import warning nothing fails on), or a dependency
   # feature that drags std in, which is the shape this crate was actually in before: it pinned
@@ -117,12 +134,34 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: thumbv7em-none-eabi
+          targets: thumbv7em-none-eabi,wasm32-unknown-unknown
       - name: cargo check (no_std, bare metal)
         working-directory: rust
         env:
           RUSTFLAGS: --cfg getrandom_backend="custom"
         run: cargo check --no-default-features --target thumbv7em-none-eabi
+
+      # The check above only ever passed because a bare-metal target cannot produce a
+      # cdylib. Through 0.4.0 the manifest listed one, cargo builds every crate type a
+      # dependency lists, and a no_std cdylib has no panic handler — so a
+      # `default-features = false` consumer failed on every target that can produce one,
+      # which is the developer's own machine and the browser. The manifest now declares
+      # only the rlib; this builds a consumer the way one would actually depend on the
+      # crate, on both, so the crate type cannot come back unnoticed. The host needs no
+      # RUSTFLAGS (getrandom reads the OS); wasm32-unknown-unknown has no OS, so it gets the
+      # same custom backend the bare-metal check names.
+      - name: A default-features = false consumer builds on the host and for wasm32-unknown-unknown
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/no-std-consumer"
+          mkdir -p "$consumer/src"
+          printf '%s\n' '[package]' 'name = "no-std-consumer"' 'version = "0.0.0"' 'edition = "2024"' '' \
+            '[dependencies]' "hyperuuid = { path = \"$GITHUB_WORKSPACE/rust\", default-features = false }" \
+            > "$consumer/Cargo.toml"
+          printf '%s\n' '#![no_std]' 'pub use hyperuuid as core_under_test;' > "$consumer/src/lib.rs"
+          cargo build --manifest-path "$consumer/Cargo.toml"
+          RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            cargo build --manifest-path "$consumer/Cargo.toml" --target wasm32-unknown-unknown
 
       # The stronger half of the claim, ported from HyperCast: the crate publishes
       # `no-std::no-alloc`, so a bare-metal consumer supplies an entropy backend and a panic

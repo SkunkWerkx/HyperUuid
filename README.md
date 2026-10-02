@@ -134,10 +134,10 @@ Every published artifact across all eight bindings — the package itself where 
 has one, and the native binaries underneath it either way — carries a GitHub build-provenance
 attestation, checkable with `gh attestation verify`. Which flags that needs depends on where
 the signing workflow physically lives, not on which registry the artifact ended up in:
-artifacts signed directly inside this repo's own `release.yml` — the RubyGems gem, the PyPI
-wheel, and the published NuGet package — verify with plain `--repo SkunkWerkx/HyperUuid`.
+artifacts signed directly inside this repo's own `release.yml` — the RubyGems gem and the
+published NuGet package — verify with plain `--repo SkunkWerkx/HyperUuid`.
 Artifacts signed by a reusable workflow hosted in `SkunkWerkx/.github` — the crates.io crate,
-the Maven jar, the pre-push NuGet package, every native library (which is the entire
+the Maven jar, the PyPI wheels, the pre-push NuGet package, every native library (which is the entire
 story for Go, Swift, and PHP, none of which has a package-level attestation of its own), and
 the `wasm32-wasip1` module that rides inside the jar, the gems, the wheels and `go/native/` —
 need `--signer-repo SkunkWerkx/.github` added, or `--owner SkunkWerkx` in place of both

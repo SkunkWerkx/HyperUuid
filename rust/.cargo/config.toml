@@ -2,7 +2,7 @@
 # libruby, libphp) — the Py*/rb_*/php* symbols resolve from the host process when the
 # extension loads, so the linker has to be told to leave them undefined
 # (`dynamic_lookup`). maturin arranges this itself for the python feature's release
-# wheel build; a plain `cargo build` (this repo's dev loop, CI, and the ruby/php
+# wheel build; a plain cargo invocation (this repo's dev loop, CI, and the ruby/php
 # features, which have no maturin-equivalent wrapper) does not, so it's declared here.
 # Harmless for the default (no extension feature) build too — a cdylib with no
 # undefined symbols is unaffected by the flag either way. Linux permits undefined
@@ -26,15 +26,15 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 # Using the guest's allocator, rather than a host-picked offset past the data segments, is
 # load-bearing: dlmalloc claims the tail of the initial memory on first use, and a batch call
 # writing there was observed corrupting the host's buffer on the very next allocation.
-# Cargo only reads this file from the crate directory (`cargo build` run inside rust/), the
+# Cargo only reads this file from the crate directory (`cargo cdylib` run inside rust/), the
 # same way every other target section here already relies on.
 [target.wasm32-wasip1]
 rustflags = ["-C", "link-arg=--export=malloc", "-C", "link-arg=--export=free"]
 
 # musl (Alpine): every *-linux-musl target defaults to a statically linked C runtime, and
-# under that default rustc cannot produce a cdylib at all — it warns "dropping unsupported
-# crate type `cdylib`" and builds only the rlib, exiting 0. Turning crt-static off is what
-# makes `cargo build` on Alpine yield libhyperuuid.so, dynamically linked against musl's libc
+# under that default rustc cannot produce a cdylib at all — `cargo cdylib` stops with "cannot
+# produce cdylib ... as the target does not support these crate types". Turning crt-static
+# off is what makes it yield libhyperuuid.so on Alpine, dynamically linked against musl's libc
 # like any other shared library there.
 #
 # This is the dev-loop half. The library CI ships additionally links the unwinder statically
@@ -56,6 +56,15 @@ rustflags = ["-C", "target-feature=-crt-static"]
 [target.wasm32-unknown-emscripten]
 rustflags = ["-C", "panic=abort"]
 
+[alias]
+# The shared library every binding loads: libhyperuuid.so / .dylib / hyperuuid.dll in
+# target/release/, and with `--target wasm32-wasip1` the hyperuuid.wasm module the wasm
+# backends run. `rustc --crate-type cdylib` rather than a [lib] entry, because Cargo.toml
+# declares only the rlib (it has the reason: a listed cdylib broke every
+# `default-features = false` consumer off bare metal). A plain `cargo build` therefore
+# produces the rlib and no shared library; this is the dev loop's build command, and what
+# CI runs spelled out. Extra arguments pass through: `cargo cdylib --features python`.
+cdylib = "rustc --release --crate-type cdylib"
 # Local-dev builds of the extension features, each in its own target dir. The ruby and php
 # features produce a differently-shaped libhyperuuid.so (Init_hyperuuid_native / the PHP module
 # entry point) at the same path as the plain cdylib that Fiddle, ctypes-free FFI, P/Invoke,
@@ -63,13 +72,12 @@ rustflags = ["-C", "panic=abort"]
 # silently breaks the rest. `cargo ruby-ext` / `cargo php-ext` keep them apart; the python feature
 # gets the same isolation from python/.cargo/config.toml, since maturin runs cargo from there.
 # Output lands in target/ruby/release/ and target/php/release/.
-[alias]
-ruby-ext = "build --release --features ruby --target-dir target/ruby"
-php-ext = "build --release --features php --target-dir target/php"
+ruby-ext = "rustc --release --crate-type cdylib --features ruby --target-dir target/ruby"
+php-ext = "rustc --release --crate-type cdylib --features php --target-dir target/php"
 # The Blazor WebAssembly static library: libhyperuuid.a for wasm32-unknown-emscripten, with no
 # copy of Rust's standard library inside it. `rustc --crate-type staticlib` rather than a
-# [lib] entry, because the override is for this one invocation — every other build of this
-# crate wants the cdylib. `--no-default-features --features staticlib` is what leaves
+# [lib] entry, for the same reason as `cargo cdylib` above: the crate type belongs to this
+# one invocation. `--no-default-features --features staticlib` is what leaves
 # std out and supplies the panic handler in its place; two Hyper* libraries that each
 # carried std could not be linked into one app (`duplicate symbol: rust_eh_personality`).
 # Output: target/wasm32-unknown-emscripten/release/libhyperuuid.a.

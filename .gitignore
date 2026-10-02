@@ -8,7 +8,7 @@
 # The forge stages each RID's native library here at test and pack time (see
 # hyper-build-native.yml and hyper-pack-nuget.yml); nothing under it is committed. Locally
 # the csproj falls back to rust/target/release/ when this RID has nothing staged, so a
-# plain `cargo build --release` is all the dev loop needs.
+# plain `cargo cdylib` is all the dev loop needs.
 csharp/HyperUuid/runtimes/
 # The same for the static libraries a Native AOT publish links in: staged by the forge's
 # static-libs/build-static-libs.sh at test and pack time, never committed.
@@ -25,7 +25,7 @@ go/staticlib/*/*.a
 **/build/
 # Same story as csharp/HyperUuid/runtimes/ above: CI (build-nuget.yml's pack-maven job)
 # bundles all platforms' natives here at pack time; regenerable locally via
-# `cargo build --release` for local dev/test.
+# `cargo cdylib` for local dev/test.
 java/src/main/resources/native/
 # csharp/HyperUuid/build/ is NuGet's real, tracked build/{PackageId}.targets packaging
 # convention (auto-imported into every consumer for the WASM NativeFileReference wiring — see
@@ -56,7 +56,7 @@ java/src/main/resources/native/
 
 # Ruby
 # Same story — CI places each leg's native lib here for `bundle exec rspec` at build-native
-# time; regenerable locally via `cargo build --release`.
+# time; regenerable locally via `cargo cdylib`.
 ruby/lib/hyperuuid/native/*/
 ruby/Gemfile.lock
 ruby/pkg/

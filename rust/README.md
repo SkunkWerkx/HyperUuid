@@ -101,7 +101,7 @@ ship it: the `cdylib` for `wasm32-wasip1`, built from inside this directory so t
 `.cargo/config.toml` applies —
 
 ```sh
-cargo build --release --target wasm32-wasip1
+cargo cdylib --target wasm32-wasip1
 # rust/target/wasm32-wasip1/release/hyperuuid.wasm
 ```
 
@@ -136,16 +136,20 @@ consumer with no heap at all is one this crate can serve.
 cargo add hyperuuid --no-default-features
 ```
 
-Default-on rather than unconditional because this crate also builds as a `cdylib` — the shared
-library every other binding in this repo dlopens — and a final linked artifact needs a
-`#[panic_handler]`, which only std supplies. So the cdylib builds exactly as it always has, and
-`default-features = false` yields a real bare-metal rlib, verified rather than argued:
+Default-on rather than unconditional because the shared library every other binding in this
+repo dlopens is built from this crate too (`cargo cdylib`, below), and a final linked artifact
+needs a `#[panic_handler]`, which only std supplies. That library is not one of the manifest's
+crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
+real `no_std` rlib on every target: your own machine, `wasm32-unknown-unknown`, and bare metal.
+CI builds a `default-features = false` consumer for the first two on every run, and checks the
+third:
 
 ```sh
 cargo check --no-default-features --target thumbv7em-none-eabi
 ```
 
-Two things that build leaves to you, both of them things such a consumer supplies anyway:
+On a target with no operating system, two things are left to you, both of them things such a
+consumer supplies anyway:
 
 - **An entropy backend.** Off std there's no OS for `getrandom` to read from, and it stops
   compiling rather than guessing. Build with `RUSTFLAGS='--cfg getrandom_backend="custom"'`
@@ -169,16 +173,23 @@ build invocation — each generates a different C entry point under the same cra
 meant to coexist in one binary:
 
 ```sh
-cargo build --release --features python  # -> PyInit__native (normally via maturin in python/)
-cargo ruby-ext                           # -> Init_hyperuuid_native, in target/ruby/release/ (ruby/'s `rake native:dev` runs this and stages the result)
-cargo php-ext                            # -> get_module, in target/php/release/
+cargo cdylib                    # -> the plain shared library every FFI binding loads
+cargo cdylib --features python  # -> PyInit__native (normally via maturin in python/)
+cargo ruby-ext                  # -> Init_hyperuuid_native, in target/ruby/release/ (ruby/'s `rake native:dev` runs this and stages the result)
+cargo php-ext                   # -> get_module, in target/php/release/
 ```
+
+`cargo cdylib` is an alias in `.cargo/config.toml` for `cargo rustc --release --crate-type
+cdylib`. The manifest declares only the rlib, so a plain `cargo build` produces no shared
+library; the crate type is named per invocation, which is what keeps it out of every
+consumer's build.
 
 Each produces `libhyperuuid.{so,dylib}` (`hyperuuid.dll` on Windows), under `target/release/` for the raw `--features` form and under its own directory for the aliases — the
 interpreter-specific loading/staging (module naming, `.pyd`/`.bundle` renaming, etc.) is this
 repo's Python/Ruby/PHP packages' job, not this crate's; verified to work from the published
-crate itself, not just an in-repo checkout — `cargo build --manifest-path` against a fresh
-`cargo download`/crates.io tarball of `hyperuuid` produces the same three symbols above.
+crate itself, not just an in-repo checkout — `cargo rustc --release --crate-type cdylib
+--features <one> --manifest-path` against the packaged crate (`cargo package`'s own
+output) produces the same three symbols above.
 
 **Local dev trap worth knowing:** "each produces `target/release/libhyperuuid.so`" means
 *the same file* — so a `--features python` build (or a `maturin build` in `python/`, which
@@ -186,7 +197,7 @@ is one) silently replaces the plain cdylib that every other binding's dev loop l
 extension build still exports the `uuid_*` symbols, but it also carries undefined
 interpreter symbols that only resolve inside a CPython (or Ruby, or PHP) process, so the
 next `./gradlew test` or `dotnet test` fails at native load with something unhelpful about a
-missing symbol. Nothing is broken; a plain `cargo build --release` puts it back. The `cargo ruby-ext` and
+missing symbol. Nothing is broken; a plain `cargo cdylib` puts it back. The `cargo ruby-ext` and
 `cargo php-ext` aliases in `.cargo/config.toml` avoid it by building into `target/ruby/` and
 `target/php/`, and `python/.cargo/config.toml` does the same for maturin (`python/target/`).
 CI never hits this — each leg builds in its own job.

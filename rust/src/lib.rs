@@ -28,14 +28,16 @@
 // `extern crate alloc` here on purpose: nothing needs it, and a consumer with no heap at all
 // is a consumer this crate can now serve.
 //
-// Gated on the default-on `std` feature rather than unconditional, because this crate also
-// ships a `cdylib`. A final linked artifact needs things only std supplies; proven, not
-// assumed — `cargo build --no-default-features` fails with "`#[panic_handler]` function
+// Gated on the default-on `std` feature rather than unconditional, because this crate is
+// also built as a `cdylib`. A final linked artifact needs things only std supplies; proven,
+// not assumed — `cargo cdylib --no-default-features` fails with "`#[panic_handler]` function
 // required, but not found" and "unwinding panics are not supported without std". So the
-// shared library every binding dlopens builds with std as it always has, while a bare-metal
-// consumer takes the crate with `default-features = false` and supplies those itself, plus a
-// `getrandom` custom backend, the way such a consumer must anyway. Verified against a real
-// target rather than argued:
+// shared library every binding dlopens builds with std as it always has, while a no_std
+// consumer takes the crate with `default-features = false` and, where the target has no
+// operating system, supplies a panic handler plus a `getrandom` custom backend, the way
+// such a consumer must anyway. The cdylib is not in Cargo.toml's `crate-type` for this
+// reason: cargo would build it for every consumer, and it cannot link without std.
+// Verified against a real target rather than argued:
 //
 //     RUSTFLAGS='--cfg getrandom_backend="custom"' \
 //         cargo check --no-default-features --target thumbv7em-none-eabi
