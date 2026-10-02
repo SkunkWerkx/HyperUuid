@@ -360,8 +360,8 @@ built for the Ruby you are running and put where `require` looks — and that is
 
 ```sh
 cd rust
-cargo build --release                           # libhyperuuid, what the Fiddle backend loads
-cargo build --release --target wasm32-wasip1    # hyperuuid.wasm, what the wasm backend loads
+cargo cdylib                           # libhyperuuid, what the Fiddle backend loads
+cargo cdylib --target wasm32-wasip1    # hyperuuid.wasm, what the wasm backend loads
 
 cd ../ruby
 bundle install

@@ -265,13 +265,16 @@ for `fill_v7`/`fill_v6` exactly as the section above already advises.
 
 ## Verifying provenance
 
-Every wheel PyPI serves carries a GitHub build-provenance attestation, signed directly by
-this repo's own `release.yml` (the `pypi-build-wheels` job attests each platform wheel
-right where it's built, no reusable workflow in between), so plain `--repo` verifies it:
+Every wheel PyPI serves carries a GitHub build-provenance attestation. The wheels are built,
+installed and attested in CI by the shared `hyper-build-wheels.yml` workflow in
+`SkunkWerkx/.github`, and `release.yml` verifies each one before publishing it unchanged, so
+the verify command names that signer:
 
 ```sh
 pip download hyperuuid==X.Y.Z --no-deps -d .
-gh attestation verify hyperuuid-X.Y.Z-*.whl --repo SkunkWerkx/HyperUuid
+gh attestation verify hyperuuid-X.Y.Z-*.whl \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+# or: gh attestation verify hyperuuid-X.Y.Z-*.whl --owner SkunkWerkx
 ```
 
 This is a separate thing from the [PEP 740](https://peps.python.org/pep-0740/) attestations
@@ -279,7 +282,7 @@ This is a separate thing from the [PEP 740](https://peps.python.org/pep-0740/) a
 own — this is the GitHub/Sigstore transparency-log route, checked with `gh attestation
 verify`, the same route every other artifact in this project uses. See
 [csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for why
-some artifacts here need `--signer-repo` and this one doesn't.
+an artifact signed by the shared workflow needs `--signer-repo`.
 
 ## License
 

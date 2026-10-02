@@ -30,7 +30,7 @@ end
 # Deliberately NOT RbSys::ExtensionTask/rake-compiler: those assume ext/{gem}/ lives inside
 # the gem's own directory tree so `cargo metadata`'s plain CWD-based lookup finds it — this
 # repo's rust/ and ruby/ are siblings in a shared monorepo, not that layout, and CI's own
-# `build-native` job already runs `cargo build --release --features ruby` for Magnus testing
+# `build-native` job already builds the `ruby` feature's cdylib for Magnus testing
 # (hyper-build-native.yml), producing the exact same artifact this needs — so this task just
 # expects those binaries already staged at lib/hyperuuid/<minor>/hyperuuid_native.{so,bundle},
 # one per entry in ABIS below (by release.yml's packing step, or locally by `rake

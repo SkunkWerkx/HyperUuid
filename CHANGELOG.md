@@ -9,6 +9,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Rust — the shared library is built by naming its crate type, not listed in the
+  manifest.** `[lib]` now declares only the rlib, and the library every binding loads is
+  built with `cargo cdylib` (an alias for `cargo rustc --release --crate-type cdylib`), the
+  way the static libraries already were. In this repository `cargo cdylib` replaces
+  `cargo build --release` in every dev loop, with `--target wasm32-wasip1` or
+  `--features python` passed through; a plain `cargo build` now produces the rlib and no
+  shared library. The fix below is the reason. *(crates.io, and every dev loop)*
+- **The native libraries are smaller.** Cargo only passes `-C lto` for a cdylib built as an
+  invocation's one crate type, so `lto = true` never reached the plain library while the
+  manifest listed `["cdylib", "rlib"]`. The linux-x64 library is 356,440 bytes against
+  432,152, at the same speed (v4, v5 and v7 through the C ABI, alternating runs, within noise).
+  *(every package that carries a native library)*
+- **Python — the wheels are built, installed and attested in CI, and the release publishes
+  them unchanged.** Through 0.4.0 they were built in `release.yml` at the tag, so the first
+  time a wheel was ever installed was after other registries had published; 0.4.0's osx-x64
+  wheel failed there. All eight are now built on every CI run by the forge's
+  `hyper-build-wheels.yml`, installed on their own platform and called into, and
+  `release.yml` verifies their count, version and provenance before uploading them. Because
+  the forge signs them, `gh attestation verify` on a wheel now takes
+  `--signer-repo SkunkWerkx/.github` (or `--owner SkunkWerkx`); wheels up to 0.4.0 verify
+  with `--repo` alone. *(PyPI)*
+- **PHP — the Composer package no longer carries the other bindings.** A `.gitattributes`
+  `export-ignore` list keeps the C#, Java, Python, Ruby, Rust and Swift trees, the
+  workflows and PHP's own tests out of the archive Packagist serves: 2.6 MB against
+  3.5 as downloaded, 6.1 MB against 8.5 unpacked. `go/` stays in, because
+  the Go module proxy builds its zip from the same kind of archive. *(Packagist)*
+
+### Fixed
+
+- **Rust — `default-features = false` builds on every target, not only bare metal.** Cargo
+  builds every crate type a dependency lists, and a no_std cdylib has no panic handler, so
+  through 0.4.0 a `default-features = false` consumer failed with "`#[panic_handler]`
+  function required, but not found" on any target that can produce a cdylib: the
+  developer's own machine and `wasm32-unknown-unknown`. Bare-metal targets drop the crate
+  type, which is why the `thumbv7em` check in CI never saw it. CI now builds a real
+  `default-features = false` consumer on the host and for `wasm32-unknown-unknown`.
+  *(crates.io)*
+
 ## [0.4.0] — 2026-10-01
 
 Six themes. *A load probe everywhere*: the core now reports its own version, and every

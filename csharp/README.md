@@ -164,13 +164,13 @@ The `.nupkg` carries compiled native code, which is a real thing to ask question
 **Building it yourself.** The core is a normal Rust crate with no build-time codegen, so you never have to take the shipped binary at all:
 
 ```shell
-cd rust && cargo build --release
+cd rust && cargo cdylib
 # -> target/release/libhyperuuid.so  (.dylib on macOS, hyperuuid.dll on Windows)
 ```
 
-Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's own MSBuild globs will pick it up, or point `dlopen` at it however you prefer — the C ABI in `rust/src/ffi.rs` is the entire contract: the twelve `uuid_*` functions and `hyperuuid_version`, taking plain pointers into your own buffers. For local development nothing needs dropping anywhere: when no library has been staged under `runtimes/` for your machine's RID, the project copies `rust/target/release/` straight to the output, so `dotnet test` after a `cargo build --release` just runs.
+Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's own MSBuild globs will pick it up, or point `dlopen` at it however you prefer — the C ABI in `rust/src/ffi.rs` is the entire contract: the twelve `uuid_*` functions and `hyperuuid_version`, taking plain pointers into your own buffers. For local development nothing needs dropping anywhere: when no library has been staged under `runtimes/` for your machine's RID, the project copies `rust/target/release/` straight to the output, so `dotnet test` after a `cargo cdylib` just runs.
 
-**Reproducibility, stated honestly.** The build is deterministic *locally*: `cargo clean -p hyperuuid` followed by `cargo build --release` reproduces a byte-identical `libhyperuuid.so` (verified by SHA-256). It is **not** currently bit-reproducible *across machines* — a local `rustc 1.98.0` build on WSL and the CI-built `linux-arm64` artifact differ in both hash and size (458,712 vs 458,176 bytes), as you'd expect from differing toolchain versions and embedded build paths. So "rebuild it and compare hashes" is not a verification path a consumer can currently rely on.
+**Reproducibility, stated honestly.** The build is deterministic *locally*: `cargo clean -p hyperuuid` followed by `cargo cdylib` reproduces a byte-identical `libhyperuuid.so` (verified by SHA-256). It is **not** currently bit-reproducible *across machines* — a local `rustc 1.98.0` build on WSL and the CI-built `linux-arm64` artifact differ in both hash and size (458,712 vs 458,176 bytes), as you'd expect from differing toolchain versions and embedded build paths. So "rebuild it and compare hashes" is not a verification path a consumer can currently rely on.
 
 **Signed provenance.** Because rebuild-and-compare doesn't work across machines, the mechanism that does is a cryptographic attestation binding each artifact to the workflow run and commit that produced it. CI emits [SLSA build provenance](https://github.com/actions/attest-build-provenance) at three points, because the package is not the same bytes at every stage of its life:
 

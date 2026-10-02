@@ -25,12 +25,11 @@ on:
         type: string
 
 jobs:
-  # ci.yml builds and tests every native leg and uploads the reusable, version-agnostic
-  # outputs (plain FFI libs, the Magnus extension) — but never anything that bakes a version
-  # into itself (a .nupkg, a .gem, a wheel). This job locates that ci.yml run so every
-  # publish job below can pull those reusable artifacts from it; the actual version-sensitive
-  # packing (NuGet, RubyGems, PyPI) happens fresh, later in this same file, once the tag
-  # makes the real version knowable.
+  # ci.yml builds and tests every native leg and uploads the reusable outputs: the plain FFI
+  # libs, the Magnus extension, and the PyPI wheels, already built and install-tested. This
+  # job locates that ci.yml run so every publish job below can pull those artifacts from
+  # it. The .nupkg and the gems are still packed fresh, later in this same file, around the
+  # libraries that run built; the wheels are published as they are.
   #
   # The run it finds has to be one that built the native libraries AT THIS VERSION. Each
   # library embeds its own version (`hyperuuid_version()`, which every binding's native-version
@@ -532,194 +531,76 @@ jobs:
           done
           rm -f served.gem
 
-  # PyPI leg: real multi-platform PyO3 native wheels from day one, no ctypes fallback and no
-  # throwaway single-wheel version. abi3-py311 collapses the matrix to one wheel per platform
-  # (not per Python version), so 8 legs (six desktop platforms plus the two musl ones) cover every supported
-  # CPython 3.11+ on every platform. Built fresh, right here — deliberately not in ci.yml, and unlike every other
-  # registry in this file, not reusable from ci.yml's run either: a wheel bakes its version
-  # into its own filename and metadata at build time (confirmed directly, not assumed —
-  # maturin has no version-override flag), and maturin's PyO3-bindings mode *is* the compile
-  # step, there's no "pack an already-built .so into a wheel" mode the way NuGet/RubyGems
-  # have. So this is the one registry that pays for a second, small compile — same 6
-  # real-hardware legs build-native already uses, just for a wheel instead of a plain test
-  # build, and only at actual release time, not on every PR.
+  # PyPI leg: the eight wheels ci.yml built (hyper-build-wheels.yml in the forge — six
+  # desktop platforms plus the two musl ones, one abi3 wheel each), downloaded from
+  # find-ci-run's run and published unchanged. Nothing is compiled here. Each wheel was
+  # installed and called into on its own platform in that run, so a wheel that cannot be
+  # installed fails a pull request rather than a release with other registries already out,
+  # which is what happened to 0.4.0's osx-x64 wheel while they were still built at the tag.
+  #
+  # The wheels carry the version in their file names and metadata, and that is the version
+  # find-ci-run already required of the run: the crate version at the commit it built.
   #
   # PyPI has no --skip-duplicate — a duplicate-version push is a guaranteed hard rejection —
-  # so this only actually works once python/pyproject.toml's version (dynamic, sourced from
-  # rust/Cargo.toml) is bumped past whatever's already published, a real prerequisite
-  # "prepare release" is responsible for.
-  pypi-build-wheels:
+  # so this only works once the version (dynamic in python/pyproject.toml, sourced from
+  # rust/Cargo.toml) is past whatever is already published.
+  pypi-publish:
     needs: find-ci-run
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-26.04
-            rid: linux-x64
-            target: x86_64-unknown-linux-gnu
-            manylinux: "2_28"
-          - os: ubuntu-26.04-arm
-            rid: linux-arm64
-            target: aarch64-unknown-linux-gnu
-            manylinux: "2_28"
-          # musl (Alpine): a separate wheel tag, not a variant of manylinux — pip on Alpine
-          # ignores every manylinux wheel, and with no sdist published that used to mean no
-          # install at all. maturin turns crt-static off for an extension module itself and
-          # bundles the extension's libgcc_s into the wheel, which the smoke test below
-          # holds it to by importing the wheel on an image that has no libgcc.
-          - os: ubuntu-26.04
-            rid: linux-musl-x64
-            target: x86_64-unknown-linux-musl
-            manylinux: "musllinux_1_2"
-          - os: ubuntu-26.04-arm
-            rid: linux-musl-arm64
-            target: aarch64-unknown-linux-musl
-            manylinux: "musllinux_1_2"
-          # Cross-built on the Apple silicon runner: there is no Intel macOS leg (see the
-          # forge's build-native-osx-x64 job). The wheel is abi3, so building it needs no
-          # x86_64 interpreter. Installing it for the smoke test below does, and
-          # `python_arch` gets one: the x64 CPython, which runs under Rosetta 2.
-          - os: macos-latest
-            rid: osx-x64
-            target: x86_64-apple-darwin
-            manylinux: ""
-            python_arch: x64
-          - os: macos-latest
-            rid: osx-arm64
-            target: aarch64-apple-darwin
-            manylinux: ""
-          - os: windows-latest
-            rid: win-x64
-            target: x86_64-pc-windows-msvc
-            manylinux: ""
-          - os: windows-11-arm
-            rid: win-arm64
-            target: aarch64-pc-windows-msvc
-            manylinux: ""
-    runs-on: ${{ matrix.os }}
-    # attest-build-provenance mints an OIDC token to sign with and records the result.
-    # A permissions block sets every unlisted scope to none, so contents has to be spelled
-    # out too for checkout.
+    runs-on: ubuntu-26.04
     permissions:
+      # A permissions block sets every unlisted scope to none, so contents is spelled out
+      # for checkout. id-token is PyPI Trusted Publishing; attestations: read is what
+      # `gh attestation verify` below needs.
       contents: read
       id-token: write
-      attestations: write
+      attestations: read
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip1${{ matrix.rid == 'osx-x64' && ',x86_64-apple-darwin' || '' }}
-
-      # The wheel's wasmtime backend module, built here from the same tagged checkout the
-      # wheel itself is built from (this leg never reuses ci.yml's artifacts, see above), so
-      # the two halves of one wheel come from one source tree. From inside rust/, where cargo
-      # reads the crate's .cargo/config.toml export flags.
-      - name: Build wasm32-wasip1 module
-        working-directory: rust
-        run: cargo build --release --target wasm32-wasip1
-
-      - name: Stage wasm32-wasip1 module into the package
-        shell: bash
-        run: |
-          mkdir -p python/src/hyperuuid/native/wasm32-wasip1
-          cp rust/target/wasm32-wasip1/release/hyperuuid.wasm python/src/hyperuuid/native/wasm32-wasip1/
-
-      # The hosted arm64 images ship with Rosetta 2; this is for the day one does not.
-      - name: Make sure Rosetta 2 is there for the x64 Python
-        if: matrix.rid == 'osx-x64'
-        run: |
-          set -euo pipefail
-          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
-            softwareupdate --install-rosetta --agree-to-license
-          fi
-          arch -x86_64 /usr/bin/true
-
-      # `architecture` is empty on every row but osx-x64, which setup-python reads as the
-      # runner's own.
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-          architecture: ${{ matrix.python_arch }}
-
-      - uses: PyO3/maturin-action@v1
-        with:
-          working-directory: python
-          target: ${{ matrix.target }}
-          manylinux: ${{ matrix.manylinux != '' && matrix.manylinux || 'off' }}
-          args: --release --out dist
-
-      # The first time this wheel is ever imported, and it happens before anything is
-      # attested or published. ci.yml tests the extension as a staged cdylib; the wheel itself
-      # — maturin's packaging, the bundled libraries, the tag pip selects it by — existed
-      # only here, and through 0.3.0 went to PyPI without being installed once. The check is
-      # small on purpose: the right backend loaded, and the core inside reports the version
-      # being released. The musl wheels are installed on a bare Alpine image, where a wheel
-      # that failed to bundle libgcc_s cannot import.
-      - name: Install the wheel and call into it
-        shell: bash
-        run: |
-          set -euo pipefail
-          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          check="import hyperuuid; assert hyperuuid.BACKEND == 'native', hyperuuid.BACKEND; assert hyperuuid.native_version() == '$want', hyperuuid.native_version(); print('hyperuuid', hyperuuid.native_version(), 'on the', hyperuuid.BACKEND, 'backend')"
-          if [[ "${{ matrix.rid }}" == linux-musl-* ]]; then
-            docker run --rm -v "$PWD/python/dist:/dist:ro" python:3.14-alpine sh -euc \
-              "pip install -q --root-user-action=ignore /dist/*.whl && python -c \"$check\""
-          else
-            # The osx-x64 leg runs on an arm64 runner. setup-python's "x64" macOS build is
-            # the python.org installer, which is a universal binary, and a universal binary
-            # runs its arm64 slice there — where pip rightly refuses an x86_64 wheel ("not a
-            # supported wheel on this platform", v0.4.0's first run). `arch -x86_64` runs the
-            # Intel slice under Rosetta, which is the interpreter this wheel is for.
-            py=(python)
-            if [[ "${{ matrix.rid }}" == osx-x64 ]]; then py=(arch -x86_64 python); fi
-            "${py[@]}" -c 'import platform, sys; print("smoke-test interpreter:", platform.machine(), sys.version.split()[0])'
-            "${py[@]}" -m pip install --quiet --force-reinstall python/dist/*.whl
-            cd "$RUNNER_TEMP"
-            "${py[@]}" -c "$check"
-          fi
-
-      # Unlike every other artifact in this file, the wheel needs no verification gate
-      # anywhere downstream — it is built right here, in this workflow, from this tagged
-      # checkout, and pypi-publish consumes it directly. There is nothing to re-verify
-      # because nothing was inherited. What it does need is an attestation, for the
-      # consumer's sake: `pip download` hands over a wheel with a compiled extension module
-      # inside it, and this is the only compiled artifact in the repo that a consumer
-      # receives sealed inside the package rather than as a file of its own.
-      #
-      # This does not duplicate what pypi-publish already does. gh-action-pypi-publish
-      # emits PEP 740 attestations, which live on PyPI and are checked by PyPI-side
-      # tooling; this is a GitHub/Sigstore build-provenance attestation in the transparency
-      # log, checked with `gh attestation verify` — the same route every other artifact
-      # here uses, so one command covers the whole repo instead of two per ecosystem.
-      #
-      # Note the verifying command has no --signer-repo, and that is not an oversight. The
-      # signing step is right here in this repo's own release.yml, so Fulcio records this
-      # repo as both source and build signer — the two halves agree, unlike everything
-      # hyper-build-native.yml signs from the forge:
-      #
-      #     gh attestation verify <wheel> --repo <owner>/<repo>
-      - name: Attest wheel build provenance
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: python/dist/*.whl
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: pypi-wheels-${{ matrix.rid }}
-          path: python/dist/*.whl
-
-  pypi-publish:
-    needs: pypi-build-wheels
-    runs-on: ubuntu-26.04
-    permissions:
-      id-token: write
-    steps:
       - uses: actions/download-artifact@v8
         with:
           pattern: pypi-wheels-*
           path: dist
           merge-multiple: true
+          run-id: ${{ needs.find-ci-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # The last moment these files can still be rejected: a PyPI upload is permanent, and
+      # nothing below rebuilds what was downloaded. Three things are held, each a way a
+      # release could otherwise go out wrong with every job green: all eight wheels are
+      # here (a missing artifact would publish a release with a platform silently absent),
+      # every one is named for the version being released, and every one carries build
+      # provenance from that ci.yml run.
+      #
+      # --signer-repo is not optional, for the same reason as the gem gate above: the
+      # attest step is in hyper-build-wheels.yml, which lives in the SkunkWerkx/.github
+      # forge, and that is what Fulcio records as the build signer.
+      - name: Verify the wheels about to be published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          ls -l dist
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 8 ]; then
+            echo "::error::Expected 8 wheels from ci.yml run ${{ needs.find-ci-run.outputs.run_id }}, found ${#wheels[@]}."
+            exit 1
+          fi
+          for wheel in "${wheels[@]}"; do
+            case "$(basename "$wheel")" in
+              hyperuuid-"$want"-*) ;;
+              *) echo "::error::$wheel is not a hyperuuid $want wheel — refusing to publish it."; exit 1 ;;
+            esac
+            echo "::group::verify $wheel"
+            if ! gh attestation verify "$wheel" \
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+              echo "::error::No valid build provenance for $wheel — refusing to publish it."
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -728,7 +609,7 @@ jobs:
 
   # Publishes the rust/ core crate to crates.io — source only, no native artifact needed,
   # so it takes nothing from find-ci-run's located run. It still waits on that job, as
-  # the wheels do, because that job is where a tag that disagrees with the manifests is
+  # PyPI's does, because that job is where a tag that disagrees with the manifests is
   # refused — and crates.io is the registry where a wrong version can never be reused.
   #
   # Live again for the coordinated v0.1.0 release. cargo publish has no duplicate-version

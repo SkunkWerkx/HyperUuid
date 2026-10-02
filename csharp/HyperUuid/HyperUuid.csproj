@@ -9,7 +9,7 @@
          that keeps every binding's manifest in lockstep with rust/Cargo.toml. Packed as-is,
          no CI-side override; UuidGenerator.NativeVersion reports the core's own, so a test
          pins the two together. -->
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
@@ -124,7 +124,7 @@
          the reasons. Staged here before packing, like runtimes/, and not committed. -->
     <None Include="staticlibs/**" Pack="true" PackagePath="staticlibs" />
     <!-- Local dev loop, the same one HyperCast's csproj carries: when the Rust core has been
-         built in-repo (a release-profile cargo build in rust/), copy that fresh native library
+         built in-repo (`cargo cdylib` in rust/), copy that fresh native library
          straight to the output so tests and benchmarks run against it without any packaging
          step. CI's runtimes/ layout above takes over for real packages; both patterns copy to
          the output root, where native library resolution always probes.

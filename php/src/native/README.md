@@ -5,7 +5,7 @@ committed to git — unlike every other registry this repo publishes to (NuGet, 
 PyPI, crates.io), Packagist has no packing/build step of its own: whatever's literally in the
 git tree at a tagged commit *is* the published package, so the native binaries have to live
 here for real, not be staged in transiently by CI. Regenerate locally with
-`cargo build --release` in `rust/` and copy the result in if you need to update one by hand;
+`cargo cdylib` in `rust/` and copy the result in if you need to update one by hand;
 CI's own `build-native` job does the same per-leg during in-repo testing, overwriting whichever
 platform's file matches that leg — harmless, since it's the same build either way. When a
 platform's file is absent the binding falls back to `rust/target/release/`, so a development
@@ -63,5 +63,5 @@ If you would rather not trust a binary at all, build the core from source instea
 plain Rust crate with no build-time codegen:
 
 ```shell
-cd rust && cargo build --release
+cd rust && cargo cdylib
 ```
