@@ -193,17 +193,36 @@ jobs:
   # function. That only happens when a release-optimized binary that calls the function is
   # linked, and the cdylib does not count (it drops every function no export reaches), so this
   # builds the example that calls each one. A panic that crossed the C ABI would abort the host
-  # process outright, or trap the wasm instance, rather than surface as an error code. `now_v7`
-  # is left out on purpose: std's own `SystemTime::now` unwraps the clock call. Static analysis
-  # only, so like the job above this doesn't depend on build-native.
+  # process outright, or trap the wasm instance, rather than surface as an error code. It runs on
+  # Windows as well because `now_v7` reads the clock differently there: `clock_gettime` directly
+  # on Unix, std's `SystemTime::now` on Windows, and this is what proves std's path panic-free.
+  # Static analysis only, so like the job above this doesn't depend on build-native.
   check-no-panic:
-    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: the public API and the C exports link with no panic path
         working-directory: rust
         run: cargo build --release --example no_panic --features no-panic
+
+  # rustfmt over every Rust file in the crate (src, tests, benches, examples), every PR. The
+  # crate drifted out of format with nothing to notice it; this keeps it in. Static analysis
+  # only, so it doesn't depend on build-native.
+  check-fmt:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        working-directory: rust
+        run: cargo fmt --check
 
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,

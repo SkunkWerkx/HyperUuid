@@ -33,7 +33,10 @@ const RFC_TEST_VECTOR_MS: u64 = 1_645_557_742_000;
 /// below the variant bits). Same field extraction `v7::to_sql_order` does.
 fn counter_of(uuid: &hyperuuid::Uuid) -> u32 {
     let b = uuid.as_bytes();
-    ((b[6] as u32 & 0x0F) << 22) | ((b[7] as u32) << 14) | ((b[8] as u32 & 0x3F) << 8) | (b[9] as u32)
+    ((b[6] as u32 & 0x0F) << 22)
+        | ((b[7] as u32) << 14)
+        | ((b[8] as u32 & 0x3F) << 8)
+        | (b[9] as u32)
 }
 
 #[test]

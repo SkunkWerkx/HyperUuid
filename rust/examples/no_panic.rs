@@ -15,8 +15,7 @@ use hyperuuid::{Timestamp, Uuid, get_timestamp, hyperuuid_version, v4, v5, v6, v
 // The C exports, reached by symbol the way every binding reaches them.
 unsafe extern "C" {
     fn uuid_new_v4(out_ptr: *mut u8) -> i32;
-    fn uuid_new_v5(ns_ptr: *const u8, name_ptr: *const u8, name_len: u32, out_ptr: *mut u8)
-    -> i32;
+    fn uuid_new_v5(ns_ptr: *const u8, name_ptr: *const u8, name_len: u32, out_ptr: *mut u8) -> i32;
     fn uuid_new_v6(unix_millis: u64, out_ptr: *mut u8) -> i32;
     fn uuid_v6_unix_millis(uuid_ptr: *const u8) -> u64;
     fn uuid_new_v6_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32;
@@ -46,6 +45,7 @@ fn main() {
     black_box(v6::unix_millis(&id));
     black_box(v6::to_sql_order(&id));
     black_box(v6::to_rfc_order(&id));
+    black_box(v7::now_v7().is_ok());
     black_box(v7::new_v7(millis).is_ok());
     black_box(v7::new_v7_at(at).is_ok());
     black_box(v7::new_v7_batch(millis, count, &mut out).is_ok());

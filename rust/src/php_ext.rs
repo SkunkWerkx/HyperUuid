@@ -14,7 +14,7 @@
 use ext_php_rs::binary::Binary;
 use ext_php_rs::prelude::*;
 
-use crate::{v4, v5, v6, v7, Uuid};
+use crate::{Uuid, v4, v5, v6, v7};
 
 fn uuid_arg(bytes: &Binary<u8>) -> PhpResult<Uuid> {
     let array: [u8; 16] = bytes

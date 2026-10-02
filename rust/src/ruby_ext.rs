@@ -18,7 +18,7 @@
 use std::sync::OnceLock;
 
 use magnus::value::Opaque;
-use magnus::{function, prelude::*, Error, ExceptionClass, RModule, RString, Ruby};
+use magnus::{Error, ExceptionClass, RModule, RString, Ruby, function, prelude::*};
 
 use crate as core;
 
@@ -34,10 +34,7 @@ static CACHED: OnceLock<Cached> = OnceLock::new();
 /// The package's exception class, or `RuntimeError` should the cache somehow be empty. `init`
 /// fills it before defining a single method, so the fallback is never taken; it is there so
 /// that an impossible state raises a Ruby exception instead of panicking.
-fn exception_class(
-    ruby: &Ruby,
-    pick: fn(&Cached) -> Opaque<ExceptionClass>,
-) -> ExceptionClass {
+fn exception_class(ruby: &Ruby, pick: fn(&Cached) -> Opaque<ExceptionClass>) -> ExceptionClass {
     match CACHED.get() {
         Some(cached) => ruby.get_inner(pick(cached)),
         None => ruby.exception_runtime_error(),
@@ -58,16 +55,19 @@ fn random_source_error(ruby: &Ruby, export: &'static str) -> Error {
 }
 
 fn timestamp_out_of_range(ruby: &Ruby, message: &'static str) -> Error {
-    Error::new(exception_class(ruby, |c| c.timestamp_out_of_range_error), message)
+    Error::new(
+        exception_class(ruby, |c| c.timestamp_out_of_range_error),
+        message,
+    )
 }
 
 /// Borrows the RString's bytes only long enough to copy/parse them — no Ruby calls happen
 /// inside the borrow, so the slice cannot be invalidated mid-use.
 fn uuid_arg(ruby: &Ruby, bytes: RString) -> Result<core::Uuid, Error> {
     let slice = unsafe { bytes.as_slice() };
-    let array: [u8; 16] = slice.try_into().map_err(|_| {
-        Error::new(ruby.exception_arg_error(), "bytes must be exactly 16 bytes")
-    })?;
+    let array: [u8; 16] = slice
+        .try_into()
+        .map_err(|_| Error::new(ruby.exception_arg_error(), "bytes must be exactly 16 bytes"))?;
     Ok(core::Uuid::from_bytes(array))
 }
 
@@ -121,9 +121,7 @@ fn new_v6_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
         Err(e @ core::v6::NewV6Error::BufferTooSmall) => {
             Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
-        Err(core::v6::NewV6Error::Random(_)) => {
-            Err(random_source_error(ruby, "uuid_new_v6_batch"))
-        }
+        Err(core::v6::NewV6Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v6_batch")),
     }
 }
 
@@ -157,26 +155,36 @@ fn new_v7_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
         Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
             Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
-        Err(core::v7::NewV7Error::Random(_)) => {
-            Err(random_source_error(ruby, "uuid_new_v7_batch"))
-        }
+        Err(core::v7::NewV7Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v7_batch")),
     }
 }
 
 fn v7_to_sql_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(ruby, core::v7::to_sql_order(&uuid_arg(ruby, bytes)?)))
+    Ok(uuid_string(
+        ruby,
+        core::v7::to_sql_order(&uuid_arg(ruby, bytes)?),
+    ))
 }
 
 fn v7_to_rfc_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(ruby, core::v7::to_rfc_order(&uuid_arg(ruby, bytes)?)))
+    Ok(uuid_string(
+        ruby,
+        core::v7::to_rfc_order(&uuid_arg(ruby, bytes)?),
+    ))
 }
 
 fn v6_to_sql_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(ruby, core::v6::to_sql_order(&uuid_arg(ruby, bytes)?)))
+    Ok(uuid_string(
+        ruby,
+        core::v6::to_sql_order(&uuid_arg(ruby, bytes)?),
+    ))
 }
 
 fn v6_to_rfc_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(ruby, core::v6::to_rfc_order(&uuid_arg(ruby, bytes)?)))
+    Ok(uuid_string(
+        ruby,
+        core::v6::to_rfc_order(&uuid_arg(ruby, bytes)?),
+    ))
 }
 
 /// The loaded core's packed version word — the same value the C-ABI `hyperuuid_version`

@@ -166,9 +166,10 @@ consumer supplies anyway:
 No input makes the public API panic. Every failure is a `Result`, or a return code through the C
 exports, where a panic would abort the host process or trap its wasm instance. That is proven at
 link time, not just tested: under the `no-panic` feature every generation, parsing and
-conversion function and every C export carries [`#[no_panic]`](https://docs.rs/no-panic), the
-same check `ryu` and `itoa` use, and CI links a release binary that calls each one. A panic path
-the optimizer cannot remove fails that link and names the function:
+conversion function, `v7::now_v7`, and every C export carries
+[`#[no_panic]`](https://docs.rs/no-panic), the same check `ryu` and `itoa` use, and CI links a
+release binary that calls each one, on Linux and on Windows. A panic path the optimizer cannot
+remove fails that link and names the function:
 
 ```sh
 cargo build --release --example no_panic --features no-panic
@@ -177,9 +178,9 @@ cargo build --release --example no_panic --features no-panic
 The proof needs optimization, so build it with `--release`. A debug build fails the link for
 most of the functions, because the checks the optimizer would have proven dead are still in.
 
-`v7::now_v7` is the one function left out. Our code there turns an unreadable clock into
-`TimestampOutOfRange`, but std's own `SystemTime::now` unwraps the OS clock call, which this
-crate cannot reach into.
+`v7::now_v7` reads the clock with `clock_gettime` on Unix rather than through std, whose
+`SystemTime::now` unwraps that call; an unreadable clock is `TimestampOutOfRange` instead. On
+Windows std's clock read cannot fail, so it is used as is.
 
 ## Optional native-extension features
 

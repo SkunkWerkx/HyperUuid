@@ -71,32 +71,52 @@ fn allocation_free() {
 
     for _ in 0..1000 {
         let (allocs, _) = allocs_during(|| v4::new_v4().unwrap());
-        assert_eq!(allocs, 0, "v4::new_v4 allocated {allocs} time(s) in one call");
+        assert_eq!(
+            allocs, 0,
+            "v4::new_v4 allocated {allocs} time(s) in one call"
+        );
     }
 
     for _ in 0..1000 {
         let (allocs, _) = allocs_during(|| v5::new_v5(v5::namespace::DNS, b"www.example.com"));
-        assert_eq!(allocs, 0, "v5::new_v5 allocated {allocs} time(s) in one call");
+        assert_eq!(
+            allocs, 0,
+            "v5::new_v5 allocated {allocs} time(s) in one call"
+        );
     }
 
     for _ in 0..1000 {
         let (allocs, _) = allocs_during(|| v6::new_v6(RFC_TEST_VECTOR_MS).unwrap());
-        assert_eq!(allocs, 0, "v6::new_v6 allocated {allocs} time(s) in one call");
+        assert_eq!(
+            allocs, 0,
+            "v6::new_v6 allocated {allocs} time(s) in one call"
+        );
     }
 
     for _ in 0..1000 {
         let (allocs, _) = allocs_during(|| v7::new_v7(RFC_TEST_VECTOR_MS).unwrap());
-        assert_eq!(allocs, 0, "v7::new_v7 allocated {allocs} time(s) in one call");
+        assert_eq!(
+            allocs, 0,
+            "v7::new_v7 allocated {allocs} time(s) in one call"
+        );
     }
 
     // The caller's `out` is allocated outside the measured region on purpose — it's the
     // caller's buffer by contract, and the claim under test is that the batch call itself adds
     // nothing on top of it.
     let mut v6_out = vec![0u8; 100 * 16];
-    let (allocs, _) = allocs_during(|| v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut v6_out).unwrap());
-    assert_eq!(allocs, 0, "v6::new_v6_batch allocated {allocs} time(s) in one call");
+    let (allocs, _) =
+        allocs_during(|| v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut v6_out).unwrap());
+    assert_eq!(
+        allocs, 0,
+        "v6::new_v6_batch allocated {allocs} time(s) in one call"
+    );
 
     let mut v7_out = vec![0u8; 100 * 16];
-    let (allocs, _) = allocs_during(|| v7::new_v7_batch(RFC_TEST_VECTOR_MS, 100, &mut v7_out).unwrap());
-    assert_eq!(allocs, 0, "v7::new_v7_batch allocated {allocs} time(s) in one call");
+    let (allocs, _) =
+        allocs_during(|| v7::new_v7_batch(RFC_TEST_VECTOR_MS, 100, &mut v7_out).unwrap());
+    assert_eq!(
+        allocs, 0,
+        "v7::new_v7_batch allocated {allocs} time(s) in one call"
+    );
 }

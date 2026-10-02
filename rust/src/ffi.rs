@@ -9,7 +9,7 @@
 //! batch too large to address (`count * 16` overflows `usize`, which only a 32-bit target can
 //! reach, and where no buffer that size can exist).
 
-use crate::{v4, v5, v6, v7, Uuid};
+use crate::{Uuid, v4, v5, v6, v7};
 use core::slice;
 
 /// This library's version, packed `major << 16 | minor << 8 | patch` from the crate's own

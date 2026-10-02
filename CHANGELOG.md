@@ -13,12 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Rust — the public API is proven panic-free at link time.** A new `no-panic` feature puts
   [`#[no_panic]`](https://docs.rs/no-panic) on every generation, parsing and conversion
-  function and every C export, and
-  CI's new `check-no-panic` job links a release binary that calls each one
-  (`examples/no_panic.rs`), so a panic path the optimizer cannot remove fails the build and
-  names the function. `v7::now_v7` is the one exception, because std's own `SystemTime::now`
-  unwraps the OS clock call. The feature is off by default and changes no code a consumer
-  runs. *(crates.io)*
+  function and every C export, and CI's new `check-no-panic` job links a release binary that
+  calls each one (`examples/no_panic.rs`) on Linux and Windows, so a panic path the optimizer
+  cannot remove fails the build and names the function. That includes `v7::now_v7`, which on
+  Unix now reads the clock with `clock_gettime` directly (`libc`, already a dependency through
+  `getrandom`) because std's `SystemTime::now` unwraps that call. The feature is off by
+  default and changes no code a consumer runs. *(crates.io)*
 - **Rust — `NewV6Error::BufferTooSmall` and `NewV7Error::BufferTooSmall`**, returned by
   `new_v6_batch`/`new_v7_batch` when `out` is shorter than `count * 16` bytes, which used to
   panic (see Fixed). Both enums are now `#[non_exhaustive]`, so a later variant is not a
@@ -56,6 +56,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workflows and PHP's own tests out of the archive Packagist serves: 2.6 MB against
   3.5 as downloaded, 6.1 MB against 8.5 unpacked. `go/` stays in, because
   the Go module proxy builds its zip from the same kind of archive. *(Packagist)*
+
+- **Rust — the crate is rustfmt-clean and CI keeps it that way.** `cargo fmt` had drifted
+  across most of `src`, the tests, the benchmarks and the no-panic example; it is applied
+  throughout, and a new `check-fmt` job runs `cargo fmt --check` on every PR. The
+  `clippy::chunks_exact_to_as_chunks` warnings are gone too: the Python batch path and the
+  batch tests use `as_chunks::<16>()`, which also drops an `unwrap` from the former.
+  Formatting only otherwise; no behavior changes. *(repository only)*
 
 ### Fixed
 
