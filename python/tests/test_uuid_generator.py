@@ -168,6 +168,28 @@ def test_v7_timestamp_round_trips_zero_and_a_large_timestamp():
     assert int(recovered.timestamp() * 1000) == large_ms
 
 
+def test_unix_millis_returns_the_embedded_integer_for_both_versions():
+    assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(RFC_TEST_VECTOR_MS)) == RFC_TEST_VECTOR_MS
+    assert hyperuuid.v6_unix_millis(hyperuuid.new_v6(RFC_TEST_VECTOR_MS)) == RFC_TEST_VECTOR_MS
+    assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(0)) == 0
+    # The integer form holds what datetime cannot: the top of the 48-bit field.
+    assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)) == 0x0000_FFFF_FFFF_FFFF
+
+
+def test_unix_millis_agrees_with_the_datetime_doors():
+    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    # Each version up to a late value its own field holds: v6's 60-bit tick count ends in
+    # the year 5236, v7's milliseconds outlast datetime itself.
+    for mint, as_int, as_datetime, latest in (
+        (hyperuuid.new_v6, hyperuuid.v6_unix_millis, hyperuuid.v6_timestamp, 100_000_000_000_000),
+        (hyperuuid.new_v7, hyperuuid.v7_unix_millis, hyperuuid.v7_timestamp, 253_370_764_800_000),
+    ):
+        for millis in (0, 1, 999, RFC_TEST_VECTOR_MS, latest):
+            id_ = mint(millis)
+            assert as_int(id_) == millis
+            assert as_datetime(id_) == epoch + datetime.timedelta(milliseconds=millis)
+
+
 def test_v7_timestamp_raises_past_datetime_year_range():
     # A legitimate RFC 9562 v7 UUID can embed a timestamp datetime.datetime can't hold.
     id_ = hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)

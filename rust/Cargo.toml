@@ -35,9 +35,9 @@ ext-php-rs = { version = "0.15", optional = true }
 # than relying on the default.
 default = ["std"]
 std = ["getrandom/std"]
-# The no_std static libraries, for the two hosts that link the core in rather than load it:
-# a Blazor WebAssembly app (the NuGet package, wasm32-unknown-emscripten) and a Swift
-# executable with no dynamic loader (Swift's static Linux SDK on musl, and its wasm SDK). A
+# The no_std static libraries, for the hosts that link the core in rather than load it: a
+# Blazor WebAssembly app (the NuGet package, wasm32-unknown-emscripten), a Swift executable
+# on Linux or WebAssembly, a Go binary built with cgo, and a C# Native AOT publish. A
 # static library is a final artifact as far as panics go, so with `std` off it needs the
 # `#[panic_handler]` std would have supplied; this feature is that handler and nothing else
 # (see lib.rs). It exists so those libraries carry no copy of Rust's standard library: two

@@ -63,6 +63,7 @@ hyperuuid.new_v6()
 id4 = hyperuuid.new_v7()
 
 hyperuuid.v7_timestamp(id4) # recover the embedded UTC datetime.datetime
+hyperuuid.v7_unix_millis(id4) # the same instant as Unix-epoch milliseconds, an int
 hyperuuid.get_timestamp(id4) # None instead of assuming id4 is v6/v7
 hyperuuid.v7_to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs to sort by creation order
 
@@ -84,7 +85,10 @@ UTC `datetime.datetime` from a version 7 UUID (raises `OverflowError` past year
 9999 — the RFC's 48-bit field holds values up to year 10889, but
 `datetime.datetime` cannot); `hyperuuid.v6_timestamp(id)` does the same for version
 6, and can never raise that way — v6's 60-bit tick count, offset from the 1582 UUID
-epoch, tops out around the year 5236. `new_v6`/`new_v7` also accept a
+epoch, tops out around the year 5236. `hyperuuid.v6_unix_millis(id)` and
+`v7_unix_millis(id)` return the same instant as an `int` of Unix-epoch milliseconds, with
+no `datetime` built around it — the cheaper call, and for version 7 the one that carries
+the whole 48-bit field. `new_v6`/`new_v7` also accept a
 `datetime.datetime` directly in place of a raw millisecond count — converted in exact
 integer arithmetic and truncated to the millisecond, never rounded into the next one; a
 naive `datetime` is read as local time, the way `datetime.timestamp()` reads it.
@@ -125,17 +129,17 @@ hyperuuid.fill_v7(buf)                      # 1000 v7 UUIDs, one timestamp captu
 first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifier parameter
 ```
 
-**This is roughly 35x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
+**This is roughly 15x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
 
 | path | µs / 1000 UUIDs |
 | --- | ---: |
-| `new_v7_batch(1000)` → `list[UUID]` | 650 |
-| `fill_v7(bytearray)` | **18.5** |
-| `fill_v7`, then build `uuid.UUID` objects in Python | 1210 |
+| `new_v7_batch(1000)` → `list[UUID]` | 142 |
+| `fill_v7(bytearray)` | **9.7** |
+| `fill_v7`, then build `uuid.UUID` objects in Python | 940 |
 
-`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 18.5 µs, which is the same native ceiling the Go (18.4 µs) and C# (18.2 µs) bindings hit for identical work.
+`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 9.7 µs, which is the same native ceiling the Go (9.8 µs) and C# (9.6 µs) bindings hit for identical work.
 
-The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is about twice as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
+The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is more than six times as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
 
 `len(buffer)` must be a multiple of 16, and a zero-length buffer writes nothing. Both functions take an optional `datetime` or Unix-epoch millisecond timestamp, same as the rest of the API.
 
@@ -153,22 +157,23 @@ This is the one binding where the honest answer genuinely depends on which Pytho
 
 ## Benchmarks
 
-Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-arm64, CPython 3.14.5, `python bench_uuid.py --fast`; see `bench_uuid.py`). Linking the core directly into the extension module — no `ctypes` boundary to cross — turns every one of these into a win against stdlib's own C-accelerated implementations:
+Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-x64 on an Intel Core i9-11900H, CPython 3.14.7 as Fedora builds it, `python bench_uuid.py --fast`; see `bench_uuid.py`). Linking the core directly into the extension module — no `ctypes` boundary to cross — puts every generator ahead of stdlib's own C-accelerated implementations:
 
 | Call | hyperuuid | vs. closest stdlib equivalent |
 |---|---|---|
-| `hyperuuid.new_v4()` | 647 ns | `uuid.uuid4()`: 1.03 µs — **1.6x faster** |
-| `hyperuuid.new_v5(...)` | 811 ns | `uuid.uuid5(...)`: 2.0 µs — **2.5x faster** |
-| `hyperuuid.new_v6(...)` | ~650 ns | `uuid.uuid6()` (3.14+): 2.85 µs — **4.2x faster** |
-| `hyperuuid.new_v7(...)` | ~685 ns | `uuid.uuid7()` (3.14+): 2.69 µs — **4.2x faster** |
+| `hyperuuid.new_v4()` | 243 ns | `uuid.uuid4()`: 718 ns — **3.0x faster** |
+| `hyperuuid.new_v5(...)` | 374 ns | `uuid.uuid5(...)`: 1.58 µs — **4.2x faster** |
+| `hyperuuid.new_v6(...)` | 351 ns | `uuid.uuid6()` (3.14+): 1.26 µs — **3.6x faster** |
+| `hyperuuid.new_v7(...)` | 354 ns | `uuid.uuid7()` (3.14+): 1.28 µs — **3.6x faster** |
 
-Batch generation amortizes per-call cost, though it's now construction-bound (1.27x over the
-loop) rather than FFI-bound — the next tuning target:
+Most of what a call costs is the `uuid.UUID` it hands back, so the extension builds that through the C API's own entry points — an instance allocated and its two slots set, no Python-level call — all of it inside the stable ABI, so one wheel still covers every CPython from 3.11.
+
+Batch generation amortizes the rest of the per-call cost:
 
 | | Mean | vs. individual calls |
 |---|---|---|
-| `new_v6_batch(1000)` | 1.03 ms ± 0.06 ms | vs. 1000x `new_v6()`: 2.25 ms ± 0.20 ms — **2.2x** |
-| `new_v7_batch(1000)` | 1.05 ms ± 0.10 ms | vs. 1000x `new_v7()`: 2.21 ms ± 0.18 ms — **2.1x** |
+| `new_v6_batch(1000)` | 139 µs ± 5 µs | vs. 1000x `new_v6()`: 333 µs ± 8 µs — **2.4x** |
+| `new_v7_batch(1000)` | 135 µs ± 6 µs | vs. 1000x `new_v7()`: 339 µs ± 11 µs — **2.5x** |
 
 ### Timestamp extraction vs. stdlib's `.time` property
 
@@ -176,8 +181,12 @@ CPython 3.14's `uuid.UUID.time` has real version-aware extraction logic of its o
 
 | Call | hyperuuid | vs. stdlib `.time` |
 |---|---|---|
-| `hyperuuid.v6_timestamp(...)` | ~248 ns | `UUID.time` (v6): ~665 ns — **2.7x faster** |
-| `hyperuuid.v7_timestamp(...)` | ~248 ns | `UUID.time` (v7): ~665 ns — **2.7x faster** |
+| `hyperuuid.v6_unix_millis(...)` → `int` | 163 ns | `UUID.time` (v6): 479 ns — **2.9x faster** |
+| `hyperuuid.v7_unix_millis(...)` → `int` | 161 ns | `UUID.time` (v7): 401 ns — **2.5x faster** |
+| `hyperuuid.v6_timestamp(...)` → `datetime` | 250 ns | `UUID.time` (v6): 479 ns — **1.9x faster** |
+| `hyperuuid.v7_timestamp(...)` → `datetime` | 252 ns | `UUID.time` (v7): 401 ns — **1.6x faster** |
+
+`.time` returns an `int`, so the `*_unix_millis` rows are the like-for-like ones; the `*_timestamp` rows hand back a timezone-aware `datetime` and are still ahead. Reach for the integer form when the value is going to be stored, compared or forwarded as a number.
 
 Worth noting: stdlib's `.time` for v6 returns raw Gregorian-epoch 100ns ticks, not Unix
 milliseconds like `hyperuuid.v6_timestamp` — different units if you actually need the value,
@@ -236,22 +245,22 @@ Three things about the crossing decide the numbers below:
   at load time and degrades to the public call — slow, never broken — if a wasmtime release
   moves it.
 
-Measured end to end on CPython 3.14.7, aarch64-linux, `timeit` best of five, same session as the
-native column:
+Measured end to end on CPython 3.14.7 (Fedora's build), linux-x64, `timeit` best of five, same
+session as the native column:
 
 | Call | wasm backend | native (`_native`) |
 | --- | ---: | ---: |
-| `new_v4()` | 5.5 µs | 0.71 µs |
-| `new_v7(ms)` | 6.2 µs | 0.85 µs |
-| `new_v5(...)` | 8.1 µs | 1.2 µs |
-| `v7_timestamp(...)` | 5.3 µs | 0.51 µs |
-| `fill_v7(bytearray)`, 1000 UUIDs | 41 µs | 18.7 µs |
-| `new_v7_batch(1000)` → `list[UUID]` | 648 µs | 585 µs |
+| `new_v4()` | 4.7 µs | 0.25 µs |
+| `new_v7(ms)` | 5.4 µs | 0.35 µs |
+| `new_v5(...)` | 7.1 µs | 0.38 µs |
+| `v7_timestamp(...)` | 4.8 µs | 0.24 µs |
+| `fill_v7(bytearray)`, 1000 UUIDs | 24 µs | 9.7 µs |
+| `new_v7_batch(1000)` → `list[UUID]` | 447 µs | 142 µs |
 
-Read it the way the rest of this README reads: single calls pay the crossing (about 5 µs of
-Python-side lock, argument packing and guest memory copy on top of the 3.1 µs call), the byte
-fill amortizes it to under 2.2x native, and the object-building batch is construction-bound on
-both backends so the crossing barely shows. If you are on this backend and minting in bulk, reach
+Read it the way the rest of this README reads: single calls pay the crossing (4-6 µs of
+Python-side lock, argument packing, guest memory copy and the call itself), the byte
+fill amortizes it to 2.5x native, and the object-building batch is three times native
+because this backend builds its `uuid.UUID`s from Python rather than through the C API.If you are on this backend and minting in bulk, reach
 for `fill_v7`/`fill_v6` exactly as the section above already advises.
 
 ## Verifying provenance

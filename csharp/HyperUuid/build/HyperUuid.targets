@@ -103,4 +103,52 @@
     <Warning Code="HYPERUUID001"
              Text="HyperUuid's WebAssembly support needs .NET 11 or later, and this project targets $(TargetFramework), so the native core is not linked into this build. Where the wasm-tools workload relinks the runtime, the link fails on undefined uuid_* symbols; otherwise UuidGenerator.IsAvailable is false in the browser and every generator call throws. Target net11.0 or later." />
   </Target>
+
+  <!-- Native AOT: link the core in.
+
+       A Native AOT publish used to produce an executable with libhyperuuid.so (or the .dylib,
+       or the .dll) sitting beside it, opened on first use like any other P/Invoke. Here it is
+       linked into the executable instead: DirectPInvoke tells the AOT compiler to bind every
+       import from "hyperuuid" as a direct call to a symbol the linker must resolve, and
+       NativeLibrary hands the linker the archive that defines them. The result is one file,
+       and calls that are plain calls, with no lazy binding stub in front of them.
+
+       The archives are in staticlibs/{rid}/, one per RID the package carries a shared
+       library for, built without Rust's standard library so that this package and
+       HyperCast's can both be linked into one executable (the same collision, and the same
+       fix, as the Blazor WebAssembly archive above).
+
+       Presence decides. Where the package has no archive for the RID being published — a
+       RID it has never heard of, or a package built before these existed — nothing here
+       applies and the publish loads the shared library exactly as it always did. Setting
+       HyperUuidStaticLink to false asks for that on purpose.
+
+       Not for browser-wasm, which has its own wiring above, and not for anything but an AOT
+       publish: a JIT process cannot link an archive, so it still loads the shared library. -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true' And '$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'browser-wasm' And '$(HyperUuidStaticLink)' != 'false'">
+    <_HyperUuidStaticLibrary Condition="$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/hyperuuid.lib</_HyperUuidStaticLibrary>
+    <_HyperUuidStaticLibrary Condition="!$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidStaticLibrary>
+    <_HyperUuidStaticLibrary Condition="!Exists('$(_HyperUuidStaticLibrary)')"></_HyperUuidStaticLibrary>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_HyperUuidStaticLibrary)' != ''">
+    <DirectPInvoke Include="hyperuuid" />
+    <NativeLibrary Include="$(_HyperUuidStaticLibrary)" />
+  </ItemGroup>
+
+  <!-- With the core linked in, the shared library is dead weight in the publish directory:
+       nothing opens it. It gets there two ways — NuGet's runtimes/{rid}/native/ asset for a
+       package consumer, a copy-to-output item for a project reference — and both end up in
+       @(ResolvedFileToPublish), which is where it is taken back out. By file name, since
+       that is all the two routes have in common; the managed assembly is HyperUuid.Managed.dll
+       and is not in an AOT publish anyway. -->
+  <Target Name="_HyperUuidDropSharedLibraryFromAotPublish"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(_HyperUuidStaticLibrary)' != ''">
+    <ItemGroup>
+      <_HyperUuidSharedLibrary Include="@(ResolvedFileToPublish)"
+                         Condition="'%(Filename)%(Extension)' == 'libhyperuuid.so' Or '%(Filename)%(Extension)' == 'libhyperuuid.dylib' Or '%(Filename)%(Extension)' == 'hyperuuid.dll'" />
+      <ResolvedFileToPublish Remove="@(_HyperUuidSharedLibrary)" />
+    </ItemGroup>
+  </Target>
 </Project>

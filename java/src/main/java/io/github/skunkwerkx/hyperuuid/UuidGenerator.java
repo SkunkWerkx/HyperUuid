@@ -78,8 +78,74 @@ public final class UuidGenerator {
     public static final String BACKEND_PROPERTY = "hyperuuid.backend";
 
     /**
-     * The loaded core: which path won, the library it resolved to, and one downcall handle
-     * per export — all {@code static final}, all resolved in this holder's own class init.
+     * The downcall handles: one per C signature the core exports, none of them bound to an
+     * address. Each takes the export's address as its leading argument, which {@link Core}
+     * looks up once the library is loaded.
+     *
+     * <p>They live apart from {@link Core} for GraalVM Native Image. An image can only compile
+     * a call through a {@code MethodHandle} that is already a constant when the image is
+     * built; a handle created at run time — which is what binding one to a symbol's address
+     * forces, since the address does not exist until the library is loaded — is invoked
+     * through the image's method-handle interpreter instead, at microseconds a call (measured:
+     * 6.4 µs for {@code newV7}, against 36 ns on the JVM). Nothing in this class needs the
+     * library, so {@code META-INF/native-image/.../native-image.properties} has it initialized
+     * at image build time, and the handles are constants in the image. On the JVM the split
+     * changes nothing: the class initializes on the first native-path call, and the JIT folds
+     * a {@code static final} handle either way.
+     */
+    private static final class Downcalls {
+        private Downcalls() {}
+
+        private static final Linker LINKER = Linker.nativeLinker();
+
+        // critical(true) is what lets a heap segment (MemorySegment.ofArray over the caller's
+        // byte[]) cross without being copied into native memory first: the array is pinned for
+        // the duration of the call instead. The contract in exchange — the callee must be short,
+        // must not block, and must never upcall into Java — is exactly what every export here is:
+        // a bounded computation over the bytes it was handed, with no callbacks.
+        private static final Linker.Option CRITICAL = Linker.Option.critical(true);
+
+        // (out) -> rc — uuid_new_v4
+        private static final MethodHandle NEW = LINKER.downcallHandle(
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
+        // (namespace, name, name_len, out) -> rc — uuid_new_v5
+        private static final MethodHandle NEW_NAMED = LINKER.downcallHandle(
+                FunctionDescriptor.of(
+                        ValueLayout.JAVA_INT,
+                        ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+                CRITICAL);
+        // (unix_millis, out) -> rc — uuid_new_v6, uuid_new_v7
+        private static final MethodHandle NEW_AT = LINKER.downcallHandle(
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
+        // (unix_millis, count, out) -> rc — uuid_new_v6_batch, uuid_new_v7_batch
+        private static final MethodHandle NEW_BATCH = LINKER.downcallHandle(
+                FunctionDescriptor.of(
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+                CRITICAL);
+        // (uuid) -> unix_millis — uuid_v6_unix_millis, uuid_v7_unix_millis
+        private static final MethodHandle UNIX_MILLIS = LINKER.downcallHandle(
+                FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
+        // (uuid), rewritten in place — the four uuid_v{6,7}_to_{sql,rfc}_order exports
+        private static final MethodHandle REORDER = LINKER.downcallHandle(
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
+        // () -> packed version — the probe. Nothing crosses, so it is not linked critical.
+        private static final MethodHandle VERSION = LINKER.downcallHandle(
+                FunctionDescriptor.of(ValueLayout.JAVA_INT));
+
+        // RFC 9562 order is exactly UUID's msb/lsb decomposition, so a UUID is two big-endian
+        // longs in a segment — written and read as such, no byte[] in between. Unaligned,
+        // because a heap segment over a caller's byte[] carries no alignment guarantee at all
+        // (the aligned layout rejects it outright), and on every supported RID an unaligned
+        // load of an aligned address costs the same as an aligned one. Here for the same
+        // reason the handles are: a layout is read through a VarHandle, and one that is not a
+        // constant in the image costs ~70 ns a load there instead of one instruction.
+        private static final ValueLayout.OfLong BIG_ENDIAN_LONG =
+                ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.BIG_ENDIAN);
+    }
+
+    /**
+     * The loaded core: which path won, the library it resolved to, and the address of every
+     * export in it — all {@code static final}, all resolved in this holder's own class init.
      * A holder rather than fields on {@code UuidGenerator} itself so that nothing loads
      * until the first call that needs the core ({@link UuidGenerator#NIL},
      * {@link UuidGenerator#MAX} and {@link Namespaces} never do), and so that
@@ -99,10 +165,9 @@ public final class UuidGenerator {
          */
         private static final Backend WASM;
 
-        // Both null on the wasm path: there is no library to look symbols up in, and the
-        // native linker is never asked for — a platform the JDK has no linker for can
-        // still run the module.
-        private static final Linker LINKER;
+        // Null on the wasm path: there is no library to look symbols up in, and the native
+        // linker is never asked for (Downcalls stays uninitialized) — a platform the JDK has
+        // no linker for can still run the module.
         private static final SymbolLookup LOOKUP;
 
         /*
@@ -123,18 +188,15 @@ public final class UuidGenerator {
             }
             NativePlatform.Target target = NativePlatform.current();
             Backend wasm = null;
-            Linker linker = null;
             SymbolLookup lookup = null;
             if ("wasm".equals(choice)) {
                 wasm = startWasm(null);
             } else if ("native".equals(choice)) {
-                linker = Linker.nativeLinker();
                 lookup = loadLibrary(target);
             } else if (target == null || UuidGenerator.class.getResource(target.resourcePath()) == null) {
                 wasm = startWasm(nativeMissing(target));
             } else {
                 try {
-                    linker = Linker.nativeLinker();
                     lookup = loadLibrary(target);
                 } catch (RuntimeException | LinkageError nativeFailure) {
                     try {
@@ -143,51 +205,33 @@ public final class UuidGenerator {
                         nativeFailure.addSuppressed(wasmFailure);
                         throw nativeFailure;
                     }
-                    linker = null;
                 }
             }
             WASM = wasm;
-            LINKER = linker;
             LOOKUP = lookup;
         }
 
-        // critical(true) is what lets a heap segment (MemorySegment.ofArray over the caller's
-        // byte[]) cross without being copied into native memory first: the array is pinned for
-        // the duration of the call instead. The contract in exchange — the callee must be short,
-        // must not block, and must never upcall into Java — is exactly what every export here is:
-        // a bounded computation over the bytes it was handed, with no callbacks.
-        private static final Linker.Option CRITICAL = Linker.Option.critical(true);
+        // Where each export lives in the loaded library — the leading argument of the
+        // Downcalls handle with its signature. Looked up here, once, so an export missing from
+        // an older core fails this class's init (and isAvailable() says so) rather than a call.
+        private static final MemorySegment UUID_NEW_V4 = export("uuid_new_v4");
+        private static final MemorySegment UUID_NEW_V5 = export("uuid_new_v5");
+        private static final MemorySegment UUID_NEW_V6 = export("uuid_new_v6");
+        private static final MemorySegment UUID_V6_UNIX_MILLIS = export("uuid_v6_unix_millis");
+        private static final MemorySegment UUID_NEW_V6_BATCH = export("uuid_new_v6_batch");
+        private static final MemorySegment UUID_NEW_V7 = export("uuid_new_v7");
+        private static final MemorySegment UUID_V7_UNIX_MILLIS = export("uuid_v7_unix_millis");
+        private static final MemorySegment UUID_NEW_V7_BATCH = export("uuid_new_v7_batch");
+        private static final MemorySegment UUID_V7_TO_SQL_ORDER = export("uuid_v7_to_sql_order");
+        private static final MemorySegment UUID_V7_TO_RFC_ORDER = export("uuid_v7_to_rfc_order");
+        private static final MemorySegment UUID_V6_TO_SQL_ORDER = export("uuid_v6_to_sql_order");
+        private static final MemorySegment UUID_V6_TO_RFC_ORDER = export("uuid_v6_to_rfc_order");
+        private static final MemorySegment HYPERUUID_VERSION = export("hyperuuid_version");
 
-        private static final MethodHandle UUID_NEW_V4 = downcall("uuid_new_v4", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_NEW_V5 = downcall("uuid_new_v5", FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT,
-                        ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_NEW_V6 = downcall("uuid_new_v6", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_V6_UNIX_MILLIS = downcall("uuid_v6_unix_millis", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_NEW_V6_BATCH = downcall("uuid_new_v6_batch", FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_NEW_V7 = downcall("uuid_new_v7", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_V7_UNIX_MILLIS = downcall("uuid_v7_unix_millis", FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_NEW_V7_BATCH = downcall("uuid_new_v7_batch", FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_V7_TO_SQL_ORDER = downcall("uuid_v7_to_sql_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_V7_TO_RFC_ORDER = downcall("uuid_v7_to_rfc_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_V6_TO_SQL_ORDER = downcall("uuid_v6_to_sql_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
-        private static final MethodHandle UUID_V6_TO_RFC_ORDER = downcall("uuid_v6_to_rfc_order", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
-        // () -> packed version — the probe. Nothing crosses, so it is not linked critical.
-        private static final MethodHandle HYPERUUID_VERSION = LOOKUP == null
-                ? null
-                : LINKER.downcallHandle(
-                        LOOKUP.find("hyperuuid_version").orElseThrow(),
-                        FunctionDescriptor.of(ValueLayout.JAVA_INT));
-
-        // Null when the wasm backend is active — the static final MethodHandles above are then
-        // never invoked, and there is no library to look symbols up in.
-        private static MethodHandle downcall(String symbol, FunctionDescriptor descriptor) {
-            if (LOOKUP == null) {
-                return null;
-            }
-            return LINKER.downcallHandle(LOOKUP.find(symbol).orElseThrow(), descriptor, CRITICAL);
+        // Null when the wasm backend is active — the addresses above are then never used, and
+        // there is no library to look symbols up in.
+        private static MemorySegment export(String symbol) {
+            return LOOKUP == null ? null : LOOKUP.find(symbol).orElseThrow();
         }
 
         // Why there is no native library to load, for the messages below: no build exists for
@@ -290,7 +334,7 @@ public final class UuidGenerator {
 
     // Its own holder so the answer is computed once and cached without UuidGenerator's own
     // init depending on the load. The probe is the version export: the cheapest crossing
-    // there is, and reaching it proves Core initialized — every handle resolved.
+    // there is, and reaching it proves Core initialized — every export resolved.
     private static final class Availability {
         static final boolean AVAILABLE = probe();
 
@@ -326,7 +370,7 @@ public final class UuidGenerator {
             packed = Core.WASM.version();
         } else {
             try {
-                packed = (int) Core.HYPERUUID_VERSION.invokeExact();
+                packed = (int) Downcalls.VERSION.invokeExact(Core.HYPERUUID_VERSION);
             } catch (Throwable t) {
                 throw new AssertionError("hyperuuid: hyperuuid_version downcall failed unexpectedly", t);
             }
@@ -340,14 +384,6 @@ public final class UuidGenerator {
 
     /** The RFC 9562 §5.10 Max UUID — all 128 bits one. */
     public static final UUID MAX = new UUID(-1L, -1L);
-
-    // RFC 9562 order is exactly UUID's msb/lsb decomposition, so a UUID is two big-endian
-    // longs in a segment — written and read as such, no byte[] in between. Unaligned,
-    // because a heap segment over a caller's byte[] carries no alignment guarantee at all
-    // (the aligned layout rejects it outright), and on every supported RID an unaligned
-    // load of an aligned address costs the same as an aligned one.
-    private static final ValueLayout.OfLong BIG_ENDIAN_LONG =
-            ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.BIG_ENDIAN);
 
     /**
      * Per-thread scratch for the single-UUID doors: sixteen bytes to hand a UUID in and
@@ -365,12 +401,12 @@ public final class UuidGenerator {
     private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
 
     private static UUID readUuid(MemorySegment segment, long offset) {
-        return new UUID(segment.get(BIG_ENDIAN_LONG, offset), segment.get(BIG_ENDIAN_LONG, offset + 8));
+        return new UUID(segment.get(Downcalls.BIG_ENDIAN_LONG, offset), segment.get(Downcalls.BIG_ENDIAN_LONG, offset + 8));
     }
 
     private static MemorySegment writeUuid(MemorySegment segment, UUID uuid) {
-        segment.set(BIG_ENDIAN_LONG, 0, uuid.getMostSignificantBits());
-        segment.set(BIG_ENDIAN_LONG, 8, uuid.getLeastSignificantBits());
+        segment.set(Downcalls.BIG_ENDIAN_LONG, 0, uuid.getMostSignificantBits());
+        segment.set(Downcalls.BIG_ENDIAN_LONG, 8, uuid.getLeastSignificantBits());
         return segment;
     }
 
@@ -386,7 +422,7 @@ public final class UuidGenerator {
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
-            rc = (int) Core.UUID_NEW_V4.invokeExact(out);
+            rc = (int) Downcalls.NEW.invokeExact(Core.UUID_NEW_V4, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v4 downcall failed unexpectedly", t);
         }
@@ -441,7 +477,7 @@ public final class UuidGenerator {
         MemorySegment out = scratch.out;
         int rc;
         try {
-            rc = (int) Core.UUID_NEW_V5.invokeExact(nsSeg, nameSeg, name.length, out);
+            rc = (int) Downcalls.NEW_NAMED.invokeExact(Core.UUID_NEW_V5, nsSeg, nameSeg, name.length, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v5 downcall failed unexpectedly", t);
         }
@@ -479,7 +515,7 @@ public final class UuidGenerator {
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
-            rc = (int) Core.UUID_NEW_V6.invokeExact(unixMillis, out);
+            rc = (int) Downcalls.NEW_AT.invokeExact(Core.UUID_NEW_V6, unixMillis, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v6 downcall failed unexpectedly", t);
         }
@@ -520,7 +556,7 @@ public final class UuidGenerator {
         }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
-            return (long) Core.UUID_V6_UNIX_MILLIS.invokeExact(seg);
+            return (long) Downcalls.UNIX_MILLIS.invokeExact(Core.UUID_V6_UNIX_MILLIS, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v6_unix_millis downcall failed unexpectedly", t);
         }
@@ -562,7 +598,7 @@ public final class UuidGenerator {
         MemorySegment out = MemorySegment.ofArray(new byte[count * 16]);
         int rc;
         try {
-            rc = (int) Core.UUID_NEW_V6_BATCH.invokeExact(unixMillis, count, out);
+            rc = (int) Downcalls.NEW_BATCH.invokeExact(Core.UUID_NEW_V6_BATCH, unixMillis, count, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v6_batch downcall failed unexpectedly", t);
         }
@@ -615,7 +651,7 @@ public final class UuidGenerator {
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
-            rc = (int) Core.UUID_NEW_V7.invokeExact(unixMillis, out);
+            rc = (int) Downcalls.NEW_AT.invokeExact(Core.UUID_NEW_V7, unixMillis, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v7 downcall failed unexpectedly", t);
         }
@@ -656,7 +692,7 @@ public final class UuidGenerator {
         }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
-            return (long) Core.UUID_V7_UNIX_MILLIS.invokeExact(seg);
+            return (long) Downcalls.UNIX_MILLIS.invokeExact(Core.UUID_V7_UNIX_MILLIS, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_unix_millis downcall failed unexpectedly", t);
         }
@@ -727,7 +763,7 @@ public final class UuidGenerator {
         }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
-            Core.UUID_V7_TO_SQL_ORDER.invokeExact(seg);
+            Downcalls.REORDER.invokeExact(Core.UUID_V7_TO_SQL_ORDER, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_to_sql_order downcall failed unexpectedly", t);
         }
@@ -747,7 +783,7 @@ public final class UuidGenerator {
         }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
-            Core.UUID_V7_TO_RFC_ORDER.invokeExact(seg);
+            Downcalls.REORDER.invokeExact(Core.UUID_V7_TO_RFC_ORDER, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
         }
@@ -788,7 +824,7 @@ public final class UuidGenerator {
         }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
-            Core.UUID_V6_TO_SQL_ORDER.invokeExact(seg);
+            Downcalls.REORDER.invokeExact(Core.UUID_V6_TO_SQL_ORDER, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v6_to_sql_order downcall failed unexpectedly", t);
         }
@@ -808,7 +844,7 @@ public final class UuidGenerator {
         }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
-            Core.UUID_V6_TO_RFC_ORDER.invokeExact(seg);
+            Downcalls.REORDER.invokeExact(Core.UUID_V6_TO_RFC_ORDER, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v6_to_rfc_order downcall failed unexpectedly", t);
         }
@@ -839,7 +875,7 @@ public final class UuidGenerator {
         MemorySegment out = MemorySegment.ofArray(new byte[count * 16]);
         int rc;
         try {
-            rc = (int) Core.UUID_NEW_V7_BATCH.invokeExact(unixMillis, count, out);
+            rc = (int) Downcalls.NEW_BATCH.invokeExact(Core.UUID_NEW_V7_BATCH, unixMillis, count, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
         }
@@ -881,10 +917,10 @@ public final class UuidGenerator {
     // rather than just removing an allocation.
 
     private static void fillBytesNative(
-            MemorySegment out, int count, long unixMillis, MethodHandle handle, String fn) {
+            MemorySegment out, int count, long unixMillis, MemorySegment export, String fn) {
         int rc;
         try {
-            rc = (int) handle.invokeExact(unixMillis, count, out);
+            rc = (int) Downcalls.NEW_BATCH.invokeExact(export, unixMillis, count, out);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
         }
@@ -981,12 +1017,12 @@ public final class UuidGenerator {
     }
 
     private static void fillUuidArray(
-            UUID[] destination, long unixMillis, MethodHandle handle, String fn) {
+            UUID[] destination, long unixMillis, MemorySegment export, String fn) {
         if (destination.length == 0) {
             return;
         }
         MemorySegment out = MemorySegment.ofArray(new byte[destination.length * 16]);
-        fillBytesNative(out, destination.length, unixMillis, handle, fn);
+        fillBytesNative(out, destination.length, unixMillis, export, fn);
         for (int i = 0; i < destination.length; i++) {
             destination[i] = readUuid(out, (long) i * 16);
         }
@@ -1049,13 +1085,13 @@ public final class UuidGenerator {
     }
 
     private static void fillByteArray(
-            byte[] destination, long unixMillis, MethodHandle handle, String fn) {
+            byte[] destination, long unixMillis, MemorySegment export, String fn) {
         requireWholeUuids(destination.length);
         if (destination.length == 0) {
             return;
         }
         // The caller's array is the destination: pinned for the call, written in place.
-        fillBytesNative(MemorySegment.ofArray(destination), destination.length / 16, unixMillis, handle, fn);
+        fillBytesNative(MemorySegment.ofArray(destination), destination.length / 16, unixMillis, export, fn);
     }
 
     // ---- Raw-byte SQL-order transforms -----------------------------------------------
@@ -1065,14 +1101,14 @@ public final class UuidGenerator {
     // correctness oracle can be pointed at directly — shared across every binding in this
     // repo rather than re-expressed against each language's own UUID type.
 
-    private static void sqlOrderBytes(byte[] uuid, MethodHandle handle, String fn) {
+    private static void sqlOrderBytes(byte[] uuid, MemorySegment export, String fn) {
         if (uuid.length != 16) {
             throw new IllegalArgumentException("a UUID is exactly 16 bytes; got " + uuid.length);
         }
         // In place, on the caller's own bytes — no staging copy in either direction.
         MemorySegment seg = MemorySegment.ofArray(uuid);
         try {
-            handle.invokeExact(seg);
+            Downcalls.REORDER.invokeExact(export, seg);
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
         }

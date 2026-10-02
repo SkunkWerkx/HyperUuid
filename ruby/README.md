@@ -125,7 +125,7 @@ bytes = HyperUuid.new_v7_batch_bytes(1000)
 first = bytes[0, 16]        # ready for a BINARY(16) bind parameter
 ```
 
-**About 15x faster than `new_v7_batch`** for a 1000-UUID batch (24 µs versus 370 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
+**About 20x faster than `new_v7_batch`** for a 1000-UUID batch (10.4 µs versus 210 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `new_v7_batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
@@ -137,34 +137,34 @@ Slice it with `bytes[i * 16, 16]` — which is exactly what `new_v7_batch` does 
 comparison above. Its first line names the backend, core version and Ruby it measured, so
 run it again under `HYPERUUID_PURE=1` or `HYPERUUID_WASM=1` for the other two backends.
 
-Real numbers, `benchmark-ips` on Ruby 4.0.6, linux-arm64 (`ruby benchmark/uuid_benchmark.rb`) — not claimed, measured. With the Magnus backend (the default wherever the extension loads):
+Real numbers, `benchmark-ips` on Ruby 4.0.7, linux-x64 on an Intel Core i9-11900H (`ruby benchmark/uuid_benchmark.rb`) — not claimed, measured. With the Magnus backend (the default wherever the extension loads):
 
 | Call | i/s | vs `SecureRandom.uuid` |
 |---|---:|---:|
-| `SecureRandom.uuid` | 775,868 | baseline |
-| `HyperUuid.new_v7` (explicit ms) | 2,275,763 | **2.9x faster** |
-| `HyperUuid.new_v6` (explicit ms) | 2,197,698 | **2.8x faster** |
-| `HyperUuid.new_v4` | 2,176,244 | **2.8x faster** |
-| `HyperUuid.new_v5` | 1,458,385 | 1.9x faster |
-| `HyperUuid.new_v7` (current time) | 701,373 | parity (1.1x slower) |
-| `HyperUuid.new_v6` (current time) | 703,748 | parity (1.1x slower) |
+| `SecureRandom.uuid` | 872,365 | baseline |
+| `HyperUuid.new_v4` | 4,278,000 | **4.9x faster** |
+| `HyperUuid.new_v7` (explicit ms) | 3,517,000 | **4.0x faster** |
+| `HyperUuid.new_v6` (explicit ms) | 3,487,000 | **4.0x faster** |
+| `HyperUuid.new_v6` (current time) | 3,324,000 | **3.8x faster** |
+| `HyperUuid.new_v7` (current time) | 3,320,000 | **3.8x faster** |
+| `HyperUuid.new_v5` | 1,838,000 | 2.1x faster |
 
-An earlier edition of this section said single-item calls "lose to `SecureRandom.uuid`, full stop" and called the gap "structural, not a bug to fix — no amount of tuning closes that gap." That was wrong, and the receipts above are the correction: the gap was `Fiddle`'s per-call marshalling, and replacing the mechanism (the same play as this repo's Python PyO3 backend) closed it with room to spare. A `HyperUuid.new_v4` — real entropy, correct version/variant bits, minted by the shared Rust core — now costs a third of what `SecureRandom.uuid` does.
+A `HyperUuid.new_v4` — real entropy, correct version/variant bits, minted by the shared Rust core — costs a fifth of what `SecureRandom.uuid` does, because the Magnus extension is an ordinary native method call with nothing marshalled around it.
 
-The two "current time" rows deserve their honest footnote: the explicit-ms rows isolate the binding's own cost (~440-460ns), and the difference is one `Process.clock_gettime(CLOCK_REALTIME)` wall-clock read — which this WSL2 measurement box prices at ~1µs because its Hyper-V clock defeats the vDSO fast path (verified: `CLOCK_REALTIME_COARSE` costs 102ns on the same box). On bare-metal Linux that read is tens of nanoseconds, and the default-time rows land next to the explicit-ms ones. `SecureRandom.uuid` never reads a clock — random v4 is the only thing it does.
+The "current time" rows deserve a footnote, because they will not look like this everywhere. Here they land beside the explicit-ms rows: the only difference between the two is one `Process.clock_gettime(CLOCK_REALTIME)` wall-clock read, and on this machine that read is too cheap to see. On a machine with a slow clock it is the whole story — where a virtualized clock defeats the vDSO fast path the same read costs ~1µs, which puts both current-time rows at parity with `SecureRandom.uuid` while the explicit-ms rows stay well ahead of it. `SecureRandom.uuid` never reads a clock — random v4 is the only thing it does. If your clock is slow and you are minting many, read it once and pass the timestamp, or use the batch doors.
 
-The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.27x slower than `SecureRandom.uuid` for v4 (was 1.30x before the diet, from a worse baseline run) with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
+The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.25x slower than `SecureRandom.uuid` for v4 (1.26 µs against 1.01 µs in its own run) and 1.45x slower for v6/v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
 
 Batch generation still amortizes per-call cost on both backends — one native call for the whole batch:
 
 | Call | i/s (Magnus backend) |
 |---|---:|
-| `new_v6` × 1000 (individual) | 731.3 |
-| `new_v6_batch(1000)` | 2,655.6 (**3.6x**) |
-| `new_v7` × 1000 (individual) | 710.0 |
-| `new_v7_batch(1000)` | 2,744.3 (**3.9x**) |
+| `new_v6` × 1000 (individual) | 3,498 |
+| `new_v6_batch(1000)` | 4,633 (**1.3x**) |
+| `new_v7` × 1000 (individual) | 3,539 |
+| `new_v7_batch(1000)` | 4,677 (**1.3x**) |
 
-The batch multiplier shrank from 11x to ~3.8x for the best reason available: the individual calls got 3x faster, so there's less waste left to amortize. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
+The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 214 µs on is building a thousand `Uuid` objects — the byte form above does the same native work in 10 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
 
 ## Backends
 
@@ -231,21 +231,25 @@ single-threaded, so every call is serialized under one Mutex around one shared i
 which is also what keeps the core's v7 counter (it lives inside the instance) monotonic
 across threads and batches, exactly as the one dlopen'd library does natively.
 
-Measured, same box as the benchmarks above (Ruby 4.0.6, linux-arm64, wasmtime 47.0.3):
+Measured, same box and same session as the benchmarks above (Ruby 4.0.7, linux-x64,
+wasmtime 48.0.1), all three backends:
 
-| Call | wasmtime | native (Magnus) |
-|---|---:|---:|
-| `uuid_new_v7`, single, per call | 867 ns | ~450 ns |
-| `uuid_new_v7_batch(1000)`, per call | 40.6 µs (50.6 µs with the 16 KB read back into Ruby) | 24 µs |
+| Call | wasmtime | Fiddle | Magnus |
+|---|---:|---:|---:|
+| `new_v4` | 1.07 µs | 1.26 µs | 234 ns |
+| `new_v7` (explicit ms) | 1.44 µs | 1.47 µs | 284 ns |
+| `new_v7_batch_bytes(1000)` | 22.6 µs | 13.6 µs | 10.4 µs |
+| `new_v7_batch(1000)` → `Uuid` objects | 233 µs | 227 µs | 210 µs |
 
-So roughly 2x the native cost per call, and the batch doors amortize it the same way they do
-for Fiddle. The guest's own work is not where the time goes — the identical module runs at
-14 µs per thousand under a JIT-compiled host — it is the crossing, and Ruby's is one of the
-cheaper ones.
+So a single call costs what it costs on Fiddle, about five times the Magnus extension, and
+the batch doors amortize it the same way they do for Fiddle: the byte batch is twice the
+native cost, and the object batch is nearly the same on all three because building the objects is
+the whole of it. The guest's own work is not where the time goes — the identical module
+fills a thousand UUIDs in 11 µs under GraalWasm's JIT — it is the crossing.
 
 ## Verifying provenance
 
-Every gem RubyGems.org serves — the universal fallback and each of the six precompiled
+Every gem RubyGems.org serves — the universal fallback and each of the five precompiled
 platform gems — carries its own GitHub build-provenance attestation, signed directly by
 this repo's own `release.yml` (the `rubygems-publish` job attests `ruby/pkg/*.gem` right
 before the push), so plain `--repo` verifies any of them:
@@ -274,10 +278,12 @@ more on why `--signer-repo` is needed for some artifacts here and not others.
 gem install hyperuuid
 ```
 
-Seven gems are published per release: one universal `ruby`-platform gem (Fiddle, with every
-platform's native library and the wasm module bundled) plus six precompiled Magnus platform
-gems (`x86_64-linux`, `aarch64-linux`, `x86_64-darwin`, `arm64-darwin`, `x64-mingw-ucrt`,
-`aarch64-mingw-ucrt`) that `gem install` and `bundle` auto-select when they match. A platform
+Six gems are published per release: one universal `ruby`-platform gem (Fiddle, with every
+platform's native library and the wasm module bundled) plus five precompiled Magnus platform
+gems (`x86_64-linux`, `aarch64-linux`, `arm64-darwin`, `x64-mingw-ucrt`,
+`aarch64-mingw-ucrt`) that `gem install` and `bundle` auto-select when they match. There is
+no `x86_64-darwin` platform gem: an Intel Mac installs the universal gem and runs on Fiddle
+over the bundled `osx-x64` library, as Alpine does. A platform
 gem carries the same libraries and module beside its extensions, so the Fiddle and wasm
 backends are still there behind `HYPERUUID_PURE` and `HYPERUUID_WASM`. No extra configuration
 needed either way.
@@ -295,7 +301,8 @@ one at `require` time:
 | 3.3 (the floor) | Fiddle | Fiddle | wasm, if `wasmtime` is installed |
 
 What stands behind each cell: CI runs the whole suite for the first column on every push —
-Magnus on Ruby 3.4 and 4.0, Fiddle and wasm on 4.0, on all six platforms — and the Fiddle
+Magnus on Ruby 3.4 and 4.0, Fiddle and wasm on 4.0, on all five platforms with a CI leg
+(Intel macOS has none) — and the Fiddle
 suite for the musl column inside an Alpine container. The 3.3 row is the same Fiddle code
 path, run with the Docker command under [Development](#development) (Ruby 3.3 with the
 Fiddle 1.1.2 it ships) rather than on every push. The last column — wasm chosen

@@ -10,6 +10,15 @@
 # the csproj falls back to rust/target/release/ when this RID has nothing staged, so a
 # plain `cargo build --release` is all the dev loop needs.
 csharp/HyperUuid/runtimes/
+# The same for the static libraries a Native AOT publish links in: staged by the forge's
+# static-libs/build-static-libs.sh at test and pack time, never committed.
+csharp/HyperUuid/staticlibs/
+# go/staticlib's archives ARE committed — a Go module is whatever is in the tree — but only
+# by stage-native-binaries.yml, which adds them with `git add -f` after verifying each one's
+# build provenance. Ignored here so that a developer's own build of them (the forge's
+# static-libs/build-static-libs.sh, which the cgo backend needs for `go test`) can never
+# ride into a commit by accident.
+go/staticlib/*/*.a
 
 # Gradle / Java
 **/.gradle/

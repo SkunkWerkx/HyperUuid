@@ -1,7 +1,8 @@
 name: CI — build native, build wasm, test every binding
 
 # The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
-# pipeline — 6 real-hardware legs plus the two musl RIDs in Alpine containers, the Rust core
+# pipeline — 5 real-hardware legs plus the two musl RIDs in Alpine containers (and osx-x64
+# cross-built on the Apple silicon runner, the core's own suite run under Rosetta), the Rust core
 # built fresh per leg, every binding's suite run against it. Ruby's suite runs twice (forced
 # Fiddle fallback + Magnus extension backend); Python has no fallback — PyO3 only, staged
 # and tested per leg.
@@ -44,7 +45,7 @@ jobs:
       project: HyperUuid
       crate: hyperuuid
       pure_env: HYPERUUID_PURE
-      # Turns the package's Native AOT claim into a per-platform receipt: publish on all six
+      # Turns the package's Native AOT claim into a per-platform receipt: publish on all five
       # legs, fail on any ILxxxx/AOTxxxx trim diagnostic, then actually run the produced
       # binary and require exit 0. The log uploads as aot-report-{rid}. The smoke test
       # exercises the real surface — including the non-throwing Try* path and the raw-byte

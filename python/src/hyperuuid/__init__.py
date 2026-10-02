@@ -76,6 +76,8 @@ __all__ = [
     "fill_v7",
     "v6_timestamp",
     "v7_timestamp",
+    "v6_unix_millis",
+    "v7_unix_millis",
     "get_timestamp",
     "v6_to_sql_order",
     "v6_from_sql_order",
@@ -186,6 +188,10 @@ def new_v6(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     :raises ValueError: if ``unix_millis`` is negative or does not fit the 60-bit v6
         timestamp field.
     """
+    # The common arguments — nothing, or a plain int in range — need none of the conversion
+    # below, and calling it costs more than a third of the whole mint.
+    if unix_millis is None or (type(unix_millis) is int and 0 <= unix_millis <= _U64_MAX):
+        return _native.new_v6(unix_millis)
     return _native.new_v6(_unix_millis_from(unix_millis, _V6_OUT_OF_RANGE))
 
 
@@ -230,6 +236,9 @@ def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     :raises ValueError: if ``unix_millis`` is negative or does not fit the 48-bit
         ``unix_ts_ms`` field.
     """
+    # See new_v6: the common arguments skip the conversion.
+    if unix_millis is None or (type(unix_millis) is int and 0 <= unix_millis <= _U64_MAX):
+        return _native.new_v7(unix_millis)
     return _native.new_v7(_unix_millis_from(unix_millis, _V7_OUT_OF_RANGE))
 
 
@@ -245,6 +254,28 @@ def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     cannot represent a year beyond 9999.
     """
     return _native.v7_timestamp(uuid_value)
+
+
+def v6_unix_millis(uuid_value: _uuid.UUID) -> int:
+    """The timestamp embedded in a version 6 UUID as Unix-epoch milliseconds — the integer
+    :func:`v6_timestamp` builds its ``datetime`` from, without building it. For a value that
+    is going to be stored, compared or forwarded as a number, this is the cheaper call.
+
+    Only meaningful when ``uuid_value.version == 6``, exactly as :func:`v6_timestamp`.
+    """
+    return _native.v6_unix_millis(uuid_value)
+
+
+def v7_unix_millis(uuid_value: _uuid.UUID) -> int:
+    """The timestamp embedded in a version 7 UUID as Unix-epoch milliseconds — the integer
+    :func:`v7_timestamp` builds its ``datetime`` from, without building it. For a value that
+    is going to be stored, compared or forwarded as a number, this is the cheaper call, and
+    unlike :func:`v7_timestamp` it cannot raise: the whole 48-bit field fits an ``int``,
+    past the year 9999 included.
+
+    Only meaningful when ``uuid_value.version == 7``, exactly as :func:`v7_timestamp`.
+    """
+    return _native.v7_unix_millis(uuid_value)
 
 
 def get_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime | None:
@@ -350,8 +381,8 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     ``uuid.UUID`` objects are created at any point, which is the entire reason this exists.
 
     **Use this when bytes are what you actually want** — a database parameter, a wire format,
-    a bulk ``COPY``. It is roughly **32x faster** than :func:`new_v7_batch` for 1000 UUIDs
-    (about 20 µs versus 640 µs), because :func:`new_v7_batch` spends nearly all its time
+    a bulk ``COPY``. It is roughly **15x faster** than :func:`new_v7_batch` for 1000 UUIDs
+    (about 10 µs versus 140 µs), because :func:`new_v7_batch` spends nearly all its time
     building a thousand ``uuid.UUID`` instances rather than in the native call.
 
     **Do not use it if you need ``uuid.UUID`` objects.** Filling bytes and then constructing

@@ -1,9 +1,14 @@
-//go:build cgo && (darwin || linux) && !hyperuuid_wasm
+//go:build cgo && (darwin || linux) && !hyperuuid_wasm && (hyperuuid_dynamic || !(amd64 || arm64))
 
-// This backend calls libhyperuuid through real cgo instead of purego — measured ~5x faster
-// per call on this project's own benchmarks (see README.md) because a real C call avoids the
-// purego call-trampoline's per-call heap allocations. It's only built on darwin/linux, and
-// only when cgo itself is enabled:
+// This backend dlopen's libhyperuuid and calls it through real cgo. It was what every cgo
+// build got through 0.3.0; a cgo build now links the core in instead (backend_static.go),
+// and this one is selected by `-tags hyperuuid_dynamic` — for a build that has to pick the
+// core up at run time rather than link time — or on an architecture the static backend has
+// no archive for, where it reports the platform as unsupported exactly as it always did.
+//
+// Against purego it measured ~5x faster per call on this project's own benchmarks (see
+// README.md), because a real C call avoids the purego call-trampoline's per-call heap
+// allocations. It's only built on darwin/linux, and only when cgo itself is enabled:
 //
 //   - Windows stays on purego (backend_purego.go) unconditionally, even when CGO_ENABLED=1 —
 //     a cgo build there needs a MinGW-class C toolchain, which has no arm64 support in the

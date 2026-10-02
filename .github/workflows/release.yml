@@ -131,18 +131,21 @@ jobs:
           sys.exit(1 if failed else 0)
           PY
 
-          # Swift links the core in on Linux rather than loading it, so the committed archive
-          # has to be linked into something before it can be asked. All five archives come
-          # from one build, so this runner's own triple answers for the bundle.
-          bundle=swift/HyperUuidCore.artifactbundle
+          # Swift and Go's cgo backend link the core in on Linux rather than loading it, so a
+          # committed archive has to be linked into something before it can be asked. Each
+          # tree's archives come from one build, so this runner's own platform answers for
+          # the tree.
           printf '#include <stdio.h>\n#include "hyperuuid.h"\nint main(void) { unsigned v = hyperuuid_version(); printf("%%u.%%u.%%u", v >> 16, (v >> 8) & 255, v & 255); return 0; }\n' > static-version.c
-          cc -I "$bundle/include" static-version.c "$bundle/x86_64-unknown-linux-gnu/libhyperuuid.a" -o static-version
-          got=$(./static-version)
-          echo "$bundle/x86_64-unknown-linux-gnu/libhyperuuid.a: $got"
-          if [ "$got" != "$want" ]; then
-            echo "::error::The Swift static library reports $got; this release is $want. stage-native-binaries.yml has not staged the version-bump commit's ci.yml run."
-            exit 1
-          fi
+          for archive in swift/HyperUuidCore.artifactbundle/x86_64-unknown-linux-gnu/libhyperuuid.a \
+                         go/staticlib/linux_amd64/libhyperuuid.a; do
+            cc -I swift/HyperUuidCore.artifactbundle/include static-version.c "$archive" -o static-version
+            got=$(./static-version)
+            echo "$archive: $got"
+            if [ "$got" != "$want" ]; then
+              echo "::error::$archive reports $got; this release is $want. stage-native-binaries.yml has not staged the version-bump commit's ci.yml run."
+              exit 1
+            fi
+          done
 
   # Packs the .nupkg fresh, right now — deliberately not in ci.yml. A .nupkg bakes its
   # version into its own filename/metadata at pack time, and ci.yml runs before any tag
@@ -356,7 +359,7 @@ jobs:
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      # The wasm32-wasip1 module rides in every gem beside the six native libraries: the
+      # The wasm32-wasip1 module rides in every gem beside the native libraries: the
       # universal gem's third backend (wasmtime, when the platform has no Fiddle library or
       # HYPERUUID_WASM=1 asks for it) and the same fallback inside each platform gem.
       - uses: actions/download-artifact@v8
@@ -437,10 +440,14 @@ jobs:
           # artifact from the forge or this loop fails at the `cp`, which is the intended
           # failure: a missing extension should stop the release, not silently ship a gem
           # that claims a platform it has no code for.
+          #
+          # x86_64-darwin is deliberately not here. There is no Intel macOS leg to build a
+          # Magnus extension on (the forge cross-builds only the core library for osx-x64),
+          # so Ruby on an Intel Mac installs the universal gem above and runs on Fiddle over
+          # that library — the same fallback Alpine takes.
           declare -A PLATFORMS=(
             [linux-x64]=x86_64-linux
             [linux-arm64]=aarch64-linux
-            [osx-x64]=x86_64-darwin
             [osx-arm64]=arm64-darwin
             [win-x64]=x64-mingw-ucrt
             [win-arm64]=aarch64-mingw-ucrt
@@ -568,10 +575,15 @@ jobs:
             rid: linux-musl-arm64
             target: aarch64-unknown-linux-musl
             manylinux: "musllinux_1_2"
-          - os: macos-26-intel
+          # Cross-built on the Apple silicon runner: there is no Intel macOS leg (see the
+          # forge's build-native-osx-x64 job). The wheel is abi3, so building it needs no
+          # x86_64 interpreter. Installing it for the smoke test below does, and
+          # `python_arch` gets one: the x64 CPython, which runs under Rosetta 2.
+          - os: macos-latest
             rid: osx-x64
             target: x86_64-apple-darwin
             manylinux: ""
+            python_arch: x64
           - os: macos-latest
             rid: osx-arm64
             target: aarch64-apple-darwin
@@ -597,7 +609,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1
+          targets: wasm32-wasip1${{ matrix.rid == 'osx-x64' && ',x86_64-apple-darwin' || '' }}
 
       # The wheel's wasmtime backend module, built here from the same tagged checkout the
       # wheel itself is built from (this leg never reuses ci.yml's artifacts, see above), so
@@ -613,9 +625,22 @@ jobs:
           mkdir -p python/src/hyperuuid/native/wasm32-wasip1
           cp rust/target/wasm32-wasip1/release/hyperuuid.wasm python/src/hyperuuid/native/wasm32-wasip1/
 
+      # The hosted arm64 images ship with Rosetta 2; this is for the day one does not.
+      - name: Make sure Rosetta 2 is there for the x64 Python
+        if: matrix.rid == 'osx-x64'
+        run: |
+          set -euo pipefail
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            softwareupdate --install-rosetta --agree-to-license
+          fi
+          arch -x86_64 /usr/bin/true
+
+      # `architecture` is empty on every row but osx-x64, which setup-python reads as the
+      # runner's own.
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
+          architecture: ${{ matrix.python_arch }}
 
       - uses: PyO3/maturin-action@v1
         with:

@@ -9,12 +9,22 @@ module HyperUuid
     # The UUID's 16 raw bytes in RFC 9562 (big-endian) order.
     attr_reader :bytes
 
-    # Wraps a raw 16-byte RFC 9562 (big-endian) UUID value.
+    # Wraps a raw 16-byte RFC 9562 (big-endian) UUID value. The bytes are copied, so the
+    # String passed in stays the caller's.
+    #
+    # +owned+ is for this gem's own use: it says +bytes+ is a String the native core has
+    # just produced — sixteen bytes, already ASCII-8BIT, held by nothing else — so there is
+    # nothing to check, copy or re-tag, and that copy is most of what constructing one costs.
     #
     # @raise [ArgumentError] if +bytes+ isn't exactly 16 bytes.
-    def initialize(bytes)
-      raise ArgumentError, "bytes must be exactly 16 bytes" unless bytes.bytesize == 16
-      @bytes = bytes.dup.force_encoding(Encoding::BINARY).freeze
+    def initialize(bytes, owned = false)
+      if owned
+        @bytes = bytes.freeze
+      else
+        raise ArgumentError, "bytes must be exactly 16 bytes" unless bytes.bytesize == 16
+
+        @bytes = bytes.dup.force_encoding(Encoding::BINARY).freeze
+      end
     end
 
     # The RFC 9562 §5.9 Nil UUID — all 128 bits zero.
@@ -109,8 +119,8 @@ module HyperUuid
     # Meaningful only for a genuine version 6 or 7 UUID.
     def to_sql_order
       case version
-      when 7 then self.class.new(Runtime.v7_to_sql_order(bytes))
-      when 6 then self.class.new(Runtime.v6_to_sql_order(bytes))
+      when 7 then self.class.new(Runtime.v7_to_sql_order(bytes), true)
+      when 6 then self.class.new(Runtime.v6_to_sql_order(bytes), true)
       else raise ArgumentError, "to_sql_order is only defined for version 6 or 7 UUIDs, got version #{version}"
       end
     end
@@ -136,9 +146,9 @@ module HyperUuid
       octet8_version = (bytes.getbyte(8) >> 4) & 0x0F
       octet7_version = (bytes.getbyte(7) >> 4) & 0x0F
       if octet8_version == 6
-        self.class.new(Runtime.v6_to_rfc_order(bytes))
+        self.class.new(Runtime.v6_to_rfc_order(bytes), true)
       elsif octet7_version == 7
-        self.class.new(Runtime.v7_to_rfc_order(bytes))
+        self.class.new(Runtime.v7_to_rfc_order(bytes), true)
       else
         raise ArgumentError, "from_sql_order: not a recognized version 6 or 7 SQL-ordered UUID"
       end

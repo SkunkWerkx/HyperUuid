@@ -21,8 +21,8 @@ dependencies {
     // the native/*/* resource glob) is what has to carry it, exactly as for the FFM path.
     // Off by default: the plain run keeps proving the FFM path with nothing extra linked in.
     if (project.hasProperty("wasm")) {
-        runtimeOnly("org.graalvm.polyglot:polyglot:25.3.4.1")
-        runtimeOnly("org.graalvm.polyglot:wasm:25.3.4.1")
+        runtimeOnly("org.graalvm.polyglot:polyglot:25.4.4.1.1")
+        runtimeOnly("org.graalvm.polyglot:wasm:25.4.4.1.1")
     }
 }
 

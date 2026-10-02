@@ -3,12 +3,19 @@
 //! call — no dlopen, no C-ABI hop, no per-call boxing, no ctypes marshalling. Ported from
 //! HyperCast's proven `hypercast._native` pattern.
 //!
-//! UUID construction uses the fastuuid-style fast path — `UUID.__new__` plus
-//! `object.__setattr__` of the `int` and `is_safe` slots — because `UUID.__init__`'s
+//! UUID construction uses the fastuuid-style fast path — an instance allocated without
+//! `UUID.__init__`, then its `int` and `is_safe` slots set — because `UUID.__init__`'s
 //! validation costs more than the entire native call. It leans on `uuid.UUID`'s
 //! `__slots__` layout, which has been stable for over a decade; the Python test suite pins
 //! the invariant (fast-constructed UUIDs compare equal to `UUID(bytes=...)`-constructed
 //! ones, fields included) so any future drift fails loudly instead of subtly.
+//!
+//! What a call costs here is almost entirely the Python objects it hands back, so those are
+//! built through the C API's own entry points rather than by calling Python callables:
+//! `PyType_GenericAlloc` and `PyObject_GenericSetAttr` are what `object.__new__` and
+//! `object.__setattr__` do underneath, without a call, an argument tuple or a fresh `str`
+//! per attribute name. All of it is in the stable ABI, so the one-wheel-per-platform build
+//! is unchanged.
 
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,15 +23,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pyo3::exceptions::{
     PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
 };
+use pyo3::ffi;
+use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyBytes, PyDateTime, PyList, PyString, PyTzInfo};
+use pyo3::types::{PyByteArray, PyBytes, PyList, PyString};
 
 use crate::{v4, v5, v6, v7, Uuid};
 
 static UUID_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
-static UUID_NEW: OnceLock<Py<PyAny>> = OnceLock::new();
-static OBJECT_SETATTR: OnceLock<Py<PyAny>> = OnceLock::new();
 static IS_SAFE_UNKNOWN: OnceLock<Py<PyAny>> = OnceLock::new();
+static DATETIME_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
+static UTC: OnceLock<Py<PyAny>> = OnceLock::new();
+static SIXTY_FOUR: OnceLock<Py<PyAny>> = OnceLock::new();
 
 fn cached<'py>(py: Python<'py>, cell: &'static OnceLock<Py<PyAny>>) -> PyResult<&'py Bound<'py, PyAny>> {
     cell.get()
@@ -32,19 +42,68 @@ fn cached<'py>(py: Python<'py>, cell: &'static OnceLock<Py<PyAny>>) -> PyResult<
         .ok_or_else(|| PyRuntimeError::new_err("hyperuuid._native used before _bind"))
 }
 
+/// A Python `int` holding 16 big-endian bytes. The stable ABI has no byte-array constructor
+/// for `int` before 3.14, so it goes through `PyLong_FromString` in base 16 — one allocation,
+/// and measured faster than joining two 64-bit halves with a shift and an or (three).
+fn int_from_be_bytes<'py>(py: Python<'py>, bytes: [u8; 16]) -> PyResult<Bound<'py, PyAny>> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    // 32 digits and the terminating NUL PyLong_FromString reads up to.
+    let mut text = [0u8; 33];
+    for (i, byte) in bytes.iter().enumerate() {
+        text[2 * i] = HEX[(byte >> 4) as usize];
+        text[2 * i + 1] = HEX[(byte & 15) as usize];
+    }
+    // SAFETY: `text` is NUL-terminated ASCII; the call returns a new reference, or null with
+    // an exception set.
+    unsafe {
+        Bound::from_owned_ptr_or_err(py, ffi::PyLong_FromString(text.as_ptr().cast(), std::ptr::null_mut(), 16))
+    }
+}
+
 /// Builds a stdlib `uuid.UUID` from 16 RFC-ordered bytes via the pinned fast path.
 fn make_uuid(py: Python<'_>, bytes: [u8; 16]) -> PyResult<Py<PyAny>> {
     let class = cached(py, &UUID_CLASS)?;
-    let instance = cached(py, &UUID_NEW)?.call1((class,))?;
-    let setattr = cached(py, &OBJECT_SETATTR)?;
-    setattr.call1((&instance, "int", u128::from_be_bytes(bytes)))?;
-    setattr.call1((&instance, "is_safe", cached(py, &IS_SAFE_UNKNOWN)?))?;
-    Ok(instance.unbind())
+    let value = int_from_be_bytes(py, bytes)?;
+    let is_safe = cached(py, &IS_SAFE_UNKNOWN)?;
+    // SAFETY: UUID_CLASS is a type object (bound in _bind); PyType_GenericAlloc is the
+    // tp_alloc `object.__new__` itself calls for it, and PyObject_GenericSetAttr is what
+    // `object.__setattr__` calls — both check their arguments and report failure by
+    // return value with an exception set.
+    unsafe {
+        let instance = Bound::from_owned_ptr_or_err(py, ffi::PyType_GenericAlloc(class.as_ptr().cast(), 0))?;
+        if ffi::PyObject_GenericSetAttr(instance.as_ptr(), intern!(py, "int").as_ptr(), value.as_ptr()) != 0
+            || ffi::PyObject_GenericSetAttr(instance.as_ptr(), intern!(py, "is_safe").as_ptr(), is_safe.as_ptr())
+                != 0
+        {
+            return Err(PyErr::fetch(py));
+        }
+        Ok(instance.unbind())
+    }
 }
 
-/// Reads a `uuid.UUID`'s 16 RFC-ordered bytes back out via its `int` slot.
+/// Reads a `uuid.UUID`'s 16 RFC-ordered bytes back out via its `int` slot: the low 64 bits
+/// directly, the high 64 after a shift. Anything that is not an integer of at most 128
+/// bits is refused by the conversions themselves (`TypeError`, `OverflowError`).
 fn uuid_bytes(value: &Bound<'_, PyAny>) -> PyResult<[u8; 16]> {
-    Ok(value.getattr("int")?.extract::<u128>()?.to_be_bytes())
+    let py = value.py();
+    let int = value.getattr(intern!(py, "int"))?;
+    // SAFETY: the conversions take any object and report failure as u64::MAX with an
+    // exception set, which is checked before the value is used.
+    unsafe {
+        let low = ffi::PyLong_AsUnsignedLongLongMask(int.as_ptr());
+        if low == u64::MAX && !ffi::PyErr_Occurred().is_null() {
+            return Err(PyErr::fetch(py));
+        }
+        let shifted = Bound::from_owned_ptr_or_err(
+            py,
+            ffi::PyNumber_Rshift(int.as_ptr(), cached(py, &SIXTY_FOUR)?.as_ptr()),
+        )?;
+        let high = ffi::PyLong_AsUnsignedLongLong(shifted.as_ptr());
+        if high == u64::MAX && !ffi::PyErr_Occurred().is_null() {
+            return Err(PyErr::fetch(py));
+        }
+        Ok(((u128::from(high) << 64) | u128::from(low)).to_be_bytes())
+    }
 }
 
 fn now_millis() -> u64 {
@@ -209,20 +268,39 @@ fn millis_datetime(py: Python<'_>, millis: u64) -> PyResult<Py<PyAny>> {
     }
     let (hour, rest) = (second_of_day / 3_600, second_of_day % 3_600);
     let (minute, second) = (rest / 60, rest % 60);
-    let utc = PyTzInfo::utc(py)?;
-    Ok(PyDateTime::new(
-        py,
-        year as i32,
+    // `datetime(state, tzinfo)` is the constructor `datetime.__reduce__` names: ten bytes —
+    // year (two, big-endian), month, day, hour, minute, second, microsecond (three,
+    // big-endian) — and the tzinfo. It is the pickle format, so it cannot change under a
+    // pickle written by an older Python, and it builds the same object as the eight-argument
+    // constructor in a quarter of the time: one bytes object instead of seven ints, and no
+    // per-field range checks to repeat (the fields above are in range by construction).
+    let state = [
+        (year >> 8) as u8,
+        year as u8,
         month,
         day,
         hour as u8,
         minute as u8,
         second as u8,
-        micros,
-        Some(&utc),
-    )?
-    .into_any()
-    .unbind())
+        (micros >> 16) as u8,
+        (micros >> 8) as u8,
+        micros as u8,
+    ];
+    Ok(cached(py, &DATETIME_CLASS)?
+        .call1((PyBytes::new(py, &state), cached(py, &UTC)?))?
+        .unbind())
+}
+
+/// The embedded timestamp as the integer the core returns — Unix-epoch milliseconds — with
+/// no `datetime` built around it.
+#[pyfunction]
+fn v6_unix_millis(uuid_value: Bound<'_, PyAny>) -> PyResult<u64> {
+    Ok(v6::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
+}
+
+#[pyfunction]
+fn v7_unix_millis(uuid_value: Bound<'_, PyAny>) -> PyResult<u64> {
+    Ok(v7::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
 }
 
 #[pyfunction]
@@ -252,18 +330,17 @@ order_fns! {
     v6_from_sql_order => v6::to_rfc_order,
 }
 
-/// Caches `uuid.UUID`, its `__new__`, `object.__setattr__`, and `SafeUUID.unknown` for the
-/// pinned fast constructor.
+/// Caches `uuid.UUID` and `SafeUUID.unknown` for the pinned fast constructor, and
+/// `datetime.datetime` and `timezone.utc` for the timestamps.
 #[pyfunction]
 fn _bind(py: Python<'_>) -> PyResult<()> {
     let uuid_module = py.import("uuid")?;
-    let class = uuid_module.getattr("UUID")?;
-    let _ = UUID_NEW.set(class.getattr("__new__")?.unbind());
-    let _ = UUID_CLASS.set(class.unbind());
-    let _ = OBJECT_SETATTR.set(
-        py.import("builtins")?.getattr("object")?.getattr("__setattr__")?.unbind(),
-    );
+    let _ = UUID_CLASS.set(uuid_module.getattr("UUID")?.unbind());
     let _ = IS_SAFE_UNKNOWN.set(uuid_module.getattr("SafeUUID")?.getattr("unknown")?.unbind());
+    let datetime_module = py.import("datetime")?;
+    let _ = DATETIME_CLASS.set(datetime_module.getattr("datetime")?.unbind());
+    let _ = UTC.set(datetime_module.getattr("timezone")?.getattr("utc")?.unbind());
+    let _ = SIXTY_FOUR.set(64u8.into_pyobject(py)?.into_any().unbind());
     Ok(())
 }
 
@@ -279,9 +356,9 @@ fn native_version() -> String {
 ///
 /// This is the destination-buffer path, and it never constructs a single `uuid.UUID`. That is
 /// the whole point in Python, where object construction — not the native call — dominates a
-/// batch: `new_v7_batch(1000)` builds a thousand `uuid.UUID` instances, each costing a
-/// `UUID.__new__` plus two `object.__setattr__` calls, while this writes the same 16000 bytes
-/// with none of that. Measured at ~32x faster for a 1000-UUID batch, which lands it on the
+/// batch: `new_v7_batch(1000)` builds a thousand `uuid.UUID` instances, each an allocation
+/// and two slot stores, while this writes the same 16000 bytes
+/// with none of that. Measured at ~15x faster for a 1000-UUID batch, which lands it on the
 /// same native ceiling the Go and C# bindings hit.
 ///
 /// `bytearray` specifically, not the general writable buffer protocol, for now: `PyBuffer`
@@ -362,6 +439,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fill_v7_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(v6_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(v7_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(v6_unix_millis, m)?)?;
+    m.add_function(wrap_pyfunction!(v7_unix_millis, m)?)?;
     m.add_function(wrap_pyfunction!(v6_to_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v6_from_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_to_sql_order, m)?)?;

@@ -20,10 +20,10 @@
 //     the default backend deliberately doesn't. The wasmtime-go module is also required in
 //     go.mod unconditionally (Go has no tag-conditional requirements), so it lands in every
 //     consumer's module graph; it only compiles into a binary built with the tag.
-//   - Measured on go1.27 linux/arm64 in the session that added this: a single
-//     uuid_new_v7 costs ~3.0 µs through wasmtime-go against 139 ns native, and a 1000-item
-//     batch including the copy back out of guest memory ~42.6 µs against 18.4 µs. Per call
-//     it is ~20x the native crossing; per UUID in a batch it is ~2.3x. Prefer the batch
+//   - Measured on go1.27 linux/amd64: a single uuid_new_v7 costs ~2.4 µs through
+//     wasmtime-go against 82 ns native, and a 1000-item batch including the copy back out
+//     of guest memory ~21 µs against 9.4 µs. Per call it is ~30x the native crossing; per
+//     UUID in a batch it is ~2.3x. Prefer the batch
 //     and Fill doors here even more than usual.
 //
 // Memory protocol: a wasm guest sees only its own linear memory, so nothing here passes a Go

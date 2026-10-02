@@ -75,8 +75,10 @@ php-ext = "build --release --features php --target-dir target/php"
 # Output: target/wasm32-unknown-emscripten/release/libhyperuuid.a.
 wasm-staticlib = "rustc --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features staticlib"
 # The same no_std static library for any other target: `cargo staticlib --target <triple>`.
-# The Swift binding links one per Linux and WebAssembly triple; the forge's
-# swift-static/build-swift-static.sh runs this for each and stages the result into
-# swift/HyperUuidCore.artifactbundle. Built on the `staticlib` profile (Cargo.toml), which is
-# release plus `panic = "abort"`. Output: target/<triple>/staticlib/libhyperuuid.a.
+# Three bindings link one rather than load the shared library — Swift on Linux and
+# WebAssembly, Go's cgo backend, a C# Native AOT publish — and the forge's
+# static-libs/build-static-libs.sh runs this for each target, trims the archive to the one
+# object that matters and places it where each binding expects it. Built on the `staticlib`
+# profile (Cargo.toml), which is release plus `panic = "abort"`.
+# Output: target/<triple>/staticlib/libhyperuuid.a.
 staticlib = "rustc --profile staticlib --crate-type staticlib --no-default-features --features staticlib"

@@ -20,6 +20,10 @@ back from HyperCast's wasm port.
 
 ### Added
 
+- **Python — `v6_unix_millis` and `v7_unix_millis`.** The embedded timestamp as the integer
+  the core returns, Unix-epoch milliseconds, with no `datetime` built around it: 161 ns
+  against 252 for `v7_timestamp` and 401 for stdlib's `UUID.time`. Unlike `v7_timestamp`
+  it cannot overflow — the whole 48-bit field fits an `int`. Both backends. *(PyPI)*
 - **Swift — musl Linux and WebAssembly.** The binding builds with Swift's static Linux SDK
   (`--swift-sdk x86_64-swift-linux-musl`, and arm64) and with its WebAssembly SDK
   (`wasm32-unknown-wasip1`). Neither target can open a shared library, so the core is
@@ -78,8 +82,9 @@ back from HyperCast's wasm port.
 - **JMH through the wasm backend.** `./gradlew :benchmarks:jmh -Pwasm` runs the same suite
   through GraalWasm, with the longer warmup Truffle's runtime compilation needs — HyperCast
   saw error bars wider than the values at the FFM suite's 3×1s — and `-PjmhInclude=<regex>`
-  runs a subset. Under GraalVM CE 25.3's JIT that run puts `newV7` at 133 ns against 72 ns
-  FFM in the same session, closer than the README's hand-loop 420 ns row. *(dev only)*
+  runs a subset. Under GraalVM CE 25.4's JIT that run puts `newV7` at 93 ns against 40 ns
+  FFM in the same session, and the README's wasm table is now that run rather than a hand
+  loop. *(dev only)*
 - **A dev loop for the native library and the wasm module.** The Java build stages
   `rust/target/release` and `rust/target/wasm32-wasip1/release` onto the classpath when
   nothing has been placed under `src/main/resources/native` explicitly, and the Ruby and
@@ -100,6 +105,40 @@ back from HyperCast's wasm port.
 
 ### Changed
 
+- **Every benchmark table was re-measured on x86-64, and most headline ratios are smaller.**
+  The published figures came from an arm64 WSL2 machine whose wall-clock read cost about a
+  microsecond and whose JDK random source ran six times slower than this one's — and both
+  sat on the far side of the comparisons that produced the largest numbers. Re-measured on
+  linux-x64 (an Intel Core i9-11900H) with each binding's own harness: against the `uuid`
+  crate, 2x on v5 and v7 and level on v4 and v6 (was 13–16x on v6/v7); against
+  `UUID.randomUUID()`, 2.4–4.5x (was 11–17x); against `Guid.NewGuid()`, 5.7–8.1x
+  (unchanged); against `Foundation.UUID()`, 9.5–13x; against a naive inline PHP v4, level to
+  1.2x (was 1.9–2x). Batch-over-loop multiples that included a clock read per call shrank
+  the same way (Swift's from 42–50x to 6–7.5x), and PHP's byte batch is 8x its object batch,
+  not 100x. Python and Ruby were measured after the two entries below and are stated
+  there. Go's table gained the
+  linked-in backend beside the loading one and purego. Every README names the machine and
+  the runtime it measured. *(docs)*
+- **Java — GraalWasm 25.4.4.1.1.** The wasm backend's optional engine moves from 25.3.4.1
+  to the release that matches GraalVM 25.4, in the build, the benchmarks, the AOT smoke
+  test and the README's dependency snippet. The two have to match: on a 25.4 JDK the older
+  artifacts ran the module interpreted on the JVM, with no error, and failed a Native Image
+  build outright. *(docs, dev only)*
+- **Python — every call costs about half what it did.** Nearly all of a call was the
+  `uuid.UUID` or `datetime` it returned, and the extension built those by calling Python
+  callables: `UUID.__new__` and two `object.__setattr__` calls for one, the eight-argument
+  constructor for the other. It now allocates the instance and sets its slots through the
+  C API (`PyType_GenericAlloc`, `PyObject_GenericSetAttr`) and builds a `datetime` from the
+  packed state its own pickling uses, all inside the stable ABI, so the wheels are
+  unchanged; and `new_v6`/`new_v7` skip their argument conversion for no argument or a
+  plain `int`. On CPython 3.14: `new_v4()` 540 ns to 243, `new_v7(ms)` 726 to 354,
+  `v7_timestamp` 466 to 252. Against stdlib that is 3.0–4.2x on generation (was 1.4–2.2x)
+  and 1.6–1.9x on timestamp extraction, which used to trail `UUID.time`. *(PyPI)*
+- **Ruby — v6 and v7 cost what v4 does.** `Uuid.new` copied the sixteen bytes the core had
+  just handed it, and the timestamp argument was range-checked against a 64-bit constant —
+  a bignum comparison that cost more than the mint. `new_v4` 317 ns to 234, `new_v7` 512
+  to 284 on the Magnus backend: 4.9x and 4.0x `SecureRandom.uuid` (was 3.1x and 1.9x).
+  `Uuid.new` still copies a caller's String. *(RubyGems)*
 - **Only upstream-supported runtimes.** PHP's floor is 8.2 (8.1 ended 2025-12-31), Ruby's is
   3.3 (3.2 ended 2026-03-31), and Java's is JDK 25 (22, 23 and 24 are end of life; 25 is the
   first LTS with the final FFM API, and the jar is compiled `--release 25`). A consumer on
@@ -144,6 +183,28 @@ back from HyperCast's wasm port.
   library, and find its resource directory under both names SwiftPM uses: `.bundle` (Swift
   6.4's default build system) and `.resources` (6.2 and 6.3 on Windows). A toolchain older
   than 6.2 keeps resolving 0.3.0. *(`.package(url:)`)*
+- **Go — a cgo build links the core in.** On Linux and macOS, amd64 and arm64, the core
+  is a static library on the cgo link line (`go/staticlib/`), not a shared library embedded
+  for every platform, written to a temp file and `dlopen`ed on first use. A program that
+  does nothing else is 3.1 MB instead of 6.2 MB, starts without touching the filesystem, and
+  runs with no writable temp directory — including fully static, in an empty read-only
+  container. One archive serves glibc and musl. `Available()` is always `true` in this
+  build. `CGO_ENABLED=0`, Windows and cross-compiles still load through purego, unchanged;
+  `-tags hyperuuid_dynamic` keeps cgo and loads the shared library as before. *(`go get`)*
+- **C# — a Native AOT publish links the core in.** The package carries a static library
+  per RID (`staticlibs/`), and its targets file hands the right one to the AOT linker and
+  binds the P/Invokes as direct calls, so the publish directory is one executable with no
+  `libhyperuuid` beside it. `<HyperUuidStaticLink>false</HyperUuidStaticLink>` restores the old
+  behaviour; a JIT process is unaffected. *(NuGet)*
+- **Intel macOS (`osx-x64`) is built and core-tested, with no CI leg of its own.** The
+  library is cross-compiled on the Apple silicon runner, attested and shipped in every
+  package as before, and the Rust core's own suite runs on it under Rosetta 2. No binding's
+  suite runs there any more, and there is no `x86_64-darwin` precompiled gem: Ruby on an
+  Intel Mac installs the universal gem and runs on Fiddle, the slower backend (2,299 ns
+  against 416 ns per `new_v4` where both were last measured side by side, on win-arm64). The `osx-x64` wheel is cross-built on the same runner and still installed
+  and called into, under an x64 Python, before it is published. The leg took 37 minutes
+  against 8 on Apple silicon, on hardware Apple stopped selling in 2023.
+  *(RubyGems; CI for everything else)*
 - **CI builds on Ubuntu 26.04 and tests Swift on 6.4.** The Linux legs name `ubuntu-26.04`
   and `ubuntu-26.04-arm` rather than `ubuntu-latest`. The glibc floor of the shared
   libraries is unchanged at 2.34, and CI now fails a Linux leg whose library references
@@ -153,6 +214,26 @@ back from HyperCast's wasm port.
 
 ### Fixed
 
+- **Java — every FFM call in a GraalVM Native Image went through the method-handle
+  interpreter.** A native image built from this jar ran `newV7(long)` in 6.4 µs where the
+  JVM takes 36 ns, 180 times slower and forty times slower than the wasm backend in the
+  same binary. The downcall handles were `static final` but bound to the library's
+  addresses, so their class initialized at run time, and Native Image only compiles a call
+  through a handle that is a constant when the image is built. The handles are now one per
+  C signature, created without an address in a holder class
+  (`UuidGenerator.Downcalls`) that a `native-image.properties` in the jar initializes at
+  image build time; each call passes the export's address as its first argument. The
+  big-endian layout a UUID is read through moved with them for the same reason. In a native
+  image: `newV7(long)` 78 ns, a 1000-UUID byte fill 12.8 µs (was 19), a `UUID[]` fill
+  31 µs (was 162). Nothing changes on the JVM, and a consumer's `native-image` build
+  inherits the setting with no configuration. *(Maven Central)*
+- **PHP — the batch benchmark timed the library load.** `bench/UuidBatchBench.php` ran one
+  unwarmed revolution per iteration, and phpbench runs each iteration in a fresh process,
+  so the ~0.7 ms it takes to load the native library sat inside every figure: the README's
+  batch table read 0.64 ms against 0.87 ms, a 1.4x gain, where the batch is 76 µs against
+  285 µs for the loop, 3.8x. The suite now warms up before it measures and covers the byte
+  batches too, so the README's bytes-versus-objects figure is reproducible from the repo.
+  *(dev only)*
 - **C# — a Blazor WebAssembly app could not use HyperUuid and HyperCast together.** Each
   package's wasm static library bundled its own copy of Rust's standard library, and the
   two collided at link time: `wasm-ld: duplicate symbol: rust_eh_personality`. The library

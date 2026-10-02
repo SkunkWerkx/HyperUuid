@@ -25,6 +25,11 @@ Regenerate it with `cargo build --release --target wasm32-wasip1` in `rust/` —
 (which export the guest's `malloc`/`free`) are picked up — and copy
 `rust/target/wasm32-wasip1/release/hyperuuid.wasm` in.
 
+A cgo build on Linux or macOS takes nothing from this directory: it links the core in from
+`staticlib/` instead (`backend_static.go`), and `embed.go` is not compiled into it. These
+files are what a purego build (`CGO_ENABLED=0`, Windows, every cross-compile), a
+`-tags hyperuuid_dynamic` build and the wasm backend embed.
+
 ## Verifying provenance
 
 These are compiled binaries committed to git, which is the least inspectable thing in this

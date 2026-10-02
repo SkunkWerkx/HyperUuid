@@ -105,3 +105,13 @@ if sys.version_info >= (3, 14):
         "stdlib UUID.time (v7)",
         lambda: stdlib_v7_for_extraction.time,
     )
+
+    # The integer forms: the same embedded value, with no datetime built around it.
+    runner.bench_func(
+        "hyperuuid.v6_unix_millis",
+        lambda: hyperuuid.v6_unix_millis(hyper_v6_for_extraction),
+    )
+    runner.bench_func(
+        "hyperuuid.v7_unix_millis",
+        lambda: hyperuuid.v7_unix_millis(hyper_v7_for_extraction),
+    )

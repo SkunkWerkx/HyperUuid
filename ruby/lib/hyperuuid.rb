@@ -21,16 +21,14 @@ module HyperUuid
   # rest of this module generates.
   VERSION = "0.3.0"
 
-  # The widest millisecond count the native ABI carries (a u64). Anything past it is refused
-  # in the doors below, before any backend sees it.
-  U64_MAX = 0xFFFF_FFFF_FFFF_FFFF
   # The widest batch count, and the longest v5 name in bytes, the native ABI carries (a u32).
+  # (The millisecond count is a u64; unix_millis_from refuses anything wider.)
   U32_MAX = 0xFFFF_FFFF
-  private_constant :U64_MAX, :U32_MAX
+  private_constant :U32_MAX
 
   # Creates a random UUID version 4 (RFC 9562 §5.4).
   def self.new_v4
-    Uuid.new(Runtime.new_v4)
+    Uuid.new(Runtime.new_v4, true)
   end
 
   # Creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a name. The
@@ -50,7 +48,7 @@ module HyperUuid
       end
     raise ArgumentError, "name must be at most #{U32_MAX} bytes" if name_bytes.bytesize > U32_MAX
 
-    Uuid.new(Runtime.new_v5(namespace.bytes, name_bytes))
+    Uuid.new(Runtime.new_v5(namespace.bytes, name_bytes), true)
   end
 
   # Converts +value+ to a Unix-epoch millisecond integer: +nil+ becomes the current time, a
@@ -65,15 +63,19 @@ module HyperUuid
   # the same +out_of_range+ message, the core raises for a value it can see but not embed.
   # Left to the backends those cases diverged: a RangeError from the extension, a wrapped
   # value from Fiddle, a silently truncated one from wasm.
+  #
+  # The two common arguments go first and cheapest: no argument is the clock, which needs no
+  # range check, and an Integer is checked by its bit length rather than against 2**64 - 1: a
+  # comparison with a number that size is a bignum comparison, and cost more than the mint.
   private_class_method def self.unix_millis_from(value, out_of_range)
+    return Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond) if value.nil?
+
     millis =
-      case value
-      when nil then Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
-      when Time then (value.to_r * 1000).floor
-      when Integer then value
+      if value.is_a?(Integer) then value
+      elsif value.is_a?(Time) then (value.to_r * 1000).floor
       else raise TypeError, "unix_millis must be a Time, an Integer or nil; got #{value.class}"
       end
-    raise TimestampOutOfRangeError, out_of_range unless millis.between?(0, U64_MAX)
+    raise TimestampOutOfRangeError, out_of_range unless millis >= 0 && millis.bit_length <= 64
 
     millis
   end
@@ -95,7 +97,7 @@ module HyperUuid
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 60-bit v6 field.
   # @raise [TypeError] if +unix_millis+ isn't a Time, an Integer or nil.
   def self.new_v6(unix_millis = nil)
-    Uuid.new(Runtime.new_v6(unix_millis_from(unix_millis, Runtime::V6_TIMESTAMP_OUT_OF_RANGE)))
+    Uuid.new(Runtime.new_v6(unix_millis_from(unix_millis, Runtime::V6_TIMESTAMP_OUT_OF_RANGE)), true)
   end
 
   # Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI call
@@ -106,7 +108,7 @@ module HyperUuid
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 60-bit v6 field.
   def self.new_v6_batch(count, unix_millis = nil)
     bytes = new_v6_batch_bytes(count, unix_millis)
-    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
+    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16], true) }
   end
 
   # Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time; pass
@@ -116,7 +118,7 @@ module HyperUuid
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
   # @raise [TypeError] if +unix_millis+ isn't a Time, an Integer or nil.
   def self.new_v7(unix_millis = nil)
-    Uuid.new(Runtime.new_v7(unix_millis_from(unix_millis, Runtime::V7_TIMESTAMP_OUT_OF_RANGE)))
+    Uuid.new(Runtime.new_v7(unix_millis_from(unix_millis, Runtime::V7_TIMESTAMP_OUT_OF_RANGE)), true)
   end
 
   # Creates `count` time-sortable version 7 UUIDs sharing one timestamp capture and one
@@ -128,7 +130,7 @@ module HyperUuid
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
   def self.new_v7_batch(count, unix_millis = nil)
     bytes = new_v7_batch_bytes(count, unix_millis)
-    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16]) }
+    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16], true) }
   end
 
   # Returns `count` version 7 UUIDs as one binary String of raw RFC 9562-ordered bytes,
