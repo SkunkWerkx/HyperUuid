@@ -75,7 +75,8 @@ jobs:
       # the pipeline's explicit per-leg placement for in-repo testing.
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
-      # go_windows stays default-true: the purego fallback carries the Windows legs.
+      # Go links the core on every leg, Windows included (the GNU-target archive under
+      # go/staticlib/windows_*), so it needs a C compiler there too.
       # The core as a wasm32-wasip1 module too, and every binding's suite a second time
       # through its in-process wasm backend (GraalWasm for Java, wasmtime for Ruby, Python
       # and Go). The module is what the jar, the gems and the wheels carry beside the native
@@ -217,10 +218,10 @@ jobs:
   # `.private_extern` on Mach-O, msvcrt on Windows — and a gap in either is a library that
   # links but will not load, so every platform the forge ships is built and loaded here
   # rather than assumed. Each leg checks the export surface is the 13 C ABI symbols and
-  # nothing else where the platform's nm can list it, then runs the Go binding's whole suite
-  # through purego (cgo off), so the library is dlopen'd and called exactly as a host would.
-  # The musl legs run in golang's Alpine image, as the forge's musl suite does, and also
-  # hold the library to a single NEEDED entry: musl's libc.
+  # nothing else where the platform's nm can list it, then loads it through Python's ctypes
+  # and calls every export (.github/scripts/cdylib_smoke.py), so the library is dlopen'd and
+  # called exactly as a host would. The musl legs build in Alpine and also hold the library
+  # to a single NEEDED entry: musl's libc.
   check-cdylib:
     strategy:
       fail-fast: false
@@ -239,11 +240,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.musl }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-python@v7
         if: ${{ !matrix.musl }}
         with:
-          go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
+          python-version: "3.x"
 
       - name: Build the no_std shared library
         if: ${{ !matrix.musl }}
@@ -269,25 +269,21 @@ jobs:
             exit 1
           fi
 
-      - name: Go suite through purego, against this library
+      - name: Load it and call every export
         if: ${{ !matrix.musl }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cp "rust/target/release/${{ matrix.lib }}" "go/native/${{ matrix.rid }}/${{ matrix.lib }}"
-          cd go
-          CGO_ENABLED=0 go test -count=1 ./...
+        run: python .github/scripts/cdylib_smoke.py "rust/target/release/${{ matrix.lib }}" rust/Cargo.toml
 
-      - name: Build, check and run the Go suite in Alpine
+      - name: Build, check, load and call it in Alpine
         if: ${{ matrix.musl }}
         run: |
           set -euo pipefail
-          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" golang:1.27-alpine sh -euc '
+          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" python:3-alpine sh -euc '
             apk add --no-cache build-base curl >/dev/null
             curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null 2>&1
             . "$HOME/.cargo/env"
             mkdir /work
-            (cd /src && tar cf - --exclude=./rust/target ./rust ./go) | tar xf - -C /work
+            (cd /src && tar cf - --exclude=./rust/target ./rust ./.github/scripts) | tar xf - -C /work
             cd /work/rust
             cargo cdylib
             lib=target/release/libhyperuuid.so
@@ -298,8 +294,7 @@ jobs:
               *) echo "::error::$lib must depend on musl libc and nothing else, found: $needed"; exit 1 ;;
             esac
             apk del build-base >/dev/null
-            cp "$lib" /work/go/native/${{ matrix.rid }}/libhyperuuid.so
-            cd /work/go && CGO_ENABLED=0 go test -count=1 ./...
+            python /work/.github/scripts/cdylib_smoke.py "$lib" Cargo.toml
           '
 
   # rustfmt over every Rust file in the crate (src, tests, benches, examples), every PR. The

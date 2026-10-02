@@ -18,10 +18,14 @@ only way to reach Swift's static Linux SDK at all: a statically linked executabl
 loader to open a `.so` with. `stage-native-binaries.yml` fills both directories from the
 same CI run.
 
-At run time the library is opened in place, from wherever SwiftPM staged this directory
-(`HyperUuid_HyperUuid.bundle` beside the build products, or `HyperUuid_HyperUuid.resources` on
-Windows before Swift 6.4) — see the binding README's "Loading and deployment" for what that
-means for a deployed executable.
+This directory is the one resource of its own target, `HyperUuidNativeLibs`, which the
+`HyperUuid` target depends on for macOS and Windows only — so a Linux or WebAssembly build
+never builds the target and never stages these files (SwiftPM resources take no platform
+condition; a target dependency does). At run time the library is opened in place, from
+wherever SwiftPM staged this directory (`HyperUuid_HyperUuidNativeLibs.bundle` beside the
+build products, or `HyperUuid_HyperUuidNativeLibs.resources` on Windows before Swift 6.4) —
+see the binding README's "Loading and deployment" for what that means for a deployed
+executable.
 
 ## Verifying provenance
 
@@ -50,10 +54,10 @@ identity mismatch.
 
 That reports the exact commit and workflow run the binary was built from. Verification is by
 content digest, so it holds for these committed copies even though they were produced as CI
-artifacts — the bytes are identical. The same set of binaries is committed under `go/native/`,
-`php/src/native/` and `swift/Sources/HyperUuid/NativeLibs/`; git stores each one as a single
-shared blob, so the three copies cost no extra repository space, and one attestation covers
-all three.
+artifacts — the bytes are identical. Where `php/src/native/` and
+`swift/Sources/HyperUuidNativeLibs/NativeLibs/` carry the same platform, they carry the same
+binary; git stores it as a single shared blob, so the second copy costs no extra repository
+space, and one attestation covers both.
 
 If you would rather not trust a binary at all, build the core from source instead — it is a
 plain Rust crate with no build-time codegen:

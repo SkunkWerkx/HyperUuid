@@ -8,9 +8,9 @@ use FFI;
 
 /**
  * FFI plumbing for the native libhyperuuid shared library — dlopen/dlsym plus a raw C-ABI
- * call, no runtime bridge (the same "no shim" positioning as the Go/Swift bindings' purego/
- * dlopen approach). PHP's built-in `ext-ffi` needs no Composer package for this — the same
- * "no extra dependency" stance as Go's purego-only/no-cgo approach.
+ * call, no runtime bridge (the same "no shim" positioning as the Swift binding's dlopen
+ * approach). PHP's built-in `ext-ffi` needs no Composer package for this — the same
+ * "no extra dependency" stance as the Go binding's lone google/uuid requirement.
  *
  * Performance shape, measured not assumed (the HyperCast lesson, applied here): PHP's raw
  * ext-ffi call floor is ~105 ns — already extension-class — so every avoidable nanosecond
@@ -222,8 +222,8 @@ final class Runtime
      * Loaded lazily, once per request: PHP's statics reset between requests, so under a web
      * SAPI the declarations are bound again on each request's first call (the OS keeps the
      * library itself mapped for the worker's lifetime). The CLI's single long request is the
-     * one case that matches the other bindings' load-once-per-process (Go's sync.Once,
-     * Swift's lazy static let).
+     * one case that matches the other bindings' load-once-per-process (Java's class
+     * initializer, Swift's lazy static let).
      */
     private static function load(): FFI
     {

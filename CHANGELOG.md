@@ -9,6 +9,87 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Go — Windows links the core in, like Linux and macOS.** A cgo build on Windows now names
+  `go/staticlib/windows_amd64` (or `windows_arm64`) on its link line: the same MSVC archive,
+  17 KB, that the C# package links under Native AOT. MinGW's linker reads MSVC's objects, and
+  the archive carries its own import stub for `ProcessPrng`, so the link line names nothing
+  else and there is one Windows archive per architecture for both bindings. The suite passes
+  on windows/amd64 built with MinGW-w64 gcc. *(`go get`)*
+
+### Removed
+
+- **Go — every backend but the linked one.** The purego backend (`CGO_ENABLED=0`, and all of
+  Windows until now), the loading cgo backend (`-tags hyperuuid_dynamic`) and the wasmtime
+  backend (`-tags hyperuuid_wasm`) are gone, and with them `go/native/`: the nine shared
+  libraries and the wasm module every non-linked build embedded, the copy each process wrote
+  to a temp directory and never removed, and the libc detection that picked one. None of them
+  reached a platform the linked build does not — wasmtime-go needs cgo itself and ships
+  engines only for the same five platforms — and Go compiled to WebAssembly never worked:
+  its toolchain has no cgo and no external linker. `go.mod` requires only
+  `github.com/google/uuid`, and `go/` (which the Composer archive carries too, for the Go
+  proxy) is about a third of its 0.5.0 size. *(`go get`, Packagist)*
+
+### Changed
+
+- **Every shipped library is stripped.** The release profile now drops the symbol table and
+  debug info from what it links, never the exports. Against what 0.5.0 shipped, a stripped
+  local build puts the linux-x64 shared library at 16,632 bytes (from 19,048), the
+  wasm32-wasip1 module at 40,617 (from 48,986) and the Linux Magnus extension at 313,680
+  (from 390,624, and a platform gem carries two). The static libraries keep their symbols,
+  since a consumer's linker resolves the core through them, and `cargo bench` keeps its own
+  for profilers. *(every package that carries a native library)*
+- **Ruby — each platform gem carries only the native libraries its platform can load.**
+  Through 0.5.0 all five carried every RID's library beside their Magnus extensions, though
+  a platform gem only installs where its own platform matches. Now `x86_64-linux` and
+  `aarch64-linux` keep their glibc and musl libraries (Alpine installs them too, and falls
+  back to Fiddle over the musl one), the other three keep their one, and every gem keeps the
+  wasm module; the universal gem still carries everything. Repacking 0.5.0's own bytes this
+  way puts `x86_64-linux` at 407,040 bytes (from 459,264), `aarch64-linux` at 416,768 (from
+  458,752), `arm64-darwin` at 375,808 (from 435,712), `x64-mingw-ucrt` at 363,520 (from
+  417,792) and `aarch64-mingw-ucrt` at 382,976 (from 437,760). *(RubyGems)*
+
+### Fixed
+
+- **C# — a Blazor WebAssembly app no longer gets the 3 MB wasm archive in its output.**
+  Restore resolves `runtimes/browser-wasm/nativeassets/` as a copy-local native asset, so
+  through 0.5.0 `libhyperuuid.a` was copied into `bin/` and the publish root of every
+  browser-wasm consumer, outside `wwwroot`, never served and never read. The package's
+  targets take it back out of the copy-local list; the link, which names the archive by
+  path, is unchanged. *(NuGet)*
+- **Rust — the `no-panic` proof from a consumer's crate is documented.** It needs `lto = true`
+  in the consumer's own release profile: Cargo ignores a dependency's profile, and without
+  fat LTO the generators fail the link. *(crates.io docs)*
+- **Swift — a Linux or WebAssembly build no longer carries the macOS and Windows libraries.**
+  SwiftPM resources take no platform condition, so through 0.5.0 every Linux build staged
+  `HyperUuid_HyperUuid.resources/NativeLibs/` beside the executable, and every WebAssembly
+  build carried it too: 104 KB of dylibs and DLLs that the statically linked core never
+  loads. They now live in a resource-only target of their own, `HyperUuidNativeLibs`, which
+  only macOS and Windows depend on; Linux and WebAssembly stage no resources from the
+  package at all. On macOS and Windows the directory to deploy beside the executable is
+  renamed to `HyperUuid_HyperUuidNativeLibs.bundle` (`.resources` on Windows before Swift
+  6.4). The public API is unchanged. *(`.package(url:)`)*
+
+### Upgrade note
+
+Go is the one package with a breaking change, and the reason this is a minor release. The
+module now builds only under cgo, on Linux, macOS and Windows on amd64 and arm64, which takes
+a C compiler where it is built: gcc or clang on Linux (`build-base` on Alpine), the Xcode
+command-line tools on macOS, MinGW-w64 gcc on Windows (llvm-mingw on arm64). A build with
+`CGO_ENABLED=0`, for `GOOS=wasip1` or `js`, or for any other platform stops at compile time on
+`undefined: hyperuuid_needs_cgo_and_a_C_compiler_…`, which names the fix; drop
+`-tags hyperuuid_dynamic` and `-tags hyperuuid_wasm`, which no longer select anything.
+Cross-compiling needs a C cross-compiler, e.g. `CC=x86_64-w64-mingw32-gcc GOOS=windows
+CGO_ENABLED=1`. The API is unchanged: `Available` is always `true`, `LoadError` always `nil`,
+and `ErrNativeUnavailable`, which nothing returns any more, is deprecated. Go compiled to
+WebAssembly cannot use this module; `github.com/google/uuid` is pure Go and builds there.
+
+One deployment step changes for Swift on macOS and Windows: the directory copied beside the
+executable is now `HyperUuid_HyperUuidNativeLibs.bundle` (`.resources` on Windows before
+Swift 6.4), not `HyperUuid_HyperUuid.*`. Nothing changes for a SwiftPM build that runs where
+it was built, or on Linux and WebAssembly.
+
 ## [0.5.0] — 2026-10-02
 
 Three themes. *Proven panic-free*: every public function in the crate and every C export

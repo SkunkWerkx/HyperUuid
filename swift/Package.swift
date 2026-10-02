@@ -17,17 +17,26 @@ let package = Package(
             name: "HyperUuidCore",
             path: "HyperUuidCore.artifactbundle"
         ),
-        // macOS and Windows load a shared library instead, bundled under
-        // NativeLibs/{rid}/{lib} as a resource: the bundle above has no variant for them,
-        // and the platform condition keeps SwiftPM from warning about that on every build.
-        // NativePlatform.swift picks the resource at compile time; DynamicLibrary.swift
+        // macOS and Windows load a shared library instead, out of a resource-only target of
+        // its own: NativeLibs/{rid}/{lib} under HyperUuidNativeLibs. Resources take no
+        // platform condition, so in this target they would be staged beside every Linux
+        // executable and carried into every WebAssembly build, loaded by neither; a target
+        // dependency does take one, and a target that isn't built stages nothing. The two
+        // conditions are disjoint, so each platform gets exactly one way to the core (and
+        // the core's keeps SwiftPM from warning, on every macOS or Windows build, that the
+        // bundle above has no variant for the triple).
+        // NativePlatform.swift picks the library at compile time; DynamicLibrary.swift
         // dlopen/dlsym's (or LoadLibraryW/GetProcAddress's, on Windows) it at run time.
+        .target(
+            name: "HyperUuidNativeLibs",
+            resources: [.copy("NativeLibs")]
+        ),
         .target(
             name: "HyperUuid",
             dependencies: [
-                .target(name: "HyperUuidCore", condition: .when(platforms: [.linux, .wasi]))
-            ],
-            resources: [.copy("NativeLibs")]
+                .target(name: "HyperUuidCore", condition: .when(platforms: [.linux, .wasi])),
+                .target(name: "HyperUuidNativeLibs", condition: .when(platforms: [.macOS, .windows])),
+            ]
         ),
         .testTarget(
             name: "HyperUuidTests",

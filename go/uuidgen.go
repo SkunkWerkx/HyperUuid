@@ -1,20 +1,11 @@
 // Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7
-// time-sortable) calling directly into the native libhyperuuid shared library — real cgo on
-// darwin/linux (backend_cgo.go), github.com/ebitengine/purego everywhere else, including
-// Windows unconditionally (backend_purego.go) — dlopen/dlsym plus either a real C call or
-// purego's per-arch call trampolines, no C compiler required to build or consume this module
-// on the purego path (the same "no runtime bridge" positioning as the Python/PyO3 and
-// Java/FFM bindings). A third backend, opt-in by build tag, runs the same core as a
-// WebAssembly module inside the process instead of dlopen'ing anything at all
-// (backend_wasmtime.go, `-tags hyperuuid_wasm`).
+// time-sortable) by calling the Rust core, linked into the binary as a static library through
+// cgo (backend_static.go). It builds on Linux, macOS and Windows, on amd64 and arm64, with a
+// C compiler present; anything else is a compile error that says so (unsupported.go).
 //
-// This module bundles a native build for every supported platform (see currentTarget) and
-// loads the right one at runtime, the same trick the Java binding uses since neither a Go
-// module nor a .jar has NuGet-style per-RID package selection.
-//
-// Nothing here panics when that load fails. Every function returns an error wrapping
-// ErrNativeUnavailable instead, and Available, LoadError and NativeVersion (load.go) probe
-// the same once-per-process outcome up front, without generating anything.
+// The core is linked, not loaded, so nothing here can fail to load: Available is always
+// true, and the errors these functions return are the core's own — a failed random source,
+// a timestamp out of range — or a caller's mistake, such as a negative count.
 package hyperuuid
 
 import (
@@ -45,9 +36,6 @@ var (
 
 // NewV4 creates a random UUID version 4 (RFC 9562 §5.4).
 func NewV4() (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	out, rc := newV4()
 	if rc != 0 {
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v4 failed with code %d: %w", rc, ErrRandomSource)
@@ -59,9 +47,6 @@ func NewV4() (uuid.UUID, error) {
 // bytes. The same (namespace, name) pair always produces the same UUID; an empty or nil name
 // is valid and hashes the namespace alone.
 func NewV5(namespace uuid.UUID, name []byte) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	if uint64(len(name)) > math.MaxUint32 {
 		return uuid.UUID{}, fmt.Errorf("hyperuuid: name of %d bytes exceeds the native length limit", len(name))
 	}
@@ -88,9 +73,6 @@ func NewV6() (uuid.UUID, error) {
 // call — unlike version 7, there is no monotonic counter, so calls within the same
 // millisecond are not guaranteed to sort in creation order.
 func NewV6At(unixMillis uint64) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	out, rc := newV6(unixMillis)
 	switch rc {
 	case 0:
@@ -120,9 +102,6 @@ func NewV6Batch(count int) ([]uuid.UUID, error) {
 // no monotonic counter, so items are not guaranteed to sort in creation order. A count of 0
 // returns a nil slice; a negative one returns ErrNegativeCount.
 func NewV6BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return nil, err
-	}
 	if count < 0 {
 		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
 	}
@@ -144,9 +123,6 @@ func NewV6BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 // distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp", so the caller is
 // responsible for checking that first if it matters.
 func V6UnixMillis(id uuid.UUID) (uint64, error) {
-	if err := ensureLoaded(); err != nil {
-		return 0, err
-	}
 	return v6UnixMillis(id), nil
 }
 
@@ -164,9 +140,6 @@ func V6Timestamp(id uuid.UUID) (time.Time, error) {
 // distinguish "not a v7 UUID" from "v7 UUID with a very early timestamp", so the caller is
 // responsible for checking that first if it matters.
 func V7UnixMillis(id uuid.UUID) (uint64, error) {
-	if err := ensureLoaded(); err != nil {
-		return 0, err
-	}
 	return v7UnixMillis(id), nil
 }
 
@@ -187,9 +160,6 @@ func NewV7() (uuid.UUID, error) {
 // NewV7At creates a time-sortable UUID version 7 (RFC 9562 §6.2), embedding unixMillis
 // (milliseconds since the Unix epoch).
 func NewV7At(unixMillis uint64) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	out, rc := newV7(unixMillis)
 	switch rc {
 	case 0:
@@ -234,9 +204,6 @@ func NewV7Batch(count int) ([]uuid.UUID, error) {
 // capture and one contiguous block of the monotonic counter. A count of 0 returns a nil
 // slice; a negative one returns ErrNegativeCount.
 func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return nil, err
-	}
 	if count < 0 {
 		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
 	}
@@ -268,18 +235,12 @@ func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 // reimplementing the math. Meaningful only for a genuine version 7 UUID — see V6ToSqlOrder
 // for the version 6 equivalent.
 func V7ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	return v7ToSqlOrder(id), nil
 }
 
 // V7FromSqlOrder is the inverse of V7ToSqlOrder — converts a SQL-Server-ordered version 7 id
 // back to RFC 9562 order.
 func V7FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	return v7ToRfcOrder(id), nil
 }
 
@@ -304,18 +265,12 @@ func V7FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 //
 // Meaningful only for a genuine version 6 UUID.
 func V6ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	return v6ToSqlOrder(id), nil
 }
 
 // V6FromSqlOrder is the inverse of V6ToSqlOrder — converts a SQL-Server-ordered version 6 id
 // back to RFC 9562 order.
 func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	if err := ensureLoaded(); err != nil {
-		return uuid.UUID{}, err
-	}
 	return v6ToRfcOrder(id), nil
 }
 
@@ -335,13 +290,6 @@ func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
 // exist there for performance but exist here only for callers who genuinely want raw bytes
 // (a wire buffer, a database parameter) rather than uuid.UUID values.
 
-// Each call below passes the backend's batch function, which is an ordinary function that
-// reads its symbol at invocation time -- after ensureLoaded has populated it. This used to
-// be a closure over a func variable for exactly that reason: a bare func var as an argument
-// was evaluated at the call site, nil, before the helper had loaded the library. (Caught by
-// running a fill as the first native call in a process -- the whole suite passed because
-// earlier tests had already loaded it.)
-
 // errBatch maps a native batch return code onto this package's sentinel errors.
 func errBatch(fn string, rc int32) error {
 	switch rc {
@@ -357,9 +305,6 @@ func errBatch(fn string, rc int32) error {
 // fillUUIDs writes len(dst) UUIDs straight into dst's backing array.
 func fillUUIDs(dst []uuid.UUID, unixMillis uint64, fn string,
 	call func(uint64, uint32, unsafe.Pointer) int32) error {
-	if err := ensureLoaded(); err != nil {
-		return err
-	}
 	if len(dst) == 0 {
 		return nil
 	}
@@ -373,9 +318,6 @@ func fillUUIDs(dst []uuid.UUID, unixMillis uint64, fn string,
 // fillBytes writes len(dst)/16 UUIDs straight into dst, which must be a whole number of them.
 func fillBytes(dst []byte, unixMillis uint64, fn string,
 	call func(uint64, uint32, unsafe.Pointer) int32) error {
-	if err := ensureLoaded(); err != nil {
-		return err
-	}
 	if len(dst)%16 != 0 {
 		return fmt.Errorf("%w: got %d", ErrBufferNotWholeUUIDs, len(dst))
 	}
@@ -453,9 +395,6 @@ func FillV7BytesAt(dst []byte, unixMillis uint64) error {
 // each language's own UUID type.
 
 func sqlOrderBytes(b []byte, call func(unsafe.Pointer)) error {
-	if err := ensureLoaded(); err != nil {
-		return err
-	}
 	if len(b) != 16 {
 		return fmt.Errorf("%w: got %d", ErrNotOneUUID, len(b))
 	}

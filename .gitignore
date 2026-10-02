@@ -16,7 +16,7 @@ csharp/HyperUuid/staticlibs/
 # go/staticlib's archives ARE committed — a Go module is whatever is in the tree — but only
 # by stage-native-binaries.yml, which adds them with `git add -f` after verifying each one's
 # build provenance. Ignored here so that a developer's own build of them (the forge's
-# static-libs/build-static-libs.sh, which the cgo backend needs for `go test`) can never
+# static-libs/build-static-libs.sh, which `go test` needs to link) can never
 # ride into a commit by accident.
 go/staticlib/*/*.a
 
@@ -43,15 +43,10 @@ java/src/main/resources/native/
 **/dist/
 **/.pytest_cache/
 
-# Go
-# Native libs under go/native/{rid}/ are committed, not ignored — see go/native/README.md
-# for why (a go:embed consumer has no packing step, unlike every other registry this repo
-# publishes to).
-
 # Swift
-# Native libs under swift/Sources/HyperUuid/NativeLibs/{rid}/ are committed, not ignored —
-# see swift/Sources/HyperUuid/NativeLibs/README.md for why (SwiftPM has no packing step for a
-# git-URL dependency, unlike every other registry this repo publishes to).
+# Native libs under swift/Sources/HyperUuidNativeLibs/NativeLibs/{rid}/ are committed, not
+# ignored — see swift/Sources/HyperUuidNativeLibs/NativeLibs/README.md for why (SwiftPM has no
+# packing step for a git-URL dependency, unlike every other registry this repo publishes to).
 **/.build/
 
 # Ruby

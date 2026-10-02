@@ -2,15 +2,13 @@ require "fiddle"
 
 module HyperUuid
   # Fiddle plumbing for the native libhyperuuid shared library — dlopen/dlsym plus a raw
-  # C-ABI call, no runtime bridge (the same "no shim" positioning as the Go/Swift bindings'
-  # purego/dlopen approach). Fiddle ships with every Ruby install; it's a plain gem
-  # dependency here (see hyperuuid.gemspec) rather than a third-party one — mirroring Go's
-  # "no cgo" and Python's zero-dependency PyO3 wheels.
+  # C-ABI call, no runtime bridge (the same "no shim" positioning as the Swift binding's
+  # dlopen approach). Fiddle ships with every Ruby install; it's a plain gem dependency here
+  # (see hyperuuid.gemspec) rather than a third-party one — mirroring Python's
+  # zero-dependency PyO3 wheels.
   #
-  # Unlike the Go/Swift bindings, which embed their native builds inside a single compiled
-  # archive and must extract to a temp file before dlopen can see a real path, a Ruby gem's
-  # files are already plain files on disk once installed — native/{rid}/{lib} can be
-  # dlopen'd directly, no extraction step needed.
+  # A Ruby gem's files are plain files on disk once installed, so native/{rid}/{lib} can be
+  # dlopen'd directly, with no extraction step.
   module Runtime
     # The package's two exceptions live on HyperUuid itself (errors.rb). These are the names
     # they had through 0.3.0, kept as aliases of the very same classes so a
@@ -170,7 +168,7 @@ module HyperUuid
         buf[0, 16]
       end
 
-      # Loaded lazily and exactly once, mirroring the Go binding's sync.Once / Swift's lazy
+      # Loaded lazily and exactly once, mirroring Java's class initializer / Swift's lazy
       # static let — the native library and its function pointers live for the process's
       # lifetime, same as every other binding (never dlclose'd). The unsynchronized read is
       # the hot path; the mutex only guards the one-time load (a benign race — idempotent).

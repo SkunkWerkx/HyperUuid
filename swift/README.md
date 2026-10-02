@@ -149,17 +149,20 @@ executable works, and so does a fully static build with
 here.
 
 **macOS and Windows: loaded.** There the core is a shared library that travels as a SwiftPM
-resource. `swift build` stages `NativeLibs/` into a directory beside the built products,
-and the first call opens this platform's library straight out of it — nothing is extracted,
-copied or left behind in a temp directory. The directory is `HyperUuid_HyperUuid.bundle` on macOS,
+resource of a small target of its own, `HyperUuidNativeLibs`, which only these two platforms
+depend on — so a Linux or WebAssembly build stages no resources from this package at all.
+`swift build` stages `NativeLibs/` into a directory beside the built products, and the first
+call opens this platform's library straight out of it — nothing is extracted, copied or left
+behind in a temp directory. The directory is `HyperUuid_HyperUuidNativeLibs.bundle` on macOS,
 and on Windows with Swift 6.4 and later; on Windows with Swift 6.2 or 6.3 (or
-`--build-system native`) it is `HyperUuid_HyperUuid.resources`. The loader accepts either.
+`--build-system native`) it is `HyperUuid_HyperUuidNativeLibs.resources`. The loader accepts
+either.
 
 **On those two platforms that directory has to ship with your executable.** A deployment
 that copies only the binary has no native library to load:
 
 ```sh
-cp -R .build/release/MyTool .build/release/HyperUuid_HyperUuid.bundle /path/to/deploy/
+cp -R .build/release/MyTool .build/release/HyperUuid_HyperUuidNativeLibs.bundle /path/to/deploy/
 ```
 
 The loader looks beside the executable first, then in the main bundle's resources, which is
@@ -208,7 +211,7 @@ Foundation, which works under WASI. CI runs the whole suite under WasmKit on Swi
 a smoke executable on 6.2, whose XCTest does not start under WASI.
 
 The other direction — running the core as wasm *inside* a native Swift process, the way the
-Java, Ruby, Python and Go bindings do — is not built: no wasm engine ships as a Swift
+Java, Ruby and Python bindings do — is not built: no wasm engine ships as a Swift
 package with a stable API, and nothing here needs one, since every platform this binding
 supports has the core natively. The root README's
 [WebAssembly section](../README.md#webassembly) tracks both directions for every binding.
@@ -217,7 +220,7 @@ supports has the core natively. The root README's
 
 Like PHP, there's no separate package registry to attest here — SwiftPM resolves a git tag
 directly against this repo. The native binaries the package carries — the shared libraries
-under `swift/Sources/HyperUuid/NativeLibs/` and the static libraries under
+under `swift/Sources/HyperUuidNativeLibs/NativeLibs/` and the static libraries under
 `swift/HyperUuidCore.artifactbundle/`, both staged by `stage-native-binaries.yml` — each carry
 their own build-provenance attestation from `hyper-build-native.yml`, which physically lives
 in `SkunkWerkx/.github` — so verifying needs `--signer-repo` alongside `--repo`, or `gh`
@@ -225,7 +228,7 @@ reports a bare `verifying with issuer "sigstore.dev"` that reads like a bad sign
 only an identity mismatch:
 
 ```sh
-gh attestation verify swift/Sources/HyperUuid/NativeLibs/osx-arm64/libhyperuuid.dylib \
+gh attestation verify swift/Sources/HyperUuidNativeLibs/NativeLibs/osx-arm64/libhyperuuid.dylib \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 gh attestation verify swift/HyperUuidCore.artifactbundle/x86_64-unknown-linux-gnu/libhyperuuid.a \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
@@ -269,7 +272,7 @@ requires `Package.swift` at the repository root with no monorepo subdirectory su
 constraint Packagist has for `composer.json` — [the repo root's own `Package.swift`](../Package.swift)
 exists for that reason, with its targets pointed at the real sources under `swift/` via
 `path:` rather than duplicating them. The native binaries — the shared libraries under
-`Sources/HyperUuid/NativeLibs/{rid}/` and the static ones under
+`Sources/HyperUuidNativeLibs/NativeLibs/{rid}/` and the static ones under
 `HyperUuidCore.artifactbundle/{triple}/` — are committed straight into git: unlike a real
 package registry, SwiftPM has no packing step of its own — whatever's literally in the git
 tree at the resolved tag is what a consumer's build links or bundles.

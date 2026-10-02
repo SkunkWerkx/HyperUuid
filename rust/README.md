@@ -143,7 +143,7 @@ Default-on rather than unconditional for the crates.io consumer, the tests and t
 extensions. The artifacts this repository ships leave it out: the static libraries and the
 shared library every FFI binding loads (`cargo cdylib`, below) are all `#![no_std]`, each
 bringing the abort-on-panic handler std would otherwise supply — which takes the linux-x64
-shared library from 347 KB to 19 KB with the same exports and the same code behind them.
+shared library from 347 KB to 17 KB with the same exports and the same code behind them.
 That library is not one of the manifest's crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
 real `no_std` rlib on every target: your own machine, `wasm32-unknown-unknown`, and bare metal.
 CI builds a `default-features = false` consumer for the first two on every run, and checks the
@@ -182,6 +182,19 @@ cargo build --release --example no_panic --features no-panic
 
 The proof needs optimization, so build it with `--release`. A debug build fails the link for
 most of the functions, because the checks the optimizer would have proven dead are still in.
+
+To run the same proof from your own crate, turn on fat LTO in its release profile. Cargo
+ignores a dependency's profile, so a consumer's stock `--release` build compiles this crate,
+`getrandom` and `sha1` separately, leaves the panic paths across those boundaries in, and
+fails the link for the generators; thin LTO and `codegen-units = 1` are not enough:
+
+```toml
+[dependencies]
+hyperuuid = { version = "0.6", features = ["no-panic"] }
+
+[profile.release]
+lto = true
+```
 
 `v7::now_v7` reads the clock with `clock_gettime` on Unix rather than through std, whose
 `SystemTime::now` unwraps that call; an unreadable clock is `TimestampOutOfRange` instead. On

@@ -284,9 +284,11 @@ gems (`x86_64-linux`, `aarch64-linux`, `arm64-darwin`, `x64-mingw-ucrt`,
 `aarch64-mingw-ucrt`) that `gem install` and `bundle` auto-select when they match. There is
 no `x86_64-darwin` platform gem: an Intel Mac installs the universal gem and runs on Fiddle
 over the bundled `osx-x64` library, as Alpine does. A platform
-gem carries the same libraries and module beside its extensions, so the Fiddle and wasm
-backends are still there behind `HYPERUUID_PURE` and `HYPERUUID_WASM`. No extra configuration
-needed either way.
+gem carries, beside its extensions, the wasm module and only the native libraries its own
+platform can load — `linux-x64` and `linux-musl-x64` in `x86_64-linux`, `linux-arm64` and
+`linux-musl-arm64` in `aarch64-linux`, `osx-arm64`, `win-x64` and `win-arm64` in the other
+three — so the Fiddle and wasm backends are still there behind `HYPERUUID_PURE` and
+`HYPERUUID_WASM`. No extra configuration needed either way.
 
 Selection has **two** axes here, unlike every other binding in this repo. A Magnus extension
 is bound to one Ruby minor ABI — there's no `abi3` equivalent to collapse the version axis the
@@ -324,8 +326,8 @@ Linux (checked with RubyGems 4.0.20 on `x86_64-linux-musl`). The Magnus extensio
 linked against glibc and cannot load there — `require` fails cleanly on the missing
 `ld-linux` loader — so the gem falls back to Fiddle, which loads the musl build of the core
 (`native/linux-musl-x64` or `native/linux-musl-arm64`, chosen from `RUBY_PLATFORM`) that
-every gem carries. Alpine therefore works as installed, on the Fiddle backend and at Fiddle's
-speed. Releases through 0.3.0 carried no musl library: there the fallback found only the
+both Linux platform gems carry for exactly this case. Alpine therefore works as installed,
+on the Fiddle backend and at Fiddle's speed. Releases through 0.3.0 carried no musl library: there the fallback found only the
 glibc one, and the first call raised `Fiddle::DLError`.
 
 **Nothing in this gem is ever compiled, on any platform.** Its one dependency can be:

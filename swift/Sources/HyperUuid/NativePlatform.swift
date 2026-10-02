@@ -8,9 +8,10 @@
 // way to cover the two targets that have no dynamic loader at all, the static Linux SDK and
 // WASI.
 //
-// macOS and Windows load a shared library instead, out of the package's resources; that is
-// everything below. `canImport`, not an OS check, picks between the two, so a target with no
-// archive of its own lands on the `#error` rather than on a loader with nothing to load.
+// macOS and Windows load a shared library instead, out of the `HyperUuidNativeLibs` target's
+// resources; that is everything below. `canImport`, not an OS check, picks between the two,
+// so a target with no archive of its own lands on the `#error` rather than on a loader with
+// nothing to load.
 #if !canImport(HyperUuidCore)
 
 /// Maps this build's compile-time OS/arch to the RID-style directory (matching the other
@@ -43,18 +44,21 @@ enum NativePlatform {
     #error("hyperuuid: unsupported platform — the Swift binding links the native core statically on Linux (glibc and musl) and WebAssembly (WASI), and loads a bundled shared library on macOS and Windows, each on x86_64 and arm64 where the platform has both; this target is none of those")
     #endif
 
-    /// The directory SwiftPM stages this target's resources into: `{package}_{target}` plus a
-    /// suffix that depends on the build system as well as the platform. Swift Build — SwiftPM's
-    /// default from Swift 6.4 — writes a `.bundle` everywhere; the build system before it
-    /// wrote a `.bundle` on macOS and a plain `.resources` directory everywhere else,
-    /// and is still there behind `--build-system native`. A toolchain produces only one of
-    /// the two, so on Windows both names are looked for. The generated `Bundle.module`
-    /// accessor knows which, but it `fatalError`s when the directory is absent, so
-    /// `DynamicLibrary.locateBundled()` looks for it by name instead.
+    /// The directory SwiftPM stages the `HyperUuidNativeLibs` target's resources into:
+    /// `{package}_{target}` plus a suffix that depends on the build system as well as the
+    /// platform. Swift Build — SwiftPM's default from Swift 6.4 — writes a `.bundle`
+    /// everywhere; the build system before it wrote a `.bundle` on macOS and a plain
+    /// `.resources` directory everywhere else, and is still there behind
+    /// `--build-system native`. A toolchain produces only one of the two, so on Windows both
+    /// names are looked for. The generated `Bundle.module` accessor knows which, but it
+    /// `fatalError`s when the directory is absent, so `DynamicLibrary.locateBundled()` looks
+    /// for it by name instead.
     #if os(macOS)
-    static let resourceBundleNames = ["HyperUuid_HyperUuid.bundle"]
+    static let resourceBundleNames = ["HyperUuid_HyperUuidNativeLibs.bundle"]
     #else
-    static let resourceBundleNames = ["HyperUuid_HyperUuid.bundle", "HyperUuid_HyperUuid.resources"]
+    static let resourceBundleNames = [
+        "HyperUuid_HyperUuidNativeLibs.bundle", "HyperUuid_HyperUuidNativeLibs.resources",
+    ]
     #endif
 }
 

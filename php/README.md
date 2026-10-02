@@ -266,11 +266,16 @@ to build and load it yourself:
    ```php
    $bytes = hyperuuid_native_new_v4();   // 16 raw RFC-9562-ordered bytes
    $id = new \HyperUuid\Uuid($bytes);    // wrap it to get the Uuid API back
+
+   // v6 and v7 take the timestamp; there is no "now" default, as there is none at the C ABI
+   $v7 = hyperuuid_native_new_v7((int) floor(microtime(true) * 1000));
    ```
    See [`rust/src/php_ext.rs`](../rust/src/php_ext.rs) for the full function list —
    `hyperuuid_native_new_v5`/`_new_v6`(`_batch`)/`_new_v7`(`_batch`)/`_v6_unix_millis`/
    `_v7_unix_millis`, same signatures as `Runtime.php`'s own internal FFI calls, plus
-   `hyperuuid_native_version`. The SQL-order conversions are not part of the spike.
+   `hyperuuid_native_version`, which returns the packed integer (`major << 16 | minor << 8 |
+   patch`) rather than `nativeVersion()`'s string. The SQL-order conversions are not part of
+   the spike.
 
 Last measured on linux-arm64, PHP 8.5, `XDEBUG_MODE=off`, same 5-iterations × 1000-revs shape
 as the table above (min of the 5 iteration means). The comparison script that produced these
@@ -300,8 +305,8 @@ None today, in either direction, and this README says so rather than leaving it 
 README's table. Compiling *this binding* into a wasm PHP: the actively maintained build
 (WordPress Playground's `@php-wasm`) loads extensions at build time or startup only, and
 there is no indication the `FFI` extension this binding needs is available there at all.
-Running the core as wasm *inside* PHP, the way the Java, Ruby, Python and Go bindings now
-do: there is no maintained wasm engine PHP can embed, so there is nothing to stand that on.
+Running the core as wasm *inside* PHP, the way the Java, Ruby and Python bindings do: there
+is no maintained wasm engine PHP can embed, so there is nothing to stand that on.
 The root README's [WebAssembly section](../README.md#webassembly) tracks both directions for
 every binding; if either changes for PHP, this section is where it lands.
 

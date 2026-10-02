@@ -57,17 +57,42 @@ namespace :native do
   # exact anyway — Ruby went 3.4 straight to 4.0, so there is no 3.5+ for it to over-claim.
   ABI_CEILING = "4.1"
 
+  # The native/<rid>/ libraries each platform gem keeps for its Fiddle fallback, out of the
+  # eight the gemspec's native/*/* glob picks up once release.yml has staged the universal
+  # gem's set. A platform gem only ever installs where RubyGems matched its platform string,
+  # so every other RID in it is dead weight; the universal "ruby" gem stays the one that
+  # carries them all. The RIDs are what lib/hyperuuid/native_platform.rb resolves on the
+  # Rubies that pick each gem, and the Linux gems need two: RubyGems doesn't tell musl from
+  # glibc, so Alpine installs these same gems, its Magnus require fails on the missing
+  # ld-linux loader, and Fiddle loads native/linux-musl-<arch>. Fiddle stays reachable on
+  # every RID kept here — HYPERUUID_PURE, or an ABI the gem has no extension for. The wasm
+  # module is not in this table because no gem drops it: HYPERUUID_WASM=1 has to work from
+  # whichever gem is installed. Keys must match release.yml's PLATFORMS values; a platform
+  # missing here aborts rather than shipping a gem with no Fiddle library at all.
+  PLATFORM_RIDS = {
+    "x86_64-linux" => %w[linux-x64 linux-musl-x64],
+    "aarch64-linux" => %w[linux-arm64 linux-musl-arm64],
+    "arm64-darwin" => %w[osx-arm64],
+    "x64-mingw-ucrt" => %w[win-x64],
+    "aarch64-mingw-ucrt" => %w[win-arm64]
+  }.freeze
+
   task :gem, [:platform] do |_t, args|
     platform = args[:platform] or abort "usage: rake native:gem[<platform>], e.g. native:gem[aarch64-linux]"
+    rids = PLATFORM_RIDS.fetch(platform) { abort "no PLATFORM_RIDS entry for #{platform} — add the RIDs its Fiddle fallback resolves" }
     ext = platform.include?("darwin") ? "bundle" : "so"
 
     libs = ABIS.map { |abi| "lib/hyperuuid/#{abi}/hyperuuid_native.#{ext}" }
     missing = libs.reject { |f| File.exist?(f) }
     missing.empty? or abort "not staged: #{missing.join(', ')} — stage each ABI's compiled Magnus extension there first"
 
+    keep = rids + ["wasm32-wasip1"]
+    unstaged = keep.reject { |rid| Dir["lib/hyperuuid/native/#{rid}/*"].any? }
+    unstaged.empty? or abort "not staged: lib/hyperuuid/native/{#{unstaged.join(',')}}/ — the Fiddle and wasm fallbacks need them in this gem"
+
     spec = GEMSPEC.dup
     spec.platform = Gem::Platform.new(platform)
-    spec.files = spec.files + libs
+    spec.files = spec.files.reject { |f| (rid = f[%r{\Alib/hyperuuid/native/([^/]+)/}, 1]) && !keep.include?(rid) } + libs
     # Narrower than the gemspec's own `>= 3.3`, deliberately: this gem is only correct on the
     # ABIs actually in the box, and every other Ruby must resolve the universal
     # "ruby"-platform gem and its Fiddle backend instead — which is exactly what RubyGems

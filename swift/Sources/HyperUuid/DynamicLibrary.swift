@@ -3,6 +3,7 @@
 #if !canImport(HyperUuidCore)
 
 import Foundation
+import HyperUuidNativeLibs
 
 // Exactly the two C libraries `NativePlatform` has a shared library for.
 #if os(macOS)
@@ -14,8 +15,8 @@ import WinSDK
 /// Thin cross-platform wrapper around `dlopen`/`dlsym` (macOS, via `Darwin`) or
 /// `LoadLibraryW`/`GetProcAddress` (Windows, via `WinSDK`) — this project's positioning is
 /// "direct native FFI, no runtime bridge," and Swift natively supports calling a raw C
-/// function pointer via an `@convention(c)` typealias cast, so no shim/trampoline is needed
-/// here the way the Go binding needs purego's. Failures are ``NativeLibraryError``, the one
+/// function pointer via an `@convention(c)` typealias cast, so no shim or trampoline is
+/// needed. Failures are ``NativeLibraryError``, the one
 /// public type in this file's orbit.
 final class DynamicLibrary {
     #if os(Windows)
@@ -58,7 +59,7 @@ final class DynamicLibrary {
     }
 
     // Deliberately no `deinit` that closes the handle: the library stays loaded for the
-    // process's lifetime (same as the Go/Java bindings, which never unload either), because
+    // process's lifetime (same as the Java binding, which never unloads either), because
     // `UuidGenerator` keeps the `@convention(c)` function pointers resolved from it, and
     // they would dangle if it were unloaded.
 }
@@ -113,8 +114,9 @@ extension DynamicLibrary {
 
         // The build machine's fallback, standing in for the absolute build path the
         // generated accessor falls back to: an executable copied out of `.build` without its
-        // resource directory still runs where the package's sources are.
-        let inSourceTree = URL(fileURLWithPath: #filePath)
+        // resource directory still runs where the package's sources are. `NativeLibs/` sits
+        // beside the resource target's one source file.
+        let inSourceTree = URL(fileURLWithPath: NativeLibsSource.filePath)
             .deletingLastPathComponent()
             .appendingPathComponent(subdirectory)
             .appendingPathComponent(NativePlatform.libraryFileName)

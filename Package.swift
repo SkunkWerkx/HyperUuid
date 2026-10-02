@@ -18,12 +18,17 @@ let package = Package(
             path: "swift/HyperUuidCore.artifactbundle"
         ),
         .target(
+            name: "HyperUuidNativeLibs",
+            path: "swift/Sources/HyperUuidNativeLibs",
+            resources: [.copy("NativeLibs")]
+        ),
+        .target(
             name: "HyperUuid",
             dependencies: [
-                .target(name: "HyperUuidCore", condition: .when(platforms: [.linux, .wasi]))
+                .target(name: "HyperUuidCore", condition: .when(platforms: [.linux, .wasi])),
+                .target(name: "HyperUuidNativeLibs", condition: .when(platforms: [.macOS, .windows])),
             ],
-            path: "swift/Sources/HyperUuid",
-            resources: [.copy("NativeLibs")]
+            path: "swift/Sources/HyperUuid"
         ),
         .testTarget(
             name: "HyperUuidTests",

@@ -106,8 +106,8 @@ jobs:
           exit 1
 
       # Go, Swift and PHP have no packing step: what is committed at the tag is what a
-      # consumer loads. The three trees hold one set of bytes per RID, staged from one
-      # ci.yml run, so loading this runner's own RID from each tree is the whole check.
+      # consumer loads or links. Each tree holds one set of bytes per RID, staged from one
+      # ci.yml run, so asking this runner's own RID from each tree is the whole check.
       - name: Committed native libraries report this version
         run: |
           set -euo pipefail
@@ -115,8 +115,7 @@ jobs:
           python3 - "$want" <<'PY'
           import ctypes, sys
           want, failed = sys.argv[1], False
-          for path in ("go/native/linux-x64/libhyperuuid.so",
-                       "php/src/native/linux-x64/libhyperuuid.so"):
+          for path in ("php/src/native/linux-x64/libhyperuuid.so",):
               try:
                   packed = ctypes.CDLL("./" + path).hyperuuid_version()
                   got = f"{packed >> 16}.{(packed >> 8) & 0xFF}.{packed & 0xFF}"
@@ -130,7 +129,7 @@ jobs:
           sys.exit(1 if failed else 0)
           PY
 
-          # Swift and Go's cgo backend link the core in on Linux rather than loading it, so a
+          # Swift and Go link the core in on Linux rather than loading it, so a
           # committed archive has to be linked into something before it can be asked. Each
           # tree's archives come from one build, so this runner's own platform answers for
           # the tree.
@@ -444,6 +443,11 @@ jobs:
           # Magnus extension on (the forge cross-builds only the core library for osx-x64),
           # so Ruby on an Intel Mac installs the universal gem above and runs on Fiddle over
           # that library — the same fallback Alpine takes.
+          #
+          # All eight libraries the universal gem's step staged are still under
+          # lib/hyperuuid/native/ here; native:gem keeps only the RIDs ruby/Rakefile's
+          # PLATFORM_RIDS names for each platform (plus the wasm module), and aborts on a
+          # platform that table doesn't list — so a value added below needs an entry there.
           declare -A PLATFORMS=(
             [linux-x64]=x86_64-linux
             [linux-arm64]=aarch64-linux

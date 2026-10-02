@@ -137,20 +137,8 @@ func ExampleNewV7At_outOfRange() {
 	// Output: true
 }
 
-func ExampleLoadError() {
-	// At startup, before the first ID: nil means the native core loaded, and anything else
-	// is the reason it did not — the same error every function here would return.
-	if err := hyperuuid.LoadError(); err != nil {
-		if errors.Is(err, hyperuuid.ErrNativeUnavailable) {
-			log.Fatalf("no HyperUuid core on this platform: %v", err)
-		}
-	}
-	fmt.Println(hyperuuid.Available())
-	// Output: true
-}
-
 func ExampleNativeVersion() {
-	// The version the loaded core reports about itself, "major.minor.patch".
+	// The version the linked core reports about itself, "major.minor.patch".
 	version, err := hyperuuid.NativeVersion()
 	if err != nil {
 		log.Fatal(err)

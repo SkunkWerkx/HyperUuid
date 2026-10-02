@@ -2,8 +2,9 @@ name: Stage native binaries after merge
 
 # PHP/Swift/Go have no packing step of their own — whatever's literally in the git tree at a
 # tagged commit is what a consumer gets (see php/src/native/README.md for the full story).
-# That means the committed binaries under php/src/native/, swift/Sources/HyperUuid/NativeLibs/,
-# and go/native/ go stale the moment rust/ changes and nothing re-stages them. This closes that
+# That means the committed binaries under php/src/native/,
+# swift/Sources/HyperUuidNativeLibs/NativeLibs/ and go/staticlib/ go stale the moment rust/
+# changes and nothing re-stages them. This closes that
 # loop automatically: the moment a PR touching rust/ merges to master, pull the exact binaries
 # that PR's own ci.yml run already built and tested, and commit them straight back — so master's
 # HEAD is always tag-ready, no separate "prepare release" step, no second CI cycle (ci.yml has
@@ -94,19 +95,9 @@ jobs:
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      # go/native/wasm32-wasip1/hyperuuid.wasm is committed for the same reason the six
-      # native libraries under go/native are: a go:embed consumer gets whatever is in the
-      # tree. Same verify-then-stage gate as the rest.
-      - uses: actions/download-artifact@v8
-        with:
-          name: wasm-wasip1-module
-          path: artifacts/wasm-wasip1-module
-          run-id: ${{ steps.find.outputs.run_id }}
-          github-token: ${{ github.token }}
-
       # The static libraries, for the two bindings that link the core in and have no packing
       # step of their own: Swift on Linux and WebAssembly (swift/HyperUuidCore.artifactbundle)
-      # and Go's cgo backend on Linux and macOS (go/staticlib). A consumer of either gets
+      # and Go on every platform it builds for (go/staticlib). A consumer of either gets
       # whatever archives are committed. The artifact is laid out by repository path; it
       # also carries the C# package's archives, which are packed at release and never
       # committed. Same verify-then-stage gate as the rest.
@@ -177,7 +168,7 @@ jobs:
           #
           # install -m 755 rather than cp: download-artifact does not preserve modes, and
           # the two repos' committed libraries had drifted to different ones.
-          for dest_root in php/src/native swift/Sources/HyperUuid/NativeLibs go/native; do
+          for dest_root in php/src/native swift/Sources/HyperUuidNativeLibs/NativeLibs; do
             for rid in "${!LIB_NAMES[@]}"; do
               case "$dest_root:$rid" in
                 swift/*:linux-*|php/*:win-arm64) continue ;;
@@ -190,28 +181,23 @@ jobs:
           # Swift links the core in on Linux now, so the shared libraries earlier stagings
           # committed under NativeLibs for linux-x64 and linux-arm64 are loaded by nothing.
           git rm -r --quiet --ignore-unmatch \
-            swift/Sources/HyperUuid/NativeLibs/linux-x64 swift/Sources/HyperUuid/NativeLibs/linux-arm64
+            swift/Sources/HyperUuidNativeLibs/NativeLibs/linux-x64 \
+            swift/Sources/HyperUuidNativeLibs/NativeLibs/linux-arm64
 
-          wasm=artifacts/wasm-wasip1-module/hyperuuid.wasm
-          echo "::group::verify wasm32-wasip1"
-          if ! gh attestation verify "$wasm" \
-               --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
-            echo "::error::No valid build provenance for the wasm32-wasip1 module — refusing to commit it."
-            exit 1
-          fi
-          echo "::endgroup::"
-          echo "$(sha256sum "$wasm" | cut -d' ' -f1)  wasm32-wasip1/hyperuuid.wasm" >> digests.txt
-          mkdir -p go/native/wasm32-wasip1
-          install -m 755 "$wasm" go/native/wasm32-wasip1/hyperuuid.wasm
+          # Go links the core on every platform now (go/staticlib, below), so the shared
+          # libraries and the wasm module earlier stagings committed under go/native are
+          # loaded by nothing.
+          git rm -r --quiet --ignore-unmatch go/native
 
-          # The static libraries: five for Swift's bundle, four for Go's cgo backend. All of a
+          # The static libraries: five for Swift's bundle, six for Go (Linux and macOS, plus the
+          # GNU-target Windows archives MinGW's linker can read). All of a
           # tree's or none: a Swift bundle whose info.json names an archive that is not there
           # fails every consumer's build, and a Go build with no archive for its platform
           # does not link. info.json is generated text naming those five paths and the crate
           # version; it rides along unattested, readable in the diff.
           declare -A STATIC_TREES=(
             [swift/HyperUuidCore.artifactbundle]=5
-            [go/staticlib]=4
+            [go/staticlib]=6
           )
           for tree in "${!STATIC_TREES[@]}"; do
             archives=(artifacts/static-libs/"$tree"/*/libhyperuuid.a)
@@ -249,7 +235,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add php/src/native swift/Sources/HyperUuid/NativeLibs swift/HyperUuidCore.artifactbundle go/native
+          git add php/src/native swift/Sources/HyperUuidNativeLibs/NativeLibs swift/HyperUuidCore.artifactbundle
           # -f: go/staticlib's archives are in .gitignore, so that this workflow is the only
           # thing that ever adds one — a developer's own build of them stays out of a commit.
           git add -f go/staticlib
