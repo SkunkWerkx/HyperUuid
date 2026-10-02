@@ -1,0 +1,27 @@
+# What a `git archive` of this repository leaves out. Packagist serves the Composer package
+# as GitHub's archive of the tag, so without this every `composer require` downloads all
+# seven bindings and their bundled native libraries to use one of them. Composer needs
+# composer.json, php/src (the sources and php/src/native), LICENSE and the READMEs.
+#
+# A deny-list on purpose, and `go/` is deliberately not on it: the Go module proxy builds
+# the module zip with `git archive` of that directory, so an export-ignore that reached it
+# would publish an empty or partial Go module. A new top-level directory that is not listed
+# here only costs download size. SwiftPM clones, and every other registry gets a built
+# package, so nothing else reads these attributes. They apply from the tree being archived:
+# a tag made before this file existed keeps its full archive.
+/.github          export-ignore
+/.gitattributes   export-ignore
+/.gitignore       export-ignore
+/Package.swift    export-ignore
+/global.json      export-ignore
+/csharp           export-ignore
+/java             export-ignore
+/python           export-ignore
+/ruby             export-ignore
+/rust             export-ignore
+/swift            export-ignore
+/php/bench        export-ignore
+/php/tests        export-ignore
+/php/phpbench.json export-ignore
+/php/phpcs.xml    export-ignore
+/php/phpunit.xml  export-ignore
