@@ -12,7 +12,7 @@ categories = ["data-structures", "no-std", "no-std::no-alloc"]
 # Only the rlib is declared. The shared library every binding loads is built by naming its
 # crate type on the command line (`cargo cdylib`, an alias in .cargo/config.toml), the way
 # the static libraries already are. Cargo builds every crate type a dependency lists, and a
-# cdylib is a linked artifact that needs std's panic handler: while `cdylib` was listed
+# cdylib is a linked artifact that needs a panic handler: while `cdylib` was listed
 # here, a `default-features = false` consumer failed to build on any target able to produce
 # one (the host, wasm32-unknown-unknown), and only bare-metal targets worked.
 [lib]
@@ -38,10 +38,11 @@ libc = { version = "0.2.189", default-features = false }
 # (each produces a different C entry point — PyInit__native, Init_hyperuuid_native, PHP's
 # module struct — under the same crate, not meant to coexist in one binary).
 [features]
-# On by default so `cargo cdylib` produces the ordinary shared library every binding dlopens
-# (a linked artifact needs std's panic handler). `default-features = false` gives a genuine
-# `#![no_std]` rlib on every target, which is what the crate's published `no-std` category
-# means; see lib.rs.
+# On by default for the crates.io consumer, the test suite and the benchmarks; no artifact
+# this repo ships is built with it except the extension modules and the wasm32-wasip1
+# module (whose hosts depend on the malloc/free exports std's allocator brings).
+# `default-features = false` gives a genuine `#![no_std]` rlib on every target, which is
+# what the crate's published `no-std` category means; see lib.rs.
 # getrandom's own `std` feature only adds `impl std::error::Error for getrandom::Error`, so
 # it rides along here rather than being pinned on unconditionally. The three extension
 # backends all require std through their own dependencies, so they name it explicitly rather
@@ -58,6 +59,17 @@ std = ["getrandom/std"]
 # (`duplicate symbol: rust_eh_personality`). Off by default, and never for an rlib consumer,
 # who supplies a handler of their own.
 staticlib = []
+# The shared library every non-extension binding dlopens (`cargo cdylib`), built without
+# Rust's standard library: the `staticlib` panic handler plus what a no_std shared library
+# needs that a static library does not (lib.rs has what and why). The exports are the same
+# code either way — every one of them takes its timestamp from the caller, so `now_v7`'s
+# clock was never behind the C ABI, and getrandom reads the OS entropy source the same way
+# with or without std. What std added was its runtime — the unwinder, the backtrace
+# symbolizer and the allocator, ~327 KB of the 347 KB linux-x64 library, none of it
+# reachable from an export. Leaving it out leaves the library depending on libc alone (no
+# libgcc_s on musl). Every export is proved panic-free (the `no-panic` feature), so the
+# abort handler is never even linked. Off by default, and never for an rlib consumer.
+cdylib = ["staticlib"]
 python = ["dep:pyo3", "std"]
 ruby = ["dep:magnus", "std"]
 php = ["dep:ext-php-rs", "std"]
@@ -97,8 +109,8 @@ required-features = ["no-panic"]
 # — and never to a downstream crates.io consumer, who gets their own workspace's profile.
 #
 # Cargo only passes `-C lto` for a cdylib built as the invocation's one crate type, which is
-# what `cargo cdylib` is: the plain linux-x64 library is 356,440 bytes that way, against
-# 432,152 from a manifest that listed `["cdylib", "rlib"]`, at the same speed (v4/v5/v7
+# what `cargo cdylib` is: the plain linux-x64 library was 356,440 bytes that way while it
+# still carried std (19,448 since), against 432,152 from a manifest that listed `["cdylib", "rlib"]`, at the same speed (v4/v5/v7
 # through the C ABI, alternating runs, within noise).
 [profile.release]
 lto = true

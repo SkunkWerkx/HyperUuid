@@ -101,9 +101,12 @@ ship it: the `cdylib` for `wasm32-wasip1`, built from inside this directory so t
 `.cargo/config.toml` applies —
 
 ```sh
-cargo cdylib --target wasm32-wasip1
+cargo wasm-module
 # rust/target/wasm32-wasip1/release/hyperuuid.wasm
 ```
+
+Unlike the native library, the module is built with std: its allocator exports come from
+wasi-libc by way of std's allocator, and a `no_std` module does not link wasi-libc at all.
 
 That config adds two linker flags for this target only, `--export=malloc` and
 `--export=free`, so the module's exports are the twelve `uuid_*` functions and
@@ -136,10 +139,12 @@ consumer with no heap at all is one this crate can serve.
 cargo add hyperuuid --no-default-features
 ```
 
-Default-on rather than unconditional because the shared library every other binding in this
-repo dlopens is built from this crate too (`cargo cdylib`, below), and a final linked artifact
-needs a `#[panic_handler]`, which only std supplies. That library is not one of the manifest's
-crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
+Default-on rather than unconditional for the crates.io consumer, the tests and the native
+extensions. The artifacts this repository ships leave it out: the static libraries and the
+shared library every FFI binding loads (`cargo cdylib`, below) are all `#![no_std]`, each
+bringing the abort-on-panic handler std would otherwise supply — which takes the linux-x64
+shared library from 347 KB to 19 KB with the same exports and the same code behind them.
+That library is not one of the manifest's crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
 real `no_std` rlib on every target: your own machine, `wasm32-unknown-unknown`, and bare metal.
 CI builds a `default-features = false` consumer for the first two on every run, and checks the
 third:
@@ -194,16 +199,19 @@ build invocation — each generates a different C entry point under the same cra
 meant to coexist in one binary:
 
 ```sh
-cargo cdylib                    # -> the plain shared library every FFI binding loads
-cargo cdylib --features python  # -> PyInit__native (normally via maturin in python/)
+cargo cdylib                    # -> the plain shared library every FFI binding loads (no_std)
+cargo rustc --release --crate-type cdylib --features python  # -> PyInit__native (normally via maturin in python/)
 cargo ruby-ext                  # -> Init_hyperuuid_native, in target/ruby/release/ (ruby/'s `rake native:dev` runs this and stages the result)
 cargo php-ext                   # -> get_module, in target/php/release/
 ```
 
 `cargo cdylib` is an alias in `.cargo/config.toml` for `cargo rustc --release --crate-type
-cdylib`. The manifest declares only the rlib, so a plain `cargo build` produces no shared
-library; the crate type is named per invocation, which is what keeps it out of every
-consumer's build.
+cdylib` with the `cdylib` feature in place of `std` and panics set to abort. The manifest
+declares only the rlib, so a plain `cargo build` produces no shared library; the crate type
+is named per invocation, which is what keeps it out of every consumer's build. The
+extensions are built with std and unwinding, so a panic in one still reaches the host as
+an exception — which is why the python one is spelled out rather than run through the
+alias.
 
 Each produces `libhyperuuid.{so,dylib}` (`hyperuuid.dll` on Windows), under `target/release/` for the raw `--features` form and under its own directory for the aliases — the
 interpreter-specific loading/staging (module naming, `.pyd`/`.bundle` renaming, etc.) is this

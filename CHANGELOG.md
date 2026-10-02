@@ -30,13 +30,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The native libraries no longer carry Rust's standard library, and are a twentieth the
+  size.** `cargo cdylib` now builds the shared library every binding loads `#![no_std]`,
+  with the same abort-on-panic handler the static libraries already had. What std added
+  was its runtime — the unwinder, the backtrace symbolizer and the allocator — which no C
+  ABI export can reach: linux-x64 goes from 346,840 bytes to 19,448, and depends on libc
+  alone, so the musl builds no longer need libgcc_s. The exports are the same 13 symbols
+  over the same code: every one takes its timestamp from the caller, and `getrandom` reads
+  the OS entropy source the same way without std. The exports are proved panic-free, so
+  the abort handler is never even linked. The wasm32-wasip1 module keeps std, whose
+  allocator its hosts call into (and is built with the new `cargo wasm-module` alias), and
+  the Python, Ruby and PHP extensions keep std and unwinding, so a panic in one still
+  surfaces as a host exception. *(every package that carries a native library)*
 - **Rust — the shared library is built by naming its crate type, not listed in the
   manifest.** `[lib]` now declares only the rlib, and the library every binding loads is
   built with `cargo cdylib` (an alias for `cargo rustc --release --crate-type cdylib`), the
   way the static libraries already were. In this repository `cargo cdylib` replaces
-  `cargo build --release` in every dev loop, with `--target wasm32-wasip1` or
-  `--features python` passed through; a plain `cargo build` now produces the rlib and no
-  shared library. The fix below is the reason. *(crates.io, and every dev loop)*
+  `cargo build --release` in every dev loop, and `cargo wasm-module` builds the
+  wasm32-wasip1 module; a plain `cargo build` now produces the rlib and no shared library.
+  The fix below is the reason. *(crates.io, and every dev loop)*
 - **The native libraries are smaller.** Cargo only passes `-C lto` for a cdylib built as an
   invocation's one crate type, so `lto = true` never reached the plain library while the
   manifest listed `["cdylib", "rlib"]`. The linux-x64 library is 356,440 bytes against

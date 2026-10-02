@@ -28,28 +28,27 @@
 // `extern crate alloc` here on purpose: nothing needs it, and a consumer with no heap at all
 // is a consumer this crate can now serve.
 //
-// Gated on the default-on `std` feature rather than unconditional, because this crate is
-// also built as a `cdylib`. A final linked artifact needs things only std supplies; proven,
-// not assumed — `cargo cdylib --no-default-features` fails with "`#[panic_handler]` function
-// required, but not found" and "unwinding panics are not supported without std". So the
-// shared library every binding dlopens builds with std as it always has, while a no_std
+// Gated on the default-on `std` feature rather than unconditional, because the extension
+// modules (python, ruby, php) need std through their own dependencies and the test harness
+// needs it to run at all. Every artifact this crate ships itself is built without it: the
+// static libraries (`cargo staticlib`) and the shared library every binding dlopens
+// (`cargo cdylib`), which bring the panic handler below in std's place. A no_std rlib
 // consumer takes the crate with `default-features = false` and, where the target has no
 // operating system, supplies a panic handler plus a `getrandom` custom backend, the way
-// such a consumer must anyway. The cdylib is not in Cargo.toml's `crate-type` for this
-// reason: cargo would build it for every consumer, and it cannot link without std.
-// Verified against a real target rather than argued:
+// such a consumer must anyway. Verified against a real target rather than argued:
 //
 //     RUSTFLAGS='--cfg getrandom_backend="custom"' \
 //         cargo check --no-default-features --target thumbv7em-none-eabi
 #![cfg_attr(not(feature = "std"), no_std)]
 
 // The panic handler for the no_std artifacts this crate links itself: the static libraries
-// behind the `staticlib` feature (Cargo.toml has what they are and why they carry no std).
-// Built with `panic = "abort"`, so a panic ends the program instead of unwinding into the
-// host: on wasm32 it is the `unreachable` trap, which the host sees as a RuntimeError rather
-// than as a corrupted return value; anywhere else it is the C library's `abort`, which the
-// executable the library is linked into already has. Never compiled for a bare-metal rlib
-// consumer, who brings a handler of their own, nor with `std`, which has one.
+// behind the `staticlib` feature and the shared library behind `cdylib` (Cargo.toml has
+// what each is and why neither carries std). Built with `panic = "abort"`, so a panic ends
+// the program instead of unwinding into the host: on wasm32 it is the `unreachable` trap,
+// which the host sees as a RuntimeError rather than as a corrupted return value; anywhere
+// else it is the C library's `abort`, which every process the library is loaded or linked
+// into already has. Never compiled for a bare-metal rlib consumer, who brings a handler of
+// their own, nor with `std`, which has one.
 #[cfg(all(feature = "staticlib", not(feature = "std")))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
@@ -63,6 +62,62 @@ fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
         abort()
     }
 }
+
+// The one symbol a no_std shared library can need that a static library does not. `core`
+// and `compiler_builtins` ship precompiled with unwind tables, and an entry linked in from
+// them can name `rust_eh_personality` (in HyperCast, that of the 128-bit division
+// intrinsic). In a static library the reference is left for the final link to resolve; a
+// shared library is the final link, so without a definition every dlopen fails with
+// "undefined symbol: rust_eh_personality". Nothing in this crate pulls such an entry in
+// today, so the linker drops the definition; it is here so that a change which does pull
+// one in still produces a library that loads. With `panic = "abort"` nothing ever unwinds,
+// so nothing ever calls it — the definition only has to exist.
+//
+// Assembly rather than a `#[no_mangle]` function, for the visibility: a `#[no_mangle]`
+// item is exported from a cdylib whatever its Rust visibility, which would put a symbol
+// beside the C ABI exports that any other library in the process could bind to. Defined
+// hidden instead, it satisfies the library's own reference and is seen by nothing outside
+// it. Never compiled for the static libraries: two Hyper* archives that each defined it
+// could not be linked into one program, the duplicate-symbol failure that kept std out of
+// them in the first place. Windows needs no definition (its unwind tables name the C
+// runtime's handler), and wasm32 has no unwind tables to name one.
+#[cfg(all(feature = "cdylib", not(feature = "std"), target_vendor = "apple"))]
+core::arch::global_asm!(
+    ".globl _rust_eh_personality",
+    ".private_extern _rust_eh_personality",
+    "_rust_eh_personality:",
+    "ret",
+);
+#[cfg(all(
+    feature = "cdylib",
+    not(feature = "std"),
+    not(target_vendor = "apple"),
+    not(target_os = "windows"),
+    not(target_arch = "wasm32"),
+))]
+core::arch::global_asm!(
+    ".globl rust_eh_personality",
+    ".hidden rust_eh_personality",
+    ".type rust_eh_personality, %function",
+    "rust_eh_personality:",
+    "ret",
+);
+
+// The C runtime. Under std it comes in through std's own link directives; a no_std shared
+// library has to name it, or nothing does. On Linux the library then links with no NEEDED
+// entry at all, its imports unversioned and resolved only because the host process happens
+// to have libc loaded; on Windows nothing names the runtime its `memcpy` and DLL entry point
+// come from. The choice mirrors the one std makes by way of the libc crate — libc on Unix,
+// and on Windows the DLL import library ordinarily or the static runtime when crt-static
+// asks for it — so the library depends on exactly the C runtime the std build did and
+// nothing more.
+#[cfg(all(feature = "cdylib", not(feature = "std"), unix))]
+#[link(name = "c")]
+unsafe extern "C" {}
+#[cfg(all(feature = "cdylib", not(feature = "std"), target_env = "msvc"))]
+#[cfg_attr(target_feature = "crt-static", link(name = "libcmt"))]
+#[cfg_attr(not(target_feature = "crt-static"), link(name = "msvcrt"))]
+unsafe extern "C" {}
 
 mod ffi;
 mod timestamp;

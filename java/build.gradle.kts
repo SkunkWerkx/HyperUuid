@@ -93,7 +93,7 @@ val stageNativeLibrary = tasks.register<Sync>("stageNativeLibrary") {
 }
 
 // The same dev loop for the wasm32-wasip1 module the GraalWasm backend runs: a
-// `cargo cdylib --target wasm32-wasip1` in ../rust (from inside rust/, so its
+// `cargo wasm-module` in ../rust (from inside rust/, so its
 // .cargo/config.toml export flags apply) lands at /native/wasm32-wasip1/hyperuuid.wasm on
 // the classpath, beside the platform library. Same explicit-placement yield as above.
 val wasmPlaced = file("src/main/resources/native/wasm32-wasip1").exists()
