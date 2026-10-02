@@ -3,7 +3,7 @@
 [![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/hyperuuid.svg)](https://crates.io/crates/hyperuuid)
 
-**A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: up to 15.6x faster on v6/v7 generation, with a real batch API `uuid` doesn't have at all.**
+**A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: about 2x faster on v5 and v7 generation, 5-6x faster at reading a timestamp back out, level on v4 and v6, with a real batch API `uuid` doesn't have at all.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`) — zero unsafe in the public API, and empirically zero-allocation across the whole public API, batch calls included — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
 
@@ -35,25 +35,25 @@ v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 
 [`uuid`](https://docs.rs/uuid) is the de facto standard and it's a good crate — v4/v5/v6/v7 are all real, all correct, all there under feature flags. This isn't a "the standard crate is bad" pitch. The real differences, measured head-to-head on the same machine in the same benchmark run (`cargo bench` — see below):
 
-1. **No batch API.** `uuid` generates exactly one UUID per call, always. `new_v6_batch`/`new_v7_batch` here share one timestamp capture and one counter reservation across the whole batch — 2.5-3.6x faster than the equivalent loop of individual calls (real numbers below).
-2. **v6/v7 generation is substantially faster here** — `uuid_crate_v6` measured 838 ns/op vs this crate's 54 ns/op (~15.6x); `uuid_crate_v7` measured 905 ns/op vs 68 ns/op (~13.2x). One caveat for fairness: `uuid`'s `Uuid::now_v6`/`now_v7` capture the current time themselves (an internal clock read) inside the timed region, while this benchmark calls this crate's `new_v6`/`new_v7` with a pre-supplied timestamp, since this crate has no `now_v6` of its own (only `v7::now_v7` exists as a convenience wrapper). A clock read alone doesn't explain a gap this size — `uuid`'s v6/v7 paths route through a shared, lock-guarded `ClockSequence`/context abstraction — but the comparison isn't perfectly apples-to-apples and is reported that way rather than smoothed over.
-3. **v4/v5 are roughly a wash.** `uuid_crate_v4` (85.1 ns) vs this crate's `v4` (88.3 ns) — statistically close, no real win either way. v5: this crate at 81.1 ns vs `uuid`'s 135.3 ns (~1.7x) — a real but modest difference, most likely from `uuid`'s SHA-1 implementation and output-formatting path versus this crate's narrower one.
+1. **No batch API.** `uuid` generates exactly one UUID per call, always. `new_v6_batch`/`new_v7_batch` here share one timestamp capture and one counter reservation across the whole batch — 2.1-3.3x faster than the equivalent loop of individual calls (real numbers below).
+2. **v5 and v7 generation are about twice as fast here.** v5: 58.2 ns against `uuid`'s 114.0 ns (~2.0x). v7: 33.3 ns against `uuid`'s 75.7 ns (~2.3x). One caveat for fairness on v7: `uuid`'s `Uuid::now_v7` captures the current time itself (an internal clock read) inside the timed region, while this benchmark calls this crate's `new_v7` with a pre-supplied timestamp. What that read costs is a property of the machine, not of either crate: it is cheap on the x64 box these numbers come from, and on a machine with a slow clock it swamps everything else in the call — so the comparison isn't perfectly apples-to-apples and is reported that way rather than smoothed over.
+3. **v4 and v6 are a wash.** v4: 41.4 ns here, 40.5 ns for `uuid` — no real win either way. v6: 29.1 ns here, 28.3 ns for `uuid` — level, though the two are doing different work to get there: `Uuid::now_v6` reads the clock and takes its node ID from the caller, with a process-wide counter for the clock sequence, while `new_v6` here takes the timestamp from the caller and draws fresh random bits for both on every call.
 4. **Verified zero-allocation, with no exceptions.** `tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and both batch functions, and asserts zero heap allocations for all of them. The crate doesn't so much as link `alloc`, which is why it carries the `no-std::no-alloc` category and not merely `no-std`. `uuid`'s docs don't make an allocation claim either way.
 
-The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v8. If you need any of that, or you're not chasing v6/v7 throughput or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with.
+The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v8. If you need any of that, or you're not chasing v5/v7 throughput, timestamp extraction or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with.
 
 ## Benchmarks
 
-`cargo bench` from this directory (Criterion; HTML reports land in `target/criterion/report/index.html`). All numbers below are linux-arm64, one run, reproducible on your own hardware with the same command.
+`cargo bench` from this directory (Criterion; HTML reports land in `target/criterion/report/index.html`). All numbers below are linux-x64 (an Intel Core i9-11900H), one run, reproducible on your own hardware with the same command.
 
 ### vs. the `uuid` crate (single-item)
 
 | Version | This crate | `uuid` crate | Delta |
 | --- | ---: | ---: | ---: |
-| v4 | 88.3 ns | 85.1 ns | ~0.96x (uuid slightly faster) |
-| v5 | 81.1 ns | 135.3 ns | **1.67x faster** |
-| v6 | 53.8 ns | 838.2 ns | **15.6x faster**¹ |
-| v7 | 68.4 ns | 904.5 ns | **13.2x faster**¹ |
+| v4 | 41.4 ns | 40.5 ns | ~0.98x (level) |
+| v5 | 58.2 ns | 114.0 ns | **1.96x faster** |
+| v6 | 29.1 ns | 28.3 ns | ~0.97x (level)¹ |
+| v7 | 33.3 ns | 75.7 ns | **2.27x faster**¹ |
 
 ¹ See the methodology caveat above — `uuid`'s v6/v7 capture the clock internally; this crate's benchmarked calls take a pre-supplied timestamp.
 
@@ -63,8 +63,8 @@ The honest trade-off: this crate's public surface is much narrower than `uuid`'s
 
 | Version | This crate's `unix_millis` | `uuid`'s `get_timestamp()` | Delta |
 | --- | ---: | ---: | ---: |
-| v6 | 2.06 ns | 5.53 ns | **2.68x faster** |
-| v7 | 3.18 ns | 4.49 ns | **1.41x faster** |
+| v6 | 1.30 ns | 6.86 ns | **5.28x faster** |
+| v7 | 1.03 ns | 6.66 ns | **6.44x faster** |
 
 The two APIs used to return different shapes — this crate hands back a plain `u64` millisecond count, `uuid`'s `Option<Timestamp>` wraps 100ns Gregorian-epoch ticks — but both are doing the same underlying job (bit-shifting the embedded time back out of 16 bytes already in hand), so timing them head-to-head is fair. This crate wins here for the same reason it's competitive on generation: no allocation, no indirection beyond what the bit math itself needs. This crate now also exposes an `Option<Timestamp>`-returning [`get_timestamp`] matching `uuid`'s own shape (see the Quick start example above) — it's a thin pass-through over the exact `unix_millis` calls benchmarked here, so these numbers describe its cost too, not a separate, unmeasured path.
 
@@ -72,8 +72,8 @@ The two APIs used to return different shapes — this crate hands back a plain `
 
 | Version | 1000 individual calls | `*_batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v6 | 52.5 µs | 20.7 µs | **2.5x** |
-| v7 | 61.7 µs | 16.9 µs | **3.6x** |
+| v6 | 26.8 µs | 12.5 µs | **2.1x** |
+| v7 | 34.0 µs | 10.4 µs | **3.3x** |
 
 Allocation-free claim: `cargo test --release --test allocation_free`.
 
@@ -217,7 +217,7 @@ full breakdown of which artifacts in this project are signed from which repo and
 cargo add hyperuuid
 ```
 
-Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 6 real-hardware platform legs plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't rebuild or retest anything itself — it just finds that already-green run for the tagged commit and republishes what it produced.
+Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't rebuild or retest anything itself — it just finds that already-green run for the tagged commit and republishes what it produced.
 
 ## License
 

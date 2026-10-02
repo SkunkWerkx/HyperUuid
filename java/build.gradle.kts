@@ -28,7 +28,7 @@ repositories {
 // POM-type dependency that fans out into Truffle) to their own build; see README.md's
 // WebAssembly section. Tests get both on the runtime classpath so the whole suite can run a
 // second time through the wasm module (the testWasm task below).
-val graalPolyglotVersion = "25.3.4.1"
+val graalPolyglotVersion = "25.4.4.1.1"
 
 dependencies {
     compileOnly("org.graalvm.polyglot:polyglot:$graalPolyglotVersion")

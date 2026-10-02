@@ -10,8 +10,9 @@ require "hyperuuid"
 NAME = "example.com"
 # The RFC 9562 test-vector timestamp, the same fixed input the PHP benchmark uses: the
 # explicit-millis rows isolate the binding's own cost from the OS wall-clock read the
-# default rows also pay (WSL2 prices clock_gettime(CLOCK_REALTIME) at ~1 µs — a real
-# syscall, no vDSO fast path there; bare-metal Linux prices it at tens of nanoseconds).
+# default rows also pay (a machine whose clock defeats the vDSO fast path — WSL2 on arm64
+# was one — prices clock_gettime(CLOCK_REALTIME) at ~1 µs, a real syscall; most Linux prices
+# it at tens of nanoseconds, and there the two sets of rows land together).
 RFC_TEST_VECTOR_MS = 1_645_557_742_000
 
 # Every number below belongs to one backend on one Ruby, so say which before printing any:

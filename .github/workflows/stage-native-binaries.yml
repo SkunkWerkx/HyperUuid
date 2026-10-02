@@ -104,14 +104,16 @@ jobs:
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      # The Swift binding's static libraries: on Linux and WebAssembly it links the core in
-      # from swift/HyperUuidCore.artifactbundle rather than loading a shared library, and a
-      # SwiftPM consumer gets whatever archives are committed there. Same verify-then-stage
-      # gate as the rest.
+      # The static libraries, for the two bindings that link the core in and have no packing
+      # step of their own: Swift on Linux and WebAssembly (swift/HyperUuidCore.artifactbundle)
+      # and Go's cgo backend on Linux and macOS (go/staticlib). A consumer of either gets
+      # whatever archives are committed. The artifact is laid out by repository path; it
+      # also carries the C# package's archives, which are packed at release and never
+      # committed. Same verify-then-stage gate as the rest.
       - uses: actions/download-artifact@v8
         with:
-          name: swift-static
-          path: artifacts/swift-static
+          name: static-libs
+          path: artifacts/static-libs
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
@@ -202,30 +204,37 @@ jobs:
           mkdir -p go/native/wasm32-wasip1
           install -m 755 "$wasm" go/native/wasm32-wasip1/hyperuuid.wasm
 
-          # The Swift binding's static libraries, one per triple. All five or none: a bundle
-          # whose info.json names an archive that is not there fails every consumer's build.
-          # info.json itself is generated text naming those five paths and the crate version;
-          # it rides along unattested, readable in the diff.
-          bundle=swift/HyperUuidCore.artifactbundle
-          archives=(artifacts/swift-static/*/libhyperuuid.a)
-          if [ "${#archives[@]}" != 5 ]; then
-            echo "::error::Expected five static libraries in the swift-static artifact, found ${#archives[@]}."
-            exit 1
-          fi
-          for archive in "${archives[@]}"; do
-            triple="$(basename "$(dirname "$archive")")"
-            echo "::group::verify swift-static $triple"
-            if ! gh attestation verify "$archive" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
-              echo "::error::No valid build provenance for the $triple static library — refusing to commit it."
+          # The static libraries: five for Swift's bundle, four for Go's cgo backend. All of a
+          # tree's or none: a Swift bundle whose info.json names an archive that is not there
+          # fails every consumer's build, and a Go build with no archive for its platform
+          # does not link. info.json is generated text naming those five paths and the crate
+          # version; it rides along unattested, readable in the diff.
+          declare -A STATIC_TREES=(
+            [swift/HyperUuidCore.artifactbundle]=5
+            [go/staticlib]=4
+          )
+          for tree in "${!STATIC_TREES[@]}"; do
+            archives=(artifacts/static-libs/"$tree"/*/libhyperuuid.a)
+            if [ ! -e "${archives[0]}" ] || [ "${#archives[@]}" != "${STATIC_TREES[$tree]}" ]; then
+              echo "::error::Expected ${STATIC_TREES[$tree]} static libraries under $tree in the static-libs artifact."
               exit 1
             fi
-            echo "::endgroup::"
-            echo "$(sha256sum "$archive" | cut -d' ' -f1)  swift-static/$triple/libhyperuuid.a" >> digests.txt
-            mkdir -p "$bundle/$triple"
-            install -m 644 "$archive" "$bundle/$triple/libhyperuuid.a"
+            for archive in "${archives[@]}"; do
+              dest="${archive#artifacts/static-libs/}"
+              echo "::group::verify $dest"
+              if ! gh attestation verify "$archive" \
+                   --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+                echo "::error::No valid build provenance for $dest — refusing to commit it."
+                exit 1
+              fi
+              echo "::endgroup::"
+              echo "$(sha256sum "$archive" | cut -d' ' -f1)  $dest" >> digests.txt
+              mkdir -p "$(dirname "$dest")"
+              install -m 644 "$archive" "$dest"
+            done
           done
-          install -m 644 artifacts/swift-static/info.json "$bundle/info.json"
+          install -m 644 "artifacts/static-libs/swift/HyperUuidCore.artifactbundle/info.json" \
+            "swift/HyperUuidCore.artifactbundle/info.json"
 
           echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -241,6 +250,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add php/src/native swift/Sources/HyperUuid/NativeLibs swift/HyperUuidCore.artifactbundle go/native
+          # -f: go/staticlib's archives are in .gitignore, so that this workflow is the only
+          # thing that ever adds one — a developer's own build of them stays out of a commit.
+          git add -f go/staticlib
           if git diff --cached --quiet; then
             echo "::notice::Staged binaries are byte-identical to what's already committed — nothing to push."
             exit 0

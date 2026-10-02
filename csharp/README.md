@@ -4,7 +4,7 @@
 [![NuGet](https://img.shields.io/nuget/v/HyperUuid.svg)](https://www.nuget.org/packages/HyperUuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
-**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.67x — with zero heap allocation, on every version including v5 — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
+**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.7x — with zero heap allocation, on every version including v5 — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via source-generated [`LibraryImport`](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/pinvoke-source-generation) P/Invoke — no runtime bridge, no reflection, AOT/trim-friendly. Ships as RID-specific native assets inside the package the standard NuGet way.
 
@@ -42,15 +42,15 @@ Before the first UUID, `UuidGenerator.IsAvailable` says whether the native libra
 
 ## Why not `Guid.NewGuid()` / `Guid.CreateVersion7()`?
 
-1. **It's measurably faster, not just different.** Real BenchmarkDotNet numbers, `[MemoryDiagnoser]`, linux-arm64 (`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Generation*`, from the repo root):
+1. **It's measurably faster, not just different.** Real BenchmarkDotNet numbers, `[MemoryDiagnoser]`, linux-x64 on an Intel Core i9-11900H (`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Generation*`, from the repo root):
 
    | Method | Mean | Allocated |
    | --- | ---: | ---: |
-   | `Guid.NewGuid()` | 630.26 ns | 0 B |
-   | `UuidGenerator.NewV4()` | 111.20 ns (**5.67x faster**) | 0 B |
-   | `UuidGenerator.NewV5()` | 131.31 ns (4.80x faster) | 0 B |
-   | `UuidGenerator.NewV6()` | 75.57 ns (**8.34x faster**) | 0 B |
-   | `UuidGenerator.NewV7()` | 82.10 ns (7.68x faster) | 0 B |
+   | `Guid.NewGuid()` | 316.05 ns | 0 B |
+   | `UuidGenerator.NewV4()` | 55.33 ns (**5.71x faster**) | 0 B |
+   | `UuidGenerator.NewV5()` | 87.22 ns (3.62x faster) | 0 B |
+   | `UuidGenerator.NewV6()` | 39.07 ns (**8.09x faster**) | 0 B |
+   | `UuidGenerator.NewV7()` | 42.21 ns (7.49x faster) | 0 B |
 
    Including `NewV5(Guid, string)` — it used to allocate 40 B encoding the name to UTF-8 via `Encoding.UTF8.GetBytes(name)`; now it UTF-8-encodes into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods already used (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library). `NewV5(Guid, ReadOnlySpan<char>)` is the same path for a name you hold as a slice rather than a `string` — one field of a parsed line, a pooled buffer — so nothing has to be materialized first, and `NewV5(Guid, ReadOnlySpan<byte>)` skips the encode step entirely: it hashes the bytes exactly as given, which also makes it the overload for a name that is not text at all.
 
@@ -60,12 +60,12 @@ Before the first UUID, `UuidGenerator.IsAvailable` says whether the native libra
 
    | Method | Mean | vs. individual | Allocated |
    | --- | ---: | ---: | ---: |
-   | `NewV7()` x1000 individually | 87.10 µs | 1.00x | 0 B |
-   | `NewV7Batch(1000)` → new `Guid[]` | 21.95 µs | 3.97x faster | 16,024 B |
-   | `FillV7(Span<Guid>)` into an existing array | 20.74 µs | **4.20x faster** | **0 B** |
-   | `FillV7(Span<byte>)` into an existing buffer | 18.20 µs | **4.79x faster** | **0 B** |
+   | `NewV7()` x1000 individually | 41.01 µs | 1.00x | 0 B |
+   | `NewV7Batch(1000)` → new `Guid[]` | 11.84 µs | 3.46x faster | 16,024 B |
+   | `FillV7(Span<Guid>)` into an existing array | 11.13 µs | **3.68x faster** | **0 B** |
+   | `FillV7(Span<byte>)` into an existing buffer | 9.61 µs | **4.27x faster** | **0 B** |
 
-   The three rows amortize different things, which is why all three exist. `NewV7Batch` amortizes the FFI call but still allocates the result array. `FillV7(Span<Guid>)` drops the allocation entirely but still pays a `new Guid(chunk, bigEndian: true)` conversion per element, because `Guid`'s in-memory layout is mixed-endian and isn't RFC byte order. `FillV7(Span<byte>)` drops that conversion too — the native core already writes RFC-ordered bytes contiguously into your buffer — and that 2.5 µs gap between the last two rows *is* the per-element conversion cost, measured. `FillV6`/`NewV6Batch` behave the same way (24.96 / 24.41 / 21.61 µs respectively).
+   The three rows amortize different things, which is why all three exist. `NewV7Batch` amortizes the FFI call but still allocates the result array. `FillV7(Span<Guid>)` drops the allocation entirely but still pays a `new Guid(chunk, bigEndian: true)` conversion per element, because `Guid`'s in-memory layout is mixed-endian and isn't RFC byte order. `FillV7(Span<byte>)` drops that conversion too — the native core already writes RFC-ordered bytes contiguously into your buffer — and that 1.5 µs gap between the last two rows *is* the per-element conversion cost, measured. `FillV6`/`NewV6Batch` behave the same way (13.98 / 13.20 / 11.70 µs respectively, against 36.83 µs for a thousand individual `NewV6()` calls).
 5. **Cross-language consistency.** The exact same Rust core also mints v5 namespace UUIDs for Ruby, Python, Go, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't C#-only, that's not something the BCL can offer at all.
 6. **SQL Server byte ordering, for free.** `UuidGenerator.V7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`V6ToSqlOrder` does the same for version 6), the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use. Verified directly against the real `SqlGuid` comparator in this package's own test suite, not a hand-rolled stand-in — and it's the same native function every other binding in this repo calls, not a C#-only reimplementation. Neither `Guid.NewGuid()` nor `Guid.CreateVersion7()` has any such concept.
 
@@ -85,7 +85,17 @@ dotnet publish csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj \
 ./csharp/HyperUuid.AotSmokeTest/bin/Release/net10.0/linux-x64/publish/HyperUuid.AotSmokeTest
 ```
 
-Last verified on `linux-x64` and, inside an Alpine container, `linux-musl-x64`: **zero `ILxxxx`/`AOTxxxx` trim or AOT diagnostics**, a 1.5 MB self-contained native binary, and `ALL NATIVE AOT CHECKS PASSED` with exit code 0. `TreatWarningsAsErrors` is on for the library project, so an analyzer warning is a build failure, not a line in a log nobody reads. CI re-proves it per platform on every PR (see [Native binary provenance](#native-binary-provenance)).
+Last verified on `linux-x64` and, inside an Alpine container, `linux-musl-x64`: **zero `ILxxxx`/`AOTxxxx` trim or AOT diagnostics**, a 1.5 MB native binary with the core inside it and no shared library beside it, and `ALL NATIVE AOT CHECKS PASSED` with exit code 0. `TreatWarningsAsErrors` is on for the library project, so an analyzer warning is a build failure, not a line in a log nobody reads. CI re-proves it per platform on every PR (see [Native binary provenance](#native-binary-provenance)).
+
+**The core is linked into the executable.** A Native AOT publish does not load
+`libhyperuuid.so` (or the `.dylib`, or the `.dll`): the package carries the core as a static
+library for each RID under `staticlibs/`, and its targets file hands the one for your RID to
+the AOT linker and binds every P/Invoke as a direct call. The publish directory holds one
+executable and no native library beside it, `UuidGenerator.IsAvailable` is always `true`, and
+this package and HyperCast's can both be linked into the same executable. Nothing to configure;
+`<HyperUuidStaticLink>false</HyperUuidStaticLink>` in the project puts it back to loading the shared
+library, and so does publishing for a RID the package has no archive for. A JIT process is
+unaffected: it cannot link an archive, and loads the shared library as before.
 
 ## WebAssembly (Blazor)
 
@@ -201,7 +211,7 @@ Attestations are produced on pushes, releases, and same-repo pull requests. Only
 
 **Not currently done: NuGet author signing.** The package carries nuget.org's repository signature but no author signature of our own, which would need an X.509 code-signing certificate registered to the account. It's complementary to the above rather than a substitute, and the difference is who does the checking: an author signature is verified automatically by every consumer's SDK at restore time, whereas an attestation is only checked by someone who deliberately runs `gh attestation verify`. Attestation ties an artifact to a commit and a build; an author signature ties it to an identity. If you want the automatic restore-time check, this is the gap.
 
-**Per-platform AOT receipts.** The same CI run publishes `HyperUuid.AotSmokeTest` under Native AOT on all six desktop RIDs and, in Alpine containers, on the two musl ones, fails the build on any `ILxxxx`/`AOTxxxx` trim diagnostic, executes the resulting binary, and requires exit 0. Each leg's log uploads as an `aot-report-{rid}` artifact.
+**Per-platform AOT receipts.** The same CI run publishes `HyperUuid.AotSmokeTest` under Native AOT on five desktop RIDs (every one but `osx-x64`, which is cross-built and has no CI leg) and, in Alpine containers, on the two musl ones, fails the build on any `ILxxxx`/`AOTxxxx` trim diagnostic, executes the resulting binary, and requires exit 0. Each leg's log uploads as an `aot-report-{rid}` artifact.
 
 ## Install
 

@@ -13,4 +13,12 @@
     <ProjectReference Include="../HyperUuid/HyperUuid.csproj" />
   </ItemGroup>
 
+  <!-- A project reference gets none of a NuGet package's build/ imports, so the file a real
+       consumer has imported for it is imported by hand here: this is the project that proves
+       the Native AOT wiring in it, and it has to take the same branch a consumer does. The
+       archive it links is csharp/HyperUuid/staticlibs/{rid}/, which is not committed —
+       the forge's static-libs/build-static-libs.sh stages it, in CI and by hand. Where it
+       is absent the publish loads the shared library, as it did before these existed. -->
+  <Import Project="../HyperUuid/build/HyperUuid.targets" />
+
 </Project>

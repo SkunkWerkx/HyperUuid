@@ -16,8 +16,8 @@ dependencies {
     // run the same suite through the wasm32-wasip1 module — one harness for both paths,
     // where the README's wasm rows came from a hand loop. Absent the property nothing here
     // loads it.
-    jmh("org.graalvm.polyglot:polyglot:25.3.4.1")
-    jmh("org.graalvm.polyglot:wasm:25.3.4.1")
+    jmh("org.graalvm.polyglot:polyglot:25.4.4.1.1")
+    jmh("org.graalvm.polyglot:wasm:25.4.4.1.1")
 }
 
 java {

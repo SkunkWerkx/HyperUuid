@@ -410,6 +410,16 @@ def _unix_millis_of(name: str, uuid_value: _uuid.UUID) -> int:
         return guest.call(name, guest._in)
 
 
+def v6_unix_millis(uuid_value: _uuid.UUID) -> int:
+    """Unix-epoch milliseconds embedded in a version 6 UUID."""
+    return _unix_millis_of("uuid_v6_unix_millis", uuid_value)
+
+
+def v7_unix_millis(uuid_value: _uuid.UUID) -> int:
+    """Unix-epoch milliseconds embedded in a version 7 UUID."""
+    return _unix_millis_of("uuid_v7_unix_millis", uuid_value)
+
+
 def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     """UTC timestamp embedded in a version 6 UUID."""
     return _millis_datetime(_unix_millis_of("uuid_v6_unix_millis", uuid_value))

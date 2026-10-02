@@ -119,6 +119,10 @@
          throws DllNotFoundException("*") at runtime. -->
     <None Include="build/**" Pack="true" PackagePath="build" />
     <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive" />
+    <!-- The core as a static library, one per RID, for a Native AOT publish to link in
+         instead of loading the shared library; build/HyperUuid.targets has the wiring and
+         the reasons. Staged here before packing, like runtimes/, and not committed. -->
+    <None Include="staticlibs/**" Pack="true" PackagePath="staticlibs" />
     <!-- Local dev loop, the same one HyperCast's csproj carries: when the Rust core has been
          built in-repo (a release-profile cargo build in rust/), copy that fresh native library
          straight to the output so tests and benchmarks run against it without any packaging

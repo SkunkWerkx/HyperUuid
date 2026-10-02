@@ -25,6 +25,7 @@ assert_type(hyperuuid.new_v7_batch(8, 1_645_557_742_000), list[uuid.UUID])
 
 minted = hyperuuid.new_v7()
 assert_type(hyperuuid.v7_timestamp(minted), datetime.datetime)
+assert_type(hyperuuid.v7_unix_millis(minted), int)
 assert_type(hyperuuid.v6_timestamp(minted), datetime.datetime)
 assert_type(hyperuuid.get_timestamp(minted), datetime.datetime | None)
 assert_type(hyperuuid.v7_from_sql_order(hyperuuid.v7_to_sql_order(minted)), uuid.UUID)

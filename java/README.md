@@ -79,14 +79,14 @@ UuidGenerator.fillV7(raw);          // RFC-ordered bytes, no UUID objects at all
 
 Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID` is two `long`s rather than 16 RFC-ordered bytes, so the `UUID[]` form still rebuilds every element from the native output — it removes the allocation, not the conversion. **The `byte[]` form is the one that removes real work**, since the native core already writes RFC-ordered bytes contiguously.
 
-`./gradlew :benchmarks:jmh`, JMH average time, 1000 UUIDs per op:
+`./gradlew :benchmarks:jmh`, JMH average time, 1000 UUIDs per op (linux-x64, an Intel Core i9-11900H, JDK 25):
 
-| Benchmark | before | after | B/op after |
-| --- | ---: | ---: | ---: |
-| `newV7` x1000 individually | 121.5 µs | **74.5 µs** | 32,000 |
-| `newV7Batch(1000)` | 33.2 µs | **26.1 µs** | 52,104 |
-| `fillV7(UUID[])` into an existing array | 34.2 µs | **27.7 µs** | 48,088 |
-| `fillV7(byte[])` into an existing buffer | 18.5 µs | **17.9 µs** | **0** |
+| Benchmark | Mean | B/op |
+| --- | ---: | ---: |
+| `newV7` x1000 individually | 43.2 µs | 32,000 |
+| `newV7Batch(1000)` | 18.2 µs | 52,104 |
+| `fillV7(UUID[])` into an existing array | 20.9 µs | 48,088 |
+| `fillV7(byte[])` into an existing buffer | **9.4 µs** | **0** |
 
 The middle two rows are still the point: filling a `UUID[]` measures the same as allocating a fresh one, within overlapping error. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it now does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
 
@@ -98,34 +98,34 @@ A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`
 
 ## Benchmarks
 
-Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-arm64, JDK 25, 3 warmup + 5 measurement iterations, average time mode, `-prof gc` for the allocation column — before the carrier rewrite against after, same machine, same session:
+Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-x64 (an Intel Core i9-11900H), JDK 25, 3 warmup + 5 measurement iterations, average time mode, `-prof gc` for the allocation column:
 
-| Method | before | after | B/op | vs. `UUID.randomUUID()` |
-| --- | ---: | ---: | ---: | ---: |
-| `UUID.randomUUID()` | 1137 ns | 1117 ns | 128 | baseline |
-| `UuidGenerator.newV4()` | 155.0 ns | **101.8 ns** | 112 → **32** | **11.0x faster** |
-| `UuidGenerator.newV5()` | 230.1 ns | **102.2 ns** | 272 → **64** | **10.9x faster** |
-| `UuidGenerator.newV6()` | 127.8 ns | **67.1 ns** | 112 → **32** | **16.6x faster** |
-| `UuidGenerator.newV7()` | 125.2 ns | **76.7 ns** | 112 → **32** | **14.6x faster** |
+| Method | Mean | B/op | vs. `UUID.randomUUID()` |
+| --- | ---: | ---: | ---: |
+| `UUID.randomUUID()` | 172.9 ns | 128 | baseline |
+| `UuidGenerator.newV4()` | 57.5 ns | 32 | **3.0x faster** |
+| `UuidGenerator.newV5()` | 72.7 ns | 64 | **2.4x faster** |
+| `UuidGenerator.newV6()` | 38.5 ns | 32 | **4.5x faster** |
+| `UuidGenerator.newV7()` | 45.0 ns | 32 | **3.9x faster** |
 
-**What changed:** every door used to open an `Arena.ofConfined()` per call — a native allocation plus a scope teardown — and copy every input into it. Every downcall is now linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
+**Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
-The FFM downcall doesn't lose to the JDK's own generator, and the reason is worth stating so the win isn't mistaken for a rigged comparison: `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default. Reported as measured, not adjusted to make the story better.
+The FFM downcall doesn't lose to the JDK's own generator, and the reason is worth stating so the win isn't mistaken for a rigged comparison: `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default. How slow is the machine's business — what its random source costs sets the width of the gap, and a box where that is expensive shows a far larger multiple than this one does. Reported as measured, not adjusted to make the story better.
 
 Batch generation vs. an equivalent loop:
 
 | Method | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v7 | 74.5 µs | 26.1 µs | **2.9x** |
-| v6 | 66.8 µs | 28.0 µs | **2.4x** |
+| v7 | 43.2 µs | 18.2 µs | **2.4x** |
+| v6 | 42.1 µs | 21.5 µs | **2.0x** |
 
-The batch multiplier shrank from ~3.9x for the best reason available: the individual calls got faster, so there is less waste left to amortize.
+The batch multiplier is smaller than it was before the carrier rewrite, for the best reason available: the individual calls got faster, so there is less waste left to amortize. The `byte[]` fills are where the rest goes — 9.4 µs for v7 and 12.0 µs for v6, 4.6x and 3.5x over the loop.
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 
 ## AOT
 
-Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, and the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime; the version probe's `()int`, the one downcall not linked critical, is a seventh entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config.
+Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, and the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime; the version probe's `()int`, the one downcall not linked critical, is a seventh entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: about 80 ns per `newV7` there ([the numbers](#webassembly-graalwasm)).
 
 ## WebAssembly (GraalWasm)
 
@@ -138,31 +138,44 @@ This is not the Java binding compiled *to* WebAssembly (the root README's WebAss
 ```kotlin
 dependencies {
     implementation("io.github.skunkwerkx:hyperuuid:<version>")
-    implementation("org.graalvm.polyglot:polyglot:25.3.4.1")
-    runtimeOnly("org.graalvm.polyglot:wasm:25.3.4.1")
+    implementation("org.graalvm.polyglot:polyglot:25.4.4.1.1")
+    runtimeOnly("org.graalvm.polyglot:wasm:25.4.4.1.1")
 }
 ```
 
 Then either set `-Dhyperuuid.backend=wasm` to force it, or do nothing: with the property unset, `UuidGenerator` takes the FFM path when the jar has a native build for the running platform and that library loads, and falls back to the wasm module otherwise. "No native build" is decided exactly, not by nearest match: an architecture other than x64/arm64 (riscv64, ppc64le, s390x, 32-bit anything) or an OS other than Linux, macOS and Windows resolves to no library at all, and on Linux a musl process (Alpine) gets the musl build, never the glibc one. "Will not load" covers a bundled library the dynamic loader refuses — a temp directory mounted `noexec`, say; if the wasm path cannot start either, the failure thrown is the native one, with the wasm one attached as suppressed. `-Dhyperuuid.backend=native` forces FFM and fails loudly on a platform without a bundled library, or with one that will not load. `UuidGenerator.backend()` reports `"native"` or `"wasm"` for whichever won. Selecting wasm without GraalWasm on the classpath fails when the core is first needed — `isAvailable()` is `false`, and every other call throws — with a message naming the two artifacts; the `org.graalvm.polyglot` classes are never loaded otherwise.
 
-**What it costs**, measured through `UuidGenerator` itself on linux-arm64 with the module the jar ships: one million `newV7(long)` calls after warm-up, then three thousand fills of a 16,000-byte array and of a 1000-element `UUID[]`, in one loop with no harness between the caller and the class. The FFM row is the same loop on the same JVM, so the two are directly comparable (the JMH table above is the FFM path's own benchmark):
+**What it costs**, measured with the JMH suite this repo ships (`./gradlew :benchmarks:jmh` for the FFM rows, the same with `-Pwasm` for the others), on linux-x64 (an Intel Core i9-11900H), one session:
 
 | Runtime | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
 | --- | ---: | ---: | ---: |
-| FFM downcall, GraalVM CE 25 or Temurin 25 | 64 ns | 15.8 µs | 79 µs |
-| GraalWasm on GraalVM CE 25 (JIT) | 420 ns | 15.9 µs | 26.1 µs |
-| GraalWasm under GraalVM Native Image | 181 ns | 19.8 µs | — |
-| GraalWasm on Temurin 25 (interpreter fallback) | 3.1 µs | 850 µs | 867 µs |
+| FFM downcall, Temurin 25 | 45 ns | 9.4 µs | 20.9 µs |
+| FFM downcall, GraalVM CE 25.4 | 40 ns | 9.4 µs | 17.8 µs |
+| GraalWasm on GraalVM CE 25.4 (JIT) | 93 ns | 11.0 µs | 24.2 µs |
+| GraalWasm on Temurin 25 (interpreter fallback) | 2.1 µs | 637 µs | 648 µs |
 
-Three things those rows say plainly. On a stock OpenJDK, GraalWasm has no JIT: the engine prints a fallback-runtime warning at startup (`-Dpolyglot.engine.WarnInterpreterOnly=false` silences it) and runs the module interpreted, at roughly 50x the FFM cost per call and slower than `UUID.randomUUID()`. The JIT numbers need a GraalVM JDK or a Native Image build; nothing in this jar can change that. And the batch doors are where the two paths meet: one crossing per thousand UUIDs, and the byte fill lands at parity with FFM under the JIT. (The FFM figure in the `UUID[]` column is this hand loop's, and it disagrees with the JMH table above, which has the same door at 27.7 µs. Both paths do the same work there — one crossing for the bytes, then the objects built in plain Java — so read the JMH figure as the FFM number for that door and this cell as unsettled until the loop is re-run.) The per-call gap is the polyglot crossing itself — each export is resolved once and called through its cached `Value`, and a UUID comes back in one 16-byte read, which together took the call from 675 ns to 420 ns; what remains is the engine's host-to-guest entry plus the lock.
+Three things those rows say plainly. Under the JIT the wasm path costs about twice the FFM downcall per call — and is still faster than `UUID.randomUUID()` — and the batch doors are where the two paths meet: one crossing per thousand UUIDs, and the byte fill lands within 20% of FFM. What remains per call is the polyglot crossing itself — each export is resolved once and called through its cached `Value`, and a UUID comes back in one 16-byte read — plus the lock.
 
-One number from the same Native Image binary that is not about this backend: the FFM path itself measured 6.5 µs per `newV7(long)` under Native Image in this harness, a hundred times its JVM cost and far behind the wasm module in the same binary. That is a finding about FFM downcalls under Native Image that has not been explained yet — this door passes its per-thread native scratch segment, not a heap array, so `Linker.Option.critical`'s heap access is not the obvious suspect — recorded here because it was measured here, not something the wasm path changes.
+On a stock OpenJDK, GraalWasm has no JIT: the engine prints a fallback-runtime warning at startup (`-Dpolyglot.engine.WarnInterpreterOnly=false` silences it) and runs the module interpreted, at roughly 50x the FFM cost per call and slower than `UUID.randomUUID()`. The JIT numbers need a GraalVM JDK or a Native Image build; nothing in this jar can change that. Keep `org.graalvm.polyglot:polyglot` and `:wasm` at the same release as the GraalVM JDK you run on (25.4.4.1.1 here): Truffle will not use a compiler from a different release, so a mismatched pair runs the interpreter on the JVM and fails a Native Image build.
+
+**Under GraalVM Native Image** there is no JMH to run, so these rows are a hand loop — warm up, then one million `newV7(long)` calls and three thousand of each fill, best of five rounds — built into a native image with the metadata the jar ships. Same machine; the first two rows are the same loop on the JVM, and they land on the JMH figures above, which is what makes the loop trustworthy for the two rows JMH cannot produce:
+
+| Runtime, hand loop | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
+| --- | ---: | ---: | ---: |
+| FFM downcall, GraalVM CE 25.4 JVM | 36 ns | 9.3 µs | 14.1 µs |
+| GraalWasm, GraalVM CE 25.4 JVM (JIT) | 102 ns | 12.1 µs | 24.2 µs |
+| FFM downcall, Native Image | 78 ns | 12.8 µs | 31 µs |
+| GraalWasm, Native Image | 163 ns | 15.7 µs | 32 µs |
+
+Both paths cost about twice in a native image what they cost on the JVM, which is the ordinary price of an ahead-of-time compiler without a profile, and FFM stays the faster of the two.
+
+FFM is compiled in the image, not interpreted, because the downcall handles are constants there: they are created from the C signature alone in a class that needs nothing from the library, take the export's address as their first argument, and `META-INF/native-image/.../native-image.properties` in the jar has that class initialized at image build time. A consumer's `native-image` build inherits it with no configuration.
 
 **Threading.** A polyglot context does not allow concurrent access from multiple threads, so every call on the wasm path is serialized on one lock; one context and one module instance serve the whole process, which is also what keeps the core's process-wide v7 counter a single sequence. The FFM path has no lock. A hot, multi-threaded generator should expect that difference, not just the per-call one.
 
-**Native Image.** The bundled `reachability-metadata.json` registers `WasmBackend`'s constructor for reflection and the `native/*/*` resource glob already covers the module, so a consumer's `native-image` build of the wasm path needs no extra configuration on this jar's account — verified by building the published jar plus the two GraalWasm artifacts into a native executable and running it with `-Dhyperuuid.backend=wasm` (the 181 ns row above); the same binary run without the property takes the FFM path. That proof is now a task rather than a hand build: `./gradlew :aot-smoke-test:nativeRun -Pwasm` puts GraalWasm on the smoke test's classpath, runs the binary with the property, and the binary prints `backend: wasm` before calling every public method; without the property it prints `backend: native` and links nothing extra.
+**Native Image.** The bundled `reachability-metadata.json` registers `WasmBackend`'s constructor for reflection and the `native/*/*` resource glob already covers the module, so a consumer's `native-image` build of the wasm path needs no extra configuration on this jar's account — verified by building the published jar plus the two GraalWasm artifacts into a native executable and running it with `-Dhyperuuid.backend=wasm` (the Native Image rows above); the same binary run without the property takes the FFM path. That proof is now a task rather than a hand build: `./gradlew :aot-smoke-test:nativeRun -Pwasm` puts GraalWasm on the smoke test's classpath, runs the binary with the property, and the binary prints `backend: wasm` before calling every public method; without the property it prints `backend: native` and links nothing extra.
 
-**Reproducing the wasm numbers.** `./gradlew :benchmarks:jmh -Pwasm` runs the same JMH suite as the FFM table through the GraalWasm backend, with the longer warmup Truffle's runtime compilation needs (the FFM suite's one-second warmup gives error bars wider than the values on this path); `-PjmhInclude=<regex>` runs a subset. The rows above came from a hand loop and are kept as measured; the JMH run is the repeatable form, and on GraalVM CE 25.3 (linux-arm64, WSL2, 10×2s warmup) it lands closer than the hand loop did: `newV7` 133 ns against 72 ns FFM in the same session, `newV4` 116 against 105, `fillV7(byte[16000])` 16.9 µs against 18.3. Same machine class as the table above, different box and different harness, so the two sets are each internally comparable and not to each other.
+**Reproducing the wasm numbers.** `./gradlew :benchmarks:jmh -Pwasm` runs the same JMH suite as the FFM table through the GraalWasm backend, with the longer warmup Truffle's runtime compilation needs (the FFM suite's one-second warmup gives error bars wider than the values on this path); `-PjmhInclude=<regex>` runs a subset. Run it under the JDK you want the row for — `JAVA_HOME` decides whether Truffle has a compiler to use. The rest of the JIT run, for the record: `newV4` 81 ns, `newV6` 80 ns, `newV5` 347 ns (the name crosses into guest memory), `newV7Batch(1000)` 24.2 µs.
 
 ## Verifying provenance
 

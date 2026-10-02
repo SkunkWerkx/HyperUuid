@@ -1,3 +1,5 @@
+//go:build !(cgo && (darwin || linux) && (amd64 || arm64) && !hyperuuid_wasm && !hyperuuid_dynamic)
+
 package hyperuuid
 
 import (

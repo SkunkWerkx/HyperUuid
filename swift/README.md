@@ -79,16 +79,16 @@ try UuidGenerator.fillV7(into: &dst)                    // the same, at the curr
 
 Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uuid_t` — 16 bytes already in RFC 9562 order — so the native core writes the whole batch straight into the array's storage with **no per-element conversion**. (C# and Java must rebuild every element, because their UUID types aren't RFC byte order.) That soundness condition is checked with a `precondition` on `MemoryLayout<UUID>`'s size and stride rather than assumed.
 
-`swift package benchmark`, p50 wall clock, 1000 UUIDs per op:
+`swift package benchmark`, p50 wall clock, 1000 UUIDs per op (linux-x64, an Intel Core i9-11900H, Swift 6.3):
 
-| Benchmark | before | after | mallocs after |
-| --- | ---: | ---: | ---: |
-| `newV7` x1000 individually | 947 µs | **844 µs** | 1000 → **0** |
-| `newV7Batch(count: 1000)` | 86 µs | **17 µs** | 1002 → **1** |
-| `fillV7(into: [UUID])` | 24 µs | **19 µs** | 1 |
-| `fillV7(into: raw bytes)` | 16 µs | **16 µs** | 1 |
+| Benchmark | p50 | mallocs |
+| --- | ---: | ---: |
+| `newV7` x1000 individually | 76 µs | 0 |
+| `newV7Batch(count: 1000)` | **10 µs** | 1 |
+| `fillV7(into: [UUID])` | 12 µs | 1 |
+| `fillV7(into: raw bytes)` | 12 µs | 1 |
 
-The gap between `newV7Batch` and the fills is gone, and the before column says why it was there: `newV7Batch` was paying for a scratch buffer plus a per-element `UUID(rfcBytes:)` construction over it. It now allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work.
+There is no gap between `newV7Batch` and the fills: `newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work.
 
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
 
@@ -98,28 +98,28 @@ The raw-buffer overload is for callers who want RFC-ordered bytes rather than `U
 
 ## Benchmarks
 
-Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-arm64, p50 of 10,000 samples):
+Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-x64 on an Intel Core i9-11900H, Swift 6.3, p50 of 10,000 samples):
 
-| Call | before | after | Malloc (total) |
+| Call | p50 | vs. `Foundation.UUID()` | Malloc (total) |
 |---|---:|---:|---:|
-| `Foundation.UUID()` | 3,101 ns | 3,201 ns | 0 |
-| `UuidGenerator.newV4()` | 1,000 ns | **900 ns** | 1 → **0** |
-| `UuidGenerator.newV5(namespace:name:)` | 1,500 ns | **1,100 ns** | 3 → **0** |
-| `UuidGenerator.newV6()` | 1,700 ns | **1,600 ns** | 1 → **0** |
-| `UuidGenerator.newV7()` | 1,700 ns | **1,600 ns** | 1 → **0** |
+| `Foundation.UUID()` | 1,413 ns | baseline | 0 |
+| `UuidGenerator.newV4()` | 107 ns | **13x faster** | 0 |
+| `UuidGenerator.newV5(namespace:name:)` | 135 ns | **10x faster** | 0 |
+| `UuidGenerator.newV6()` | 148 ns | **9.5x faster** | 0 |
+| `UuidGenerator.newV7()` | 117 ns | **12x faster** | 0 |
 
-Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the `dlopen`/`@convention(c)` call path is cheap — and none of them allocates. The before column is a heap `[UInt8]` for the out-value and one more per input, neither of which this shape needs: Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
+Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the call path is cheap, a direct call to a linked-in symbol on Linux and a `dlopen`ed one on macOS and Windows — and none of them allocates. Each used to: a heap `[UInt8]` for the out-value and one more per input, neither of which this shape needs. Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
 
 Batch generation amortizes the native call over the whole batch, and no longer pays a per-element construction on top:
 
-| Call | before | after | Per-UUID after |
-|---|---:|---:|---:|
-| `newV6()` × 1000 (individual) | 991 µs | **842 µs** | 842 ns |
-| `newV6Batch(count: 1000)` | 91 µs | **20 µs** | 20 ns |
-| `newV7()` × 1000 (individual) | 947 µs | **844 µs** | 844 ns |
-| `newV7Batch(count: 1000)` | 86 µs | **17 µs** | 17 ns |
+| Call | p50 | Per UUID |
+|---|---:|---:|
+| `newV6()` × 1000 (individual) | 70 µs | 70 ns |
+| `newV6Batch(count: 1000)` | **12 µs** | 12 ns |
+| `newV7()` × 1000 (individual) | 76 µs | 76 ns |
+| `newV7Batch(count: 1000)` | **10 µs** | 10 ns |
 
-**≈42x for v6, ≈50x for v7** — one native call and one allocation instead of a thousand of each, with the batch doors now landing on the same floor the fills reach.
+**≈6x for v6, ≈7.5x for v7** — one native call, one clock read and one allocation instead of a thousand of each, with the batch doors landing on the same floor the fills reach. The multiple is the machine's as much as the binding's: the individual calls each read the wall clock, so where a clock read is expensive the loop costs far more and the batch, which reads it once, does not.
 
 ## Requirements
 
