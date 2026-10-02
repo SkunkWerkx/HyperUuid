@@ -9,14 +9,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Four themes. *A load probe everywhere*: the core now reports its own version, and every
+## [0.4.0] — 2026-10-01
+
+Six themes. *A load probe everywhere*: the core now reports its own version, and every
 binding fronts it with an availability check, the pair HyperCast already had. *musl*:
 `linux-musl-x64` and `linux-musl-arm64` are built, attested and shipped, so Alpine gets a
 native library instead of a glibc one that cannot load. *Only supported runtimes*: every
-floor that had reached end of life is raised, and the floors are now tested. *Swift links
-the core in* on Linux, which is what adds musl and WebAssembly to that binding. Around those,
-the fixes from a full audit of all eight bindings, and the test and dev-loop setup carried
-back from HyperCast's wasm port.
+floor that had reached end of life is raised, and the floors are now tested. *The core
+links in*: Swift on Linux, which is what adds musl and WebAssembly to that binding, and Go's
+cgo build and C# Native AOT, which now carry no shared library to extract or load.
+*Faster where it was slow for no reason*: Java's FFM calls are compiled rather than
+interpreted in a GraalVM Native Image, and Python and Ruby calls cost about half what they
+did. *Measured again*: every benchmark table is re-measured on x86-64, and most headline
+ratios are smaller for it. Around those, the fixes from a full audit of all eight bindings,
+and the test and dev-loop setup carried back from HyperCast's wasm port.
 
 ### Added
 
@@ -619,7 +625,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.1.1...v0.2.0
