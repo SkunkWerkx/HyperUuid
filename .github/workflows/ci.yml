@@ -4,8 +4,9 @@ name: CI — build native, build wasm, test every binding
 # pipeline — 5 real-hardware legs plus the two musl RIDs in Alpine containers (and osx-x64
 # cross-built on the Apple silicon runner, the core's own suite run under Rosetta), the Rust core
 # built fresh per leg, every binding's suite run against it. Ruby's suite runs on the
-# Magnus extension once per Ruby ABI on all eight RIDs — the musl ones in each Ruby's Alpine
-# image, osx-x64 on an Intel runner — and once more forced onto the Fiddle fallback; Python
+# Magnus extension once per Ruby ABI on seven RIDs — the musl ones in each Ruby's Alpine
+# image; osx-x64 is cross-built, with no Magnus extension and no binding suite — and once
+# more forced onto the Fiddle fallback; Python
 # has no fallback — PyO3 only, staged and tested per leg.
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
