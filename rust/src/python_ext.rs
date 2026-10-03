@@ -118,10 +118,24 @@ fn uuid_bytes(value: &Bound<'_, PyAny>) -> PyResult<[u8; 16]> {
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Pyodide (wasm32-unknown-emscripten): Emscripten's realtime clock is JS `Date.now()`, whole
+/// milliseconds, handed back as `Math.round(ms * 1e6)` nanoseconds computed in a double. Past
+/// 2^53 ns that lands up to ~128 ns either side of the millisecond it means, and truncating
+/// read about one timestamp in four a millisecond early. The clock has no finer resolution
+/// to lose, so rounding to the nearest millisecond is exact.
+#[cfg(target_os = "emscripten")]
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| ((elapsed.as_nanos() + 500_000) / 1_000_000) as u64)
         .unwrap_or(0)
 }
 
@@ -154,7 +168,7 @@ impl<'py> FromPyObject<'_, 'py> for Name<'py> {
             Ok(Name::Bytes(bytes.to_owned()))
         } else {
             // PyO3 prefixes the argument name, so new_v5 raises
-            // "argument 'name': must be str or bytes" — the wasm backend's own words.
+            // "argument 'name': must be str or bytes".
             Err(PyTypeError::new_err("must be str or bytes"))
         }
     }
@@ -209,8 +223,10 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
 
 fn batch_list<'py>(py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyList>> {
     let list = PyList::empty(py);
-    for chunk in raw.as_chunks::<16>().0 {
-        list.append(make_uuid(py, *chunk)?)?;
+    // chunks_exact rather than as_chunks: rust-version is 1.85, and as_chunks is 1.88.
+    for chunk in raw.chunks_exact(16) {
+        let bytes: [u8; 16] = chunk.try_into().expect("chunks_exact(16) yields 16 bytes");
+        list.append(make_uuid(py, bytes)?)?;
     }
     Ok(list)
 }

@@ -1,6 +1,5 @@
-"""The typed surface of ``hyperuuid._native`` — the PyO3 extension, and equally the
-``_wasm`` backend that stands in for it under the same name (``tests/test_typing.py`` holds
-both to this file). ``hyperuuid`` validates and converts its arguments before calling in, so
+"""The typed surface of ``hyperuuid._native``, the PyO3 extension (``tests/test_typing.py``
+holds the loaded module to this file). ``hyperuuid`` validates and converts its arguments before calling in, so
 these are the already-narrowed shapes: a timestamp here is an ``int`` or ``None``, never a
 ``datetime``.
 """

@@ -64,15 +64,49 @@ cgo, and so a C compiler wherever the module is **built** — nothing at run tim
 Every other build fails at compile time, by name:
 
 ```
-undefined: hyperuuid_needs_cgo_and_a_C_compiler_on_linux_darwin_or_windows_amd64_arm64__set_CGO_ENABLED_1__GOOS_wasip1_and_js_are_unsupported
+undefined: hyperuuid_needs_cgo_and_a_C_compiler_on_linux_darwin_or_windows_amd64_arm64__set_CGO_ENABLED_1__for_wasm_build_with_TinyGo
 ```
 
 That is `CGO_ENABLED=0` (which is also Go's default for a cross-compile — see
 [Building and cross-compiling](#building-and-cross-compiling)), any OS or architecture
-outside the six above, and Go compiled to WebAssembly (`GOOS=wasip1`, `GOOS=js`): Go's wasm
-toolchain links Go code only, with no cgo, so a foreign library has nowhere to go. For Go
-on wasm, use [`github.com/google/uuid`](https://pkg.go.dev/github.com/google/uuid), which is
-pure Go and builds there.
+outside the six above, and stock Go compiled to WebAssembly (`GOOS=wasip1`, `GOOS=js`): Go's
+wasm toolchain links Go code only, with no cgo, so a foreign library has nowhere to go.
+For WebAssembly, build with [TinyGo](#in-the-browser-tinygo), which links the core there,
+browser included.
+
+## In the browser (TinyGo)
+
+[TinyGo](https://tinygo.org) 0.42 or later compiles this module to WebAssembly with the core
+linked in, the way the C# package does for Blazor: TinyGo links with `wasm-ld` and has cgo,
+so `backend_tinygo.go` names `staticlib/wasm/libhyperuuid.a` — the core built for
+`wasm32-wasip1` — on its link line. No code changes and no extra files to ship: the core is
+inside your `.wasm`.
+
+```sh
+tinygo build -target=wasm -no-debug -opt=z -o main.wasm .
+cp "$(tinygo env TINYGOROOT)/targets/wasm_exec.js" .
+```
+
+```html
+<script src="wasm_exec.js"></script>
+<script>
+  const go = new Go();
+  WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject)
+    .then(result => go.run(result.instance));
+</script>
+```
+
+Use TinyGo's own `wasm_exec.js`, not stock Go's: the core's one import, WASI's
+`random_get`, is supplied by TinyGo's from `crypto.getRandomValues`. The core and this
+binding add about 43 KB to an `-opt=z` build. `-target=wasip1` works the same way under a
+WASI runtime (wasmtime, for one). `-target=wasip2` does not yet: TinyGo componentizes without
+the preview1 adapter, and the core's `random_get` is a preview1 import. CI builds
+[`internal/tinygosmoke`](internal/tinygosmoke) this way on every pull request and runs it
+in headless Chrome.
+
+TinyGo's cgo is narrower than Go's — no build constraints on `#cgo` lines, no `${SRCDIR}`,
+no C structs by value — which is why the browser build has a backend file of its own
+rather than more lines in `backend_static.go`; the file's header has the details.
 
 ## API
 
@@ -177,6 +211,7 @@ points.
 | Linux x64 / arm64, glibc and musl (Alpine) | `staticlib/linux_amd64`, `staticlib/linux_arm64` | the C library |
 | macOS x64 / arm64 | `staticlib/darwin_amd64`, `staticlib/darwin_arm64` | the C library |
 | Windows x64 / arm64 | `staticlib/windows_amd64`, `staticlib/windows_arm64` | nothing (the C runtime) |
+| WebAssembly under [TinyGo](#in-the-browser-tinygo) — browser, WASI | `staticlib/wasm` | wasi-libc, which TinyGo links anyway |
 
 Each build names one archive on its link line and that is all it takes from this module:
 the binary carries about 20 KB of core for its own platform, writes nothing to disk, and

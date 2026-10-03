@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Loads main.wasm (this package, built by `tinygo build -target=wasm`) through TinyGo's
+     own wasm_exec.js, both served from this directory. TinyGo writes the program's stdout
+     through console.log, so that is redirected into the <pre>, which is what CI reads from
+     headless Chrome's --dump-dom. -->
+<meta charset="utf-8">
+<title>HyperUuid TinyGo smoke</title>
+<script src="wasm_exec.js"></script>
+<pre id="out"></pre>
+<script>
+  const out = document.getElementById("out");
+  const log = console.log;
+  console.log = (...args) => { out.textContent += args.join(" ") + "\n"; log(...args); };
+  const go = new Go();
+  WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject)
+    .then(result => go.run(result.instance))
+    .catch(error => { out.textContent += "FAIL " + error + "\n"; });
+</script>

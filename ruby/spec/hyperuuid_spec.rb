@@ -367,10 +367,9 @@ RSpec.describe HyperUuid do
   end
 
   # Caller bugs are caught once, in the shared doors, so the error is the same whichever
-  # backend is live — this whole suite runs under all three. Left to the backends these
-  # cases diverged: a RangeError from the extension where Fiddle wrapped the value and
-  # raised TimestampOutOfRangeError, a silently truncated timestamp from wasm, a
-  # NoMemoryError for a negative count.
+  # backend is live — this whole suite runs under both. Left to the backends these cases
+  # diverged: a RangeError from the extension where Fiddle wrapped the value and raised
+  # TimestampOutOfRangeError, a NoMemoryError for a negative count.
   describe "caller bugs" do
     v6_doors = {
       "new_v6" => ->(ms) { HyperUuid.new_v6(ms) },
@@ -436,7 +435,7 @@ RSpec.describe HyperUuid do
 
     it "word a random-source failure the same way on every backend" do
       # The failure itself cannot be provoked from here; the message is built in one place
-      # per backend, and this is the Ruby one the Fiddle and wasm backends raise.
+      # per backend, and this is the Ruby one the Fiddle backend raises.
       error = HyperUuid::Runtime.random_source_failure("uuid_new_v4")
       expect(error).to be_a(HyperUuid::RandomSourceError)
       expect(error.message).to eq("uuid_new_v4: the system random source failed")
@@ -463,10 +462,25 @@ RSpec.describe HyperUuid do
       script = "HyperUuid::Runtime.singleton_class.define_method(:library_path) { nil }; " \
                "print HyperUuid.available?; print ' '; " \
                "begin; HyperUuid.new_v4; rescue LoadError; print 'raised'; end"
-      out, status = Open3.capture2({ "HYPERUUID_PURE" => "1", "HYPERUUID_WASM" => nil },
+      out, status = Open3.capture2({ "HYPERUUID_PURE" => "1" },
                                    RbConfig.ruby, "-I", lib, "-r", "hyperuuid", "-e", script)
       expect(status).to be_success
       expect(out).to eq("false raised")
+    end
+
+    it "names the universal gem when a platform gem, which carries no Fiddle library, falls to Fiddle" do
+      musl = Gem::Platform.new("x86_64-linux-musl")
+      forced = HyperUuid::Runtime.send(:missing_library_message, musl, true)
+      expect(forced).to include("x86_64-linux-musl platform gem", "HYPERUUID_PURE forces",
+                                "gem install hyperuuid --platform ruby")
+      unloaded = HyperUuid::Runtime.send(:missing_library_message, musl, false)
+      expect(unloaded).to include("none of its extensions loads on this Ruby (#{RUBY_VERSION}",
+                                  "gem install hyperuuid --platform ruby")
+      expect(unloaded).not_to include("HYPERUUID_PURE")
+      [["ruby", true], [nil, false]].each do |platform, pure|
+        expect(HyperUuid::Runtime.send(:missing_library_message, platform, pure))
+          .to match(/not found \(unsupported platform/)
+      end
     end
   end
 
@@ -493,8 +507,7 @@ RSpec.describe HyperUuid do
 
   # Runs under every backend, and matters most under Fiddle: Fiddle releases the GVL for the
   # duration of a call, so that is the one backend where Ruby threads run the core truly in
-  # parallel, each through its own scratch buffer. (The Magnus extension holds the GVL; the
-  # wasm backend serializes on one Mutex around one shared instance.)
+  # parallel, each through its own scratch buffer. (The Magnus extension holds the GVL.)
   describe "concurrent callers" do
     it "keep their own results: a deterministic v5 per thread never sees another thread's bytes" do
       names = Array.new(8) { |n| "thread-#{n}.example.com" }

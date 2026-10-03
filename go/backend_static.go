@@ -1,6 +1,6 @@
-//go:build cgo && (darwin || linux || windows) && (amd64 || arm64)
+//go:build cgo && !tinygo && (darwin || linux || windows) && (amd64 || arm64)
 
-// The one backend: libhyperuuid linked into the binary. The core is a static library under
+// The native backend: libhyperuuid linked into the binary. The core is a static library under
 // staticlib/{goos}_{goarch}/, named on the cgo link line below, and every call is an
 // ordinary C call to a symbol the linker resolved. Nothing is embedded, nothing is written to
 // a temp directory, nothing is loaded at run time: a binary carries the ~20 KB of the core
@@ -9,7 +9,9 @@
 //
 // That takes cgo, and so a C compiler wherever the module is built — gcc or clang on Linux,
 // the Xcode command-line tools on macOS, a MinGW-w64 gcc (or llvm-mingw on arm64) on
-// Windows. Anything else does not compile; unsupported.go says so by name. There used to be
+// Windows. TinyGo compiling to WebAssembly links the same core from backend_tinygo.go — its
+// cgo cannot parse this file's per-platform #cgo lines, hence `!tinygo` above. Anything else
+// does not compile; unsupported.go says so by name. There used to be
 // three more backends — a purego one for CGO_ENABLED=0 and Windows that extracted an
 // embedded shared library to a temp file, a cgo one that loaded that library instead of
 // linking it, and a wasmtime one — and none of them reached a platform this one does not:

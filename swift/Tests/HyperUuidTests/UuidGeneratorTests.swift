@@ -44,50 +44,10 @@ final class UuidGeneratorTests: XCTestCase {
         }
     }
 
-    func testIsAvailableAgreesWithTheLoad() throws {
+    func testIsAvailableBecauseTheCoreIsLinkedIn() throws {
         XCTAssertTrue(UuidGenerator.isAvailable)
         XCTAssertNoThrow(try UuidGenerator.nativeVersion())
     }
-
-    func testTheNativeCoreComesFromWhereADeployedBinaryHasIt() throws {
-        #if os(Linux) || os(WASI)
-        // Linked into the executable: nothing to find, so nothing to leave behind.
-        XCTAssertEqual(try UuidGenerator.nativeLibraryOrigin(), .staticallyLinked)
-        #else
-        // The resource directory is the only place a deployed binary has. The source-tree
-        // fallback would keep every other test here green on the build machine even if
-        // the bundle lookup stopped working, so the origin is pinned on its own.
-        XCTAssertEqual(try UuidGenerator.nativeLibraryOrigin(), .resourceBundle)
-        #endif
-    }
-
-    // The two ways a load can fail exist only where there is a load: macOS and Windows.
-    #if os(macOS) || os(Windows)
-    func testAMissingLibraryIsANativeLibraryErrorACallerCanMatch() {
-        let missing = "/nonexistent/\(NativePlatform.libraryFileName)"
-        XCTAssertThrowsError(try DynamicLibrary(path: missing)) { error in
-            guard case NativeLibraryError.openFailed(let path, _) = error else {
-                XCTFail("expected NativeLibraryError.openFailed, got \(error)")
-                return
-            }
-            XCTAssertEqual(path, missing)
-            // LocalizedError, so the one-liner survives `localizedDescription` too.
-            XCTAssertEqual(error.localizedDescription, "\(error)")
-            XCTAssertTrue(error.localizedDescription.hasPrefix("hyperuuid: failed to load native library at \(missing)"))
-        }
-    }
-
-    func testAMissingExportIsANativeLibraryErrorNamingTheSymbol() throws {
-        let library = try DynamicLibrary(path: try DynamicLibrary.locateBundled().path)
-        XCTAssertThrowsError(try library.symbol("uuid_no_such_export")) { error in
-            guard case NativeLibraryError.symbolNotFound(let name) = error else {
-                XCTFail("expected NativeLibraryError.symbolNotFound, got \(error)")
-                return
-            }
-            XCTAssertEqual(name, "uuid_no_such_export")
-        }
-    }
-    #endif
 
     func testGeneratorErrorsDescribeThemselvesThroughLocalizedDescription() {
         let error: Swift.Error = UuidGenerator.Error.bufferNotWholeUUIDs(count: 17)

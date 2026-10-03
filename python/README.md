@@ -4,14 +4,12 @@
 [![PyPI](https://img.shields.io/pypi/v/hyperuuid.svg)](https://pypi.org/project/hyperuuid/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
-**Python 3.14 finally added `uuid.uuid7()` to stdlib, with a real monotonic counter — genuinely well done. If you're stuck on 3.11-3.13 like most production code still is, stdlib has no v6/v7 at all, and this package gives you both today without waiting for a runtime upgrade — and on any version, the native backend below outruns stdlib outright.**
+**Python 3.14 finally added `uuid.uuid7()` to stdlib, with a real monotonic counter — genuinely well done. If you're stuck on 3.11-3.13 like most production code still is, stdlib has no v6/v7 at all, and this package gives you both today without waiting for a runtime upgrade — and on any version, the native extension below outruns stdlib outright.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. A
 native extension built with [PyO3](https://pyo3.rs) — the Rust core linked directly into the
 CPython extension module, no `dlopen`, no C-ABI hop, no `ctypes` marshalling, no runtime
-bridge. A second backend runs the same core as a `wasm32-wasip1` module inside CPython through
-`wasmtime-py`, opt-in via `pip install hyperuuid[wasm]` and `HYPERUUID_WASM=1` — see
-[WebAssembly (wasmtime)](#webassembly-wasmtime).
+bridge.
 
 ## Install
 
@@ -22,7 +20,8 @@ pip install hyperuuid
 Real platform-specific wheels, so it lands at native speed with nothing to compile, the same
 way numpy or cryptography does — no compiler needed and no dependencies at all; the PyO3
 extension *is* the package. The wheels are `abi3`, so one per platform covers every CPython
-from the 3.11 floor up, eight in all:
+from the 3.11 floor up — eight native ones, plus a ninth for Pyodide in the browser
+([below](#in-the-browser-pyodide)):
 
 | | x64 | arm64 |
 | --- | :---: | :---: |
@@ -31,14 +30,17 @@ from the 3.11 floor up, eight in all:
 | macOS | ✓ | ✓ |
 | Windows | ✓ | ✓ |
 
-**Only wheels are published — there is no sdist.** An interpreter none of the eight matches
+**Only wheels are published — there is no sdist.** An interpreter none of the wheels matches
 (a glibc older than 2.28, PyPy, free-threaded CPython) gets `No matching distribution found`
 from pip, not a source build.
+
+On Alpine the musl wheel needs nothing beyond the base image — it carries its own copy of
+`libgcc_s` — and the whole suite passes on a bare `python:3.14-alpine`.
 
 **Not yet covered: free-threaded (no-GIL) CPython (`3.13t`/`3.14t`).** An `abi3` wheel is
 ignored by a free-threaded interpreter (it's a genuinely separate ABI, not a compatibility
 flag), so closing this gap means building and shipping additional version-specific
-`cp313t`/`cp314t` wheels alongside the existing eight, not just a build-flag change. PyO3
+`cp313t`/`cp314t` wheels alongside the existing ones, not just a build-flag change. PyO3
 itself has supported free-threading (opt-in, `gil_used = false`) since 0.23; the cleaner
 long-term fix — [PEP 803](https://peps.python.org/pep-0803/)'s `abi3t` stable ABI, one build
 covering both GIL and no-GIL — needs Python 3.15+, not yet released. Revisiting once that
@@ -108,14 +110,40 @@ UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter, so
 `clock_seq`/node (not the timestamp) decide ties, the same pre-existing RFC 9562
 v6 limitation plain order already has.
 
-A caller's bug is an exception, and the same exception on both backends: an argument of the
+A caller's bug is an exception: an argument of the
 wrong type is a `TypeError`; a timestamp no field can hold (negative, or past v7's 48 bits
 or v6's 60) and a batch `count` outside 0 to 4294967295 are a `ValueError`; a batch too
 large to allocate is a `MemoryError`, never a batch of some other size.
 
 `hyperuuid.native_version()` names the core actually loaded, `"major.minor.patch"`, decoded
-from the same packed `hyperuuid_version` export every other binding probes, and
-`hyperuuid.BACKEND` says which backend loaded it — `"native"` or `"wasm"`.
+from the same packed `hyperuuid_version` export every other binding probes.
+`hyperuuid.BACKEND` is always `"native"`, the PyO3 extension.
+
+## In the browser (Pyodide)
+
+The same PyO3 extension, compiled for Pyodide's Emscripten target, is published to PyPI as
+`hyperuuid-X.Y.Z-cp311-abi3-pyemscripten_2026_0_wasm32.whl` (about 74 KB), so micropip finds
+it the way pip finds the native wheels:
+
+```python
+import micropip
+await micropip.install("hyperuuid")
+
+import uuid, hyperuuid
+hyperuuid.new_v7()
+hyperuuid.new_v5(uuid.NAMESPACE_DNS, "example.com")
+```
+
+It is the native backend (`hyperuuid.BACKEND == "native"`), with the same API and no
+JavaScript bridge: randomness comes from Emscripten's `getentropy` (the browser's
+`crypto.getRandomValues`), and the clock is `Date.now()`, so v6/v7 timestamps have
+millisecond resolution there, as everywhere. CI installs the wheel into Pyodide and runs this
+package's whole pytest suite in it twice, under Node and in headless Chrome.
+
+The wheel is for **Pyodide 314.x** (Python 3.14, platform `pyemscripten_2026_0`). It is
+`abi3`, but a Pyodide ABI is one Python minor built with one exact Emscripten, so each
+Pyodide ABI year needs its own wheel: earlier Pyodide lines (0.29.x and older) find no wheel,
+and the next line is covered by the release that adds its build.
 
 ## Bulk generation into a buffer
 
@@ -149,7 +177,7 @@ One deliberate limitation: these take a `bytearray`, not any writable buffer. Su
 
 This is the one binding where the honest answer genuinely depends on which Python you're running — this package supports 3.11+, and stdlib's own v6/v7 story changed dramatically partway through that range:
 
-- **Python 3.11-3.13:** stdlib has `uuid1`/`uuid3`/`uuid4`/`uuid5` — no v6, no v7, at all. This package is the only way to get either without a third-party dependency, and the native backend outruns stdlib's v4/v5 on top of that.
+- **Python 3.11-3.13:** stdlib has `uuid1`/`uuid3`/`uuid4`/`uuid5` — no v6, no v7, at all. This package is the only way to get either without a third-party dependency, and the native extension outruns stdlib's v4/v5 on top of that.
 - **Python 3.14+:** stdlib added `uuid.uuid6()`/`uuid7()`/`uuid8()`, and `uuid7()` genuinely implements RFC 9562 §6.2's monotonic counter (42 bits of it) — this isn't a naive random-bits implementation, it's a real, well-built addition, and it's what the benchmarks below measure against. This package still wins across the board there — see Benchmarks — plus:
   1. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Go, C#, Ruby, and every other binding in this repo — verified in CI to match stdlib's own `uuid.uuid5` byte-for-byte. If your stack isn't Python-only, or you need every service minting IDs from the literal same engine rather than N independent (if individually correct) implementations, that's not something stdlib can offer regardless of version.
   2. **Batch generation.** `new_v7_batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch — stdlib's `uuid7()` has no bulk-generation entry point, so a loop of individual calls is the only option there.
@@ -198,74 +226,9 @@ extension — `pip install -e ".[bench]"` alone builds debug by default and will
 every number above — then `pip install pyperf` and
 `python bench_uuid.py --fast -o results.json`.
 
-## WebAssembly (wasmtime)
-
-The same Rust core, compiled to `wasm32-wasip1`, run *inside* CPython by
-[`wasmtime-py`](https://github.com/bytecodealliance/wasmtime-py) — the inverse of the Pyodide
-experiment this package once carried (CPython itself in the browser, loading the core as an
-Emscripten side module). Nothing is reimplemented: `hyperuuid._wasm` calls the identical C-ABI
-exports the PyO3 extension does — the twelve `uuid_*` functions and `hyperuuid_version` —
-across a guest/host memory boundary instead of a direct call. The whole test suite runs
-against it.
-
-```sh
-pip install hyperuuid[wasm]        # adds wasmtime; the .wasm module ships inside every wheel
-HYPERUUID_WASM=1 python app.py     # force it; hyperuuid.BACKEND reports "wasm" or "native"
-```
-
-Without the variable, `_native` is used whenever it imports, and `_wasm` is the fallback when it
-does not and `wasmtime` is installed — an install whose extension cannot load keeps working
-instead of failing at import. One honest limit on that story today: it does not widen where
-`pip install hyperuuid` works. Only wheels are published and every one of them carries the
-PyO3 extension, so an interpreter no wheel matches has nothing to install, with or without
-`[wasm]`. A pure-Python wheel carrying only the wasm backend is what would make
-`pip install hyperuuid[wasm]` land anywhere `wasmtime` itself does; it is not built yet.
-
-One platform note, measured on a bare `python:3.14-alpine`: the musl wheel needs nothing
-beyond the base image — it carries its own copy of `libgcc_s` — and the whole suite passes
-there. The wasm backend on Alpine additionally needs `apk add libgcc`, because `wasmtime`'s
-own musl wheel links `libgcc_s` without bundling it.
-
-Three things about the crossing decide the numbers below:
-
-- **Buffers come from the guest.** A wasm module only sees its own linear memory, so this backend
-  asks the module's exported `malloc` for every buffer it fills — 16-byte scratch, a v5 name, a
-  batch destination — rather than picking an offset itself. That is load-bearing, not tidiness:
-  a host-chosen offset past the data segments was tried first, and the guest's own allocator
-  (dlmalloc, which claims the tail of the initial memory on first use) corrupted a batch.
-- **Calls are serialized.** A wasmtime `Store` is not thread-safe and the v7 counter lives inside
-  the one instance, so one process-wide lock guards every call. Uncontended under the GIL; on a
-  free-threaded build it is what keeps two threads out of one store.
-- **The call path sidesteps wasmtime-py's per-call type lookup.** `Func.__call__` re-fetches the
-  function's type from the engine and builds and frees a `FuncType` plus one `ValType` wrapper per
-  parameter and result on *every* call — measured at 38 µs per call, almost none of it in the
-  guest. This backend builds the argument and result arrays once and hands them to the same
-  `wasmtime_func_call` C entry point the library reaches after that bookkeeping, 3.1 µs for the
-  bare call. That touches `wasmtime._ffi`, which is not public API, so it is bound inside a `try`
-  at load time and degrades to the public call — slow, never broken — if a wasmtime release
-  moves it.
-
-Measured end to end on CPython 3.14.7 (Fedora's build), linux-x64, `timeit` best of five, same
-session as the native column:
-
-| Call | wasm backend | native (`_native`) |
-| --- | ---: | ---: |
-| `new_v4()` | 4.7 µs | 0.25 µs |
-| `new_v7(ms)` | 5.4 µs | 0.35 µs |
-| `new_v5(...)` | 7.1 µs | 0.38 µs |
-| `v7_timestamp(...)` | 4.8 µs | 0.24 µs |
-| `fill_v7(bytearray)`, 1000 UUIDs | 24 µs | 9.7 µs |
-| `new_v7_batch(1000)` → `list[UUID]` | 447 µs | 142 µs |
-
-Read it the way the rest of this README reads: single calls pay the crossing (4-6 µs of
-Python-side lock, argument packing, guest memory copy and the call itself), the byte
-fill amortizes it to 2.5x native, and the object-building batch is three times native
-because this backend builds its `uuid.UUID`s from Python rather than through the C API.If you are on this backend and minting in bulk, reach
-for `fill_v7`/`fill_v6` exactly as the section above already advises.
-
 ## Verifying provenance
 
-Every wheel PyPI serves carries a GitHub build-provenance attestation. The wheels are built,
+Every wheel PyPI serves, the Pyodide one included, carries a GitHub build-provenance attestation. The wheels are built,
 installed and attested in CI by the shared `hyper-build-wheels.yml` workflow in
 `SkunkWerkx/.github`, and `release.yml` verifies each one before publishing it unchanged, so
 the verify command names that signer:

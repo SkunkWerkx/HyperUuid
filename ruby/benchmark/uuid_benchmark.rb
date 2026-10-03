@@ -16,7 +16,7 @@ NAME = "example.com"
 RFC_TEST_VECTOR_MS = 1_645_557_742_000
 
 # Every number below belongs to one backend on one Ruby, so say which before printing any:
-# run it again under HYPERUUID_PURE=1 or HYPERUUID_WASM=1 for the other two.
+# run it again under HYPERUUID_PURE=1 for the other one.
 puts "backend: #{HyperUuid::BACKEND} (core #{HyperUuid.native_version}) — #{RUBY_DESCRIPTION}"
 puts
 

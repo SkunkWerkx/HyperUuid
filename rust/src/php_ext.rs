@@ -20,7 +20,7 @@ fn uuid_arg(bytes: &Binary<u8>) -> PhpResult<Uuid> {
     let array: [u8; 16] = bytes
         .as_slice()
         .try_into()
-        .map_err(|_| PhpException::default("bytes must be exactly 16 bytes".into()))?;
+        .map_err(|_| PhpException::from_message("bytes must be exactly 16 bytes".into()))?;
     Ok(Uuid::from_bytes(array))
 }
 
@@ -37,7 +37,7 @@ pub fn hyperuuid_native_version() -> i64 {
 pub fn hyperuuid_native_new_v4() -> PhpResult<Binary<u8>> {
     v4::new_v4()
         .map(|id| Binary::from(id.as_bytes().to_vec()))
-        .map_err(|e| PhpException::default(format!("uuid_new_v4 failed: {e}")))
+        .map_err(|e| PhpException::from_message(format!("uuid_new_v4 failed: {e}")))
 }
 
 #[php_function]
@@ -53,13 +53,13 @@ pub fn hyperuuid_native_new_v5(namespace: Binary<u8>, name: Binary<u8>) -> PhpRe
 pub fn hyperuuid_native_new_v6(unix_millis: u64) -> PhpResult<Binary<u8>> {
     match v6::new_v6(unix_millis) {
         Ok(id) => Ok(Binary::from(id.as_bytes().to_vec())),
-        Err(v6::NewV6Error::TimestampOutOfRange) => Err(PhpException::default(
+        Err(v6::NewV6Error::TimestampOutOfRange) => Err(PhpException::from_message(
             "unix_millis does not fit the 60-bit v6 timestamp field".into(),
         )),
-        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PhpException::default(e.to_string())),
-        Err(v6::NewV6Error::Random(e)) => {
-            Err(PhpException::default(format!("uuid_new_v6 failed: {e}")))
-        }
+        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PhpException::from_message(e.to_string())),
+        Err(v6::NewV6Error::Random(e)) => Err(PhpException::from_message(format!(
+            "uuid_new_v6 failed: {e}"
+        ))),
     }
 }
 
@@ -78,11 +78,11 @@ pub fn hyperuuid_native_new_v6_batch(count: u32, unix_millis: u64) -> PhpResult<
     let mut out = vec![0u8; count as usize * 16];
     match v6::new_v6_batch(unix_millis, count, &mut out) {
         Ok(()) => Ok(Binary::from(out)),
-        Err(v6::NewV6Error::TimestampOutOfRange) => Err(PhpException::default(
+        Err(v6::NewV6Error::TimestampOutOfRange) => Err(PhpException::from_message(
             "unix_millis does not fit the 60-bit v6 timestamp field".into(),
         )),
-        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PhpException::default(e.to_string())),
-        Err(v6::NewV6Error::Random(e)) => Err(PhpException::default(format!(
+        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PhpException::from_message(e.to_string())),
+        Err(v6::NewV6Error::Random(e)) => Err(PhpException::from_message(format!(
             "uuid_new_v6_batch failed: {e}"
         ))),
     }
@@ -93,13 +93,13 @@ pub fn hyperuuid_native_new_v6_batch(count: u32, unix_millis: u64) -> PhpResult<
 pub fn hyperuuid_native_new_v7(unix_millis: u64) -> PhpResult<Binary<u8>> {
     match v7::new_v7(unix_millis) {
         Ok(id) => Ok(Binary::from(id.as_bytes().to_vec())),
-        Err(v7::NewV7Error::TimestampOutOfRange) => Err(PhpException::default(
+        Err(v7::NewV7Error::TimestampOutOfRange) => Err(PhpException::from_message(
             "unix_millis must fit within the RFC 9562 48-bit field".into(),
         )),
-        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PhpException::default(e.to_string())),
-        Err(v7::NewV7Error::Random(e)) => {
-            Err(PhpException::default(format!("uuid_new_v7 failed: {e}")))
-        }
+        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PhpException::from_message(e.to_string())),
+        Err(v7::NewV7Error::Random(e)) => Err(PhpException::from_message(format!(
+            "uuid_new_v7 failed: {e}"
+        ))),
     }
 }
 
@@ -118,11 +118,11 @@ pub fn hyperuuid_native_new_v7_batch(count: u32, unix_millis: u64) -> PhpResult<
     let mut out = vec![0u8; count as usize * 16];
     match v7::new_v7_batch(unix_millis, count, &mut out) {
         Ok(()) => Ok(Binary::from(out)),
-        Err(v7::NewV7Error::TimestampOutOfRange) => Err(PhpException::default(
+        Err(v7::NewV7Error::TimestampOutOfRange) => Err(PhpException::from_message(
             "unix_millis must fit within the RFC 9562 48-bit field".into(),
         )),
-        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PhpException::default(e.to_string())),
-        Err(v7::NewV7Error::Random(e)) => Err(PhpException::default(format!(
+        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PhpException::from_message(e.to_string())),
+        Err(v7::NewV7Error::Random(e)) => Err(PhpException::from_message(format!(
             "uuid_new_v7_batch failed: {e}"
         ))),
     }

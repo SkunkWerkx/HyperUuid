@@ -7,9 +7,8 @@ Section 6.6 well-known namespaces already in the standard library:
 ``uuid.NAMESPACE_DNS``, ``NAMESPACE_URL``, ``NAMESPACE_OID``, ``NAMESPACE_X500``.
 
 Ships as real platform-specific abi3 wheels (linux glibc and musl, macOS, Windows; x64 and
-arm64) built by ``maturin`` — no compiler needed to install. The same core also rides inside
-every wheel as a ``wasm32-wasip1`` module, which ``wasmtime-py`` can run in-process
-(``pip install hyperuuid[wasm]``, ``HYPERUUID_WASM=1``); see ``_wasm``. The package is typed:
+arm64, plus Pyodide's ``pyemscripten`` wasm32 for the browser) built by ``maturin`` — no
+compiler needed to install. The package is typed:
 ``py.typed`` ships beside it, with a stub for the extension module.
 """
 
@@ -18,48 +17,13 @@ from __future__ import annotations
 import datetime
 import uuid as _uuid
 
-import os as _os
 from operator import index as _index
-from typing import TYPE_CHECKING
 
-#: Which backend this process loaded: ``"native"`` (the PyO3 extension) or ``"wasm"`` (the
-#: same core as a wasm32-wasip1 module under wasmtime-py). Informational — every function in
-#: this module behaves identically on both; the test suite runs against each.
-BACKEND: str
+from . import _native
 
-# --- backend selection -----------------------------------------------------------------
-# `_native` is the PyO3 extension: the Rust core linked straight into CPython, the backend
-# every published wheel ships. `_wasm` is the same core compiled to wasm32-wasip1 and run
-# inside this process by wasmtime-py (see `_wasm.py` for how the crossing works and what it
-# costs). HYPERUUID_WASM=1 forces the wasm backend; otherwise it is the fallback for an
-# install whose extension cannot be imported, taken only when `wasmtime` is importable. It
-# does not widen where pip can install the package: only wheels are published, so an
-# interpreter no wheel matches gets nothing to fall back *from*.
-#
-# A type checker reads the first branch and nothing else: `_native.pyi` is the one typed
-# description of the surface both backends present.
-if TYPE_CHECKING:
-    from . import _native
-elif _os.environ.get("HYPERUUID_WASM"):
-    from . import _wasm as _native
-
-    BACKEND = "wasm"
-else:
-    try:
-        from . import _native
-
-        BACKEND = "native"
-    except ImportError as _native_error:
-        try:
-            import wasmtime as _wasmtime  # noqa: F401
-        except ImportError:
-            raise ImportError(
-                f"{_native_error}. No hyperuuid._native extension for this interpreter; the "
-                "wasm backend can stand in if wasmtime is installed: pip install hyperuuid[wasm]"
-            ) from _native_error
-        from . import _wasm as _native
-
-        BACKEND = "wasm"
+#: Which backend this process loaded: always ``"native"``, the PyO3 extension that links the
+#: Rust core straight into CPython — the only backend, and the one every published wheel ships.
+BACKEND: str = "native"
 
 _native._bind()
 
@@ -105,7 +69,7 @@ _V7_OUT_OF_RANGE = "unix_millis must be non-negative and fit within 48 bits"
 
 
 def _unix_millis_from(value: int | datetime.datetime | None, out_of_range: str) -> int | None:
-    """Convert ``value`` to a Unix-epoch millisecond int: ``None`` passes through (the backend
+    """Convert ``value`` to a Unix-epoch millisecond int: ``None`` passes through (the extension
     defaults that to the current time), a ``datetime.datetime`` is converted in exact integer
     arithmetic and truncated to the millisecond — no float in between, so a time 0.9 ms into a
     millisecond stays in it rather than rounding into the next — and an ``int`` (a raw
@@ -114,10 +78,10 @@ def _unix_millis_from(value: int | datetime.datetime | None, out_of_range: str) 
     door below so a caller can pass either a ``datetime.datetime`` or a raw millisecond count
     interchangeably.
 
-    Validated here, once, rather than in each backend: anything that is not an integer or a
+    Validated here, before the extension sees it: anything that is not an integer or a
     ``datetime`` is a ``TypeError``, and an integer the core's unsigned 64-bit parameter
     cannot carry is the ``ValueError`` (``out_of_range``) the core itself raises for a
-    timestamp past its field — one exception per caller bug, on both backends.
+    timestamp past its field — one exception per caller bug.
     """
     if value is None:
         return None
@@ -138,7 +102,7 @@ def _unix_millis_from(value: int | datetime.datetime | None, out_of_range: str) 
 
 
 def _count_from(count: int) -> int:
-    """Validate a batch ``count`` once, for both backends: an integer from 0 to 4294967295,
+    """Validate a batch ``count`` before the extension sees it: an integer from 0 to 4294967295,
     the range of the core's own unsigned 32-bit batch parameter. Anything else is refused
     here rather than narrowed into a batch of some other size.
     """
@@ -154,7 +118,7 @@ def _count_from(count: int) -> int:
 def native_version() -> str:
     """Return the version of the Rust core this process actually loaded, as
     ``"major.minor.patch"`` — decoded from the same packed ``hyperuuid_version`` export
-    every other binding probes, on whichever backend :data:`BACKEND` names.
+    every other binding probes.
     """
     return _native.native_version()
 

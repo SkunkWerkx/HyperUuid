@@ -44,9 +44,9 @@ java/src/main/resources/native/
 **/.pytest_cache/
 
 # Swift
-# Native libs under swift/Sources/HyperUuidNativeLibs/NativeLibs/{rid}/ are committed, not
-# ignored — see swift/Sources/HyperUuidNativeLibs/NativeLibs/README.md for why (SwiftPM has no
-# packing step for a git-URL dependency, unlike every other registry this repo publishes to).
+# The static libraries under swift/HyperUuidCore.artifactbundle/{triple}/ are committed, not
+# ignored — SwiftPM has no packing step for a git-URL dependency, unlike every other registry
+# this repo publishes to — and only by stage-native-binaries.yml, after their provenance checks.
 **/.build/
 
 # Ruby

@@ -17,7 +17,7 @@ module HyperUuid
     RandomSourceError = HyperUuid::RandomSourceError
     TimestampOutOfRangeError = HyperUuid::TimestampOutOfRangeError
 
-    # One copy of each out-of-range message for the Fiddle and wasm backends and for the
+    # One copy of each out-of-range message for the Fiddle backend and for the
     # doors' own range check in hyperuuid.rb; the Magnus extension (rust/src/ruby_ext.rs)
     # carries the same text, and spec/native_backend_spec.rb pins that the two agree.
     V6_TIMESTAMP_OUT_OF_RANGE = "unix_millis does not fit the 60-bit v6 timestamp field"
@@ -126,16 +126,6 @@ module HyperUuid
         RandomSourceError.new("#{export}: the system random source failed")
       end
 
-      # Whether this platform has a shared library for Fiddle to dlopen at all: a known RID
-      # and the file actually present — in this install, or in the in-repo cargo build the
-      # dev loop falls back to. Backend selection (hyperuuid.rb) asks this before falling
-      # back to the WebAssembly backend, which needs neither.
-      def fiddle_library_available?
-        !library_path.nil?
-      rescue NativePlatform::UnsupportedPlatformError
-        false
-      end
-
       private
 
       # The shared library to dlopen: this install's native/{rid}/{lib}, or — the
@@ -149,6 +139,35 @@ module HyperUuid
 
         repo_build = File.expand_path(File.join(__dir__, "../../../rust/target/release", lib_name))
         File.exist?(repo_build) ? repo_build : nil
+      end
+
+      # Why Fiddle found nothing to load. A precompiled platform gem is the one install where
+      # that is by design rather than a gap: it carries only its Magnus extensions, and the
+      # Fiddle backend is reached there only by forcing it (HYPERUUID_PURE) or because none
+      # of its extensions loaded — a gem RubyGems matched to a Ruby it was not built for,
+      # such as the glibc Linux gem that `gem install` on RubyGems 3.x picks on Alpine. So
+      # that case names its fix, the universal gem, which carries every platform's library,
+      # instead of a missing path that reads like a packaging bug. Both arguments are
+      # parameters only so the specs can ask for every wording.
+      def missing_library_message(gem_platform = Gem.loaded_specs["hyperuuid"]&.platform,
+                                  forced = ENV.key?("HYPERUUID_PURE"))
+        rid, lib_name = NativePlatform.rid_and_library_name
+        missing = File.join(NATIVE_DIR, rid, lib_name)
+        if gem_platform && gem_platform.to_s != Gem::Platform::RUBY
+          reason =
+            if forced
+              "HYPERUUID_PURE forces the Fiddle backend (unset it to use the extension)"
+            else
+              "none of its extensions loads on this Ruby (#{RUBY_VERSION}, #{RUBY_PLATFORM})"
+            end
+          "hyperuuid: this #{gem_platform} platform gem carries only Magnus extensions, no " \
+            "Fiddle library, and #{reason}. The universal gem has the Fiddle backend for every " \
+            "platform: `gem install hyperuuid --platform ruby`, or Bundler's force_ruby_platform " \
+            "(#{missing} not found)"
+        else
+          "hyperuuid: #{missing} not found (unsupported platform, or this gem was built " \
+            "without a native library for it)"
+        end
       end
 
       # One 16-byte scratch allocation per thread, reused by every single-item call —
@@ -178,12 +197,7 @@ module HyperUuid
 
       def load_functions
         path = library_path
-        if path.nil?
-          rid, lib_name = NativePlatform.rid_and_library_name
-          raise LoadError,
-                "hyperuuid: #{File.join(NATIVE_DIR, rid, lib_name)} not found (unsupported " \
-                "platform, or this gem was built without a native library for it)"
-        end
+        raise LoadError, missing_library_message if path.nil?
 
         handle = Fiddle.dlopen(path)
         {

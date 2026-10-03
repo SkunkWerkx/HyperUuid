@@ -10,7 +10,7 @@
 //! doors and their argument checks, batch slicing) is shared byte-for-byte between backends,
 //! which is exactly what keeps them provably in agreement. Exceptions stay the package's own
 //! `HyperUuid::RandomSourceError` / `HyperUuid::TimestampOutOfRangeError`, with the same
-//! messages `lib/hyperuuid/runtime.rb` gives the Fiddle and wasm backends — the two texts
+//! messages `lib/hyperuuid/runtime.rb` gives the Fiddle backend — the two texts
 //! below are that file's `V6_TIMESTAMP_OUT_OF_RANGE` / `V7_TIMESTAMP_OUT_OF_RANGE`, and
 //! `random_source_error` is its `random_source_failure`. `HYPERUUID_PURE=1` (checked
 //! Ruby-side) keeps Fiddle.
@@ -45,8 +45,8 @@ const V6_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis does not fit the 60-bit v6 
 const V7_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis must fit within the RFC 9562 48-bit field";
 
 /// The one message every backend raises for a failed random source: the C-ABI export the
-/// call corresponds to, and nothing backend-specific — the Fiddle and wasm backends only
-/// ever see a return code, so the OS error this backend could name is left out on purpose.
+/// call corresponds to, and nothing backend-specific — the Fiddle backend only ever sees a
+/// return code, so the OS error this backend could name is left out on purpose.
 fn random_source_error(ruby: &Ruby, export: &'static str) -> Error {
     Error::new(
         exception_class(ruby, |c| c.random_source_error),

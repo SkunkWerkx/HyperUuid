@@ -299,16 +299,114 @@ computation dwarfs the one-time crossing cost either way — which, with the per
 packaging cost above, is why this stays a spike rather than a second shipped backend. See
 [`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning.
 
+The same extension is also the route to PHP in the browser, proven and documented under
+[WebAssembly](#webassembly).
+
 ## WebAssembly
 
-None today, in either direction, and this README says so rather than leaving it to the root
-README's table. Compiling *this binding* into a wasm PHP: the actively maintained build
-(WordPress Playground's `@php-wasm`) loads extensions at build time or startup only, and
-there is no indication the `FFI` extension this binding needs is available there at all.
-Running the core as wasm *inside* PHP, the way the Java, Ruby and Python bindings do: there
-is no maintained wasm engine PHP can embed, so there is nothing to stand that on.
-The root README's [WebAssembly section](../README.md#webassembly) tracks both directions for
-every binding; if either changes for PHP, this section is where it lands.
+**In the browser: proven, not shipped.** The [native extension spike](#the-native-extension-spike)
+runs inside WordPress Playground's prebuilt PHP for the browser (`@php-wasm/web`, and
+`@php-wasm/node` for node) as a side module — no custom PHP build — verified under node and in
+headless Chromium against PHP 8.5.10 (`@php-wasm/*` 3.1.56, October 2026): the version probe,
+v4, the v5 RFC 9562 vector, v7 to and from a millisecond timestamp, a 1000-UUID batch and the
+out-of-range error. It is not shipped because of what shipping it costs, not because it does
+not work: one module per supported PHP minor (each must match its PHP version exactly), a
+~4 GB Docker image in CI to build them, and a distribution channel still to choose, for a
+binding whose Composer package is FFI only. If someone asks for it, the recipe below is
+everything that was needed.
+
+What it runs on, and the two upstream problems found on the way:
+
+- **Playground's JSPI builds only.** Its Asyncify build cannot load third-party extensions.
+- **A 64-bit `zend_long` only.** Playground builds PHP with `-DZEND_ENABLE_ZVAL_LONG64
+  -D__x86_64__`, so `PHP_INT_SIZE` is 8 and millisecond timestamps are ints. On a 32-bit PHP
+  ext-php-rs does not compile ([ext-php-rs#800](https://github.com/extphprs/ext-php-rs/issues/800),
+  five one-line fixes), and the binding's `u64` millisecond arguments would not fit a PHP int
+  there anyway.
+- **Playground's `@php-wasm/compile-extension` drops four flags for Rust's C code**
+  ([wordpress-playground#4377](https://github.com/WordPress/wordpress-playground/issues/4377)):
+  without them the module fails to load with `bad export type for '__THREW__'`. The recipe
+  passes them itself. Its README's "nightly and `-Zbuild-std`" requirement is stale: stable
+  Rust (1.99 here) works.
+
+**The recipe** (Rust stable with `wasm32-unknown-emscripten`, Docker, node):
+
+1. Build Playground's extension image for each PHP minor, and copy its PHP headers out:
+
+   ```sh
+   npm i @php-wasm/compile-extension @php-wasm/node @php-wasm/universal
+   node node_modules/@php-wasm/compile-extension/cli.js --prepare-image --php-versions 8.5
+   docker cp <that image's container>:/usr/local/include/php ./php-include
+   ```
+
+2. ext-php-rs runs `php -i` and `php-config` to find the PHP it builds for, and the host PHP
+   cannot stand in for the wasm one, so give it two scripts that describe the target:
+
+   ```sh
+   # fake-php-i.sh
+   printf 'PHP Version => 8.5.10\nPHP API => 20250925\nDebug Build => no\nThread Safety => disabled\n'
+   # fake-php-config.sh — DIR is ./php-include from step 1, absolute
+   case "$1" in
+     --includes) echo "-I$DIR -I$DIR/main -I$DIR/TSRM -I$DIR/Zend -I$DIR/ext -I$DIR/ext/date/lib";;
+     --version) echo 8.5.10;; *) exit 1;; esac
+   ```
+
+3. Build the extension as a static library for the side module to wrap, from `rust/`, with
+   Emscripten's environment sourced (the toolchain the image uses is fine):
+
+   ```sh
+   SYSROOT="$EMSDK/upstream/emscripten/cache/sysroot"
+   PHP=./fake-php-i.sh PHP_CONFIG=./fake-php-config.sh \
+   BINDGEN_EXTRA_CLANG_ARGS_wasm32_unknown_emscripten="--sysroot=$SYSROOT -DZEND_ENABLE_ZVAL_LONG64 -D__x86_64__" \
+   CFLAGS_wasm32_unknown_emscripten="-fPIC -DZEND_ENABLE_ZVAL_LONG64 -D__x86_64__ -sSUPPORT_LONGJMP=wasm -fwasm-exceptions" \
+   RUSTFLAGS="-C relocation-model=pic -C panic=abort" \
+   cargo rustc --release --target wasm32-unknown-emscripten --crate-type staticlib --features php
+   ```
+
+   Not `EXT_PHP_RS_STATIC_EXT` — that is for linking into PHP itself, not a side module.
+
+4. Wrap it as a side module. The extension directory needs only a `config.m4` and an empty C
+   file, since `get_module` comes from the Rust archive:
+
+   ```m4
+   PHP_ARG_ENABLE([hyperuuid], [whether to enable hyperuuid], [AS_HELP_STRING([--enable-hyperuuid], [Enable hyperuuid])], [no])
+   if test "$PHP_HYPERUUID" != "no"; then
+     PHP_NEW_EXTENSION([hyperuuid], [hyperuuid_stub.c], [$ext_shared])
+   fi
+   ```
+
+   ```sh
+   node node_modules/@php-wasm/compile-extension/cli.js --source ./ext --name hyperuuid \
+     --php-versions 8.5 --extra-ldflags /build/libhyperuuid.a --out dist
+   ```
+
+   That writes `hyperuuid-php8.5-jspi.so` (128 KB; 50 KB gzipped) and `manifest.json`.
+
+5. Load it into the runtime and call it:
+
+   ```js
+   import { loadNodeRuntime } from '@php-wasm/node';   // or @php-wasm/web in a page
+   import { PHP } from '@php-wasm/universal';
+   const php = new PHP(await loadNodeRuntime('8.5', {
+     emscriptenOptions: { processId: 1 },
+     extensions: [{ source: { format: 'manifest', manifestUrl: 'dist/manifest.json' } }],
+   }));
+   const r = await php.run({ code: '<?php echo bin2hex(hyperuuid_native_new_v4());' });
+   ```
+
+   The functions are the spike's `hyperuuid_native_*` raw-byte API; a browser rollout would
+   wrap them the way `Uuid`/`HyperUuid` wrap the FFI calls.
+
+Rolling it out would mean a CI job per PHP minor (steps 1–5, about ten minutes each cold, then
+the same calls in headless Chrome) and somewhere to publish the modules and manifests. The
+alternative measured beside it — a ~90-line C extension over the `no_std` archive the C# Blazor
+build already links, instead of ext-php-rs — also worked, at 12 KB a module and on 32-bit PHP
+too, but it is a second native implementation in a language the repo does not otherwise use.
+
+**Running the core as wasm inside PHP**, the way the Java binding does with GraalWasm: there
+is no maintained wasm engine PHP can embed, so there is nothing to stand that on. The root
+README's [WebAssembly section](../README.md#webassembly) tracks both directions for every
+binding.
 
 ## Verifying provenance
 

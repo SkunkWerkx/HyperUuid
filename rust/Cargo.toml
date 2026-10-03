@@ -2,6 +2,7 @@
 name = "hyperuuid"
 version = "0.6.0"
 edition = "2024"
+rust-version = "1.85"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
 license = "MIT"
 readme = "README.md"
@@ -23,7 +24,7 @@ getrandom = { version = "0.4.3", default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
 pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311"], optional = true }
 magnus = { version = "0.8", features = ["rb-sys"], optional = true }
-ext-php-rs = { version = "0.15", optional = true }
+ext-php-rs = { version = "0.16", optional = true }
 no-panic = { version = "0.1", optional = true }
 
 # `now_v7` reads the clock with `clock_gettime` itself rather than through std, whose
@@ -113,7 +114,8 @@ required-features = ["no-panic"]
 # still carried std (19,448 since), against 432,152 from a manifest that listed `["cdylib", "rlib"]`, at the same speed (v4/v5/v7
 # through the C ABI, alternating runs, within noise).
 #
-# strip drops the symbol table and debug info from what is linked, never the exports.
+# strip drops the symbol table and debug info from what is linked, never the exports, and
+# never the code: the stripped linux-x64 library's .text is byte-identical to the unstripped one.
 # Against the 0.5.0 artifacts, a stripped local build puts the linux-x64 shared library at
 # 16,632 bytes (from 19,048), the wasm32-wasip1 module at 40,617 (from 48,986) and the Linux
 # Magnus extension at 313,680 (from 390,624; a platform gem ships two). Windows already got

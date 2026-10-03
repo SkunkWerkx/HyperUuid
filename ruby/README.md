@@ -7,17 +7,15 @@
 **Ruby's own stdlib stops at `SecureRandom.uuid` — random v4, full stop. No v5, no v6, no v7. This gem is the whole RFC, with zero gem dependency beyond `Fiddle` (which ships with every Ruby install) — and it's faster than `SecureRandom.uuid` too.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
-three backends sharing one public surface. Ruby 3.3 is the floor. The fast path is a native
+two backends sharing one public surface. Ruby 3.3 is the floor. The fast path is a native
 extension built with [Magnus](https://github.com/matsadler/magnus) — the Rust core linked
 directly into the Ruby VM, auto-selected when loadable — which redefines the low-level
 `Runtime` methods in place on require; everything above them (`Uuid`, the module doors and
 their argument checks, batch slicing) is shared byte-for-byte between backends. The
-universal fallback calls the native `libhyperuuid` shared library via
-[`Fiddle`](https://docs.ruby-lang.org/en/master/Fiddle.html) — dlopen/dlsym plus a raw C-ABI
-call, no runtime bridge. A third backend runs the same core as a WebAssembly module inside
-the [`wasmtime`](https://rubygems.org/gems/wasmtime) gem, for any platform with no native
-build at all. `HyperUuid::BACKEND` reports which one is live; `HYPERUUID_PURE=1` forces
-Fiddle, `HYPERUUID_WASM=1` the wasm module — see [Backends](#backends).
+last-resort fallback, in the universal gem only, calls the native `libhyperuuid` shared
+library via [`Fiddle`](https://docs.ruby-lang.org/en/master/Fiddle.html) — dlopen/dlsym plus
+a raw C-ABI call, no runtime bridge. `HyperUuid::BACKEND` reports which one is live;
+`HYPERUUID_PURE=1` forces Fiddle for testing — see [Backends](#backends).
 
 ```ruby
 require "hyperuuid"
@@ -135,7 +133,7 @@ Slice it with `bytes[i * 16, 16]` — which is exactly what `new_v7_batch` does 
 
 `ruby benchmark/uuid_benchmark.rb` reproduces every table here and the bytes-versus-objects
 comparison above. Its first line names the backend, core version and Ruby it measured, so
-run it again under `HYPERUUID_PURE=1` or `HYPERUUID_WASM=1` for the other two backends.
+run it again under `HYPERUUID_PURE=1` for the other backend.
 
 Real numbers, `benchmark-ips` on Ruby 4.0.7, linux-x64 on an Intel Core i9-11900H (`ruby benchmark/uuid_benchmark.rb`) — not claimed, measured. With the Magnus backend (the default wherever the extension loads):
 
@@ -170,86 +168,33 @@ The multiplier is small on this backend for the best reason available: the indiv
 
 | `HyperUuid::BACKEND` | What runs | Chosen when |
 |---|---|---|
-| `:native` | the core linked into a Magnus extension | a precompiled platform gem carries an extension for this Ruby's ABI — see [Install](#install) |
-| `:fiddle` | `libhyperuuid` for this platform, `dlopen`ed through Fiddle | no extension loads; also the answer when nothing loads at all |
-| `:wasm` | the core as a `wasm32-wasip1` module inside the `wasmtime` gem | no extension and no library for this platform, and `wasmtime` is installed — see [WebAssembly (wasmtime)](#webassembly-wasmtime) |
+| `:native` | the core linked into a Magnus extension | a precompiled platform gem is installed — every one carries an extension for each Ruby it installs on; see [Install](#install) |
+| `:fiddle` | `libhyperuuid` for this platform, `dlopen`ed through Fiddle | no extension loads: the universal gem, on a Ruby or platform no platform gem covers; also the answer when nothing loads at all |
 
-Selection happens once, at `require`, in that order. Two environment variables override it:
+Selection happens once, at `require`, in that order.
 
-| Variable | Effect |
-|---|---|
-| `HYPERUUID_WASM` | forces `:wasm`; `require` raises a `LoadError` naming the gem if `wasmtime` is missing |
-| `HYPERUUID_PURE` | forces `:fiddle`, even where an extension would load |
-
-Both are read for presence, not value — set to anything at all, `0` and the empty string
-included, they force their backend — and `HYPERUUID_WASM` wins when both are set. A forced
-backend that turns out to have nothing to load does not fall through to another one: the
-first call raises, and `HyperUuid.available?` answers `false`.
+`HYPERUUID_PURE` forces `:fiddle`, even where an extension would load. It is a testing and
+diagnostic switch — CI runs the whole suite through it, and it is how to rule an extension
+problem in or out — not a setting a deployment needs. It is read for presence, not value: set
+to anything at all, `0` and the empty string included, it forces Fiddle. A forced backend that
+turns out to have nothing to load does not fall through to another one: the first call raises,
+and `HyperUuid.available?` answers `false`. That is what happens inside a platform gem, which
+carries no Fiddle library: the `LoadError` names the universal gem
+(`gem install hyperuuid --platform ruby`, or Bundler's `force_ruby_platform`), where the
+Fiddle backend lives.
 
 **Threads.** Every backend is safe to call from any number of threads. The extension runs
 under the GVL. Fiddle releases the GVL for the duration of each call, so that is the one
 backend where Ruby threads run the core truly in parallel — each through its own scratch
-buffer, with the core's v7 counter shared and atomic. The wasm backend serializes every call
-on one Mutex around one instance. `spec/hyperuuid_spec.rb`'s "concurrent callers" examples
-run under all three.
+buffer, with the core's v7 counter shared and atomic. `spec/hyperuuid_spec.rb`'s "concurrent
+callers" examples run under both.
 
 **Ractors.** Main Ractor only, on every backend: called from another Ractor the doors raise
-`Ractor::UnsafeError` (`Ractor::IsolationError` under wasm).
-
-## WebAssembly (wasmtime)
-
-The Rust core also ships inside this gem as a `wasm32-wasip1` module
-(`lib/hyperuuid/native/wasm32-wasip1/hyperuuid.wasm`), and the
-[`wasmtime`](https://rubygems.org/gems/wasmtime) gem can run it in-process. This is the
-inverse of ruby.wasm — not Ruby inside a wasm sandbox, but a wasm module inside Ruby — and
-it is the one backend that needs no shared library for the platform it runs on: no
-`dlopen`, no Magnus extension, nothing compiled against this Ruby's ABI. Everything above
-`Runtime` (`Uuid`, the module doors, batch slicing) is the same code the other two backends
-run, and `spec/wasm_backend_spec.rb` pins that the outputs agree with the Fiddle backend
-byte for byte.
-
-`wasmtime` is deliberately **not** a dependency of this gem; a consumer who wants this path
-installs it:
-
-```sh
-gem install wasmtime
-HYPERUUID_WASM=1 ruby -rhyperuuid -e 'p HyperUuid::BACKEND'   # => :wasm
-```
-
-`HYPERUUID_WASM=1` forces the backend (and raises a `LoadError` naming the gem if it is
-missing). Without it, the wasm backend is only ever chosen automatically when there is no
-native library for this platform at all — no Magnus extension and no `libhyperuuid` for the
-RID — and `wasmtime` happens to be installed. No supported platform's behavior changes just
-because this backend exists.
-
-Two things are different under the sandbox, both by necessity. A wasm guest only sees its own
-linear memory, so every buffer the core fills comes from the module's own exported `malloc`
-(the same wasi-libc allocator Rust's std uses on that target) and is read back with
-`Memory#read` — using the guest's allocator rather than a host-picked offset is what keeps a
-batch from being clobbered by the guest's next allocation. And a `Wasmtime::Store` is
-single-threaded, so every call is serialized under one Mutex around one shared instance,
-which is also what keeps the core's v7 counter (it lives inside the instance) monotonic
-across threads and batches, exactly as the one dlopen'd library does natively.
-
-Measured, same box and same session as the benchmarks above (Ruby 4.0.7, linux-x64,
-wasmtime 48.0.1), all three backends:
-
-| Call | wasmtime | Fiddle | Magnus |
-|---|---:|---:|---:|
-| `new_v4` | 1.07 µs | 1.26 µs | 234 ns |
-| `new_v7` (explicit ms) | 1.44 µs | 1.47 µs | 284 ns |
-| `new_v7_batch_bytes(1000)` | 22.6 µs | 13.6 µs | 10.4 µs |
-| `new_v7_batch(1000)` → `Uuid` objects | 233 µs | 227 µs | 210 µs |
-
-So a single call costs what it costs on Fiddle, about five times the Magnus extension, and
-the batch doors amortize it the same way they do for Fiddle: the byte batch is twice the
-native cost, and the object batch is nearly the same on all three because building the objects is
-the whole of it. The guest's own work is not where the time goes — the identical module
-fills a thousand UUIDs in 11 µs under GraalWasm's JIT — it is the crossing.
+`Ractor::UnsafeError`.
 
 ## Verifying provenance
 
-Every gem RubyGems.org serves — the universal fallback and each of the five precompiled
+Every gem RubyGems.org serves — the universal fallback and each of the seven precompiled
 platform gems — carries its own GitHub build-provenance attestation, signed directly by
 this repo's own `release.yml` (the `rubygems-publish` job attests `ruby/pkg/*.gem` right
 before the push), so plain `--repo` verifies any of them:
@@ -261,7 +206,7 @@ gh attestation verify hyperuuid-X.Y.Z-<platform>.gem --repo SkunkWerkx/HyperUuid
 
 That's the release's second layer of checking, not the only one: before any gem gets built,
 the same job verifies every native binary it packs — the Fiddle libraries, the Magnus
-extensions (one per Ruby ABI per platform) and the wasm module — against *their own*
+extensions (one per Ruby ABI per platform) — against *their own*
 attestations — those are signed from `SkunkWerkx/.github` by `hyper-build-native.yml`, so
 that check needs `--signer-repo SkunkWerkx/.github` added — and refuses to proceed on an
 unverified one. RubyGems.org has no unpublish and no
@@ -278,17 +223,16 @@ more on why `--signer-repo` is needed for some artifacts here and not others.
 gem install hyperuuid
 ```
 
-Six gems are published per release: one universal `ruby`-platform gem (Fiddle, with every
-platform's native library and the wasm module bundled) plus five precompiled Magnus platform
-gems (`x86_64-linux`, `aarch64-linux`, `arm64-darwin`, `x64-mingw-ucrt`,
-`aarch64-mingw-ucrt`) that `gem install` and `bundle` auto-select when they match. There is
-no `x86_64-darwin` platform gem: an Intel Mac installs the universal gem and runs on Fiddle
-over the bundled `osx-x64` library, as Alpine does. A platform
-gem carries, beside its extensions, the wasm module and only the native libraries its own
-platform can load — `linux-x64` and `linux-musl-x64` in `x86_64-linux`, `linux-arm64` and
-`linux-musl-arm64` in `aarch64-linux`, `osx-arm64`, `win-x64` and `win-arm64` in the other
-three — so the Fiddle and wasm backends are still there behind `HYPERUUID_PURE` and
-`HYPERUUID_WASM`. No extra configuration needed either way.
+Eight gems are published per release: seven precompiled Magnus platform gems that
+`gem install` and `bundle` auto-select when they match — `x86_64-linux-gnu`,
+`aarch64-linux-gnu`, `x86_64-linux-musl`, `aarch64-linux-musl`, `arm64-darwin`,
+`x64-mingw-ucrt` and `aarch64-mingw-ucrt` — and one universal `ruby`-platform gem. A platform gem carries its
+Magnus extensions and nothing else native: no Fiddle library at all. The universal gem is
+the last resort, Fiddle with every platform's native library bundled, and it is what
+RubyGems resolves for a Ruby the platform gems do not cover (3.3, or a Ruby newer than the
+release, such as 4.1 before a release ships for it) and on a platform no platform gem is
+built for — Intel macOS among them, which runs on Fiddle. No extra configuration needed either
+way.
 
 Selection has **two** axes here, unlike every other binding in this repo. A Magnus extension
 is bound to one Ruby minor ABI — there's no `abi3` equivalent to collapse the version axis the
@@ -296,20 +240,20 @@ way [the Python binding's](../python/) wheels do — so each platform gem is a "
 carrying one compiled extension per supported Ruby, under `lib/hyperuuid/<minor>/`, and picks
 one at `require` time:
 
-| Ruby | glibc Linux, macOS, Windows — x64 and arm64 | musl Linux (Alpine) — x64 and arm64 | anywhere else |
-| --- | --- | --- | --- |
-| 4.0 (primary) | Magnus, `BACKEND == :native` | Fiddle | wasm, if `wasmtime` is installed |
-| 3.4 (until its EOL 2028-03-31) | Magnus, `BACKEND == :native` | Fiddle | wasm, if `wasmtime` is installed |
-| 3.3 (the floor) | Fiddle | Fiddle | wasm, if `wasmtime` is installed |
+| Ruby | Linux (glibc and musl), Apple silicon macOS, Windows — x64 and arm64 | Gem installed |
+| --- | --- | --- |
+| a newer Ruby than the release covers (4.1+) | Fiddle | universal |
+| 4.0 (primary) | Magnus, `BACKEND == :native` | platform |
+| 3.4 (until its EOL 2028-03-31) | Magnus, `BACKEND == :native` | platform |
+| 3.3 (the floor, until its EOL 2027-03-31) | Fiddle | universal |
 
-What stands behind each cell: CI runs the whole suite for the first column on every push —
-Magnus on Ruby 3.4 and 4.0, Fiddle and wasm on 4.0, on all five platforms with a CI leg
-(Intel macOS has none) — and the Fiddle
-suite for the musl column inside an Alpine container. The 3.3 row is the same Fiddle code
-path, run with the Docker command under [Development](#development) (Ruby 3.3 with the
-Fiddle 1.1.2 it ships) rather than on every push. The last column — wasm chosen
-automatically because nothing native exists — has no leg of its own: CI runs the wasm
-backend's suite forced, on platforms that have native builds too.
+What stands behind each cell: CI runs the whole suite through each Magnus extension on every
+push — Ruby 3.4 and 4.0 on all seven platform-gem platforms, the two musl ones inside each
+Ruby's own Alpine image — and the Fiddle suite on Ruby 4.0 on every one of them, plus on Ruby
+3.3 inside Alpine. Intel macOS has no CI leg: its library is cross-built and tested at the
+core, and Ruby there runs the universal gem's Fiddle backend over it. Anywhere else — a platform with no native build at
+all — the universal gem installs but `HyperUuid.available?` answers `false`, and the first
+call raises `HyperUuid::NativePlatform::UnsupportedPlatformError`.
 
 The platform gems declare `required_ruby_version >= 3.4, < 4.1` precisely so RubyGems
 *declines* them outside that range and resolves the universal gem instead — a wrong-ABI
@@ -320,15 +264,13 @@ don't link libruby at all, so one can load successfully against the wrong ABI an
 later. When 3.4 goes EOL it simply leaves the matrix and its users fall back to Fiddle, which
 is exactly what the fallback is for.
 
-**musl.** RubyGems does not tell musl from glibc for these gems: on Alpine, `gem install`
-picks the `x86_64-linux` or `aarch64-linux` platform gem exactly as it does on any other
-Linux (checked with RubyGems 4.0.20 on `x86_64-linux-musl`). The Magnus extension inside is
-linked against glibc and cannot load there — `require` fails cleanly on the missing
-`ld-linux` loader — so the gem falls back to Fiddle, which loads the musl build of the core
-(`native/linux-musl-x64` or `native/linux-musl-arm64`, chosen from `RUBY_PLATFORM`) that
-both Linux platform gems carry for exactly this case. Alpine therefore works as installed,
-on the Fiddle backend and at Fiddle's speed. Releases through 0.3.0 carried no musl library: there the fallback found only the
-glibc one, and the first call raised `Fiddle::DLError`.
+**musl.** Alpine has platform gems of its own, `x86_64-linux-musl` and
+`aarch64-linux-musl`, whose extensions are built inside each Ruby's official `ruby:*-alpine`
+image and need nothing beyond musl's libc. The glibc gems name their libc too
+(`x86_64-linux-gnu`, `aarch64-linux-gnu`), which is what makes both `gem install` and
+Bundler pick the right one on every supported Ruby: next to a plain `x86_64-linux` gem,
+RubyGems before 4.0 resolves that one on Alpine instead, even under
+`--platform x86_64-linux-musl`.
 
 **Nothing in this gem is ever compiled, on any platform.** Its one dependency can be:
 `fiddle` is a bundled gem on Ruby 4.0 and a default gem on 3.3 and 3.4, and `gem install` is
@@ -355,7 +297,7 @@ forge's `ruby-magnus` action (`build-magnus.sh`), shared with every other Hyper*
 ## Development
 
 Everything below runs from a checkout, with `rust/` beside `ruby/`; none of it is needed to
-use the gem. The Fiddle and wasm backends find the in-repo builds on their own when nothing
+use the gem. The Fiddle backend finds the in-repo build on its own when nothing
 is staged under `lib/hyperuuid/native/`. The Magnus backend does not — an extension has to be
 built for the Ruby you are running and put where `require` looks — and that is what
 `rake native:dev` is for.
@@ -363,14 +305,12 @@ built for the Ruby you are running and put where `require` looks — and that is
 ```sh
 cd rust
 cargo cdylib                           # libhyperuuid, what the Fiddle backend loads
-cargo wasm-module                      # hyperuuid.wasm, what the wasm backend loads
 
 cd ../ruby
 bundle install
 bundle exec rake native:dev          # build the Magnus extension for this Ruby and stage it
 bundle exec rspec                    # BACKEND == :native
 HYPERUUID_PURE=1 bundle exec rspec   # BACKEND == :fiddle
-HYPERUUID_WASM=1 bundle exec rspec   # BACKEND == :wasm
 bundle exec rake docs:check          # every public object carries a doc comment
 ruby benchmark/uuid_benchmark.rb     # prints the backend it measured
 ```
@@ -405,8 +345,8 @@ docker run --rm -v "$PWD/..":/src:ro ruby:4.0-alpine sh -euc '
   mkdir -p /work/ruby/lib/hyperuuid/native/linux-musl-x64
   cp /src/rust/target/musl/linux-musl-x64/libhyperuuid.so /work/ruby/lib/hyperuuid/native/linux-musl-x64/
   cd /work/ruby && rm -f Gemfile.lock
-  BUNDLE_WITHOUT=wasm bundle install --quiet --prefer-local
-  HYPERUUID_PURE=1 BUNDLE_WITHOUT=wasm bundle exec rspec'
+  bundle install --quiet --prefer-local
+  HYPERUUID_PURE=1 bundle exec rspec'
 ```
 
 The floor's test is the same container on `ruby:3.3-alpine`. Bundler would compile a newer
@@ -422,6 +362,11 @@ docker run --rm -v "$PWD/..":/src:ro ruby:3.3-alpine sh -euc '
   gem install rspec -v "~> 3.13" --no-document --silent
   HYPERUUID_PURE=1 rspec'
 ```
+
+The musl Magnus extension is built the way CI builds it by the forge's
+`ruby-magnus-musl/build-magnus-musl.sh`, which runs on any machine with Docker: from the repo
+root, `build-magnus-musl.sh hyperuuid linux-musl-x64 4.0 . <dir with the musl libhyperuuid.so> <out-dir>`
+compiles it in `ruby:4.0-alpine`, then runs this suite through it on a bare copy of that image.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

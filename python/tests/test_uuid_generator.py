@@ -10,6 +10,16 @@ import hyperuuid
 RFC_TEST_VECTOR_MS = 1_645_557_742_000
 
 
+def _now_ms() -> int:
+    """The wall clock in Unix-epoch milliseconds, read the way the core reads it. Pyodide's
+    clock is whole milliseconds carried as a double nanosecond count, which can land a few
+    nanoseconds under the millisecond it means, so it is rounded there and truncated on a real
+    clock."""
+    if sys.platform == "emscripten":
+        return (time.time_ns() + 500_000) // 1_000_000
+    return time.time_ns() // 1_000_000
+
+
 def test_v4_has_version_and_variant_bits_set():
     id_ = hyperuuid.new_v4()
     assert id_.version == 4
@@ -80,9 +90,9 @@ def test_v6_is_non_deterministic_within_the_same_millisecond():
 
 
 def test_v6_current_timestamp_is_embedded():
-    before = int(time.time() * 1000)
+    before = _now_ms()
     id_ = hyperuuid.new_v6()
-    after = int(time.time() * 1000)
+    after = _now_ms()
 
     embedded_ms = int(hyperuuid.v6_timestamp(id_).timestamp() * 1000)
     assert before <= embedded_ms <= after
@@ -144,9 +154,9 @@ def test_v7_same_millisecond_batch_is_monotonically_ordered():
 
 
 def test_v7_current_timestamp_is_embedded():
-    before = int(time.time() * 1000)
+    before = _now_ms()
     id_ = hyperuuid.new_v7()
-    after = int(time.time() * 1000)
+    after = _now_ms()
 
     embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
     assert before <= embedded_ms <= after

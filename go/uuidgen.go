@@ -1,7 +1,8 @@
 // Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7
 // time-sortable) by calling the Rust core, linked into the binary as a static library through
 // cgo (backend_static.go). It builds on Linux, macOS and Windows, on amd64 and arm64, with a
-// C compiler present; anything else is a compile error that says so (unsupported.go).
+// C compiler present, and under TinyGo for WebAssembly, browser included (backend_tinygo.go);
+// anything else is a compile error that says so (unsupported.go).
 //
 // The core is linked, not loaded, so nothing here can fail to load: Available is always
 // true, and the errors these functions return are the core's own — a failed random source,

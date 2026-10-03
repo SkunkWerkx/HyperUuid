@@ -4,10 +4,8 @@ require "open3"
 
 # Cross-backend agreement: the Magnus extension and the pure-Fiddle fallback must be
 # indistinguishable through the public surface. The whole main spec suite already runs under
-# every backend (HYPERUUID_PURE=1 forces Fiddle, HYPERUUID_WASM=1 the wasmtime module); this
-# file pins the *agreement* between Magnus and Fiddle by comparing deterministic outputs
-# across a subprocess boundary, and wasm_backend_spec.rb does the same for wasm against
-# Fiddle.
+# both backends (HYPERUUID_PURE=1 forces Fiddle); this file pins the *agreement* between them
+# by comparing deterministic outputs across a subprocess boundary.
 RSpec.describe "native backend" do
   before(:all) do
     skip "Magnus extension not loaded (BACKEND=#{HyperUuid::BACKEND})" unless
@@ -17,7 +15,7 @@ RSpec.describe "native backend" do
   def fiddle_eval(expression)
     lib = File.expand_path("../lib", __dir__)
     out, status = Open3.capture2(
-      { "HYPERUUID_PURE" => "1", "HYPERUUID_WASM" => nil },
+      { "HYPERUUID_PURE" => "1" },
       RbConfig.ruby, "-I", lib, "-r", "hyperuuid", "-e", "print (#{expression})"
     )
     raise "fiddle subprocess failed: #{out}" unless status.success?
@@ -64,7 +62,7 @@ RSpec.describe "native backend" do
 
   it "raises the package's own error classes from the extension, worded as Fiddle words them" do
     # 2**60 crosses the ABI and is refused by the core, so the message comes from the
-    # extension's own Rust text — which has to match what runtime.rb gives Fiddle and wasm.
+    # extension's own Rust text — which has to match what runtime.rb gives Fiddle.
     rescued = "begin; %s; rescue HyperUuid::TimestampOutOfRangeError => e; e.message; end"
     v6 = HyperUuid::Runtime::V6_TIMESTAMP_OUT_OF_RANGE
     v7 = HyperUuid::Runtime::V7_TIMESTAMP_OUT_OF_RANGE

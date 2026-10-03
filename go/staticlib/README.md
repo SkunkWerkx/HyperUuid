@@ -2,9 +2,11 @@
 
 The core as a static library, one per platform the module links it on:
 `staticlib/{goos}_{goarch}/libhyperuuid.a` for `linux_amd64`, `linux_arm64`, `darwin_amd64`,
-`darwin_arm64`, `windows_amd64` and `windows_arm64`. `backend_static.go` names the one for
-the build's platform on its cgo link line, and that archive is everything a build takes from
-this module — no shared libraries, nothing loaded or extracted at run time.
+`darwin_arm64`, `windows_amd64` and `windows_arm64`, plus `staticlib/wasm/libhyperuuid.a`
+for TinyGo on WebAssembly. `backend_static.go` names the one for the build's platform on its
+cgo link line (`backend_tinygo.go` names `wasm` under TinyGo), and that archive is
+everything a build takes from this module — no shared libraries, nothing loaded or
+extracted at run time.
 
 They are committed because a `go get` consumer has no packing step, so what is in the git
 tree at the resolved module version is what gets linked. Only `stage-native-binaries.yml` commits them, after verifying each one's
@@ -22,6 +24,11 @@ renamed to the `libhyperuuid.a` every cgo line here uses. MinGW's linker reads M
 objects, and the archive carries its own import stub for `ProcessPrng`, Windows' entropy
 source, so nothing else goes on the link line.
 
+The `wasm` archive is the `wasm32-wasip1` build, byte for byte the one Swift's artifact
+bundle links for WebAssembly. TinyGo's browser target is a wasm32-wasi build underneath, so
+it links unchanged there too, and TinyGo's `wasm_exec.js` supplies the archive's one import,
+WASI's `random_get`, from `crypto.getRandomValues`.
+
 ## Building them yourself
 
 `go test` needs the archive for your platform. On a checkout that has none — a branch that
@@ -34,7 +41,8 @@ repository:
 ```
 
 Name the Rust target for your platform (`aarch64-unknown-linux-musl`, `x86_64-apple-darwin`,
-`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`); with no target
+`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`, or
+`wasm32-wasip1` for TinyGo); with no target
 it builds every one. A static library is compiled
 and never linked, so all of them cross-compile from any machine with `rustup`.
 
