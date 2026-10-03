@@ -357,14 +357,23 @@ jobs:
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the eight
-      # plain FFI libs go verbatim into the universal "ruby" platform gem and each Magnus
-      # extension goes verbatim into its own precompiled platform gem — so `gem push` is
-      # the last moment these bytes can still be rejected, and it is irreversible
-      # (RubyGems has no unpublish and no duplicate-version overwrite). ci.yml attested all
-      # twenty-two (eight libraries, fourteen extensions) at build time via
-      # hyper-build-native.yml; this is the gate that actually spends
-      # those attestations instead of just producing them.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ruby-wasm-*
+          path: artifacts/ruby-wasm
+          merge-multiple: false
+          run-id: ${{ needs.find-ci-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the
+      # eight plain FFI libs go verbatim into the universal "ruby" platform gem and each
+      # Magnus extension goes verbatim into its own precompiled platform gem, the two
+      # wasm32-wasip1 archives into the -wasm gem — so `gem push` is the last moment
+      # these bytes can still be rejected, and it is irreversible (RubyGems has no
+      # unpublish and no duplicate-version overwrite). ci.yml attested all twenty-two
+      # (eight libraries, fourteen extensions) at build time via hyper-build-native.yml,
+      # and the two archives via hyper-build-wasm.yml; this is the gate that actually
+      # spends those attestations instead of just producing them.
       #
       # --signer-repo is not optional. `--repo X` alone asserts BOTH that the artifact's
       # source repo is X and that the workflow which signed it lives in X. Only the first
@@ -378,7 +387,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/*; do
+          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/* \
+                   artifacts/ruby-wasm/ruby-wasm-*/*; do
             echo "::group::verify $f"
             if ! gh attestation verify "$f" \
                  --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
@@ -489,6 +499,29 @@ jobs:
               || { echo "::error::$gem carries $natives Fiddle libraries and $exts extensions; expected $want"; exit 1; }
           done
 
+
+      # The ruby.wasm companion gem: the same lib/ with no fiddle, the extconf rbwasm runs, and
+      # one wasm32-wasip1 archive per Ruby minor, gzipped. Packed last so the platform gems'
+      # count above never sees it. Keep ABIS in step with the forge's ruby_wasm_abis default
+      # and ruby/Rakefile's ABIS; the rake task aborts naming the missing file otherwise.
+      - name: Build the ruby.wasm companion gem (hyperuuid-wasm)
+        working-directory: ruby
+        shell: bash
+        run: |
+          set -euo pipefail
+          ABIS=(3.4 4.0)
+          for abi in "${ABIS[@]}"; do
+            mkdir -p "ext/hyperuuid_native/$abi"
+            cp "../artifacts/ruby-wasm/ruby-wasm-$abi/hyperuuid_native.a" "ext/hyperuuid_native/$abi/"
+          done
+          bundle exec rake wasm:gem
+          gem=(pkg/hyperuuid-wasm-*.gem)
+          files=$(tar -xOf "${gem[0]}" data.tar.gz | tar -tzf -)
+          echo "$files"
+          archives=$(grep -c '^ext/hyperuuid_native/[0-9.]*/hyperuuid_native\.a\.gz$' <<<"$files" || true)
+          natives=$(grep -c '^lib/hyperuuid/native/' <<<"$files" || true)
+          [ "$archives $natives" = "${#ABIS[@]} 0" ] && grep -qx 'ext/hyperuuid_native/extconf.rb' <<<"$files" \
+            || { echo "::error::${gem[0]} carries $archives archives and $natives Fiddle libraries; expected ${#ABIS[@]} and 0, plus the extconf"; exit 1; }
 
       # Attested BEFORE the push, over ruby/pkg/*.gem — these exact files are what `gem
       # push` uploads, with no repack in between, so the attested digest is the published

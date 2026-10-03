@@ -56,6 +56,14 @@ ruby/lib/hyperuuid/native/*/
 ruby/Gemfile.lock
 ruby/pkg/
 ruby/.yardoc/
+# The wasm32-wasip1 archives `rake wasm:gem` packs (and their .gz), staged from CI's
+# ruby-wasm-<minor> artifacts by release.yml, or by hand; never committed.
+ruby/ext/hyperuuid_native/*/
+# rbwasm's interpreter build and its output, from running ruby/wasm-smoke locally.
+ruby/wasm-smoke/Gemfile.lock
+ruby/wasm-smoke/build/
+ruby/wasm-smoke/rubies/
+ruby/wasm-smoke/*.wasm
 
 # PHP
 # Native libs under php/src/native/{rid}/ are committed, not ignored — see

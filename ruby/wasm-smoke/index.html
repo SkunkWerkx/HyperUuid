@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>HyperUuid ruby.wasm smoke test</title>
+<!-- Served beside ruby.wasm, test.rb and @ruby/wasm-wasi's dist/browser.umd.js. -->
+<script src="browser.umd.js"></script>
+</head>
+<body>
+<pre id="out">pending</pre>
+<script>
+(async () => {
+  const out = document.getElementById("out");
+  try {
+    const { DefaultRubyVM } = window["ruby-wasm-wasi"];
+    const module = await WebAssembly.compileStreaming(fetch("ruby.wasm"));
+    const { vm } = await DefaultRubyVM(module);
+    const report = vm.eval(await (await fetch("test.rb")).text()).toString();
+    const agent = vm.eval('require "js"; JS.global[:navigator][:userAgent].to_s').toString();
+    out.textContent = report + "\nok JS interop (" + agent + ")\nDONE";
+  } catch (e) {
+    out.textContent = "FAIL " + e;
+  }
+})();
+</script>
+</body>
+</html>

@@ -9,6 +9,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Ruby — in the browser, through ruby.wasm: the `hyperuuid-wasm` gem.** ruby.wasm links
+  extensions into the interpreter when `rbwasm build` makes it, so a browser app lists
+  `hyperuuid-wasm` instead of `hyperuuid` in that Gemfile and gets the same Magnus extension,
+  prebuilt for `wasm32-wasip1` for Ruby 3.4 and 4.0, with no Rust toolchain on the consumer's
+  machine. It links into the same interpreter as HyperCast's `hypercast-wasm`. CI builds each
+  minor's archive from the commit, attests it, and runs the gem packed around it under Node and
+  in headless Chrome; the release packs the published gem from those archives. Unblocked by
+  Magnus 0.8.3/0.9.2, which fixed the two bugs that kept it off WASI
+  ([magnus#186](https://github.com/matsadler/magnus/issues/186),
+  [#187](https://github.com/matsadler/magnus/issues/187)). *(RubyGems)*
+
+### Changed
+
+- **Ruby — Magnus 0.9.** The extension builds on Magnus 0.9.2 (from 0.8.2), with no change to
+  the gem's API. *(RubyGems)*
+
 ### Fixed
 
 - **Ruby — the platform gems no longer depend on `fiddle`.** They carry no library for Fiddle

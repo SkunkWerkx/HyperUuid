@@ -123,3 +123,61 @@ namespace :native do
     puts "staged #{staged} for Ruby #{RUBY_VERSION} — HyperUuid::BACKEND is now :native under this Ruby"
   end
 end
+
+# The hyperuuid-wasm companion gem: the Magnus extension for ruby.wasm, which links extensions
+# into the interpreter when the consumer runs `rbwasm build` and cannot load one at runtime. It
+# is its own gem because neither of the others can go there: the universal gem's fiddle
+# dependency fails to cross-compile and stops the build, a platform gem is never chosen for a
+# wasm target, and giving either an `extensions` entry would run extconf on every host
+# `gem install`. Same lib/ as the others, no fiddle, and ext/hyperuuid_native/extconf.rb, which
+# hands rbwasm the archive for the Ruby it is building.
+namespace :wasm do
+  # One wasm32-wasip1 archive per Ruby minor in native:gem's ABIS, built by the forge's
+  # hyper-build-wasm.yml and staged at ext/hyperuuid_native/<minor>/hyperuuid_native.a (by
+  # release.yml, or by hand from that job's artifacts). They ship gzipped: rbwasm packs every
+  # file of every gem into the interpreter, so each one rides along into the consumer's .wasm,
+  # and gzip takes it from about 3.5 MB to under 1. The extconf inflates it with Zlib.
+  #
+  # `rake wasm:gem[source]` leaves the archives out. That gem builds the extension from the
+  # crate named by HYPERUUID_RUST_DIR, which is how CI makes the archives in the first place;
+  # it is never published. `rake "wasm:gem[4.0]"` packs the named minors only (space-separated),
+  # which is how CI tests one minor's archive the way a consumer gets it.
+  task :gem, [:abis] do |_t, args|
+    require "rubygems/package"
+    require "zlib"
+
+    ext_dir = "ext/hyperuuid_native"
+    abis = args[:abis] == "source" ? [] : (args[:abis]&.split || ABIS)
+    archives = []
+    unless abis.empty?
+      staged = abis.map { |abi| "#{ext_dir}/#{abi}/hyperuuid_native.a" }
+      missing = staged.reject { |f| File.exist?(f) }
+      missing.empty? or abort "not staged: #{missing.join(', ')} — stage each Ruby minor's wasm32-wasip1 archive there first"
+      archives = staged.map do |archive|
+        # mtime 0 so the same archive always packs to the same bytes.
+        Zlib::GzipWriter.open("#{archive}.gz", Zlib::BEST_COMPRESSION) do |gz|
+          gz.mtime = 0
+          gz.write(File.binread(archive))
+        end
+        "#{archive}.gz"
+      end
+    end
+
+    spec = GEMSPEC.dup
+    spec.name = "hyperuuid-wasm"
+    spec.summary = "HyperUuid for ruby.wasm: the Magnus extension, linked in by rbwasm build"
+    spec.description = <<~DESC
+      The hyperuuid gem's Magnus extension, prebuilt for wasm32-wasip1, for a ruby.wasm
+      interpreter built with `rbwasm build`: put this gem in that Gemfile instead of hyperuuid
+      and the extension is linked into the interpreter. Same API and the same Rust core as the
+      hyperuuid gem. Not for a host Ruby, where the hyperuuid gem is the one to install.
+    DESC
+    spec.files = spec.files.grep_v(%r{\Alib/hyperuuid/native/}) + ["#{ext_dir}/extconf.rb"] + archives
+    spec.extensions = ["#{ext_dir}/extconf.rb"]
+    spec.dependencies.reject! { |dep| dep.name == "fiddle" }
+    spec.metadata["documentation_uri"] = "#{spec.homepage}/tree/master/ruby#ruby-in-the-browser"
+
+    mkdir_p "pkg"
+    Gem::Package.build(spec, false, false, "pkg/#{spec.full_name}.gem")
+  end
+end

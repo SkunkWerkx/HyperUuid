@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ruby/wasm-wasi": "2.10.1"
+  }
+}
