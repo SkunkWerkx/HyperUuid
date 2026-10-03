@@ -3,7 +3,7 @@
   "artifacts": {
     "HyperUuidCore": {
       "type": "staticLibrary",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "variants": [
         {
           "path": "x86_64-unknown-linux-gnu/libhyperuuid.a",
@@ -32,6 +32,38 @@
         {
           "path": "aarch64-swift-linux-musl/libhyperuuid.a",
           "supportedTriples": ["aarch64-swift-linux-musl"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "arm64-apple-macosx/libhyperuuid.a",
+          "supportedTriples": ["arm64-apple-macosx"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "x86_64-apple-macosx/libhyperuuid.a",
+          "supportedTriples": ["x86_64-apple-macosx"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "x86_64-unknown-windows-msvc/hyperuuid.lib",
+          "supportedTriples": ["x86_64-unknown-windows-msvc"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "aarch64-unknown-windows-msvc/hyperuuid.lib",
+          "supportedTriples": ["aarch64-unknown-windows-msvc"],
           "staticLibraryMetadata": {
             "headerPaths": ["include"],
             "moduleMapPath": "include/module.modulemap"
