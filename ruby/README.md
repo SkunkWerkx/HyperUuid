@@ -112,7 +112,7 @@ looked for, or `HyperUuid::NativePlatform::UnsupportedPlatformError` naming the 
 3. **Batch generation.** `new_v7_batch(1000)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch instead of paying per-item overhead a thousand times over.
 4. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't Ruby-only, no Ruby-only gem can offer that.
 
-The honest trade-off: this gem `dlopen`s a native library instead of being pure Ruby, so it needs a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled alongside it. If plain v4 randomness is all you need, `SecureRandom.uuid` is simpler and already in stdlib — that's a completely reasonable choice.
+The honest trade-off: this gem is native code, not pure Ruby — a precompiled extension in each platform gem, and on the universal gem a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` loaded through Fiddle — so it runs only where one of those was built. If plain v4 randomness is all you need, `SecureRandom.uuid` is simpler and already in stdlib — that's a completely reasonable choice.
 
 ## Bulk generation into bytes
 

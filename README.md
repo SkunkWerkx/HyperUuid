@@ -116,6 +116,7 @@ The cells that are not a plain ✅, and why each is deliberate:
 
 - **osx-x64 (Intel macOS): built, and tested at the core only.** There is no Intel macOS CI leg. The library is cross-compiled on the Apple silicon runner, attested, and shipped in every package exactly as before, and the Rust core's own suite runs on it there under Rosetta 2, which is why that row keeps its ✅. No binding's suite runs on Intel macOS; each still runs on Apple silicon against the same source. Ruby there installs the universal gem and runs on Fiddle, since no precompiled gem is built for it. The leg took 37 minutes against 8 on Apple silicon, for hardware Apple stopped selling in 2023 on runners GitHub retires by Fall 2027.
 - **PHP on win-arm64.** PHP has never shipped a native Windows ARM64 build, so it runs as an x64 process there regardless of host CPU and loads the win-x64 library — already exercised for real by the win-x64 leg.
+
 Three bindings link the core into the consumer's executable where they can, instead of loading a shared library at run time. Swift always does, on every platform in the table, so there is nothing to deploy beside the executable: its musl cells are Swift's static Linux SDK, which CI proves with a smoke executable built and run in Swift's own containers (that SDK ships no XCTest), and the same mechanism compiles the binding to WebAssembly; see [WebAssembly](#webassembly). A platform with no prebuilt core fails to compile. Go always does, through cgo on Linux, macOS and Windows, so a binary carries ~20 KB of core for its own platform and loads nothing; building it takes a C compiler, and `CGO_ENABLED=0` or any other target is a compile error — except WebAssembly under TinyGo, which links the same way; see [WebAssembly](#webassembly). C# does for a Native AOT publish, on every RID, so the result is one executable. Everything else — the JIT, the JVM, the interpreters — loads the shared library, as before.
 
 The musl libraries are built so that they depend on musl's libc and nothing else — the unwinder is linked statically — which is what lets them load on a bare `alpine` or `python:alpine` image with no `libgcc` installed. The glibc libraries need glibc 2.34 or newer.
@@ -323,14 +324,14 @@ That also explains why Go, C# and Swift barely move: they are already at or near
 ## Layout
 
 ```
-rust/       the core: one cdylib, twelve uuid_* exports plus hyperuuid_version, allocation-free and no_std
+rust/       the core: twelve uuid_* exports plus hyperuuid_version, allocation-free and no_std; a cdylib and nine static archives
 csharp/     the .NET 10 binding: UuidGenerator over LibraryImport, AOT smoke test, Blazor wasm on .NET 11+
 java/       the JDK 25+ binding: FFM + GraalWasm backends, Native Image smoke test
 python/     the 3.11+ binding: PyO3 native extension (abi3 wheels, Pyodide in the browser)
 swift/      the SwiftPM binding: the core linked in as a static library on every platform
 go/         the Go binding: the core linked in through cgo, and under TinyGo in the browser
 ruby/       the 3.3+ binding: Magnus extension + Fiddle fallback
-php/        the 8.2+ binding: ext-ffi
+php/        the 8.2+ binding: ext-ffi (an ext-php-rs extension spike, proven in the browser, unshipped)
 ```
 
 ## Why "Hyper"

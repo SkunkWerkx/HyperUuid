@@ -9,15 +9,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-02
+
+Three themes. *One way in*: every binding reaches the core one way per platform. Go links it
+statically through cgo on Linux, macOS and Windows and nothing else — purego, the loading cgo
+backend, the wasmtime backend and the nine embedded libraries are gone — and Swift now links
+it on macOS and Windows as well as Linux and WebAssembly, so it has no loader and nothing to
+deploy. Ruby gets Magnus platform gems for Alpine and keeps Fiddle only in the universal gem,
+as the last resort; Python and Ruby drop the wasmtime backend that reached no platform their
+native backends did not. *In the browser*: C#, Rust, Python (a Pyodide wheel on PyPI), Go
+(through TinyGo) and Swift (through a WASI shim) all run HyperUuid in a web page, and CI runs
+each in headless Chrome on every PR; PHP and Ruby are proven and documented but not shipped.
+*Smaller*: every shipped library is stripped, the Ruby platform gems carry only their own
+platform's extensions, Go's module and the Composer package lose their embedded libraries,
+and a Blazor app no longer carries a 3 MB archive it never reads. Around those, the Rust
+crate declares its minimum Rust (1.85) and gains clippy, semver and round-trip checks.
+
 ### Added
 
-- **C# and Rust in the browser, run in one on every PR.** The Blazor WebAssembly smoke app,
-  which links the `wasm32-unknown-emscripten` archive through the package's own targets file,
-  is published and loaded in headless Chrome against the archive that run built; until now it
-  was a local check. The crate gets the same for `wasm32-unknown-unknown`: `rust/browser-test`
-  depends on it the way a browser consumer does (getrandom's `wasm_js` backend switched on
-  from the consumer's side) and `wasm-pack test --headless --chrome` runs v4–v7, a batch,
-  parsing and the version export in a real browser. *(repository only)*
 - **Go — Windows links the core in, like Linux and macOS.** A cgo build on Windows now names
   `go/staticlib/windows_amd64` (or `windows_arm64`) on its link line: the same MSVC archive,
   17 KB, that the C# package links under Native AOT. MinGW's linker reads MSVC's objects, and
@@ -35,7 +44,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   v5 known answer, both batches, the SQL-order round trip and the core's version against
   `rust/Cargo.toml` in headless Chrome. Stock Go on `GOOS=js`/`wasip1` is still a compile
   error, whose name now points at TinyGo. *(`go get`)*
-
 - **Python — in the browser, under Pyodide.** A ninth wheel,
   `cp311-abi3-pyemscripten_2026_0_wasm32` (~74 KB), is the same PyO3 extension built for
   Pyodide 314.x's Emscripten target, so `await micropip.install("hyperuuid")` finds it on
@@ -50,6 +58,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   archive and runs it in headless Chrome on every PR, failing unless it exits 0; it also now
   builds and runs it as a glibc consumer on 6.4, the path a downstream package takes, which
   `swift test` inside this package does not. *(`.package(url:)`)*
+- **C# and Rust in the browser, run in one on every PR.** The Blazor WebAssembly smoke app,
+  which links the `wasm32-unknown-emscripten` archive through the package's own targets file,
+  is published and loaded in headless Chrome against the archive that run built; until now it
+  was a local check. The crate gets the same for `wasm32-unknown-unknown`: `rust/browser-test`
+  depends on it the way a browser consumer does (getrandom's `wasm_js` backend switched on
+  from the consumer's side) and `wasm-pack test --headless --chrome` runs v4–v7, a batch,
+  parsing and the version export in a real browser. *(repository only)*
 - **Rust — `rust-version = "1.85"`.** The lowest toolchain the crate builds on, edition 2024's
   own floor, now declared: an older rustc says so by name instead of failing somewhere in
   the compile, and Cargo's resolver picks dependency versions that build on it. CI checks
@@ -90,20 +105,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **PHP — the `ext-php-rs` extension spike is on ext-php-rs 0.16, and proven in the browser.**
-  0.16 replaced `PhpException::default` with `from_message`; the extension builds and loads on
-  PHP 8.5 as before. Built as a side module, the same extension runs in WordPress Playground's
-  prebuilt PHP for the browser (`@php-wasm/web`, PHP 8.5, JSPI), checked in node and headless
-  Chrome. It is not shipped — a module per PHP minor and a large build image in CI, waiting on a
-  request — and `php/README.md` now carries the whole recipe, including the two upstream issues
-  it found ([ext-php-rs#800](https://github.com/extphprs/ext-php-rs/issues/800),
-  [wordpress-playground#4377](https://github.com/WordPress/wordpress-playground/issues/4377)).
-  *(repository only)*
 - **Every shipped library is stripped.** The release profile now drops the symbol table and
-  debug info from what it links, never the exports. Against what 0.5.0 shipped, a stripped
-  local build puts the linux-x64 shared library at 16,632 bytes (from 19,048), the
-  wasm32-wasip1 module at 40,617 (from 48,986) and the Linux Magnus extension at 313,680
-  (from 390,624, and a platform gem carries two). The static libraries keep their symbols,
+  debug info from what it links, never the exports, and leaves the machine code byte-identical.
+  The linux-x64 shared library ships at 16,168 bytes (0.5.0's was 19,048); measured on local
+  builds, the wasm32-wasip1 module goes 48,986 → 40,617 and the Linux Magnus extension
+  390,624 → 313,680 (a platform gem carries two). Windows is unchanged — MSVC keeps symbols in
+  a PDB, not the DLL. The static libraries keep their symbols,
   since a consumer's linker resolves the core through them, and `cargo bench` keeps its own
   for profilers. *(every package that carries a native library)*
 - **Ruby — Magnus platform gems for Alpine, glibc gems named for their libc, and Fiddle only
@@ -134,6 +141,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `isAvailable` is always `true`. `NativeLibraryError` is deprecated and has no cases, since
   there is no load left to fail; a platform with no prebuilt core (iOS, Android, …) now fails
   to compile, with no `HyperUuidCore` module, instead of at an `#error`. *(`.package(url:)`)*
+- **PHP — the `ext-php-rs` extension spike is on ext-php-rs 0.16, and proven in the browser.**
+  0.16 replaced `PhpException::default` with `from_message`; the extension builds and loads on
+  PHP 8.5 as before. Built as a side module, the same extension runs in WordPress Playground's
+  prebuilt PHP for the browser (`@php-wasm/web`, PHP 8.5, JSPI), checked in node and headless
+  Chrome. It is not shipped — a module per PHP minor and a large build image in CI, waiting on a
+  request — and `php/README.md` now carries the whole recipe, including the two upstream issues
+  it found ([ext-php-rs#800](https://github.com/extphprs/ext-php-rs/issues/800),
+  [wordpress-playground#4377](https://github.com/WordPress/wordpress-playground/issues/4377)).
+  *(repository only)*
 
 ### Fixed
 
@@ -154,9 +170,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrade note
 
-Go has the breaking change, and it is the reason this is a minor release; Swift drops the
-`NativeLibraryError` cases (third paragraph); Python and Ruby lose an opt-in backend (last
-paragraph). The Go module now builds only under cgo, on Linux, macOS and Windows on amd64 and arm64, which takes
+Go has the breaking change, and it is the reason this is a minor release. Three smaller ones
+follow it: Swift drops the `NativeLibraryError` cases (second paragraph), Ruby renames its glibc
+platform gems (third), and Python and Ruby lose an opt-in backend (last). The Go module now builds only under cgo, on Linux, macOS and Windows on amd64 and arm64, which takes
 a C compiler where it is built: gcc or clang on Linux (`build-base` on Alpine), the Xcode
 command-line tools on macOS, MinGW-w64 gcc on Windows (llvm-mingw on arm64). A build with
 `CGO_ENABLED=0`, for stock Go's `GOOS=wasip1` or `js`, or for any other platform stops at
@@ -924,7 +940,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.2.1...v0.3.0

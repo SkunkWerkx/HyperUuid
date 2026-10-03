@@ -146,7 +146,7 @@ Default-on rather than unconditional for the crates.io consumer, the tests and t
 extensions. The artifacts this repository ships leave it out: the static libraries and the
 shared library every FFI binding loads (`cargo cdylib`, below) are all `#![no_std]`, each
 bringing the abort-on-panic handler std would otherwise supply — which takes the linux-x64
-shared library from 347 KB to 17 KB with the same exports and the same code behind them.
+shared library from 347 KB to 16 KB with the same exports and the same code behind them.
 That library is not one of the manifest's crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
 real `no_std` rlib on every target: your own machine, `wasm32-unknown-unknown`, and bare metal.
 CI builds a `default-features = false` consumer for the first two on every run, and checks the
@@ -272,6 +272,9 @@ full breakdown of which artifacts in this project are signed from which repo and
 ```sh
 cargo add hyperuuid
 ```
+
+Requires Rust 1.85 or later (`rust-version` in the manifest, edition 2024's own floor); CI
+builds the library and the `no_std` shared library on exactly that toolchain on every PR.
 
 Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't rebuild or retest anything itself — it just finds that already-green run for the tagged commit and republishes what it produced.
 
