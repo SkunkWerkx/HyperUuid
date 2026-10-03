@@ -107,7 +107,7 @@ looked for, or `HyperUuid::NativePlatform::UnsupportedPlatformError` naming the 
 
 `SecureRandom.uuid` only ever gives you a random v4 UUID — Ruby's stdlib has no built-in v5, v6, or v7 at all. If you need more than that, the choice is really "which gem":
 
-1. **Full RFC 9562 coverage, one gem, zero extra dependency.** v4/v5/v6/v7 plus batch generation plus `Nil`/`Max`, and the only thing this gem adds to your `Gemfile.lock` beyond `Fiddle` — which is Ruby's own bundled FFI layer, not a third-party C extension to compile.
+1. **Full RFC 9562 coverage, one gem, zero extra dependency.** v4/v5/v6/v7 plus batch generation plus `Nil`/`Max`, and nothing added to your `Gemfile.lock` beyond `Fiddle` — Ruby's own bundled FFI layer, not a third-party C extension to compile — and on the precompiled platform gems not even that.
 2. **No native-extension compile step.** Third-party UUID gems that go beyond v4 are typically pure Ruby or wrap a C extension compiled at install time; this gem ships its fast path as a prebuilt platform-gem extension and its fallback as a `dlopen`ed prebuilt library — either way, the gem itself compiles nothing at install time ([Install](#install) has the one caveat, which is Fiddle's own).
 3. **Batch generation.** `new_v7_batch(1000)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch instead of paying per-item overhead a thousand times over.
 4. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't Ruby-only, no Ruby-only gem can offer that.
@@ -272,13 +272,17 @@ Bundler pick the right one on every supported Ruby: next to a plain `x86_64-linu
 RubyGems before 4.0 resolves that one on Alpine instead, even under
 `--platform x86_64-linux-musl`.
 
-**Nothing in this gem is ever compiled, on any platform.** Its one dependency can be:
-`fiddle` is a bundled gem on Ruby 4.0 and a default gem on 3.3 and 3.4, and `gem install` is
-satisfied by the copy Ruby ships. Bundler resolves the newest `fiddle` on rubygems.org
-instead, and when that is newer than the one your Ruby ships — true today on 3.3 and 3.4, not
-on 4.0 — it builds Fiddle's own C extension, which takes a compiler and libffi's headers
-(`apk add build-base libffi-dev` on Alpine). Holding `fiddle` at your Ruby's version in the
-`Gemfile.lock` avoids that.
+**Nothing in this gem is ever compiled, on any platform.** The platform gems depend on nothing
+at all. The universal gem depends on `fiddle`, which can be: `fiddle` is a bundled gem on Ruby
+4.0 and a default gem on 3.3 and 3.4, and `gem install` is satisfied by the copy Ruby ships.
+Bundler resolves the newest `fiddle` on rubygems.org instead, and when that is newer than the
+one your Ruby ships — true today on 3.3 and 3.4, not on 4.0 — it builds Fiddle's own C
+extension, which takes a compiler and libffi's headers (`apk add build-base libffi-dev` on
+Alpine). That only reaches you where the universal gem installs: Ruby 3.3, Intel macOS, a
+Ruby newer than the release, or a platform with no platform gem. `bundle install
+--prefer-local` makes Bundler use the copy Ruby ships where it can (it did on Ruby 3.4's
+Bundler 2.6, not on 3.3's 2.5); otherwise install the compiler and headers. Pinning `fiddle`
+to your Ruby's version in the `Gemfile.lock` does not stop the build.
 
 Both Windows architectures get a Magnus gem. MinGW is the *only* Windows flavour `rb-sys`
 targets (`x64-mingw-ucrt` and `aarch64-mingw-ucrt`, both `supported: true` in its own

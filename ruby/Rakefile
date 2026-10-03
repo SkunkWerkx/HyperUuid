@@ -74,6 +74,11 @@ namespace :native do
     # runtime.rb's LoadError then names the universal gem, which carries every RID's library
     # and is the last resort for a Ruby or a platform these gems do not cover.
     spec.files = spec.files.grep_v(%r{\Alib/hyperuuid/native/}) + libs
+    # And so no fiddle either: with no library to dlopen, these gems never load it (runtime.rb
+    # autoloads Fiddle only for the universal gem's backend). Declaring it anyway made Bundler
+    # on Alpine compile fiddle from source — build-base and libffi-dev, or a failed install —
+    # for a gem that would never call it. The universal gem keeps the dependency.
+    spec.dependencies.reject! { |dep| dep.name == "fiddle" }
     # Narrower than the gemspec's own `>= 3.3`, deliberately: this gem is only correct on the
     # ABIs actually in the box, and every other Ruby must resolve the universal
     # "ruby"-platform gem and its Fiddle backend instead — which is exactly what RubyGems

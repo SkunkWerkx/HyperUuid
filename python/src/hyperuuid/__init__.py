@@ -134,7 +134,8 @@ def new_v5(namespace: _uuid.UUID, name: str | bytes) -> _uuid.UUID:
     The same ``(namespace, name)`` pair always produces the same UUID. ``name`` may
     be ``str`` (encoded as UTF-8) or raw ``bytes``.
 
-    :raises TypeError: if ``name`` is neither ``str`` nor ``bytes``.
+    :raises TypeError: if ``namespace`` is not a ``uuid.UUID``, or ``name`` is neither
+        ``str`` nor ``bytes``.
     """
     return _native.new_v5(namespace, name)
 

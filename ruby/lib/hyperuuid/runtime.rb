@@ -1,10 +1,15 @@
-require "fiddle"
+# Autoloaded, not required: the platform gems carry no library for Fiddle to open and do not
+# declare fiddle, so loading it eagerly would make `require "hyperuuid"` fail under Bundler
+# wherever fiddle is a bundled rather than a default gem (Ruby 4.0). It loads the first time
+# the Fiddle backend runs, and every path there goes through `functions` first, so a platform
+# gem forced onto Fiddle still gets missing_library_message rather than a bare LoadError.
+autoload :Fiddle, "fiddle"
 
 module HyperUuid
   # Fiddle plumbing for the native libhyperuuid shared library — dlopen/dlsym plus a raw
-  # C-ABI call, no runtime bridge (the same "no shim" positioning as the Swift binding's
-  # dlopen approach). Fiddle ships with every Ruby install; it's a plain gem dependency here
-  # (see hyperuuid.gemspec) rather than a third-party one — mirroring Python's
+  # C-ABI call, no runtime bridge (the same "no shim" positioning as the PHP binding's
+  # FFI and C#'s P/Invoke). Fiddle ships with every Ruby install; it's a plain gem dependency of the
+  # universal gem (see hyperuuid.gemspec) rather than a third-party one — mirroring Python's
   # zero-dependency PyO3 wheels.
   #
   # A Ruby gem's files are plain files on disk once installed, so native/{rid}/{lib} can be
@@ -63,7 +68,7 @@ module HyperUuid
 
       def new_v6_batch(count, unix_millis)
         return "" if count.zero?
-        out = Fiddle::Pointer.malloc(count * 16, Fiddle::RUBY_FREE)
+        out = buffer(count * 16)
         rc = functions[:new_v6_batch].call(unix_millis, count, out)
         case rc
         when 0 then out[0, count * 16]
@@ -88,7 +93,7 @@ module HyperUuid
 
       def new_v7_batch(count, unix_millis)
         return "" if count.zero?
-        out = Fiddle::Pointer.malloc(count * 16, Fiddle::RUBY_FREE)
+        out = buffer(count * 16)
         rc = functions[:new_v7_batch].call(unix_millis, count, out)
         case rc
         when 0 then out[0, count * 16]
@@ -175,7 +180,15 @@ module HyperUuid
       # (in HyperCast, same mechanism) as the dominant per-call cost by an order of
       # magnitude. Batches keep a per-call buffer: one malloc amortized over `count` IDs.
       def scratch
-        Thread.current[:hyperuuid_scratch] ||= Fiddle::Pointer.malloc(16, Fiddle::RUBY_FREE)
+        Thread.current[:hyperuuid_scratch] ||= buffer(16)
+      end
+
+      # Every Fiddle allocation goes through here, and loads the library first: that is what
+      # keeps a missing library reported as missing_library_message instead of as whatever
+      # touching Fiddle raises first. The scratch buffer pays for it once per thread.
+      def buffer(size)
+        functions
+        Fiddle::Pointer.malloc(size, Fiddle::RUBY_FREE)
       end
 
       # The in-place byte-order rewrites are the one shape that must copy in: the native

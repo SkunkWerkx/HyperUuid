@@ -9,6 +9,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ruby — the platform gems no longer depend on `fiddle`.** They carry no library for Fiddle
+  to open, but 0.6.0's still declared it, so Bundler on Alpine with Ruby 3.4 resolved the
+  newest `fiddle` and compiled it — or failed to, without `build-base` and `libffi-dev` — for a
+  gem that never loads it. `fiddle` is now autoloaded the first time the Fiddle backend runs
+  rather than required at load, so a platform gem never touches it, and only the universal gem
+  declares it. The README's advice for the universal gem's case is corrected: pinning
+  `fiddle` in `Gemfile.lock` does not stop the build; `bundle install --prefer-local` does on
+  Ruby 3.4's Bundler, and otherwise the compiler and headers are needed. *(RubyGems)*
+- **Python — a non-UUID where a `uuid.UUID` belongs is a `TypeError`.** `new_v5`, the
+  timestamp readers and the SQL-order conversions read the argument's `int`, so a `str` or
+  `None` there raised `AttributeError`, where the README promises a `TypeError` for every
+  wrong-typed argument. It now raises `TypeError: expected a uuid.UUID, not str`; anything
+  with an integer `int`, as before, still works. *(PyPI)*
+
 ## [0.6.0] — 2026-10-02
 
 Three themes. *One way in*: every binding reaches the core one way per platform. Go links it

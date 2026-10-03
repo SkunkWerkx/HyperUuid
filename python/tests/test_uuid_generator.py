@@ -415,3 +415,21 @@ def test_fill_fully_overwrites_a_reused_buffer():
     assert all(
         uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])).version == 7 for i in range(8)
     )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: hyperuuid.new_v5("not a uuid", "name"),
+        lambda: hyperuuid.new_v5(None, "name"),
+        lambda: hyperuuid.v6_timestamp("not a uuid"),
+        lambda: hyperuuid.v7_unix_millis(42),
+        lambda: hyperuuid.v7_to_sql_order(b"\x00" * 16),
+        lambda: hyperuuid.v6_to_sql_order(None),
+    ],
+)
+def test_a_non_uuid_argument_is_a_type_error_naming_its_type(call):
+    # Every UUID argument reads the value's `int`; something with none is the TypeError the
+    # README promises for a wrong-typed argument, not the AttributeError reading it raises.
+    with pytest.raises(TypeError, match=r"expected a uuid\.UUID, not "):
+        call()

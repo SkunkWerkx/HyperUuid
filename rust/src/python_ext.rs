@@ -20,7 +20,9 @@
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pyo3::exceptions::{PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyAttributeError, PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
+};
 use pyo3::ffi;
 use pyo3::intern;
 use pyo3::prelude::*;
@@ -95,10 +97,23 @@ fn make_uuid(py: Python<'_>, bytes: [u8; 16]) -> PyResult<Py<PyAny>> {
 
 /// Reads a `uuid.UUID`'s 16 RFC-ordered bytes back out via its `int` slot: the low 64 bits
 /// directly, the high 64 after a shift. Anything that is not an integer of at most 128
-/// bits is refused by the conversions themselves (`TypeError`, `OverflowError`).
+/// bits is refused by the conversions themselves (`TypeError`, `OverflowError`), and an
+/// argument with no `int` at all — a `str`, `None` — is a `TypeError` naming its type, as
+/// the README promises for every wrong-typed argument, rather than the `AttributeError`
+/// reading the attribute raises.
 fn uuid_bytes(value: &Bound<'_, PyAny>) -> PyResult<[u8; 16]> {
     let py = value.py();
-    let int = value.getattr(intern!(py, "int"))?;
+    let int = value.getattr(intern!(py, "int")).map_err(|err| {
+        if err.is_instance_of::<PyAttributeError>(py) {
+            let type_name = value
+                .get_type()
+                .name()
+                .map_or_else(|_| String::from("?"), |name| name.to_string());
+            PyTypeError::new_err(format!("expected a uuid.UUID, not {type_name}"))
+        } else {
+            err
+        }
+    })?;
     // SAFETY: the conversions take any object and report failure as u64::MAX with an
     // exception set, which is checked before the value is used.
     unsafe {

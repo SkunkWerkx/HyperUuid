@@ -33,7 +33,9 @@ Gem::Specification.new do |spec|
   # confirmed by hitting exactly the resulting LoadError under `bundle exec` on Ruby 4.0.6
   # before adding this line. Still zero *third-party* runtime dependencies: fiddle ships
   # with every Ruby install (rbenv/RubyGems installs it alongside the interpreter), just no
-  # longer implicitly on the load path.
+  # longer implicitly on the load path. This gemspec is the universal gem's, the one that runs
+  # on Fiddle; the precompiled platform gems drop the dependency (Rakefile, native:gem), since
+  # they carry no library for Fiddle to open.
   spec.add_dependency "fiddle"
   # The test and benchmark gems live in the Gemfile.
   spec.add_development_dependency "rake", "~> 13.0"
