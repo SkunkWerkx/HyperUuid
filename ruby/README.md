@@ -168,7 +168,7 @@ The multiplier is small on this backend for the best reason available: the indiv
 
 | `HyperUuid::BACKEND` | What runs | Chosen when |
 |---|---|---|
-| `:native` | the core linked into a Magnus extension | a precompiled platform gem is installed — every one carries an extension for each Ruby it installs on; see [Install](#install) |
+| `:native` | the core linked into a Magnus extension | a precompiled platform gem is installed — every one carries an extension for each Ruby it installs on; see [Install](#install) — or the `hyperuuid-wasm` gem is linked into a ruby.wasm interpreter; see [Ruby in the browser](#ruby-in-the-browser) |
 | `:fiddle` | `libhyperuuid` for this platform, `dlopen`ed through Fiddle | no extension loads: the universal gem, on a Ruby or platform no platform gem covers; also the answer when nothing loads at all |
 
 Selection happens once, at `require`, in that order.
@@ -194,8 +194,8 @@ callers" examples run under both.
 
 ## Verifying provenance
 
-Every gem RubyGems.org serves — the universal fallback and each of the seven precompiled
-platform gems — carries its own GitHub build-provenance attestation, signed directly by
+Every gem RubyGems.org serves — the universal fallback, each of the seven precompiled
+platform gems and `hyperuuid-wasm` — carries its own GitHub build-provenance attestation, signed directly by
 this repo's own `release.yml` (the `rubygems-publish` job attests `ruby/pkg/*.gem` right
 before the push), so plain `--repo` verifies any of them:
 
@@ -206,8 +206,9 @@ gh attestation verify hyperuuid-X.Y.Z-<platform>.gem --repo SkunkWerkx/HyperUuid
 
 That's the release's second layer of checking, not the only one: before any gem gets built,
 the same job verifies every native binary it packs — the Fiddle libraries, the Magnus
-extensions (one per Ruby ABI per platform) — against *their own*
-attestations — those are signed from `SkunkWerkx/.github` by `hyper-build-native.yml`, so
+extensions (one per Ruby ABI per platform), the `wasm32-wasip1` archives — against *their own*
+attestations — those are signed from `SkunkWerkx/.github` by `hyper-build-native.yml` and
+`hyper-build-wasm.yml`, so
 that check needs `--signer-repo SkunkWerkx/.github` added — and refuses to proceed on an
 unverified one. RubyGems.org has no unpublish and no
 duplicate-version overwrite, so this all happens while a bad artifact is still reversible.
@@ -223,7 +224,7 @@ more on why `--signer-repo` is needed for some artifacts here and not others.
 gem install hyperuuid
 ```
 
-Eight gems are published per release: seven precompiled Magnus platform gems that
+Nine gems are published per release. This section is about eight of them: seven precompiled Magnus platform gems that
 `gem install` and `bundle` auto-select when they match — `x86_64-linux-gnu`,
 `aarch64-linux-gnu`, `x86_64-linux-musl`, `aarch64-linux-musl`, `arm64-darwin`,
 `x64-mingw-ucrt` and `aarch64-mingw-ucrt` — and one universal `ruby`-platform gem. A platform gem carries its
@@ -232,7 +233,7 @@ the last resort, Fiddle with every platform's native library bundled, and it is 
 RubyGems resolves for a Ruby the platform gems do not cover (3.3, or a Ruby newer than the
 release, such as 4.1 before a release ships for it) and on a platform no platform gem is
 built for — Intel macOS among them, which runs on Fiddle. No extra configuration needed either
-way.
+way. The ninth, `hyperuuid-wasm`, is only for ruby.wasm; see [Ruby in the browser](#ruby-in-the-browser).
 
 Selection has **two** axes here, unlike every other binding in this repo. A Magnus extension
 is bound to one Ruby minor ABI — there's no `abi3` equivalent to collapse the version axis the
@@ -297,6 +298,57 @@ linked with LLVM and compiler-rt instead of GCC and a statically-linked libgcc, 
 keeps the shipped extension small. The build script, and the two flags that are load-bearing
 on the ARM leg (a static libunwind, and a clang-spelled `--target` for bindgen), live in the
 forge's `ruby-magnus` action (`build-magnus.sh`), shared with every other Hyper* repo.
+
+## Ruby in the browser
+
+ruby.wasm cannot load an extension at runtime. `rbwasm build` cross-compiles the extension of
+every gem in a Gemfile and links them all into the one interpreter it builds, so the browser
+gets a gem of its own: `hyperuuid-wasm`, the same library and the same Magnus extension,
+prebuilt for `wasm32-wasip1`. List it **instead of** `hyperuuid` in the Gemfile you build the
+interpreter from (the two carry the same `lib/` files):
+
+```ruby
+source "https://rubygems.org"
+
+gem "hyperuuid-wasm"
+gem "js" # JavaScript interop, which a browser app almost always wants
+
+group :development do
+  gem "ruby_wasm"
+end
+```
+
+```sh
+bundle install
+bundle exec rbwasm build --ruby-version 4.0 -o ruby.wasm
+```
+
+Load `ruby.wasm` with [`@ruby/wasm-wasi`](https://www.npmjs.com/package/@ruby/wasm-wasi)
+(`DefaultRubyVM` in a browser, `RubyVM.instantiateModule` under Node), then
+`require "/bundle/setup"` and `require "hyperuuid"` as anywhere else. `HyperUuid::BACKEND` is
+`:native`: every door, the batch and raw-bytes forms, and `new_v6`/`new_v7` with no argument,
+which read the clock through WASI.
+
+- **Ruby 3.4 and 4.0**, one archive each, the same minors the platform gems cover, picked by
+  `--ruby-version`. Any other minor stops the build with a message naming the ones the gem
+  carries. Built and tested against ruby_wasm 2.10.
+- **No Rust toolchain.** The gem's `extconf.rb` only hands rbwasm the prebuilt archive, and
+  rbwasm downloads its own wasi-sdk. The first `rbwasm build` compiles Ruby itself and takes
+  15–20 minutes; later builds reuse it.
+- **Static linking only,** into ruby.wasm's default `wasm32-unknown-wasip1` interpreter.
+  rbwasm's dynamic-linking build (a pic target, for the component model) is not supported.
+- **Size.** rbwasm packs every gem's files into the interpreter, the archives included, so the
+  gem adds about 2 MB to `ruby.wasm` (both archives are gzipped).
+- **With HyperCast.** `hypercast-wasm` links into the same interpreter. Every Rust extension
+  that carries std defines a few of the same symbols (`rust_eh_personality`, which ruby.wasm's
+  own wasi-vfs defines too, rb-sys's `ruby_abi_version`, and one of std's), and both gems
+  rename them to names of their own when CI builds the archive, which also fails if a newer
+  Rust starts exporting another.
+
+What stands behind it: CI builds each minor's archive from the commit, packs the gem the way
+it ships, links it into a fresh interpreter and runs [`wasm-smoke/test.rb`](wasm-smoke/test.rb)
+under Node and in headless Chrome (the forge's `hyper-build-wasm.yml`). The published gem is
+packed around those attested archives.
 
 ## Development
 

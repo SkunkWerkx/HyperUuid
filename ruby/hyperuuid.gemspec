@@ -2,7 +2,7 @@ Gem::Specification.new do |spec|
   spec.name = "hyperuuid"
   # Kept in lockstep with HyperUuid::VERSION (lib/hyperuuid.rb) and rust/Cargo.toml by the
   # prepare-release workflow, which rewrites all three together.
-  spec.version = "0.6.0"
+  spec.version = "0.6.1"
   spec.summary = "RFC 9562 UUID v4/v5/v6/v7 generation over a native Rust core, shipped prebuilt"
   spec.description = <<~DESC
     RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with

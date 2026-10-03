@@ -1,0 +1,11 @@
+# The Gemfile handed to `rbwasm build` by the forge's hyper-build-wasm.yml: the companion gem
+# unpacked from the .gem that `rake wasm:gem` packs (the workflow sets both variables), and
+# the js gem a browser consumer would almost always add beside it.
+source "https://rubygems.org"
+
+gem ENV.fetch("WASM_GEM_NAME"), path: ENV.fetch("WASM_GEM_DIR")
+gem "js", "2.10.1"
+
+group :development do
+  gem "ruby_wasm", "2.10.1"
+end

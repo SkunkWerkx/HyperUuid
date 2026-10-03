@@ -86,15 +86,25 @@ jobs:
   # Architecture), so it's built on every PR too, not just at release time.
   build-wasm:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
+    # Handed down for the same reason as build-native's: the ruby.wasm job attests the
+    # archives the companion gem ships.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     with:
       crate: hyperuuid
       project: HyperUuid
       # Every browser target runs in headless Chrome, not just built: the Blazor smoke app
       # linking the archive above, the crate itself for wasm32-unknown-unknown, and the Go
-      # binding compiled by TinyGo with this commit's wasm32-wasip1 archive linked in.
+      # binding compiled by TinyGo with this commit's wasm32-wasip1 archive linked in. And
+      # the Magnus extension, built for each Ruby minor the -wasm gem carries, linked into a
+      # ruby.wasm interpreter and run under Node and in headless Chrome; those archives are
+      # uploaded as ruby-wasm-{minor} for release.yml.
       blazor_check: csharp/HyperUuid.WasmSmokeTest/check.sh
       rust_browser_test: rust/browser-test
       go_tinygo_smoke: go/internal/tinygosmoke
+      ruby_wasm_smoke: ruby/wasm-smoke
 
   # The nine PyPI wheels, on every run rather than only at the tag: built by maturin,
   # installed on their own platform (the musl ones on a bare Alpine image, osx-x64 under
