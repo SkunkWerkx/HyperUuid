@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-03
+
 ### Added
 
 - **Ruby — in the browser, through ruby.wasm: the `hyperuuid-wasm` gem.** ruby.wasm links
@@ -974,7 +976,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.3.0...v0.4.0
