@@ -2,15 +2,14 @@ Gem::Specification.new do |spec|
   spec.name = "hyperuuid"
   # Kept in lockstep with HyperUuid::VERSION (lib/hyperuuid.rb) and rust/Cargo.toml by the
   # prepare-release workflow, which rewrites all three together.
-  spec.version = "0.5.0"
+  spec.version = "0.6.0"
   spec.summary = "RFC 9562 UUID v4/v5/v6/v7 generation over a native Rust core, shipped prebuilt"
   spec.description = <<~DESC
     RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
-    batch and raw-bytes forms, from one native Rust core. Three backends behind one surface,
-    selected automatically and all shipped prebuilt: a Magnus extension where a precompiled
-    platform gem matches, stdlib Fiddle everywhere else, and the same core as a WebAssembly
-    module for anyone who installs the wasmtime gem. No runtime bridge, no dependencies
-    beyond Fiddle.
+    batch and raw-bytes forms, from one native Rust core. Two backends behind one surface,
+    selected automatically and both shipped prebuilt: a Magnus extension where a precompiled
+    platform gem matches, and stdlib Fiddle everywhere else. No runtime bridge, no
+    dependencies beyond Fiddle.
   DESC
   spec.authors = ["Brian Buvinghausen"]
   spec.license = "MIT"
@@ -25,8 +24,7 @@ Gem::Specification.new do |spec|
   # and a symlink is stored *as* a symlink — `gem build` warns, and it dangles once the gem
   # is unpacked somewhere else entirely. Same reason rust/ and python/ carry their own.
   #
-  # native/*/* is exactly the staged binaries, one directory per RID plus wasm32-wasip1 —
-  # not native/README.md, the placeholder that only keeps the directory in a fresh checkout.
+  # native/*/* is exactly the staged binaries, one directory per RID — not native/README.md, the placeholder that only keeps the directory in a fresh checkout.
   spec.files = Dir["lib/**/*.rb"] + Dir["lib/hyperuuid/native/*/*"] + ["README.md", "LICENSE"]
   spec.require_paths = ["lib"]
 
@@ -37,11 +35,7 @@ Gem::Specification.new do |spec|
   # with every Ruby install (rbenv/RubyGems installs it alongside the interpreter), just no
   # longer implicitly on the load path.
   spec.add_dependency "fiddle"
-  # wasmtime — the engine behind the WebAssembly backend (lib/hyperuuid/wasm_runtime.rb) —
-  # is deliberately absent here. It is never a dependency of this gem, and it is not a
-  # development dependency either: it lives in the Gemfile's own `:wasm` group, so CI can
-  # install it only where the wasm suite actually runs. See the Gemfile, which also holds
-  # the test and benchmark gems.
+  # The test and benchmark gems live in the Gemfile.
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "yard", "~> 0.9"
 

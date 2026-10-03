@@ -87,6 +87,21 @@
     <WasmOptConfigurationFlags Include="--translate-to-exnref" Exclude="@(WasmOptConfigurationFlags)" />
   </ItemGroup>
 
+  <!-- The archive is linked by the path above, and nothing else is supposed to touch it. But
+       restore resolves runtimes/browser-wasm/nativeassets/ as a copy-local native asset for
+       this RID, so without this the 3 MB archive was copied into bin/ and the publish root of
+       every Blazor WebAssembly consumer, never served and never read. Taken back out of
+       @(NativeCopyLocalItems), which is where restore puts it, before anything copies it.
+       Ungated by target framework: below .NET 11 it is not linked either. -->
+  <Target Name="_HyperUuidDropWasmArchiveFromCopyLocal"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <ItemGroup>
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+                            Condition="'%(NativeCopyLocalItems.NuGetPackageId)' == 'HyperUuid' And '%(NativeCopyLocalItems.Filename)%(NativeCopyLocalItems.Extension)' == 'libhyperuuid.a'" />
+    </ItemGroup>
+  </Target>
+
   <!-- The other half of the gate above. A browser-wasm project below .NET 11 still restores
        against this package, but the native core is deliberately not linked into it. What
        happens next depends on the consumer's own toolchain, which is why this says it out

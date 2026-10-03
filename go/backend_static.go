@@ -1,17 +1,21 @@
-//go:build cgo && (darwin || linux) && (amd64 || arm64) && !hyperuuid_wasm && !hyperuuid_dynamic
+//go:build cgo && !tinygo && (darwin || linux || windows) && (amd64 || arm64)
 
-// This backend links libhyperuuid into the binary. It is what a cgo build gets on Linux and
-// macOS, on amd64 and arm64: the core is a static library under staticlib/{goos}_{goarch}/,
-// named on the cgo link line below, and every call is an ordinary C call to a symbol the
-// linker resolved.
+// The native backend: libhyperuuid linked into the binary. The core is a static library under
+// staticlib/{goos}_{goarch}/, named on the cgo link line below, and every call is an
+// ordinary C call to a symbol the linker resolved. Nothing is embedded, nothing is written to
+// a temp directory, nothing is loaded at run time: a binary carries the ~20 KB of the core
+// for its own platform, starts without touching the filesystem, runs from a read-only or
+// `scratch` image, and has nothing that can fail to load.
 //
-// What that removes, compared with the backend it replaced as the default (backend_cgo.go,
-// still there behind the hyperuuid_dynamic tag): nothing is embedded, nothing is written to
-// a temp directory, nothing is dlopen'd. A binary built this way carries the 20 KB of the
-// core for its own platform instead of every platform's shared library, starts without
-// touching the filesystem, and runs where there is no writable temp directory or no
-// dynamic loader at all — a read-only container, a `scratch` image, a fully static build.
-// There is also nothing left that can fail to load: Available is always true.
+// That takes cgo, and so a C compiler wherever the module is built — gcc or clang on Linux,
+// the Xcode command-line tools on macOS, a MinGW-w64 gcc (or llvm-mingw on arm64) on
+// Windows. TinyGo compiling to WebAssembly links the same core from backend_tinygo.go — its
+// cgo cannot parse this file's per-platform #cgo lines, hence `!tinygo` above. Anything else
+// does not compile; unsupported.go says so by name. There used to be
+// three more backends — a purego one for CGO_ENABLED=0 and Windows that extracted an
+// embedded shared library to a temp file, a cgo one that loaded that library instead of
+// linking it, and a wasmtime one — and none of them reached a platform this one does not:
+// wasmtime-go itself needs cgo and ships engines only for these same platforms.
 //
 // One archive serves both C libraries on Linux. cgo has no build constraint that tells
 // glibc from musl, so there cannot be one per libc; the archive is the core built for the
@@ -19,18 +23,12 @@
 // for a decade (getrandom, and open/read/poll for the fallback). The suite runs against it
 // on Debian and on Alpine.
 //
-// Three other builds exist, and none of them changes:
+// Windows links the same MSVC archive C#'s Native AOT publish does: MinGW's linker reads
+// MSVC's COFF objects, and the archive carries its own import stub for ProcessPrng, the
+// entropy source getrandom uses there, so the link line names nothing else.
 //
-//   - CGO_ENABLED=0 — which includes every cross-compile, per Go's own default — is the
-//     purego backend (backend_purego.go): the shared library, embedded and dlopen'd. An
-//     archive cannot be linked without a C linker.
-//   - Windows is purego unconditionally; see backend_purego.go for why.
-//   - `-tags hyperuuid_dynamic` keeps cgo but loads the shared library the way this module
-//     did through 0.3.0 (backend_cgo.go), for a build that has to pick the core up at run
-//     time rather than link time.
-//
-// The archives are committed, for the reason the shared libraries are (staticlib/README.md):
-// a Go module is whatever is in the tree at the resolved version.
+// The archives are committed (staticlib/README.md): a Go module is whatever is in the tree at
+// the resolved version, with no packing step to stage them in.
 package hyperuuid
 
 /*
@@ -38,9 +36,11 @@ package hyperuuid
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/staticlib/linux_arm64/libhyperuuid.a
 #cgo darwin,amd64 LDFLAGS: ${SRCDIR}/staticlib/darwin_amd64/libhyperuuid.a
 #cgo darwin,arm64 LDFLAGS: ${SRCDIR}/staticlib/darwin_arm64/libhyperuuid.a
+#cgo windows,amd64 LDFLAGS: ${SRCDIR}/staticlib/windows_amd64/libhyperuuid.a
+#cgo windows,arm64 LDFLAGS: ${SRCDIR}/staticlib/windows_arm64/libhyperuuid.a
 #include <stdint.h>
 
-// The core's C ABI — rust/src/ffi.rs, the same thirteen exports every backend calls.
+// The core's C ABI — rust/src/ffi.rs, the thirteen exports every binding calls.
 uint32_t hyperuuid_version(void);
 int32_t uuid_new_v4(uint8_t *out_ptr);
 int32_t uuid_new_v5(const uint8_t *ns_ptr, const uint8_t *name_ptr, uint32_t name_len, uint8_t *out_ptr);
@@ -98,13 +98,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// loadBackend has nothing to load — the linker did that — so it makes the one call through
-// the ABI that every backend ends with, and cannot fail. ensureLoaded (load.go) runs it
-// exactly once.
-func loadBackend() error {
-	nativeVersion = uint32(C.hyperuuid_version())
-	return nil
-}
+// packedVersion is the core's own version, major<<16 | minor<<8 | patch, read through the
+// ABI rather than from this module, so NativeVersion reports the archive that was linked.
+func packedVersion() uint32 { return uint32(C.hyperuuid_version()) }
 
 func toGo(r C.hu_result) (uuid.UUID, int32) {
 	return *(*uuid.UUID)(unsafe.Pointer(&r.id)), int32(r.code)

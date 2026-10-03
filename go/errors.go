@@ -2,12 +2,10 @@ package hyperuuid
 
 import "errors"
 
-// ErrNativeUnavailable is returned by every function in this package when the native
-// library (or, under the hyperuuid_wasm tag, the wasm module) could not be loaded: an
-// unsupported platform, no embedded build for it, a failed extraction or dlopen, or a core
-// that does not export the ABI this binding was built against. The returned error wraps
-// this one around the specific reason, so test with errors.Is. The outcome is decided once
-// per process; Available and LoadError probe it without generating anything.
+// ErrNativeUnavailable is never returned: the core is linked into the binary, so there is no
+// load that can fail.
+//
+// Deprecated: kept only so code that tests for it keeps compiling.
 var ErrNativeUnavailable = errors.New("hyperuuid: native library unavailable")
 
 // ErrRandomSource is returned when the native random source fails (return code 1 from

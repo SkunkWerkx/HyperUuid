@@ -1,11 +1,7 @@
-//go:build cgo && (darwin || linux) && !hyperuuid_wasm
-
 package hyperuuid
 
 // The README's zero-allocation claims, held as tests rather than as a benchmark somebody
-// has to remember to read. cgo backend only (the build tag is backend_cgo.go's own): the
-// by-value shims are what make these zero, and neither purego's trampoline nor
-// wasmtime-go's argument boxing can make the same promise.
+// has to remember to read. The by-value shims in backend_static.go are what make these zero.
 
 import (
 	"testing"

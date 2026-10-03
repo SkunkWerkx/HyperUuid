@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 # Builds the wasm staticlib, publishes this Blazor app, serves it, loads it in headless
 # Chromium and requires the page to report PASS. Exits non-zero on anything else.
-#   Needs: rustup target wasm32-unknown-emscripten, emsdk on PATH, the .NET wasm-tools
-#   workload, and chromium (CHROMIUM=/path/to/browser to override).
+#   Needs: the .NET wasm-tools workload and chromium or Chrome (CHROMIUM=/path/to/browser to
+#   override); plus rustup target wasm32-unknown-emscripten and emsdk on PATH, unless
+#   STATICLIB names an already-built libhyperuuid.a to use instead — which is how CI runs it,
+#   with the archive hyper-build-wasm.yml just built.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$here/../.."
-chromium="${CHROMIUM:-$(command -v chromium-browser || command -v chromium || command -v google-chrome)}"
+chromium="${CHROMIUM:-$(command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable)}"
 port="${PORT:-5099}"
 out="$(mktemp -d)"
 server=""
 trap '[ -z "$server" ] || kill "$server" 2>/dev/null || true; rm -rf "$out"' EXIT
 
-(cd "$repo/rust" && cargo wasm-staticlib)
+staticlib="${STATICLIB:-}"
+if [ -z "$staticlib" ]; then
+  (cd "$repo/rust" && cargo wasm-staticlib)
+  staticlib="$repo/rust/target/wasm32-unknown-emscripten/release/libhyperuuid.a"
+fi
 dest="$here/../HyperUuid/runtimes/browser-wasm/nativeassets/net10.0"
 mkdir -p "$dest"
-cp "$repo/rust/target/wasm32-unknown-emscripten/release/libhyperuuid.a" "$dest/"
+cp "$staticlib" "$dest/libhyperuuid.a"
 
 (cd "$here" && dotnet publish -c Release -o "$out/app")
 (cd "$out/app/wwwroot" && exec python3 -m http.server "$port" >/dev/null 2>&1) &

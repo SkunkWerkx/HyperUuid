@@ -95,9 +95,13 @@ support is target-specific, not universal —
   that feature itself — `getrandom`'s own guidance is that libraries shouldn't, since it
   bloats every consumer's `Cargo.lock` and can break non-web wasm targets that happen to
   share this dependency — so it's a decision left where it belongs, on your side.
+  `v7::now_v7` is not compiled for wasm32 — a browser has no OS clock to read it from — so
+  pass the time in yourself: `v7::new_v7(js_sys::Date::now() as u64)`. `rust/browser-test/`
+  is exactly this setup, and CI runs it in headless Chrome on every PR (`wasm-pack test
+  --headless --chrome` there).
 
-One wasm build of this crate is not left to the consumer, because four bindings in this repo
-ship it: the `cdylib` for `wasm32-wasip1`, built from inside this directory so that
+One wasm build of this crate is not left to the consumer, because the Java binding in this
+repo ships it: the `cdylib` for `wasm32-wasip1`, built from inside this directory so that
 `.cargo/config.toml` applies —
 
 ```sh
@@ -111,9 +115,8 @@ wasi-libc by way of std's allocator, and a `no_std` module does not link wasi-li
 That config adds two linker flags for this target only, `--export=malloc` and
 `--export=free`, so the module's exports are the twelve `uuid_*` functions and
 `hyperuuid_version` from `ffi.rs` plus wasi-libc's allocator. A wasm host cannot hand this library a pointer into its own
-memory, so every embedder — GraalWasm inside the Java binding, wasmtime inside the Ruby,
-Python and Go ones — asks the guest for the buffer it will fill and reads the result back
-out of the exported `memory`. The exported allocator is what makes that safe: dlmalloc
+memory, so every embedder — GraalWasm inside the Java binding here — asks the guest for the
+buffer it will fill and reads the result back out of the exported `memory`. The exported allocator is what makes that safe: dlmalloc
 claims the tail of the initial linear memory on its first use, so a host-chosen offset past
 the data segments is not free, and a batch written there was observed corrupted by the next
 allocation. The module imports five `wasi_snapshot_preview1` functions (`random_get`, plus
@@ -143,7 +146,7 @@ Default-on rather than unconditional for the crates.io consumer, the tests and t
 extensions. The artifacts this repository ships leave it out: the static libraries and the
 shared library every FFI binding loads (`cargo cdylib`, below) are all `#![no_std]`, each
 bringing the abort-on-panic handler std would otherwise supply — which takes the linux-x64
-shared library from 347 KB to 19 KB with the same exports and the same code behind them.
+shared library from 347 KB to 17 KB with the same exports and the same code behind them.
 That library is not one of the manifest's crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
 real `no_std` rlib on every target: your own machine, `wasm32-unknown-unknown`, and bare metal.
 CI builds a `default-features = false` consumer for the first two on every run, and checks the
@@ -182,6 +185,19 @@ cargo build --release --example no_panic --features no-panic
 
 The proof needs optimization, so build it with `--release`. A debug build fails the link for
 most of the functions, because the checks the optimizer would have proven dead are still in.
+
+To run the same proof from your own crate, turn on fat LTO in its release profile. Cargo
+ignores a dependency's profile, so a consumer's stock `--release` build compiles this crate,
+`getrandom` and `sha1` separately, leaves the panic paths across those boundaries in, and
+fails the link for the generators; thin LTO and `codegen-units = 1` are not enough:
+
+```toml
+[dependencies]
+hyperuuid = { version = "0.6", features = ["no-panic"] }
+
+[profile.release]
+lto = true
+```
 
 `v7::now_v7` reads the clock with `clock_gettime` on Unix rather than through std, whose
 `SystemTime::now` unwraps that call; an unreadable clock is `TimestampOutOfRange` instead. On

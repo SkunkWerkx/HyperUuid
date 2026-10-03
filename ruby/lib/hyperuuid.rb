@@ -5,12 +5,11 @@ require_relative "hyperuuid/native_platform"
 require_relative "hyperuuid/runtime"
 
 # RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation from one
-# Rust core, reached through whichever of three backends this install can load: the core
+# Rust core, reached through whichever of two backends this install can load: the core
 # linked straight into a Magnus native extension (shipped precompiled in the platform gems),
-# the native libhyperuuid shared library called through Fiddle (the universal gem bundles
-# one per supported platform, picked by HyperUuid::NativePlatform), or the same core as a
-# WebAssembly module inside the wasmtime gem. No runtime bridge in any of them, and nothing
-# compiled at install time. HyperUuid::BACKEND names the one that loaded; the selection logic
+# or the native libhyperuuid shared library called through Fiddle (the universal gem bundles
+# one per supported platform, picked by HyperUuid::NativePlatform). No runtime bridge in
+# either, and nothing compiled at install time. HyperUuid::BACKEND names the one that loaded; the selection logic
 # is at the bottom of this file.
 #
 # The doors below — with Uuid, Namespaces and the two exception classes — are the public
@@ -19,7 +18,7 @@ require_relative "hyperuuid/runtime"
 module HyperUuid
   # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v6/v7) the
   # rest of this module generates.
-  VERSION = "0.5.0"
+  VERSION = "0.6.0"
 
   # The widest batch count, and the longest v5 name in bytes, the native ABI carries (a u32).
   # (The millisecond count is a u64; unix_millis_from refuses anything wider.)
@@ -62,7 +61,7 @@ module HyperUuid
   # before the epoch included) or past 64 bits — is the same TimestampOutOfRangeError, with
   # the same +out_of_range+ message, the core raises for a value it can see but not embed.
   # Left to the backends those cases diverged: a RangeError from the extension, a wrapped
-  # value from Fiddle, a silently truncated one from wasm.
+  # value from Fiddle.
   #
   # The two common arguments go first and cheapest: no argument is the clock, which needs no
   # range check, and an Integer is checked by its bit length rather than against 2**64 - 1: a
@@ -185,11 +184,10 @@ module HyperUuid
   # Whether a backend actually loaded and exports the ABI this binding was built against —
   # what a consumer with a fallback of its own (SecureRandom.uuid, say) checks before
   # committing to these doors. Probed once (a native_version round trip), cached, and never
-  # raises: a missing shared library, an unsupported platform, an older core without the
-  # version export, or a wasm module the wasmtime gem cannot instantiate all answer false.
-  # The doors themselves keep their own behavior — the first call on an unavailable backend
-  # raises its precise error — and so does require-time selection under HYPERUUID_WASM=1
-  # without wasmtime; this only answers the question quietly.
+  # raises: a missing shared library, an unsupported platform, or an older core without the
+  # version export all answer false. The doors themselves keep their own behavior — the
+  # first call on an unavailable backend raises its precise error — this only answers the
+  # question quietly.
   def self.available?
     return @available unless @available.nil?
 
@@ -205,31 +203,18 @@ end
 # above in place (no delegation layer) — Fiddle's measured per-call marshalling floor drops
 # to an ordinary extension call, while everything above Runtime (Uuid, the module doors,
 # batch slicing) stays shared byte-for-byte between backends. The pure-Fiddle definitions
-# remain the universal zero-compile fallback; precompiled platform gems are how the
-# extension ships without ever making a consumer compile anything. Set HYPERUUID_PURE=1 to
-# force Fiddle.
+# remain the universal zero-compile fallback — the last resort, for a Ruby or a platform no
+# platform gem covers; precompiled platform gems are how the extension ships without ever
+# making a consumer compile anything, and they carry no Fiddle library at all.
 #
-# The third backend is WebAssembly (lib/hyperuuid/wasm_runtime.rb): the same core as a
-# wasm32-wasip1 module, run in-process by the `wasmtime` gem, which is deliberately not a
-# runtime dependency of this gem — a consumer who wants it installs it. HYPERUUID_WASM=1
-# forces it (and fails loudly if wasmtime is missing); otherwise it is only ever chosen when
-# there is no native library for this platform at all and wasmtime happens to be available,
-# so no supported platform's behavior changes by its existence.
-#
-# Both variables are read for presence, not value — set to anything at all, "0" and the
-# empty string included, they force their backend — and HYPERUUID_WASM wins when both are
-# set.
+# HYPERUUID_PURE forces Fiddle. It is a testing and diagnostic switch — CI runs the whole suite
+# through it, and it is how a suspected extension bug is ruled in or out — not a setting a
+# deployment needs. It is read for presence, not value, so "0" and the empty string force it
+# too. Inside a platform gem there is no library for it to load: BACKEND still reads :fiddle,
+# HyperUuid.available? answers false, and the first door call raises a LoadError naming the
+# universal gem, which is where the Fiddle backend lives.
 HyperUuid::BACKEND =
-  if ENV["HYPERUUID_WASM"]
-    begin
-      require "wasmtime"
-    rescue LoadError
-      raise LoadError,
-            "hyperuuid: HYPERUUID_WASM=1 needs the wasmtime gem — `gem install wasmtime` (or add it to your Gemfile)"
-    end
-    require_relative "hyperuuid/wasm_runtime"
-    :wasm
-  elsif ENV["HYPERUUID_PURE"]
+  if ENV["HYPERUUID_PURE"]
     :fiddle
   else
     # Two layouts, and both have to work. A released platform gem is a "fat" gem carrying one
@@ -243,7 +228,11 @@ HyperUuid::BACKEND =
     # other exists.
     #
     # A miss on both is not an error: it means this Ruby/platform combination has no
-    # precompiled extension, which is precisely what the Fiddle backend below is for.
+    # precompiled extension, which is precisely what the Fiddle backend below is for. A
+    # platform with no shared library either still lands on Fiddle, so the first call raises
+    # its own precise error — a "not found" LoadError naming the path, or
+    # NativePlatform::UnsupportedPlatformError naming the platform. HyperUuid.available? is
+    # the quiet way to ask.
     begin
       require "hyperuuid/#{RUBY_VERSION[/\d+\.\d+/]}/hyperuuid_native"
       :native
@@ -252,22 +241,7 @@ HyperUuid::BACKEND =
         require "hyperuuid_native"
         :native
       rescue LoadError
-        if HyperUuid::Runtime.fiddle_library_available?
-          :fiddle
-        else
-          # No shared library for this platform either. wasmtime, if the consumer has it,
-          # is the only backend left that can run here; without it, stay on Fiddle so the
-          # first call raises its own precise error — a "not found" LoadError naming the
-          # path, or NativePlatform::UnsupportedPlatformError naming the platform — rather
-          # than a vaguer one from here. HyperUuid.available? is the quiet way to ask.
-          begin
-            require "wasmtime"
-            require_relative "hyperuuid/wasm_runtime"
-            :wasm
-          rescue LoadError
-            :fiddle
-          end
-        end
+        :fiddle
       end
     end
   end

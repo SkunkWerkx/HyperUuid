@@ -232,7 +232,7 @@ pub fn now_v7() -> Result<Uuid, NewV7Error> {
 ///
 /// std's `SystemTime::now` unwraps `clock_gettime` on Unix, a panic path `#[no_panic]` can't
 /// see past, so the call is made directly and a failure comes back as `None` instead.
-#[cfg(all(feature = "std", unix))]
+#[cfg(all(feature = "std", unix, not(target_arch = "wasm32")))]
 fn system_millis() -> Option<u64> {
     // SAFETY: `timespec` is plain integers, for which all zeroes is a valid value, and
     // `clock_gettime` writes only through the pointer it is given.

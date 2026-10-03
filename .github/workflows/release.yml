@@ -106,8 +106,8 @@ jobs:
           exit 1
 
       # Go, Swift and PHP have no packing step: what is committed at the tag is what a
-      # consumer loads. The three trees hold one set of bytes per RID, staged from one
-      # ci.yml run, so loading this runner's own RID from each tree is the whole check.
+      # consumer loads or links. Each tree holds one set of bytes per RID, staged from one
+      # ci.yml run, so asking this runner's own RID from each tree is the whole check.
       - name: Committed native libraries report this version
         run: |
           set -euo pipefail
@@ -115,8 +115,7 @@ jobs:
           python3 - "$want" <<'PY'
           import ctypes, sys
           want, failed = sys.argv[1], False
-          for path in ("go/native/linux-x64/libhyperuuid.so",
-                       "php/src/native/linux-x64/libhyperuuid.so"):
+          for path in ("php/src/native/linux-x64/libhyperuuid.so",):
               try:
                   packed = ctypes.CDLL("./" + path).hyperuuid_version()
                   got = f"{packed >> 16}.{(packed >> 8) & 0xFF}.{packed & 0xFF}"
@@ -130,7 +129,7 @@ jobs:
           sys.exit(1 if failed else 0)
           PY
 
-          # Swift and Go's cgo backend link the core in on Linux rather than loading it, so a
+          # Swift and Go link the core in rather than loading it, so a
           # committed archive has to be linked into something before it can be asked. Each
           # tree's archives come from one build, so this runner's own platform answers for
           # the tree.
@@ -321,7 +320,7 @@ jobs:
   # extension; the gemspec version it actually builds against comes from this tagged
   # checkout directly. Deliberately NOT rubygems/release-gem@v1 — that action always builds
   # (and pushes) exactly one gem itself via `bundle exec rake release`, which doesn't fit
-  # "build and publish 5 gems in one job"; configure-rubygems-credentials is the same OIDC
+  # "build and publish 9 gems in one job"; configure-rubygems-credentials is the same OIDC
   # exchange release-gem uses internally, called directly so a plain `gem push` per file
   # picks up the resulting credentials.
   #
@@ -358,29 +357,20 @@ jobs:
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      # The wasm32-wasip1 module rides in every gem beside the native libraries: the
-      # universal gem's third backend (wasmtime, when the platform has no Fiddle library or
-      # HYPERUUID_WASM=1 asks for it) and the same fallback inside each platform gem.
-      - uses: actions/download-artifact@v8
-        with:
-          name: wasm-wasip1-module
-          path: artifacts/wasm-wasip1-module
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the six
+      # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the eight
       # plain FFI libs go verbatim into the universal "ruby" platform gem and each Magnus
       # extension goes verbatim into its own precompiled platform gem — so `gem push` is
       # the last moment these bytes can still be rejected, and it is irreversible
       # (RubyGems has no unpublish and no duplicate-version overwrite). ci.yml attested all
-      # ten at build time via hyper-build-native.yml; this is the gate that actually spends
+      # twenty-two (eight libraries, fourteen extensions) at build time via
+      # hyper-build-native.yml; this is the gate that actually spends
       # those attestations instead of just producing them.
       #
       # --signer-repo is not optional. `--repo X` alone asserts BOTH that the artifact's
       # source repo is X and that the workflow which signed it lives in X. Only the first
       # is true — the attest step is in hyper-build-native.yml, which physically lives in
       # the shared SkunkWerkx/.github forge, and that job_workflow_ref is what Fulcio
-      # records as the build signer. Omit it and all ten fail with a bare `verifying with
+      # records as the build signer. Omit it and every one fails with a bare `verifying with
       # issuer "sigstore.dev"` that reads like a bad signature but is only an identity
       # mismatch. Same flag, same reason as stage-native-binaries.yml's gate.
       - name: Verify build provenance of every binary about to be packed
@@ -388,7 +378,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/* artifacts/wasm-wasip1-module/*; do
+          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/*; do
             echo "::group::verify $f"
             if ! gh attestation verify "$f" \
                  --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
@@ -424,8 +414,6 @@ jobs:
             mkdir -p "$dest"
             cp "../artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
           done
-          mkdir -p lib/hyperuuid/native/wasm32-wasip1
-          cp ../artifacts/wasm-wasip1-module/hyperuuid.wasm lib/hyperuuid/native/wasm32-wasip1/
           bundle exec rake build
 
       - name: Build precompiled platform gems (Magnus)
@@ -440,13 +428,28 @@ jobs:
           # failure: a missing extension should stop the release, not silently ship a gem
           # that claims a platform it has no code for.
           #
-          # x86_64-darwin is deliberately not here. There is no Intel macOS leg to build a
-          # Magnus extension on (the forge cross-builds only the core library for osx-x64),
-          # so Ruby on an Intel Mac installs the universal gem above and runs on Fiddle over
-          # that library — the same fallback Alpine takes.
+          # Seven RIDs, one gem each: every one but osx-x64, which has no platform gem — an
+          # Intel Mac installs the universal gem and runs on Fiddle, the price of not keeping
+          # an Intel runner job for a platform Apple is retiring. The musl extensions come from
+          # the forge's musl job (built in each Ruby's Alpine image), under the same
+          # ruby-native-{rid}-{abi} names as every other leg.
+          #
+          # The glibc gems are `-linux-gnu`, not plain `-linux`. RubyGems before 4.0 (Ruby 3.4's
+          # 3.6) matches a plain `x86_64-linux` gem on Alpine ahead of `x86_64-linux-musl` —
+          # even under `gem install --platform x86_64-linux-musl` — which now that platform
+          # gems carry no Fiddle library would be a gem that cannot load. Naming the libc on
+          # both sides is what makes every supported RubyGems and Bundler pick right; Nokogiri
+          # names its gems the same way for the same reason.
+          #
+          # All eight libraries the universal gem's step staged are still under
+          # lib/hyperuuid/native/ here; native:gem leaves every one of them out of a platform
+          # gem, which carries its Magnus extensions and nothing else native. The check after
+          # the loop holds it to that.
           declare -A PLATFORMS=(
-            [linux-x64]=x86_64-linux
-            [linux-arm64]=aarch64-linux
+            [linux-x64]=x86_64-linux-gnu
+            [linux-arm64]=aarch64-linux-gnu
+            [linux-musl-x64]=x86_64-linux-musl
+            [linux-musl-arm64]=aarch64-linux-musl
             [osx-arm64]=arm64-darwin
             [win-x64]=x64-mingw-ucrt
             [win-arm64]=aarch64-mingw-ucrt
@@ -466,6 +469,24 @@ jobs:
             done
             bundle exec rake "native:gem[${PLATFORMS[$rid]}]"
             for abi in "${ABIS[@]}"; do rm -rf "lib/hyperuuid/$abi"; done
+          done
+
+          # Seven platform gems, each with its two extensions and no Fiddle library — and the
+          # universal gem with all eight libraries. A drift in the Rakefile or the gemspec
+          # glob fails the release here instead of shipping the wrong contents.
+          platform_gems=(pkg/*-*-*.gem)
+          [ "${#platform_gems[@]}" -eq "${#PLATFORMS[@]}" ] \
+            || { echo "::error::expected ${#PLATFORMS[@]} platform gems in pkg/, found: $(ls pkg)"; exit 1; }
+          for gem in pkg/*.gem; do
+            files=$(tar -xOf "$gem" data.tar.gz | tar -tzf -)
+            natives=$(grep -c '^lib/hyperuuid/native/' <<<"$files" || true)
+            exts=$(grep -c '/hyperuuid_native\.' <<<"$files" || true)
+            echo "$gem: $natives Fiddle libraries, $exts Magnus extensions"
+            # hyperuuid-X.Y.Z.gem is the universal one; a platform gem's name adds -<platform>.
+            want="0 ${#ABIS[@]}"
+            [[ "$(basename "$gem" .gem)" == *-*-* ]] || want="8 0"
+            [ "$natives $exts" = "$want" ] \
+              || { echo "::error::$gem carries $natives Fiddle libraries and $exts extensions; expected $want"; exit 1; }
           done
 
 
@@ -531,10 +552,11 @@ jobs:
           done
           rm -f served.gem
 
-  # PyPI leg: the eight wheels ci.yml built (hyper-build-wheels.yml in the forge — six
-  # desktop platforms plus the two musl ones, one abi3 wheel each), downloaded from
-  # find-ci-run's run and published unchanged. Nothing is compiled here. Each wheel was
-  # installed and called into on its own platform in that run, so a wheel that cannot be
+  # PyPI leg: the nine wheels ci.yml built (hyper-build-wheels.yml in the forge — six
+  # desktop platforms, the two musl ones and Pyodide's pyemscripten one, one abi3 wheel
+  # each), downloaded from find-ci-run's run and published unchanged. Nothing is compiled
+  # here. Each wheel was installed and called into on its own platform in that run (the
+  # Pyodide one under Node and in headless Chrome, its whole suite run in both), so a wheel that cannot be
   # installed fails a pull request rather than a release with other registries already out,
   # which is what happened to 0.4.0's osx-x64 wheel while they were still built at the tag.
   #
@@ -567,7 +589,7 @@ jobs:
 
       # The last moment these files can still be rejected: a PyPI upload is permanent, and
       # nothing below rebuilds what was downloaded. Three things are held, each a way a
-      # release could otherwise go out wrong with every job green: all eight wheels are
+      # release could otherwise go out wrong with every job green: all nine wheels are
       # here (a missing artifact would publish a release with a platform silently absent),
       # every one is named for the version being released, and every one carries build
       # provenance from that ci.yml run.
@@ -584,8 +606,8 @@ jobs:
           ls -l dist
           shopt -s nullglob
           wheels=(dist/*.whl)
-          if [ "${#wheels[@]}" -ne 8 ]; then
-            echo "::error::Expected 8 wheels from ci.yml run ${{ needs.find-ci-run.outputs.run_id }}, found ${#wheels[@]}."
+          if [ "${#wheels[@]}" -ne 9 ]; then
+            echo "::error::Expected 9 wheels from ci.yml run ${{ needs.find-ci-run.outputs.run_id }}, found ${#wheels[@]}."
             exit 1
           fi
           for wheel in "${wheels[@]}"; do

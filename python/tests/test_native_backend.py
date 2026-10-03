@@ -1,12 +1,10 @@
-"""Pins the native backend's contracts: the run loads the backend it thinks it does, the
-version probe names the core actually loaded, the fastuuid-style constructor produces objects
-indistinguishable from UUID(bytes=...)-constructed ones (the __slots__ invariant it leans
-on), and exceptions match the documented types. The file runs under ``HYPERUUID_WASM=1`` too,
-where every pin but the first holds for the wasm backend just the same."""
+"""Pins the native backend's contracts: the version probe names the core actually loaded,
+the fastuuid-style constructor produces objects indistinguishable from UUID(bytes=...)-
+constructed ones (the __slots__ invariant it leans on), and exceptions match the documented
+types."""
 
 import datetime
 import importlib.metadata
-import os
 import re
 import uuid
 from pathlib import Path
@@ -14,14 +12,6 @@ from pathlib import Path
 import pytest
 
 import hyperuuid
-
-
-def test_the_run_loads_the_backend_it_was_asked_for():
-    # The fallback is silent by design — an extension that fails to import hands over to the
-    # wasm backend whenever wasmtime is installed — so without this a broken `_native` passes
-    # the whole "native" run on the other backend and nobody finds out.
-    expected = "wasm" if os.environ.get("HYPERUUID_WASM") else "native"
-    assert hyperuuid.BACKEND == expected
 
 
 def _expected_version() -> str:
@@ -81,8 +71,8 @@ def test_exception_types_are_correct():
 
 # Every door that takes a timestamp, called with one. A timestamp no field can hold is one
 # caller bug, so it is one exception — ValueError — whether the value merely overflows the
-# field (the core's own check) or does not even fit the u64 the core takes (which used to
-# surface as PyO3's OverflowError on one backend).
+# field (the core's own check) or does not even fit the u64 the core takes (which PyO3 would
+# otherwise surface as OverflowError).
 _TIMESTAMP_DOORS = [
     hyperuuid.new_v6,
     hyperuuid.new_v7,
@@ -103,14 +93,13 @@ def test_a_timestamp_out_of_range_is_always_a_value_error(door, millis):
 @pytest.mark.parametrize("door", _TIMESTAMP_DOORS)
 @pytest.mark.parametrize("millis", [1.5, "1645557742000", b"1", object()])
 def test_a_timestamp_of_the_wrong_type_is_always_a_type_error(door, millis):
-    # The wasm backend used to coerce these through int() — 1.5 minted at millisecond 1.
     with pytest.raises(TypeError):
         door(millis)
 
 
 def test_an_empty_batch_or_fill_still_checks_its_timestamp():
     # The core checks the timestamp before it looks at the count, so "nothing to mint" is
-    # not a way to slip a bad one through — on either backend.
+    # not a way to slip a bad one through.
     with pytest.raises(ValueError):
         hyperuuid.new_v7_batch(0, 2**48)
     with pytest.raises(ValueError):

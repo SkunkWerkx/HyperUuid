@@ -16,15 +16,9 @@ import (
 // ---- The load probes -----------------------------------------------------------------
 
 func TestAvailableAndLoadErrorAgree(t *testing.T) {
-	if err := LoadError(); err != nil {
-		t.Fatalf("the embedded core should load on every CI leg: %v", err)
-	}
-	if !Available() {
-		t.Fatal("Available() is false while LoadError() is nil")
-	}
-	// Cached: the second answer is the same one, not a second probe.
+	// The core is linked in, so both are constants; this pins that they stay that way.
 	if !Available() || LoadError() != nil {
-		t.Fatal("availability flipped between probes")
+		t.Fatalf("Available() = %v, LoadError() = %v; a linked core is always available", Available(), LoadError())
 	}
 }
 
@@ -59,26 +53,6 @@ func TestNativeVersionMatchesTheCrate(t *testing.T) {
 			t.Fatal("rust/Cargo.toml not found above the test directory")
 		}
 		dir = parent
-	}
-}
-
-// A load failure can't be provoked in-process without poisoning the once-per-process
-// outcome every other test depends on, so this pins the one function that shapes it: the
-// sentinel is findable, the reason is still findable, and the message carries both.
-func TestLoadFailureWrapsErrNativeUnavailableAroundTheReason(t *testing.T) {
-	if loadFailure(nil) != nil {
-		t.Fatal("a successful load must stay nil")
-	}
-	reason := errors.New("dlopen failed: no such file")
-	err := loadFailure(reason)
-	if !errors.Is(err, ErrNativeUnavailable) {
-		t.Fatalf("got %v, want it to wrap ErrNativeUnavailable", err)
-	}
-	if !errors.Is(err, reason) {
-		t.Fatalf("got %v, want it to wrap the reason", err)
-	}
-	if want := "hyperuuid: native library unavailable: dlopen failed: no such file"; err.Error() != want {
-		t.Fatalf("got %q, want %q", err.Error(), want)
 	}
 }
 

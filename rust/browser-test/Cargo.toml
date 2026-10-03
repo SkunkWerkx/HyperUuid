@@ -1,0 +1,18 @@
+# The crate the way a browser consumer depends on it: wasm32-unknown-unknown, default
+# features, and getrandom's `wasm_js` backend switched on from the consumer's side (rust/README
+# has why the library leaves that choice to its consumer). `wasm-pack test --headless --chrome`
+# runs tests/browser.rs inside a real browser; CI does the same on every PR. Not published, and
+# not part of the crate's package: cargo leaves a nested package out of `cargo package`.
+[package]
+name = "hyperuuid-browser-test"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+hyperuuid = { path = ".." }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
+[dev-dependencies]
+js-sys = "0.3"
+wasm-bindgen-test = "0.3"

@@ -16,8 +16,7 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 
 # wasm32-wasip1 is the one target where a host cannot hand this library a pointer into its
 # own memory: a wasm guest only sees its own linear memory, so every host that embeds the
-# module (GraalWasm in the Java binding, wasmtime in the Ruby/Python/Go ones) has to ask the
-# guest for a buffer it can fill. wasi-libc's malloc/free are already linked in (Rust's std
+# module (GraalWasm in the Java binding) has to ask the guest for a buffer it can fill. wasi-libc's malloc/free are already linked in (Rust's std
 # allocator on this target is dlmalloc behind them); exporting them costs nothing and keeps
 # ffi.rs's "plain pointers, no allocator protocol" contract untouched for every native
 # platform. Linker flags rather than #[no_mangle] shims, so the C ABI surface stays exactly
@@ -73,8 +72,8 @@ rustflags = ["-C", "panic=abort"]
 # for wasm32-wasip1 (`cargo wasm-module`, below), nor for an extension feature, which have
 # their own aliases.
 cdylib = ["rustc", "--release", "--crate-type", "cdylib", "--no-default-features", "--features", "cdylib", "--config", 'profile.release.panic="abort"']
-# The hyperuuid.wasm module the wasm backends run, in target/wasm32-wasip1/release/. Built
-# with std, unlike the native library: its hosts allocate their buffers through the
+# The hyperuuid.wasm module Java's GraalWasm backend runs, in
+# target/wasm32-wasip1/release/. Built with std, unlike the native library: its hosts allocate their buffers through the
 # module's own malloc/free (the wasm32-wasip1 section above), which come from wasi-libc by
 # way of std's allocator, and a no_std module does not link wasi-libc at all.
 wasm-module = "rustc --release --crate-type cdylib --target wasm32-wasip1"

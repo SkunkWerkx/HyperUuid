@@ -1,21 +1,15 @@
 import Foundation
-
-#if canImport(HyperUuidCore)
 import HyperUuidCore
-#endif
 
 /// RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7 time-sortable) calling directly
 /// into the native `hyperuuid` core through `@convention(c)` function pointers — no runtime
 /// bridge, no cgo-style shim.
 ///
-/// On Linux and WebAssembly the core is linked into the executable, so it is always there.
-/// On macOS and Windows it is a shared library bundled with this package and opened on first
-/// use (see `NativePlatform` and `DynamicLibrary`). Every call `throws`: ``Error`` when a
-/// native call ran and failed, ``NativeLibraryError`` when the shared library couldn't be
-/// loaded — a question ``isAvailable`` answers up front, without a `do`/`catch`.
+/// The core is a static library linked into the executable on every platform this package
+/// builds for (`HyperUuidCore`, a SwiftPM binary target), so there is nothing to find, open
+/// or deploy at run time. Every call `throws` ``Error`` when a native call ran and failed.
 public enum UuidGenerator {
-    /// An error returned when a native UUID generation call fails. A library that couldn't
-    /// be loaded at all is ``NativeLibraryError`` instead.
+    /// An error returned when a native UUID generation call fails.
     public enum Error: Swift.Error, CustomStringConvertible, LocalizedError {
         /// The native random source failed; `code` is the native call's raw return code.
         case randomSourceFailure(code: Int32)
@@ -57,11 +51,10 @@ public enum UuidGenerator {
     private typealias UuidV6ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias VersionFn = @convention(c) () -> UInt32
 
-    // A class, deliberately: `loaded()` used to copy this struct — one function pointer per
-    // native export — out of the `Result` on every single call. A reference is one retain.
+    // The native exports as one table, so every door reaches them the same way. A class:
+    // a reference is one retain where a struct of function pointers would be copied.
     // Immutable once built, and C function pointers carry no state of their own.
     private final class LoadedLibrary: Sendable {
-        let origin: NativeLibraryOrigin
         let newV4: UuidNewV4Fn
         let newV5: UuidNewV5Fn
         let newV6: UuidNewV6Fn
@@ -76,13 +69,12 @@ public enum UuidGenerator {
         let v6ToRfcOrder: UuidV6ToRfcOrderFn
         let version: VersionFn
 
-        init(origin: NativeLibraryOrigin, newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
+        init(newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
              newV6: UuidNewV6Fn, v6UnixMillis: UuidV6UnixMillisFn, newV6Batch: UuidNewV6BatchFn,
              newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
              v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
              v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn,
              version: VersionFn) {
-            self.origin = origin
             self.newV4 = newV4; self.newV5 = newV5
             self.newV6 = newV6; self.v6UnixMillis = v6UnixMillis; self.newV6Batch = newV6Batch
             self.newV7 = newV7; self.v7UnixMillis = v7UnixMillis; self.newV7Batch = newV7Batch
@@ -122,87 +114,25 @@ public enum UuidGenerator {
         return UUID(uuid: bytes)
     }
 
-    // Swift initializes `static let`s lazily and exactly once, thread-safely — the same
-    // "loaded on first use" behavior the Java binding gets from its class's static
-    // initializers. A `static let` initializer can't itself `throw`, so failures are captured
-    // in a `Result` and re-surfaced as a normal `throws` from `loaded()` rather than
-    // crashing the process.
-    private static let loadResult: Result<LoadedLibrary, Swift.Error> = Result { try load() }
-
-    #if canImport(HyperUuidCore)
     // Linked in: the C declarations are the table, and there is nothing to find or open.
-    private static func load() throws -> LoadedLibrary {
-        LoadedLibrary(
-            origin: .staticallyLinked, newV4: uuid_new_v4, newV5: uuid_new_v5,
-            newV6: uuid_new_v6, v6UnixMillis: uuid_v6_unix_millis, newV6Batch: uuid_new_v6_batch,
-            newV7: uuid_new_v7, v7UnixMillis: uuid_v7_unix_millis, newV7Batch: uuid_new_v7_batch,
-            v7ToSqlOrder: uuid_v7_to_sql_order, v7ToRfcOrder: uuid_v7_to_rfc_order,
-            v6ToSqlOrder: uuid_v6_to_sql_order, v6ToRfcOrder: uuid_v6_to_rfc_order,
-            version: hyperuuid_version)
-    }
-    #else
-    // `DynamicLibrary` never closes its handle, so the function pointers resolved here stay
-    // valid for the life of the process without this holding the library object itself.
-    private static func load() throws -> LoadedLibrary {
-        let (path, origin) = try DynamicLibrary.locateBundled()
-        let library = try DynamicLibrary(path: path)
-        let newV4 = unsafeBitCast(try library.symbol("uuid_new_v4"), to: UuidNewV4Fn.self)
-        let newV5 = unsafeBitCast(try library.symbol("uuid_new_v5"), to: UuidNewV5Fn.self)
-        let newV6 = unsafeBitCast(try library.symbol("uuid_new_v6"), to: UuidNewV6Fn.self)
-        let v6UnixMillis = unsafeBitCast(
-            try library.symbol("uuid_v6_unix_millis"), to: UuidV6UnixMillisFn.self)
-        let newV6Batch = unsafeBitCast(
-            try library.symbol("uuid_new_v6_batch"), to: UuidNewV6BatchFn.self)
-        let newV7 = unsafeBitCast(try library.symbol("uuid_new_v7"), to: UuidNewV7Fn.self)
-        let v7UnixMillis = unsafeBitCast(
-            try library.symbol("uuid_v7_unix_millis"), to: UuidV7UnixMillisFn.self)
-        let newV7Batch = unsafeBitCast(
-            try library.symbol("uuid_new_v7_batch"), to: UuidNewV7BatchFn.self)
-        let v7ToSqlOrder = unsafeBitCast(
-            try library.symbol("uuid_v7_to_sql_order"), to: UuidV7ToSqlOrderFn.self)
-        let v7ToRfcOrder = unsafeBitCast(
-            try library.symbol("uuid_v7_to_rfc_order"), to: UuidV7ToRfcOrderFn.self)
-        let v6ToSqlOrder = unsafeBitCast(
-            try library.symbol("uuid_v6_to_sql_order"), to: UuidV6ToSqlOrderFn.self)
-        let v6ToRfcOrder = unsafeBitCast(
-            try library.symbol("uuid_v6_to_rfc_order"), to: UuidV6ToRfcOrderFn.self)
-        let version = unsafeBitCast(try library.symbol("hyperuuid_version"), to: VersionFn.self)
-        return LoadedLibrary(
-            origin: origin, newV4: newV4, newV5: newV5,
-            newV6: newV6, v6UnixMillis: v6UnixMillis, newV6Batch: newV6Batch,
-            newV7: newV7, v7UnixMillis: v7UnixMillis, newV7Batch: newV7Batch,
-            v7ToSqlOrder: v7ToSqlOrder, v7ToRfcOrder: v7ToRfcOrder,
-            v6ToSqlOrder: v6ToSqlOrder, v6ToRfcOrder: v6ToRfcOrder,
-            version: version)
-    }
-    #endif
+    private static let library = LoadedLibrary(
+        newV4: uuid_new_v4, newV5: uuid_new_v5,
+        newV6: uuid_new_v6, v6UnixMillis: uuid_v6_unix_millis, newV6Batch: uuid_new_v6_batch,
+        newV7: uuid_new_v7, v7UnixMillis: uuid_v7_unix_millis, newV7Batch: uuid_new_v7_batch,
+        v7ToSqlOrder: uuid_v7_to_sql_order, v7ToRfcOrder: uuid_v7_to_rfc_order,
+        v6ToSqlOrder: uuid_v6_to_sql_order, v6ToRfcOrder: uuid_v6_to_rfc_order,
+        version: hyperuuid_version)
 
+    // `throws` only so every door keeps one shape; the core is always there.
     private static func loaded() throws -> LoadedLibrary {
-        switch loadResult {
-        case .success(let l): return l
-        case .failure(let e): throw e
-        }
+        library
     }
 
-    /// Whether the native core is usable: always `true` on Linux and WebAssembly, where it
-    /// is linked into the executable; on macOS and Windows, whether the bundled shared
-    /// library loaded and exports the ABI this binding was built against — the twelve
-    /// `uuid_*` functions and `hyperuuid_version`. The probe a consumer with a fallback gates
-    /// on, so a load failure never has to be caught at a call site. Drives the same lazy,
-    /// once-only load every other call does, so it costs nothing after the first answer;
-    /// never throws and never traps, a missing resource directory included. `true` exactly
-    /// when ``nativeVersion()`` would succeed.
-    public static var isAvailable: Bool {
-        if case .success = loadResult { return true }
-        return false
-    }
-
-    /// Where the core came from — internal, for the test suite to pin that it was linked in,
-    /// or that it came out of the resource bundle rather than the build machine's
-    /// source-tree fallback.
-    static func nativeLibraryOrigin() throws -> NativeLibraryOrigin {
-        try loaded().origin
-    }
+    /// Whether the native core is usable. Always `true`: the core is linked into the
+    /// executable on every platform this package builds for, and a platform with no
+    /// prebuilt core fails to compile rather than at run time. Kept for callers that gated
+    /// on it when macOS and Windows loaded a shared library.
+    public static var isAvailable: Bool { true }
 
     /// Unix-epoch milliseconds off a `Date`, for the doors that take one. `UInt64(_:)` traps
     /// on a negative, NaN or infinite `Double`, and none of those is a caller bug worth a
@@ -576,11 +506,11 @@ public enum UuidGenerator {
 
     // MARK: - The native library itself
 
-    /// The version of the native `libhyperuuid` this process actually loaded, as
+    /// The version of the native `libhyperuuid` linked into this executable, as
     /// `major.minor.patch` — the library's own answer (`hyperuuid_version`), not this
     /// package's tag — so a caller can prove the two agree before minting the first UUID
-    /// and name the mismatch when they don't. Throws only when the library itself couldn't
-    /// load.
+    /// and name the mismatch when they don't. Never throws in practice; `throws` is kept
+    /// from when macOS and Windows loaded a shared library at run time.
     public static func nativeVersion() throws -> String {
         let packed = try loaded().version()
         return "\(packed >> 16).\(packed >> 8 & 0xFF).\(packed & 0xFF)"

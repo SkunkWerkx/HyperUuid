@@ -19,11 +19,8 @@ let package = Package(
         ),
         .target(
             name: "HyperUuid",
-            dependencies: [
-                .target(name: "HyperUuidCore", condition: .when(platforms: [.linux, .wasi]))
-            ],
-            path: "swift/Sources/HyperUuid",
-            resources: [.copy("NativeLibs")]
+            dependencies: ["HyperUuidCore"],
+            path: "swift/Sources/HyperUuid"
         ),
         .testTarget(
             name: "HyperUuidTests",

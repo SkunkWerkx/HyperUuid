@@ -9,6 +9,186 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **C# and Rust in the browser, run in one on every PR.** The Blazor WebAssembly smoke app,
+  which links the `wasm32-unknown-emscripten` archive through the package's own targets file,
+  is published and loaded in headless Chrome against the archive that run built; until now it
+  was a local check. The crate gets the same for `wasm32-unknown-unknown`: `rust/browser-test`
+  depends on it the way a browser consumer does (getrandom's `wasm_js` backend switched on
+  from the consumer's side) and `wasm-pack test --headless --chrome` runs v4–v7, a batch,
+  parsing and the version export in a real browser. *(repository only)*
+- **Go — Windows links the core in, like Linux and macOS.** A cgo build on Windows now names
+  `go/staticlib/windows_amd64` (or `windows_arm64`) on its link line: the same MSVC archive,
+  17 KB, that the C# package links under Native AOT. MinGW's linker reads MSVC's objects, and
+  the archive carries its own import stub for `ProcessPrng`, so the link line names nothing
+  else and there is one Windows archive per architecture for both bindings. The suite passes
+  on windows/amd64 built with MinGW-w64 gcc. *(`go get`)*
+- **Go — in the browser, through TinyGo.** [TinyGo](https://tinygo.org) 0.42+ compiles the
+  module to WebAssembly with the core linked in, the way Blazor links it for C#:
+  `tinygo build -target=wasm` picks up `backend_tinygo.go`, which names
+  `go/staticlib/wasm/libhyperuuid.a` — the `wasm32-wasip1` archive, the same bytes as Swift's —
+  on its link line, and TinyGo's own `wasm_exec.js` supplies the core's randomness from
+  `crypto.getRandomValues`. The core and binding add about 43 KB to an `-opt=z` build.
+  `-target=wasip1` works the same way under a WASI runtime. CI builds
+  `go/internal/tinygosmoke` this way on every PR, with that run's archive, and runs v4–v7, the
+  v5 known answer, both batches, the SQL-order round trip and the core's version against
+  `rust/Cargo.toml` in headless Chrome. Stock Go on `GOOS=js`/`wasip1` is still a compile
+  error, whose name now points at TinyGo. *(`go get`)*
+
+- **Python — in the browser, under Pyodide.** A ninth wheel,
+  `cp311-abi3-pyemscripten_2026_0_wasm32` (~74 KB), is the same PyO3 extension built for
+  Pyodide 314.x's Emscripten target, so `await micropip.install("hyperuuid")` finds it on
+  PyPI the way pip finds the native wheels — the native backend, no JavaScript bridge. CI
+  runs the package's whole pytest suite inside Pyodide on every run, under Node and in
+  headless Chrome, before the wheel is attested and uploaded. *(PyPI)*
+- **Swift — in the browser, through a WASI shim.** What swift.org's WebAssembly SDK builds
+  from the binding is a plain `wasm32-wasip1` command module with the core linked in, so a
+  page runs it with [`@bjorn3/browser_wasi_shim`](https://github.com/bjorn3/browser_wasi_shim),
+  whose `random_get` is `crypto.getRandomValues` — no JavaScriptKit, no change to the
+  package. CI builds the smoke executable for WebAssembly on Swift 6.4 with that run's
+  archive and runs it in headless Chrome on every PR, failing unless it exits 0; it also now
+  builds and runs it as a glibc consumer on 6.4, the path a downstream package takes, which
+  `swift test` inside this package does not. *(`.package(url:)`)*
+- **Rust — `rust-version = "1.85"`.** The lowest toolchain the crate builds on, edition 2024's
+  own floor, now declared: an older rustc says so by name instead of failing somewhere in
+  the compile, and Cargo's resolver picks dependency versions that build on it. CI checks
+  the library and the `no_std` shared library on exactly that version. *(crates.io)*
+- **Rust — the parser is checked against a reference, not just for panics.** Every value
+  formats to the canonical form and parses back to itself, and every one-character edit of
+  a valid string (replaced, removed or inserted, multi-byte UTF-8 included) parses exactly
+  when a deliberately naive reference parser says it should, to the same bytes — about
+  3,000 strings, the 0.5.0 stray-hyphen case among them. *(repository only)*
+- **Rust — clippy and semver checks on every PR.** `lint-rust` runs clippy with warnings as
+  errors over each configuration that compiles different code (default with tests, the
+  bare-metal `no_std` rlib, the `no_std` shared library, the Python extension), beside
+  `cargo fmt --check`, which it replaces as a job. `check-semver` runs `cargo-semver-checks`
+  against the latest crates.io release. *(repository only)*
+
+### Removed
+
+- **Go — every backend but the linked one.** The purego backend (`CGO_ENABLED=0`, and all of
+  Windows until now), the loading cgo backend (`-tags hyperuuid_dynamic`) and the wasmtime
+  backend (`-tags hyperuuid_wasm`) are gone, and with them `go/native/`: the nine shared
+  libraries and the wasm module every non-linked build embedded, the copy each process wrote
+  to a temp directory and never removed, and the libc detection that picked one. None of them
+  reached a platform the linked build does not — wasmtime-go needs cgo itself and ships
+  engines only for the same five platforms — and stock Go compiled to WebAssembly never
+  worked: its toolchain has no cgo and no external linker. (TinyGo's does; see Added.) `go.mod` requires only
+  `github.com/google/uuid`, and `go/` (which the Composer archive carries too, for the Go
+  proxy) is about a third of its 0.5.0 size. *(`go get`, Packagist)*
+- **Python and Ruby — the in-process wasm backend.** `hyperuuid._wasm` and the `[wasm]` extra,
+  `lib/hyperuuid/wasm_runtime.rb` and the Gemfile's `wasmtime` group, the `HYPERUUID_WASM`
+  variable that forced either, and the `wasm32-wasip1` module inside every wheel and every gem
+  are gone. Neither reached a platform the native backends do not: only platform wheels are
+  published, each carrying the PyO3 extension, and no sdist, so a Python with no matching
+  wheel had nothing to fall back from; and the Ruby backend's only extra reach was a platform
+  with no Fiddle library, where the `wasmtime` gem itself has to be built from source with a
+  Rust toolchain. `hyperuuid.BACKEND` is now always `"native"`, and `HyperUuid::BACKEND` is
+  `:native` or `:fiddle`. Java's GraalWasm backend stays, since it is plain Java and reaches
+  every JVM platform, and the jar keeps the module. *(PyPI, RubyGems)*
+
+### Changed
+
+- **PHP — the `ext-php-rs` extension spike is on ext-php-rs 0.16, and proven in the browser.**
+  0.16 replaced `PhpException::default` with `from_message`; the extension builds and loads on
+  PHP 8.5 as before. Built as a side module, the same extension runs in WordPress Playground's
+  prebuilt PHP for the browser (`@php-wasm/web`, PHP 8.5, JSPI), checked in node and headless
+  Chrome. It is not shipped — a module per PHP minor and a large build image in CI, waiting on a
+  request — and `php/README.md` now carries the whole recipe, including the two upstream issues
+  it found ([ext-php-rs#800](https://github.com/extphprs/ext-php-rs/issues/800),
+  [wordpress-playground#4377](https://github.com/WordPress/wordpress-playground/issues/4377)).
+  *(repository only)*
+- **Every shipped library is stripped.** The release profile now drops the symbol table and
+  debug info from what it links, never the exports. Against what 0.5.0 shipped, a stripped
+  local build puts the linux-x64 shared library at 16,632 bytes (from 19,048), the
+  wasm32-wasip1 module at 40,617 (from 48,986) and the Linux Magnus extension at 313,680
+  (from 390,624, and a platform gem carries two). The static libraries keep their symbols,
+  since a consumer's linker resolves the core through them, and `cargo bench` keeps its own
+  for profilers. *(every package that carries a native library)*
+- **Ruby — Magnus platform gems for Alpine, glibc gems named for their libc, and Fiddle only
+  in the universal gem.** Alpine gets platform gems of its own, `x86_64-linux-musl` and
+  `aarch64-linux-musl`, whose extensions are built and tested inside each Ruby's
+  `ruby:*-alpine` image. The glibc gems are now `x86_64-linux-gnu` and `aarch64-linux-gnu`
+  (0.5.0's `x86_64-linux` and `aarch64-linux`): beside a plain `*-linux` gem, `gem install`
+  on RubyGems before 4.0 resolves that one on Alpine, even under `--platform
+  x86_64-linux-musl`, while naming the libc on both sides makes every supported RubyGems and
+  Bundler pick right — Nokogiri's scheme, for the same reason. With `arm64-darwin`,
+  `x64-mingw-ucrt` and `aarch64-mingw-ucrt` that is seven platform gems, each carrying its
+  Ruby 3.4 and 4.0 extensions and no Fiddle library at all; through 0.5.0 every platform gem
+  also carried every RID's library, though one only installs where its own platform matches.
+  Fiddle is now the last resort, in the universal gem alone, which still bundles all eight
+  libraries: Ruby 3.3, a Ruby newer than the release, Intel macOS (which has no platform gem
+  and no CI leg), or a platform with no build. Built locally with stripped extensions,
+  `x86_64-linux-gnu` is 339,456 bytes (0.5.0's `x86_64-linux` was 459,264) and
+  `x86_64-linux-musl` 372,736. *(RubyGems)*
+- **Swift — the core is linked in on macOS and Windows too, so there is nothing to deploy.**
+  The SwiftPM binary target that already linked a static core on Linux and WebAssembly now
+  carries macOS (`arm64-apple-macosx`, `x86_64-apple-macosx`) and Windows
+  (`x86_64-unknown-windows-msvc`, `aarch64-unknown-windows-msvc`) archives as well — the same
+  8–17 KB archives the C# package links under Native AOT and Go links through cgo — and
+  every platform depends on it unconditionally. The shared libraries, the
+  `HyperUuid_HyperUuid.resources` directory they travelled in, and the `dlopen`/`LoadLibraryW`
+  loader are gone: an executable copied on its own works on every platform, and a Linux or
+  WebAssembly build no longer carries 104 KB of dylibs and DLLs it never loaded.
+  `isAvailable` is always `true`. `NativeLibraryError` is deprecated and has no cases, since
+  there is no load left to fail; a platform with no prebuilt core (iOS, Android, …) now fails
+  to compile, with no `HyperUuidCore` module, instead of at an `#error`. *(`.package(url:)`)*
+
+### Fixed
+
+- **C# — a Blazor WebAssembly app no longer gets the 3 MB wasm archive in its output.**
+  Restore resolves `runtimes/browser-wasm/nativeassets/` as a copy-local native asset, so
+  through 0.5.0 `libhyperuuid.a` was copied into `bin/` and the publish root of every
+  browser-wasm consumer, outside `wwwroot`, never served and never read. The package's
+  targets take it back out of the copy-local list; the link, which names the archive by
+  path, is unchanged. *(NuGet)*
+- **Python — v6/v7 timestamps a millisecond early under Pyodide, fixed before it shipped.**
+  Emscripten's clock hands back whole milliseconds as a double nanosecond count that can land
+  just under the millisecond, and truncating it put about one v6/v7 in four a millisecond
+  early. The extension rounds on Emscripten, so the new Pyodide wheel embeds the same
+  millisecond `Date.now()` reads. *(PyPI)*
+- **Rust — the `no-panic` proof from a consumer's crate is documented.** It needs `lto = true`
+  in the consumer's own release profile: Cargo ignores a dependency's profile, and without
+  fat LTO the generators fail the link. *(crates.io docs)*
+
+### Upgrade note
+
+Go has the breaking change, and it is the reason this is a minor release; Swift drops the
+`NativeLibraryError` cases (third paragraph); Python and Ruby lose an opt-in backend (last
+paragraph). The Go module now builds only under cgo, on Linux, macOS and Windows on amd64 and arm64, which takes
+a C compiler where it is built: gcc or clang on Linux (`build-base` on Alpine), the Xcode
+command-line tools on macOS, MinGW-w64 gcc on Windows (llvm-mingw on arm64). A build with
+`CGO_ENABLED=0`, for stock Go's `GOOS=wasip1` or `js`, or for any other platform stops at
+compile time on `undefined: hyperuuid_needs_cgo_and_a_C_compiler_…`, which names the fix; drop
+`-tags hyperuuid_dynamic` and `-tags hyperuuid_wasm`, which no longer select anything.
+Cross-compiling needs a C cross-compiler, e.g. `CC=x86_64-w64-mingw32-gcc GOOS=windows
+CGO_ENABLED=1`. The API is unchanged: `Available` is always `true`, `LoadError` always `nil`,
+and `ErrNativeUnavailable`, which nothing returns any more, is deprecated. Stock Go compiled
+to WebAssembly cannot use this module; build with TinyGo 0.42+ instead, which links the core
+there, browser included (go/README's "In the browser (TinyGo)").
+
+Swift on macOS and Windows has nothing to deploy beside the executable any more: delete the
+step that copied `HyperUuid_HyperUuid.bundle` (or `.resources`) from deployment scripts and
+Dockerfiles. Code that matches `NativeLibraryError` cases (`.openFailed`, `.symbolNotFound`)
+no longer compiles — those cases are gone with the loader; a plain
+`catch let error as NativeLibraryError` still compiles, with a deprecation warning, and can be
+deleted. A Swift build for a platform with no prebuilt core now fails at compile time
+instead of throwing at run time. Nothing changes on Linux and WebAssembly.
+
+Ruby on Alpine moves from `BACKEND == :fiddle` to `:native` on Ruby 3.4 and 4.0 with no
+action, through the new musl platform gems; Intel Macs stay on Fiddle. The glibc platform
+gems are renamed `x86_64-linux-gnu` and `aarch64-linux-gnu`: RubyGems and Bundler resolve
+them by themselves, but anything that names the old `x86_64-linux`/`aarch64-linux` platform
+string explicitly — a `gem install --platform`, a pinned gem file name — needs the new one. A
+platform gem has no Fiddle library any more, so `HYPERUUID_PURE` inside one makes the first
+call raise a `LoadError` that names the universal gem (`gem install hyperuuid --platform
+ruby`, or Bundler's `force_ruby_platform`) instead of running on Fiddle.
+
+Python and Ruby users who set `HYPERUUID_WASM` should unset it: both packages now ignore it
+and load their native backend as though it were not set. `pip install hyperuuid[wasm]` still
+installs, with pip's warning that the package has no `wasm` extra; drop the extra.
+
 ## [0.5.0] — 2026-10-02
 
 Three themes. *Proven panic-free*: every public function in the crate and every C export

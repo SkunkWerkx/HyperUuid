@@ -42,8 +42,8 @@ namespace :native do
   # version axis the way PyO3 does for the Python binding. Covering two therefore means two
   # compiled files per platform, under lib/hyperuuid/<minor>/, with lib/hyperuuid.rb picking
   # at require time. This list must match what hyper-build-native.yml actually builds — the
-  # forge runs one setup-ruby/build/test trio per entry — or these gems start lying about
-  # what they contain.
+  # forge runs one build/test/upload trio per entry on every platform, inside that Ruby's
+  # Alpine image for the two musl ones — or these gems start lying about what they contain.
   #
   # 4.0 is primary: the current release, what every other binding's leg runs against. 3.4 is
   # the compatibility floor and leaves this list when it goes EOL on 2028-03-31, joining
@@ -58,7 +58,7 @@ namespace :native do
   ABI_CEILING = "4.1"
 
   task :gem, [:platform] do |_t, args|
-    platform = args[:platform] or abort "usage: rake native:gem[<platform>], e.g. native:gem[aarch64-linux]"
+    platform = args[:platform] or abort "usage: rake native:gem[<platform>], e.g. native:gem[aarch64-linux-gnu]"
     ext = platform.include?("darwin") ? "bundle" : "so"
 
     libs = ABIS.map { |abi| "lib/hyperuuid/#{abi}/hyperuuid_native.#{ext}" }
@@ -67,7 +67,13 @@ namespace :native do
 
     spec = GEMSPEC.dup
     spec.platform = Gem::Platform.new(platform)
-    spec.files = spec.files + libs
+    # Its Magnus extensions and nothing else native: none of the native/<rid>/ libraries the
+    # gemspec's glob picks up once release.yml has staged the universal gem's set. The
+    # required_ruby_version below confines this gem to the ABIs it has an extension for, so
+    # its Fiddle backend is never the one that loads — only HYPERUUID_PURE forces it, and
+    # runtime.rb's LoadError then names the universal gem, which carries every RID's library
+    # and is the last resort for a Ruby or a platform these gems do not cover.
+    spec.files = spec.files.grep_v(%r{\Alib/hyperuuid/native/}) + libs
     # Narrower than the gemspec's own `>= 3.3`, deliberately: this gem is only correct on the
     # ABIs actually in the box, and every other Ruby must resolve the universal
     # "ruby"-platform gem and its Fiddle backend instead — which is exactly what RubyGems

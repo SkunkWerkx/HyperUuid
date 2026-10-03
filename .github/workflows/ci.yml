@@ -3,13 +3,14 @@ name: CI — build native, build wasm, test every binding
 # The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
 # pipeline — 5 real-hardware legs plus the two musl RIDs in Alpine containers (and osx-x64
 # cross-built on the Apple silicon runner, the core's own suite run under Rosetta), the Rust core
-# built fresh per leg, every binding's suite run against it. Ruby's suite runs twice (forced
-# Fiddle fallback + Magnus extension backend); Python has no fallback — PyO3 only, staged
-# and tested per leg.
+# built fresh per leg, every binding's suite run against it. Ruby's suite runs on the
+# Magnus extension once per Ruby ABI on all eight RIDs — the musl ones in each Ruby's Alpine
+# image, osx-x64 on an Intel runner — and once more forced onto the Fiddle fallback; Python
+# has no fallback — PyO3 only, staged and tested per leg.
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
-# Magnus extension) get uploaded here for later reuse, as do the eight PyPI wheels, which
+# Magnus extension) get uploaded here for later reuse, as do the nine PyPI wheels, which
 # are built, installed and called into on every run (build-wheels below). The .nupkg and
 # the gems are still packed in release.yml, at tag time, from this run's libraries.
 #
@@ -75,13 +76,10 @@ jobs:
       # the pipeline's explicit per-leg placement for in-repo testing.
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
-      # go_windows stays default-true: the purego fallback carries the Windows legs.
-      # The core as a wasm32-wasip1 module too, and every binding's suite a second time
-      # through its in-process wasm backend (GraalWasm for Java, wasmtime for Ruby, Python
-      # and Go). The module is what the jar, the gems and the wheels carry beside the native
-      # libraries so a platform with no native build still has a working backend.
+      # The core as a wasm32-wasip1 module too, and the Java suite a second time through its
+      # in-process GraalWasm backend. The module is what the jar carries beside the native
+      # libraries so a JVM on a platform with no native build still has a working backend.
       wasip1_module: true
-      wasm_env: HYPERUUID_WASM
 
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
   # Architecture), so it's built on every PR too, not just at release time.
@@ -89,10 +87,18 @@ jobs:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
     with:
       crate: hyperuuid
+      project: HyperUuid
+      # Every browser target runs in headless Chrome, not just built: the Blazor smoke app
+      # linking the archive above, the crate itself for wasm32-unknown-unknown, and the Go
+      # binding compiled by TinyGo with this commit's wasm32-wasip1 archive linked in.
+      blazor_check: csharp/HyperUuid.WasmSmokeTest/check.sh
+      rust_browser_test: rust/browser-test
+      go_tinygo_smoke: go/internal/tinygosmoke
 
-  # The eight PyPI wheels, on every run rather than only at the tag: built by maturin,
+  # The nine PyPI wheels, on every run rather than only at the tag: built by maturin,
   # installed on their own platform (the musl ones on a bare Alpine image, osx-x64 under
-  # Rosetta), called into, attested and uploaded as pypi-wheels-{rid}. release.yml
+  # Rosetta, the Pyodide one in Pyodide under Node and in headless Chrome, where the whole
+  # pytest suite runs too), called into, attested and uploaded as pypi-wheels-{rid}. release.yml
   # publishes these exact files. A wheel that cannot be installed therefore fails the pull
   # request; while they were built in release.yml, 0.4.0's osx-x64 wheel failed its first
   # install with four registries already published.
@@ -217,10 +223,10 @@ jobs:
   # `.private_extern` on Mach-O, msvcrt on Windows — and a gap in either is a library that
   # links but will not load, so every platform the forge ships is built and loaded here
   # rather than assumed. Each leg checks the export surface is the 13 C ABI symbols and
-  # nothing else where the platform's nm can list it, then runs the Go binding's whole suite
-  # through purego (cgo off), so the library is dlopen'd and called exactly as a host would.
-  # The musl legs run in golang's Alpine image, as the forge's musl suite does, and also
-  # hold the library to a single NEEDED entry: musl's libc.
+  # nothing else where the platform's nm can list it, then loads it through Python's ctypes
+  # and calls every export (.github/scripts/cdylib_smoke.py), so the library is dlopen'd and
+  # called exactly as a host would. The musl legs build in Alpine and also hold the library
+  # to a single NEEDED entry: musl's libc.
   check-cdylib:
     strategy:
       fail-fast: false
@@ -239,11 +245,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.musl }}
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-python@v7
         if: ${{ !matrix.musl }}
         with:
-          go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
+          python-version: "3.x"
 
       - name: Build the no_std shared library
         if: ${{ !matrix.musl }}
@@ -269,25 +274,21 @@ jobs:
             exit 1
           fi
 
-      - name: Go suite through purego, against this library
+      - name: Load it and call every export
         if: ${{ !matrix.musl }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cp "rust/target/release/${{ matrix.lib }}" "go/native/${{ matrix.rid }}/${{ matrix.lib }}"
-          cd go
-          CGO_ENABLED=0 go test -count=1 ./...
+        run: python .github/scripts/cdylib_smoke.py "rust/target/release/${{ matrix.lib }}" rust/Cargo.toml
 
-      - name: Build, check and run the Go suite in Alpine
+      - name: Build, check, load and call it in Alpine
         if: ${{ matrix.musl }}
         run: |
           set -euo pipefail
-          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" golang:1.27-alpine sh -euc '
+          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" python:3-alpine sh -euc '
             apk add --no-cache build-base curl >/dev/null
             curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null 2>&1
             . "$HOME/.cargo/env"
             mkdir /work
-            (cd /src && tar cf - --exclude=./rust/target ./rust ./go) | tar xf - -C /work
+            (cd /src && tar cf - --exclude=./rust/target ./rust ./.github/scripts) | tar xf - -C /work
             cd /work/rust
             cargo cdylib
             lib=target/release/libhyperuuid.so
@@ -298,23 +299,71 @@ jobs:
               *) echo "::error::$lib must depend on musl libc and nothing else, found: $needed"; exit 1 ;;
             esac
             apk del build-base >/dev/null
-            cp "$lib" /work/go/native/${{ matrix.rid }}/libhyperuuid.so
-            cd /work/go && CGO_ENABLED=0 go test -count=1 ./...
+            python /work/.github/scripts/cdylib_smoke.py "$lib" Cargo.toml
           '
 
-  # rustfmt over every Rust file in the crate (src, tests, benches, examples), every PR. The
-  # crate drifted out of format with nothing to notice it; this keeps it in. Static analysis
-  # only, so it doesn't depend on build-native.
-  check-fmt:
+  # Formatting and lints for the crate, every PR. clippy runs over each configuration that
+  # compiles different code — the default (with tests, benches and the example), the
+  # bare-metal no_std rlib, the no_std shared library, and the python extension — with
+  # warnings as errors. The ruby and php features need their interpreters' headers to
+  # compile at all; the forge builds both on every leg, and they were clean when this job
+  # was added. Static analysis only, so it doesn't depend on build-native.
+  lint-rust:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
+          targets: thumbv7em-none-eabi,wasm32-unknown-unknown
       - name: cargo fmt --check
         working-directory: rust
-        run: cargo fmt --check
+        run: |
+          cargo fmt --check
+          cargo fmt --check --manifest-path browser-test/Cargo.toml
+      - name: cargo clippy
+        working-directory: rust
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            cargo clippy --no-default-features --target thumbv7em-none-eabi -- -D warnings
+          cargo clippy --no-default-features --features cdylib -- -D warnings
+          cargo clippy --features python -- -D warnings
+          cargo clippy --manifest-path browser-test/Cargo.toml --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+  # rust-version in rust/Cargo.toml is a promise to every crates.io consumer, and nothing
+  # else would notice it going stale: the library and the no_std shared library are built
+  # on exactly that toolchain, read from the manifest so the two cannot drift apart. The
+  # tests are not part of the promise and use newer APIs.
+  check-msrv:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read rust-version
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' rust/Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - name: cargo check on rust-version
+        working-directory: rust
+        run: |
+          cargo check --lib
+          cargo check --lib --no-default-features --features cdylib
+
+  # The crate's public API against the latest release on crates.io: a breaking change with
+  # a version that does not say so fails here, naming the item. Default features only — the
+  # extension features are this repo's own plumbing and need interpreter headers to build.
+  # A release bump goes in the same PR as the change (the libraries embed the version), so
+  # the version this compares is the one the PR will publish.
+  check-semver:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          manifest-path: rust/Cargo.toml
+          feature-group: default-features
 
   # Doc-comment coverage on every real public API surface, every PR — the same bar
   # C#/Java/Rust get from a compiler flag (CS1591+TreatWarningsAsErrors, javadoc -Xwerror,
