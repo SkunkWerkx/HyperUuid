@@ -46,11 +46,13 @@ if sys.version_info >= (3, 14):
 
 
 def v6_individual_loop() -> None:
+    """Mints BATCH_SIZE v6 UUIDs one call at a time."""
     for _ in range(BATCH_SIZE):
         hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
 
 
 def v7_individual_loop() -> None:
+    """Mints BATCH_SIZE v7 UUIDs one call at a time."""
     for _ in range(BATCH_SIZE):
         hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
 

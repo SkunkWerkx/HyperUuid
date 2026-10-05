@@ -38,6 +38,7 @@ module HyperUuid
         out = scratch
         rc = functions[:new_v4].call(out)
         raise random_source_failure("uuid_new_v4") unless rc.zero?
+
         out[0, 16]
       end
 
@@ -49,6 +50,7 @@ module HyperUuid
         # contract.
         rc = functions[:new_v5].call(namespace_bytes, name_bytes, name_bytes.bytesize, out)
         raise random_source_failure("uuid_new_v5") unless rc.zero?
+
         out[0, 16]
       end
 
@@ -68,6 +70,7 @@ module HyperUuid
 
       def new_v6_batch(count, unix_millis)
         return "" if count.zero?
+
         out = buffer(count * 16)
         rc = functions[:new_v6_batch].call(unix_millis, count, out)
         case rc
@@ -93,6 +96,7 @@ module HyperUuid
 
       def new_v7_batch(count, unix_millis)
         return "" if count.zero?
+
         out = buffer(count * 16)
         rc = functions[:new_v7_batch].call(unix_millis, count, out)
         case rc

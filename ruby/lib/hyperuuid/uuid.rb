@@ -82,7 +82,9 @@ module HyperUuid
         when 6 then Runtime.v6_unix_millis(bytes)
         when 7 then Runtime.v7_unix_millis(bytes)
         else
-          raise ArgumentError, "timestamp is only defined for version 6 or 7 UUIDs, got version #{version}" if raise_on_mismatch
+          raise ArgumentError,
+                "timestamp is only defined for version 6 or 7 UUIDs, got version #{version}" if raise_on_mismatch
+
           return nil
         end
       Time.at(millis / 1000, millis % 1000, :millisecond).utc
@@ -168,6 +170,7 @@ module HyperUuid
     # Byte-order comparison against +other+, or +nil+ if +other+ isn't a Uuid.
     def <=>(other)
       return nil unless other.is_a?(Uuid)
+
       bytes <=> other.bytes
     end
 

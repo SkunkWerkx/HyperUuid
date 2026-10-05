@@ -9,6 +9,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Every language is formatted, and CI holds it there — library, tests, benchmarks and
+  smoke tests alike.** Rust (`cargo fmt`) already was; Go now runs `gofmt` beside revive.
+  New: ruff format and the docstring rules over all of `python/` (100 columns); PSR-12 via
+  phpcs over php's src, tests and bench (the doc rules stay on the public API); RuboCop,
+  layout cops only, over every Ruby file; `dotnet format whitespace` against
+  `csharp/.editorconfig` (tabs); Spotless with palantir-java-format (4 spaces, 120
+  columns) over every Java source set; and `swift format` against `swift/.swift-format`
+  (4 spaces, 120 columns, lint rules off). Whitespace and line breaks only — no behavior
+  changed. *(repository)*
+
 ## [0.6.1] — 2026-10-03
 
 ### Added

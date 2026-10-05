@@ -24,7 +24,8 @@ Gem::Specification.new do |spec|
   # and a symlink is stored *as* a symlink — `gem build` warns, and it dangles once the gem
   # is unpacked somewhere else entirely. Same reason rust/ and python/ carry their own.
   #
-  # native/*/* is exactly the staged binaries, one directory per RID — not native/README.md, the placeholder that only keeps the directory in a fresh checkout.
+  # native/*/* is exactly the staged binaries, one directory per RID — not native/README.md,
+  # the placeholder that only keeps the directory in a fresh checkout.
   spec.files = Dir["lib/**/*.rb"] + Dir["lib/hyperuuid/native/*/*"] + ["README.md", "LICENSE"]
   spec.require_paths = ["lib"]
 

@@ -207,7 +207,8 @@ class UuidGeneratorTest {
     @Test
     void getTimestampReturnsEmptyForNonTimeBasedVersions() {
         assertFalse(UuidGenerator.getTimestamp(UuidGenerator.newV4()).isPresent());
-        assertFalse(UuidGenerator.getTimestamp(UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, "test")).isPresent());
+        assertFalse(UuidGenerator.getTimestamp(UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, "test"))
+                .isPresent());
     }
 
     @Test
@@ -462,8 +463,8 @@ class UuidGeneratorTest {
     void v5OverloadsAgreeOnTheSameBytes() {
         String name = "www.example.com";
         UUID expected = UUID.fromString("2ed6657d-e927-568b-95e1-2665a8aea6a2");
-        assertEquals(expected,
-                UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(
+                expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name.getBytes(StandardCharsets.UTF_8)));
         assertEquals(expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name, StandardCharsets.US_ASCII));
         // The charset is part of the name: the same text in another encoding is another UUID.
         assertNotEquals(expected, UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name, StandardCharsets.UTF_16LE));
@@ -483,18 +484,21 @@ class UuidGeneratorTest {
         // be refused before that multiplication, not discovered by the core writing past
         // a buffer that came out too small.
         int[] refused = {
-            -1, Integer.MIN_VALUE, -(1 << 28),
-            UuidGenerator.MAX_BATCH + 1, 1 << 28, (1 << 28) + 1, Integer.MAX_VALUE,
+            -1, Integer.MIN_VALUE, -(1 << 28), UuidGenerator.MAX_BATCH + 1, 1 << 28, (1 << 28) + 1, Integer.MAX_VALUE,
         };
         for (int count : refused) {
-            assertThrows(IllegalArgumentException.class,
-                    () -> UuidGenerator.newV7Batch(count, RFC_TEST_VECTOR_MS), "v7 count " + count);
-            assertThrows(IllegalArgumentException.class,
-                    () -> UuidGenerator.newV6Batch(count, RFC_TEST_VECTOR_MS), "v6 count " + count);
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> UuidGenerator.newV7Batch(count, RFC_TEST_VECTOR_MS),
+                    "v7 count " + count);
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> UuidGenerator.newV6Batch(count, RFC_TEST_VECTOR_MS),
+                    "v6 count " + count);
             assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV7Batch(count), "v7 count " + count);
             assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6Batch(count), "v6 count " + count);
-            assertThrows(IllegalArgumentException.class,
-                    () -> UuidGenerator.requireBatchCount(count), "count " + count);
+            assertThrows(
+                    IllegalArgumentException.class, () -> UuidGenerator.requireBatchCount(count), "count " + count);
         }
         // The same check guards a UUID[] destination's length; an array that long is not
         // something a test should allocate, so the limit itself is what is pinned here.
@@ -587,5 +591,4 @@ class UuidGeneratorTest {
             pool.shutdownNow();
         }
     }
-
 }

@@ -50,6 +50,12 @@ python-source = "src"
 module-name = "hyperuuid._native"
 features = ["python"]
 
+[tool.ruff]
+# One width for the package, its tests and its benchmark, the Rust core's own (rustfmt.toml).
+line-length = 100
+# Code only: the README's examples are laid out by hand.
+extend-exclude = ["*.md"]
+
 [tool.ruff.lint]
 # Doc-comment enforcement only — the "missing docstring" family of pydocstyle rules
 # (D100-D107), not the full pydocstyle convention (imperative mood, blank-line placement,

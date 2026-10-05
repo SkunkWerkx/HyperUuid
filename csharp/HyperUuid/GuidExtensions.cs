@@ -29,53 +29,53 @@ namespace HyperUuid;
 /// </remarks>
 public static class GuidExtensions
 {
-    extension(Guid uuid)
-    {
-        /// <summary>
-        /// The UTC timestamp embedded in this UUID, or <see langword="null"/> when it isn't a
-        /// version 6 or version 7 UUID and therefore carries no timestamp at all.
-        /// </summary>
-        /// <value>
-        /// The creation time recovered from the UUID's own bits, or <see langword="null"/> for
-        /// any other version — including v4, v5, <see cref="UuidGenerator.Nil"/> and
-        /// <see cref="UuidGenerator.Max"/>.
-        /// </value>
-        /// <remarks>
-        /// <para>
-        /// Nullable rather than throwing, because "this Guid isn't time-based" is an ordinary,
-        /// expected answer for a type that is far more often not a v6/v7 UUID than it is.
-        /// Callers typically already have a <see cref="Guid"/> of unknown provenance, which is
-        /// exactly the case <see cref="UuidGenerator.V6Timestamp"/> and
-        /// <see cref="UuidGenerator.V7Timestamp"/> deliberately do not serve: those assume the
-        /// caller already knows the version and read the timestamp field unconditionally.
-        /// </para>
-        /// <para>
-        /// Composes with the usual null handling — <c>id.Timestamp ?? fallback</c>,
-        /// <c>id.Timestamp?.ToLocalTime()</c>, or <c>if (id.Timestamp is { } created)</c>.
-        /// </para>
-        /// <para>
-        /// This can still throw <see cref="ArgumentOutOfRangeException"/> for a spec-valid v7
-        /// UUID whose embedded timestamp lands past year 9999, which
-        /// <see cref="DateTimeOffset"/> cannot represent. That is inherited from
-        /// <see cref="UuidGenerator.V7Timestamp"/> and is deliberately not swallowed into
-        /// <see langword="null"/>: a v7 UUID from the year 10500 genuinely does carry a
-        /// timestamp, so reporting "no timestamp" would be a lie about the value rather than a
-        /// description of it.
-        /// </para>
-        /// <para>
-        /// The opposite edge is quiet rather than loud: a v6 UUID whose embedded timestamp
-        /// predates 1970 — legitimate, since the v6 field counts from 1582, but only another
-        /// generator can have minted it — reads back as the Unix epoch, inherited from
-        /// <see cref="UuidGenerator.V6UnixMillis"/>.
-        /// </para>
-        /// </remarks>
-        /// <example>
-        /// <code>
-        /// Guid id = UuidGenerator.NewV7();
-        /// DateTimeOffset? created = id.Timestamp;   // the creation time
-        /// DateTimeOffset? none = Guid.NewGuid().Timestamp;   // null — a v4 UUID
-        /// </code>
-        /// </example>
-        public DateTimeOffset? Timestamp => UuidGenerator.GetTimestamp(uuid);
-    }
+	extension(Guid uuid)
+	{
+		/// <summary>
+		/// The UTC timestamp embedded in this UUID, or <see langword="null"/> when it isn't a
+		/// version 6 or version 7 UUID and therefore carries no timestamp at all.
+		/// </summary>
+		/// <value>
+		/// The creation time recovered from the UUID's own bits, or <see langword="null"/> for
+		/// any other version — including v4, v5, <see cref="UuidGenerator.Nil"/> and
+		/// <see cref="UuidGenerator.Max"/>.
+		/// </value>
+		/// <remarks>
+		/// <para>
+		/// Nullable rather than throwing, because "this Guid isn't time-based" is an ordinary,
+		/// expected answer for a type that is far more often not a v6/v7 UUID than it is.
+		/// Callers typically already have a <see cref="Guid"/> of unknown provenance, which is
+		/// exactly the case <see cref="UuidGenerator.V6Timestamp"/> and
+		/// <see cref="UuidGenerator.V7Timestamp"/> deliberately do not serve: those assume the
+		/// caller already knows the version and read the timestamp field unconditionally.
+		/// </para>
+		/// <para>
+		/// Composes with the usual null handling — <c>id.Timestamp ?? fallback</c>,
+		/// <c>id.Timestamp?.ToLocalTime()</c>, or <c>if (id.Timestamp is { } created)</c>.
+		/// </para>
+		/// <para>
+		/// This can still throw <see cref="ArgumentOutOfRangeException"/> for a spec-valid v7
+		/// UUID whose embedded timestamp lands past year 9999, which
+		/// <see cref="DateTimeOffset"/> cannot represent. That is inherited from
+		/// <see cref="UuidGenerator.V7Timestamp"/> and is deliberately not swallowed into
+		/// <see langword="null"/>: a v7 UUID from the year 10500 genuinely does carry a
+		/// timestamp, so reporting "no timestamp" would be a lie about the value rather than a
+		/// description of it.
+		/// </para>
+		/// <para>
+		/// The opposite edge is quiet rather than loud: a v6 UUID whose embedded timestamp
+		/// predates 1970 — legitimate, since the v6 field counts from 1582, but only another
+		/// generator can have minted it — reads back as the Unix epoch, inherited from
+		/// <see cref="UuidGenerator.V6UnixMillis"/>.
+		/// </para>
+		/// </remarks>
+		/// <example>
+		/// <code>
+		/// Guid id = UuidGenerator.NewV7();
+		/// DateTimeOffset? created = id.Timestamp;   // the creation time
+		/// DateTimeOffset? none = Guid.NewGuid().Timestamp;   // null — a v4 UUID
+		/// </code>
+		/// </example>
+		public DateTimeOffset? Timestamp => UuidGenerator.GetTimestamp(uuid);
+	}
 }

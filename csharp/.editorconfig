@@ -1,0 +1,14 @@
+# The formatter's settings for every C# file under csharp/ — the library, its tests, the
+# benchmarks and the smoke tests. `dotnet format whitespace HyperUuid.slnx` applies them; CI
+# runs it with --verify-no-changes. The style is tabs, LF and a final newline, as in HyperCast
+# and HyperTabular.
+root = true
+
+[*.cs]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = tab
+tab_width = 4
+indent_size = 4

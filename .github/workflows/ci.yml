@@ -398,6 +398,15 @@ jobs:
       - run: go install github.com/mgechev/revive@v1.16.0
       - working-directory: go
         run: revive -config revive.toml ./...
+      # revive does not check layout; gofmt is the formatter, over every file in the module.
+      - name: gofmt
+        working-directory: go
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-formatted (run gofmt -w .): $unformatted"
+            exit 1
+          fi
 
   lint-docs-python:
     runs-on: ubuntu-26.04
@@ -407,8 +416,12 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install ruff==0.16.5
+      # Docstrings and formatting over the whole package — src, tests and bench_uuid.py
+      # (pyproject.toml's [tool.ruff]).
       - working-directory: python
-        run: ruff check src
+        run: ruff check .
+      - working-directory: python
+        run: ruff format --check .
 
   lint-docs-php:
     runs-on: ubuntu-26.04
@@ -434,6 +447,9 @@ jobs:
           working-directory: ruby
       - working-directory: ruby
         run: bundle exec rake docs:check
+      # The formatter (.rubocop.yml: layout only) over every Ruby file in the gem.
+      - working-directory: ruby
+        run: bundle exec rubocop
 
   lint-docs-swift:
     runs-on: ubuntu-26.04
@@ -456,3 +472,46 @@ jobs:
       - name: Lint
         working-directory: swift
         run: ../swiftlint_bin/swiftlint-static lint --strict Sources
+
+  # The formatters with no doc linter to ride beside: each checks every file of its
+  # language — library, tests, benchmarks, smoke tests — against the committed config, and
+  # fails on drift. (Rust's is lint-rust's cargo fmt; Go's, Python's, PHP's and Ruby's run
+  # in the lint-docs jobs above.)
+  format-csharp:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
+      # csharp/.editorconfig: tabs, LF, a final newline.
+      - working-directory: csharp
+        run: dotnet format whitespace HyperUuid.slnx --verify-no-changes
+
+  format-java:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+      # Spotless with palantir-java-format (java/build.gradle.kts).
+      - working-directory: java
+        run: ./gradlew --no-daemon spotlessCheck
+
+  format-swift:
+    runs-on: ubuntu-26.04
+    # swift-format ships in the toolchain, so the formatter is the version of the Swift the
+    # matrix builds with (the forge's swift_version).
+    container: swift:6.4
+    steps:
+      - uses: actions/checkout@v7
+      # swift/.swift-format: 4-space indent, 120 columns, every lint rule off — layout only.
+      - working-directory: swift
+        run: >-
+          swift format lint --strict --recursive
+          Package.swift Sources Tests
+          StaticSmokeTest/Package.swift StaticSmokeTest/Sources
+          Benchmarks/Package.swift Benchmarks/Benchmarks

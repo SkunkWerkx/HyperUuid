@@ -152,7 +152,8 @@ namespace :wasm do
     unless abis.empty?
       staged = abis.map { |abi| "#{ext_dir}/#{abi}/hyperuuid_native.a" }
       missing = staged.reject { |f| File.exist?(f) }
-      missing.empty? or abort "not staged: #{missing.join(', ')} — stage each Ruby minor's wasm32-wasip1 archive there first"
+      missing.empty? or
+        abort "not staged: #{missing.join(', ')} — stage each Ruby minor's wasm32-wasip1 archive there first"
       archives = staged.map do |archive|
         # mtime 0 so the same archive always packs to the same bytes.
         Zlib::GzipWriter.open("#{archive}.gz", Zlib::BEST_COMPRESSION) do |gz|

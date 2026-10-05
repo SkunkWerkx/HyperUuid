@@ -33,11 +33,14 @@ class NativePlatformTest {
 
     @Test
     void theLibraryIsNamedTheWayEachOsNamesOne() {
-        assertEquals("/native/linux-musl-x64/libhyperuuid.so",
+        assertEquals(
+                "/native/linux-musl-x64/libhyperuuid.so",
                 NativePlatform.resolve("Linux", "amd64", true).resourcePath());
-        assertEquals("/native/osx-arm64/libhyperuuid.dylib",
+        assertEquals(
+                "/native/osx-arm64/libhyperuuid.dylib",
                 NativePlatform.resolve("Mac OS X", "aarch64", false).resourcePath());
-        assertEquals("/native/win-x64/hyperuuid.dll",
+        assertEquals(
+                "/native/win-x64/hyperuuid.dll",
                 NativePlatform.resolve("Windows Server 2025", "amd64", false).resourcePath());
     }
 
@@ -67,8 +70,8 @@ class NativePlatformTest {
         assertTrue(NativePlatform.mentionsMusl(Stream.of(
                 "55d0c8a00000-55d0c8a01000 r--p 00000000 00:2f 1054 /opt/java/openjdk/bin/java",
                 "7f2a1c000000-7f2a1c014000 r--p 00000000 00:2f 211 /lib/ld-musl-x86_64.so.1")));
-        assertTrue(NativePlatform.mentionsMusl(Stream.of(
-                "ffff8a000000-ffff8a0a4000 r-xp 00000000 fe:01 77 /lib/libc.musl-aarch64.so.1")));
+        assertTrue(NativePlatform.mentionsMusl(
+                Stream.of("ffff8a000000-ffff8a0a4000 r-xp 00000000 fe:01 77 /lib/libc.musl-aarch64.so.1")));
         assertFalse(NativePlatform.mentionsMusl(Stream.of(
                 "7f1c2a400000-7f1c2a428000 r--p 00000000 08:20 4411 /usr/lib/x86_64-linux-gnu/libc.so.6",
                 "7f1c2a7c2000-7f1c2a7c3000 r--p 00000000 08:20 4399 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2")));

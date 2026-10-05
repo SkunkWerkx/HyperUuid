@@ -1,0 +1,33 @@
+# The formatter for every Ruby file in the gem — lib, spec, benchmark, the extension's
+# extconf, the wasm smoke test and the build files — and nothing more than a formatter:
+# every cop is off unless enabled below, and what is enabled is layout (indentation,
+# spacing, alignment, line length) plus the double-quoted string literals this code already
+# uses. `bundle exec rubocop -a` applies it; CI runs `bundle exec rubocop`. Documentation is
+# the separate `rake docs:check`.
+AllCops:
+  TargetRubyVersion: 3.3
+  DisabledByDefault: true
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "pkg/**/*"
+    - "vendor/**/*"
+
+Layout:
+  Enabled: true
+
+# The width PHP's PSR-12 and Java's formatter hold their code to.
+Layout/LineLength:
+  Max: 120
+
+# Elements indented one step from the line that opens the bracket, as this code writes them,
+# rather than aligned under the bracket.
+Layout/FirstArrayElementIndentation:
+  EnforcedStyle: consistent
+
+Layout/FirstHashElementIndentation:
+  EnforcedStyle: consistent
+
+Style/StringLiterals:
+  Enabled: true
+  EnforcedStyle: double_quotes
