@@ -106,13 +106,16 @@ public final class UuidGenerator {
         private static final Linker.Option CRITICAL = Linker.Option.critical(true);
 
         // (out) -> rc — uuid_new_v4
-        private static final MethodHandle NEW = LINKER.downcallHandle(
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
+        private static final MethodHandle NEW =
+                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
         // (namespace, name, name_len, out) -> rc — uuid_new_v5
         private static final MethodHandle NEW_NAMED = LINKER.downcallHandle(
                 FunctionDescriptor.of(
                         ValueLayout.JAVA_INT,
-                        ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+                        ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS,
+                        ValueLayout.JAVA_INT,
+                        ValueLayout.ADDRESS),
                 CRITICAL);
         // (unix_millis, out) -> rc — uuid_new_v6, uuid_new_v7
         private static final MethodHandle NEW_AT = LINKER.downcallHandle(
@@ -123,14 +126,13 @@ public final class UuidGenerator {
                         ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
                 CRITICAL);
         // (uuid) -> unix_millis — uuid_v6_unix_millis, uuid_v7_unix_millis
-        private static final MethodHandle UNIX_MILLIS = LINKER.downcallHandle(
-                FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
+        private static final MethodHandle UNIX_MILLIS =
+                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
         // (uuid), rewritten in place — the four uuid_v{6,7}_to_{sql,rfc}_order exports
-        private static final MethodHandle REORDER = LINKER.downcallHandle(
-                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
+        private static final MethodHandle REORDER =
+                LINKER.downcallHandle(FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
         // () -> packed version — the probe. Nothing crosses, so it is not linked critical.
-        private static final MethodHandle VERSION = LINKER.downcallHandle(
-                FunctionDescriptor.of(ValueLayout.JAVA_INT));
+        private static final MethodHandle VERSION = LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT));
 
         // RFC 9562 order is exactly UUID's msb/lsb decomposition, so a UUID is two big-endian
         // longs in a segment — written and read as such, no byte[] in between. Unaligned,
@@ -254,10 +256,11 @@ public final class UuidGenerator {
          */
         private static Backend startWasm(String nativeUnavailable) {
             if (UuidGenerator.class.getResource(WasmBackend.RESOURCE_PATH) == null) {
-                throw new IllegalStateException(nativeUnavailable == null
-                        ? WasmBackend.RESOURCE_PATH + " classpath resource not found (this jar was built "
-                                + "without the wasm module)"
-                        : nativeUnavailable + ", and " + WasmBackend.RESOURCE_PATH + " is not bundled either");
+                throw new IllegalStateException(
+                        nativeUnavailable == null
+                                ? WasmBackend.RESOURCE_PATH + " classpath resource not found (this jar was built "
+                                        + "without the wasm module)"
+                                : nativeUnavailable + ", and " + WasmBackend.RESOURCE_PATH + " is not bundled either");
             }
             try {
                 return (Backend) Class.forName(UuidGenerator.class.getPackageName() + ".WasmBackend")
@@ -269,8 +272,11 @@ public final class UuidGenerator {
                 // included — inside an InvocationTargetException.
                 Throwable cause = e instanceof InvocationTargetException && e.getCause() != null ? e.getCause() : e;
                 if (cause instanceof NoClassDefFoundError) {
-                    throw new IllegalStateException(WasmBackend.GRAALWASM_MISSING
-                            + (nativeUnavailable == null ? "" : "; wasm was selected because " + nativeUnavailable),
+                    throw new IllegalStateException(
+                            WasmBackend.GRAALWASM_MISSING
+                                    + (nativeUnavailable == null
+                                            ? ""
+                                            : "; wasm was selected because " + nativeUnavailable),
                             cause);
                 }
                 if (cause instanceof RuntimeException re) {
@@ -401,7 +407,8 @@ public final class UuidGenerator {
     private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
 
     private static UUID readUuid(MemorySegment segment, long offset) {
-        return new UUID(segment.get(Downcalls.BIG_ENDIAN_LONG, offset), segment.get(Downcalls.BIG_ENDIAN_LONG, offset + 8));
+        return new UUID(
+                segment.get(Downcalls.BIG_ENDIAN_LONG, offset), segment.get(Downcalls.BIG_ENDIAN_LONG, offset + 8));
     }
 
     private static MemorySegment writeUuid(MemorySegment segment, UUID uuid) {
@@ -606,8 +613,7 @@ public final class UuidGenerator {
             throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
         }
         if (rc != 0) {
-            throw new IllegalStateException(
-                    "uuid_new_v6_batch failed with code " + rc + " (random source failure)");
+            throw new IllegalStateException("uuid_new_v6_batch failed with code " + rc + " (random source failure)");
         }
         UUID[] result = new UUID[count];
         for (int i = 0; i < count; i++) {
@@ -883,8 +889,7 @@ public final class UuidGenerator {
             throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
         }
         if (rc != 0) {
-            throw new IllegalStateException(
-                    "uuid_new_v7_batch failed with code " + rc + " (random source failure)");
+            throw new IllegalStateException("uuid_new_v7_batch failed with code " + rc + " (random source failure)");
         }
         UUID[] result = new UUID[count];
         for (int i = 0; i < count; i++) {
@@ -942,8 +947,7 @@ public final class UuidGenerator {
     // reaches the core as a count of billions.
     static void requireBatchCount(int count) {
         if (count < 0 || count > MAX_BATCH) {
-            throw new IllegalArgumentException(
-                    "a batch holds between 0 and " + MAX_BATCH + " UUIDs; got " + count);
+            throw new IllegalArgumentException("a batch holds between 0 and " + MAX_BATCH + " UUIDs; got " + count);
         }
     }
 
@@ -1016,8 +1020,7 @@ public final class UuidGenerator {
         fillV6(destination, System.currentTimeMillis());
     }
 
-    private static void fillUuidArray(
-            UUID[] destination, long unixMillis, MemorySegment export, String fn) {
+    private static void fillUuidArray(UUID[] destination, long unixMillis, MemorySegment export, String fn) {
         if (destination.length == 0) {
             return;
         }
@@ -1084,8 +1087,7 @@ public final class UuidGenerator {
         fillV6(destination, System.currentTimeMillis());
     }
 
-    private static void fillByteArray(
-            byte[] destination, long unixMillis, MemorySegment export, String fn) {
+    private static void fillByteArray(byte[] destination, long unixMillis, MemorySegment export, String fn) {
         requireWholeUuids(destination.length);
         if (destination.length == 0) {
             return;

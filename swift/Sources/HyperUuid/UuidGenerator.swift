@@ -26,7 +26,8 @@ public enum UuidGenerator {
             case .timestampOutOfRange:
                 return "hyperuuid: unix millisecond timestamp must be non-negative and fit within 48 bits"
             case .bufferNotWholeUUIDs(let count):
-                return "hyperuuid: destination length must be a multiple of 16 (one whole UUID per 16 bytes); got \(count)"
+                return
+                    "hyperuuid: destination length must be a multiple of 16 (one whole UUID per 16 bytes); got \(count)"
             }
         }
 
@@ -36,9 +37,10 @@ public enum UuidGenerator {
     }
 
     private typealias UuidNewV4Fn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Int32
-    private typealias UuidNewV5Fn = @convention(c) (
-        UnsafePointer<UInt8>?, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?
-    ) -> Int32
+    private typealias UuidNewV5Fn =
+        @convention(c) (
+            UnsafePointer<UInt8>?, UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt8>?
+        ) -> Int32
     private typealias UuidNewV6Fn = @convention(c) (UInt64, UnsafeMutablePointer<UInt8>?) -> Int32
     private typealias UuidV6UnixMillisFn = @convention(c) (UnsafePointer<UInt8>?) -> UInt64
     private typealias UuidNewV6BatchFn = @convention(c) (UInt64, UInt32, UnsafeMutablePointer<UInt8>?) -> Int32
@@ -69,12 +71,14 @@ public enum UuidGenerator {
         let v6ToRfcOrder: UuidV6ToRfcOrderFn
         let version: VersionFn
 
-        init(newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
-             newV6: UuidNewV6Fn, v6UnixMillis: UuidV6UnixMillisFn, newV6Batch: UuidNewV6BatchFn,
-             newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
-             v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
-             v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn,
-             version: VersionFn) {
+        init(
+            newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
+            newV6: UuidNewV6Fn, v6UnixMillis: UuidV6UnixMillisFn, newV6Batch: UuidNewV6BatchFn,
+            newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
+            v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
+            v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn,
+            version: VersionFn
+        ) {
             self.newV4 = newV4; self.newV5 = newV5
             self.newV6 = newV6; self.v6UnixMillis = v6UnixMillis; self.newV6Batch = newV6Batch
             self.newV7 = newV7; self.v7UnixMillis = v7UnixMillis; self.newV7Batch = newV7Batch

@@ -1,3 +1,6 @@
+"""The generator doors: every UUID version's bits, timestamps, batches, SQL order and buffer
+fills."""
+
 import datetime
 import sys
 import time
@@ -21,75 +24,85 @@ def _now_ms() -> int:
 
 
 def test_v4_has_version_and_variant_bits_set():
+    """A v4 UUID carries version 4 and the RFC variant."""
     id_ = hyperuuid.new_v4()
     assert id_.version == 4
     assert id_.variant == uuid.RFC_4122
 
 
 def test_v4_is_non_deterministic():
+    """A hundred v4 UUIDs are a hundred different UUIDs."""
     results = {hyperuuid.new_v4() for _ in range(100)}
     assert len(results) == 100
 
 
 def test_v5_matches_rfc_test_vector():
-    # RFC 9562 Appendix A.4 official test vector.
+    """RFC 9562 Appendix A.4 official test vector."""
     id_ = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "www.example.com")
     assert id_ == uuid.UUID("2ed6657d-e927-568b-95e1-2665a8aea6a2")
 
 
 def test_v5_matches_python_docs_vector():
-    # Same test vector Python's own uuid module documentation uses.
+    """Same test vector Python's own uuid module documentation uses."""
     id_ = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "python.org")
     assert id_ == uuid.UUID("886313e1-3b8a-5372-9b90-0c9aee199e5d")
 
 
 def test_v5_matches_stdlib_uuid5():
-    # hyperuuid's v5 should agree byte-for-byte with Python's own (SHA-1-based) uuid5.
+    """hyperuuid's v5 should agree byte-for-byte with Python's own (SHA-1-based) uuid5."""
     for name in ("same-name", "café — 日本語"):
         assert hyperuuid.new_v5(uuid.NAMESPACE_URL, name) == uuid.uuid5(uuid.NAMESPACE_URL, name)
 
 
 def test_v5_is_deterministic():
+    """The same namespace and name give the same v5 UUID."""
     a = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "same-name")
     b = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "same-name")
     assert a == b
 
 
 def test_v5_different_namespaces_differ():
+    """The same name in two namespaces gives two v5 UUIDs."""
     dns = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "test")
     url = hyperuuid.new_v5(uuid.NAMESPACE_URL, "test")
     assert dns != url
 
 
 def test_v5_bytes_and_str_name_agree():
+    """A str name and its UTF-8 bytes give the same v5 UUID."""
     a = hyperuuid.new_v5(uuid.NAMESPACE_URL, "test-name")
     b = hyperuuid.new_v5(uuid.NAMESPACE_URL, b"test-name")
     assert a == b
 
 
 def test_v6_embeds_the_timestamp():
+    """A v6 UUID carries the timestamp it was minted with."""
     id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
     expected = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
     assert hyperuuid.v6_timestamp(id_) == expected
 
 
 def test_v6_has_version_and_variant_bits_set():
+    """A v6 UUID carries version 6 and the RFC variant."""
     id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
     assert id_.version == 6
     assert id_.variant == uuid.RFC_4122
 
 
 def test_v6_sets_the_node_id_multicast_bit():
+    """A v6 UUID's random node id has the multicast bit set, per RFC 9562."""
     id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
     assert id_.bytes[10] & 0x01 == 1
 
 
 def test_v6_is_non_deterministic_within_the_same_millisecond():
+    """A hundred v6 UUIDs in one millisecond are a hundred different UUIDs."""
     results = {hyperuuid.new_v6(RFC_TEST_VECTOR_MS) for _ in range(100)}
     assert len(results) == 100
 
 
 def test_v6_current_timestamp_is_embedded():
+    """A v6 UUID minted with no timestamp carries the current time."""
     before = _now_ms()
     id_ = hyperuuid.new_v6()
     after = _now_ms()
@@ -99,6 +112,7 @@ def test_v6_current_timestamp_is_embedded():
 
 
 def test_v6_batch_returns_count_uuids_sharing_the_timestamp():
+    """new_v6_batch returns count UUIDs, all carrying the given timestamp."""
     ids = hyperuuid.new_v6_batch(10, RFC_TEST_VECTOR_MS)
     assert len(ids) == 10
     expected = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
@@ -108,52 +122,62 @@ def test_v6_batch_returns_count_uuids_sharing_the_timestamp():
 
 
 def test_v6_batch_produces_pairwise_distinct_uuids():
+    """A v6 batch holds no duplicates."""
     ids = hyperuuid.new_v6_batch(100, RFC_TEST_VECTOR_MS)
     assert len(set(ids)) == 100
 
 
 def test_v6_batch_count_zero_returns_empty_list():
+    """A v6 batch of zero is an empty list."""
     assert hyperuuid.new_v6_batch(0, RFC_TEST_VECTOR_MS) == []
 
 
 def test_v6_batch_overflow_timestamp_raises():
+    """A v6 batch at a timestamp past the field raises ValueError."""
     with pytest.raises(ValueError):
         hyperuuid.new_v6_batch(1, 0xFFFF_FFFF_FFFF_FFFF)
 
 
 def test_nil_is_all_zero_bytes():
+    """NIL is sixteen zero bytes."""
     assert hyperuuid.NIL.bytes == bytes(16)
     assert str(hyperuuid.NIL) == "00000000-0000-0000-0000-000000000000"
 
 
 def test_max_is_all_one_bytes():
+    """MAX is sixteen 0xFF bytes."""
     assert hyperuuid.MAX.bytes == b"\xff" * 16
     assert str(hyperuuid.MAX) == "ffffffff-ffff-ffff-ffff-ffffffffffff"
 
 
 def test_v7_embeds_the_timestamp():
+    """A v7 UUID's first 48 bits are its millisecond timestamp."""
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
     assert embedded_ms == RFC_TEST_VECTOR_MS
 
 
 def test_v7_has_version_and_variant_bits_set():
+    """A v7 UUID carries version 7 and the RFC variant."""
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     assert id_.version == 7
     assert id_.variant == uuid.RFC_4122
 
 
 def test_v7_overflow_timestamp_raises():
+    """A v7 timestamp past 48 bits raises ValueError."""
     with pytest.raises(ValueError):
         hyperuuid.new_v7(0x0001_0000_0000_0000)
 
 
 def test_v7_same_millisecond_batch_is_monotonically_ordered():
+    """v7 UUIDs minted in one millisecond sort in minting order."""
     ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS) for _ in range(100)]
     assert ids == sorted(ids)
 
 
 def test_v7_current_timestamp_is_embedded():
+    """A v7 UUID minted with no timestamp carries the current time."""
     before = _now_ms()
     id_ = hyperuuid.new_v7()
     after = _now_ms()
@@ -163,12 +187,14 @@ def test_v7_current_timestamp_is_embedded():
 
 
 def test_v7_timestamp_recovers_the_exact_millisecond():
+    """v7_timestamp recovers the exact millisecond minted."""
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     expected = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
     assert hyperuuid.v7_timestamp(id_) == expected
 
 
 def test_v7_timestamp_round_trips_zero_and_a_large_timestamp():
+    """v7_timestamp round-trips the epoch and the latest datetime can hold."""
     assert hyperuuid.v7_timestamp(hyperuuid.new_v7(0)).timestamp() == 0
 
     # Largest ms value datetime.datetime (year <= 9999) can represent, not the RFC's own
@@ -179,14 +205,18 @@ def test_v7_timestamp_round_trips_zero_and_a_large_timestamp():
 
 
 def test_unix_millis_returns_the_embedded_integer_for_both_versions():
+    """v6_unix_millis and v7_unix_millis return the millisecond minted."""
     assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(RFC_TEST_VECTOR_MS)) == RFC_TEST_VECTOR_MS
     assert hyperuuid.v6_unix_millis(hyperuuid.new_v6(RFC_TEST_VECTOR_MS)) == RFC_TEST_VECTOR_MS
     assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(0)) == 0
     # The integer form holds what datetime cannot: the top of the 48-bit field.
-    assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)) == 0x0000_FFFF_FFFF_FFFF
+    assert (
+        hyperuuid.v7_unix_millis(hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)) == 0x0000_FFFF_FFFF_FFFF
+    )
 
 
 def test_unix_millis_agrees_with_the_datetime_doors():
+    """The millisecond doors agree with the datetime doors."""
     epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
     # Each version up to a late value its own field holds: v6's 60-bit tick count ends in
     # the year 5236, v7's milliseconds outlast datetime itself.
@@ -201,17 +231,20 @@ def test_unix_millis_agrees_with_the_datetime_doors():
 
 
 def test_v7_timestamp_raises_past_datetime_year_range():
-    # A legitimate RFC 9562 v7 UUID can embed a timestamp datetime.datetime can't hold.
+    """A legitimate RFC 9562 v7 UUID can embed a timestamp datetime.datetime can't hold."""
     id_ = hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)
     with pytest.raises(OverflowError):
         hyperuuid.v7_timestamp(id_)
 
 
-@pytest.mark.skipif(sys.version_info < (3, 14), reason="stdlib uuid.uuid7() was added in Python 3.14")
+@pytest.mark.skipif(
+    sys.version_info < (3, 14), reason="stdlib uuid.uuid7() was added in Python 3.14"
+)
 def test_v7_timestamp_extracts_from_the_stdlib_native_generator():
-    # Proves v7_timestamp isn't just reading back what our own new_v7 wrote — it's a plain
-    # RFC 9562 bit-layout read, so it recovers the real embedded timestamp from a version 7
-    # UUID minted by Python's own stdlib generator too.
+    """Proves v7_timestamp isn't just reading back what our own new_v7 wrote — it's a plain RFC 9562
+    bit-layout read, so it recovers the real embedded timestamp from a version 7 UUID minted by
+    Python's own stdlib generator too.
+    """
     before = time.time()
     native = uuid.uuid7()
     after = time.time()
@@ -221,33 +254,39 @@ def test_v7_timestamp_extracts_from_the_stdlib_native_generator():
 
 
 def test_new_v6_accepts_a_datetime_in_place_of_a_millisecond_int():
+    """new_v6 takes a datetime where it takes milliseconds."""
     dt = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
     id_ = hyperuuid.new_v6(dt)
     assert hyperuuid.v6_timestamp(id_) == dt
 
 
 def test_new_v7_accepts_a_datetime_in_place_of_a_millisecond_int():
+    """new_v7 takes a datetime where it takes milliseconds."""
     dt = datetime.datetime.fromtimestamp(RFC_TEST_VECTOR_MS / 1000, tz=datetime.timezone.utc)
     id_ = hyperuuid.new_v7(dt)
     assert hyperuuid.v7_timestamp(id_) == dt
 
 
 def test_get_timestamp_returns_none_for_non_time_based_versions():
+    """get_timestamp is None for v4 and v5, which carry no time."""
     assert hyperuuid.get_timestamp(hyperuuid.new_v4()) is None
     assert hyperuuid.get_timestamp(hyperuuid.new_v5(uuid.NAMESPACE_DNS, "test")) is None
 
 
 def test_get_timestamp_matches_v6_timestamp():
+    """get_timestamp agrees with v6_timestamp on a v6 UUID."""
     id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
     assert hyperuuid.get_timestamp(id_) == hyperuuid.v6_timestamp(id_)
 
 
 def test_get_timestamp_matches_v7_timestamp():
+    """get_timestamp agrees with v7_timestamp on a v7 UUID."""
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     assert hyperuuid.get_timestamp(id_) == hyperuuid.v7_timestamp(id_)
 
 
 def test_v7_batch_returns_count_uuids_sorted_and_sharing_the_timestamp():
+    """new_v7_batch returns count sorted UUIDs, all carrying the given timestamp."""
     ids = hyperuuid.new_v7_batch(1000, RFC_TEST_VECTOR_MS)
     assert len(ids) == 1000
     assert ids == sorted(ids)
@@ -257,6 +296,7 @@ def test_v7_batch_returns_count_uuids_sorted_and_sharing_the_timestamp():
 
 
 def test_v7_batch_continues_the_same_counter_sequence_as_individual_calls():
+    """A v7 batch sorts between the single UUIDs minted before and after it."""
     before = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     batch = hyperuuid.new_v7_batch(10, RFC_TEST_VECTOR_MS)
     after = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
@@ -266,15 +306,18 @@ def test_v7_batch_continues_the_same_counter_sequence_as_individual_calls():
 
 
 def test_v7_batch_count_zero_returns_empty_list():
+    """A v7 batch of zero is an empty list."""
     assert hyperuuid.new_v7_batch(0, RFC_TEST_VECTOR_MS) == []
 
 
 def test_v7_batch_overflow_timestamp_raises():
+    """A v7 batch at a timestamp past 48 bits raises ValueError."""
     with pytest.raises(ValueError):
         hyperuuid.new_v7_batch(1, 0x0001_0000_0000_0000)
 
 
 def test_v7_to_sql_order_round_trips_through_v7_from_sql_order():
+    """v7_from_sql_order undoes v7_to_sql_order."""
     id_ = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
     sql_ordered = hyperuuid.v7_to_sql_order(id_)
     assert sql_ordered != id_
@@ -282,6 +325,7 @@ def test_v7_to_sql_order_round_trips_through_v7_from_sql_order():
 
 
 def test_v7_to_sql_order_preserves_version_and_variant_at_octets_7_and_8():
+    """SQL order keeps the version and variant bits where RFC 9562 puts them."""
     sql_ordered = hyperuuid.v7_to_sql_order(hyperuuid.new_v7(RFC_TEST_VECTOR_MS))
     b = sql_ordered.bytes
     assert b[7] & 0xF0 == 0x70
@@ -298,6 +342,7 @@ def _sql_guid_key(uuid_value):
 
 
 def test_v7_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison():
+    """v7 UUIDs in SQL order sort by creation under SQL Server's uniqueidentifier order."""
     ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + i) for i in range(200)]
     # Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
     ids += [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + 1_000_000) for _ in range(200)]
@@ -309,6 +354,7 @@ def test_v7_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison():
 
 
 def test_v6_to_sql_order_round_trips_through_v6_from_sql_order():
+    """v6_from_sql_order undoes v6_to_sql_order."""
     id_ = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
     sql_ordered = hyperuuid.v6_to_sql_order(id_)
     assert sql_ordered != id_
@@ -316,7 +362,7 @@ def test_v6_to_sql_order_round_trips_through_v6_from_sql_order():
 
 
 def test_v6_to_sql_order_preserves_version_and_variant():
-    # Different offsets than v7's sql order — see v6_to_sql_order's docstring for why.
+    """Different offsets than v7's sql order — see v6_to_sql_order's docstring for why."""
     sql_ordered = hyperuuid.v6_to_sql_order(hyperuuid.new_v6(RFC_TEST_VECTOR_MS))
     b = sql_ordered.bytes
     assert b[8] & 0xF0 == 0x60
@@ -324,9 +370,10 @@ def test_v6_to_sql_order_preserves_version_and_variant():
 
 
 def test_v6_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison_for_distinct_timestamps():
-    # Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed to
-    # sort in creation order even in plain RFC order, so this only exercises strictly
-    # increasing timestamps, where the timestamp alone determines order with no tie to break.
+    """Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed to sort in
+    creation order even in plain RFC order, so this only exercises strictly increasing
+    timestamps, where the timestamp alone determines order with no tie to break.
+    """
     ids = [hyperuuid.new_v6(RFC_TEST_VECTOR_MS + i) for i in range(300)]
 
     sql_ordered = [hyperuuid.v6_to_sql_order(id_) for id_ in ids]
@@ -339,6 +386,7 @@ def test_v6_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison_for_di
 
 
 def test_fill_v7_fills_the_callers_buffer():
+    """fill_v7 writes a v7 UUID into every 16 bytes of the caller's buffer."""
     count = 64
     buf = bytearray(count * 16)
     hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
@@ -348,6 +396,7 @@ def test_fill_v7_fills_the_callers_buffer():
 
 
 def test_fill_v7_is_strictly_increasing():
+    """The UUIDs fill_v7 writes strictly increase."""
     count = 256
     buf = bytearray(count * 16)
     hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
@@ -357,6 +406,7 @@ def test_fill_v7_is_strictly_increasing():
 
 
 def test_fill_v6_fills_the_callers_buffer():
+    """fill_v6 writes a v6 UUID into every 16 bytes of the caller's buffer."""
     count = 32
     buf = bytearray(count * 16)
     hyperuuid.fill_v6(buf, RFC_TEST_VECTOR_MS)
@@ -379,6 +429,7 @@ def test_fill_matches_the_batch_form_structurally():
 
 
 def test_fill_rejects_a_partial_uuid_buffer():
+    """A buffer that is not a whole number of UUIDs raises ValueError."""
     with pytest.raises(ValueError):
         hyperuuid.fill_v7(bytearray(17), RFC_TEST_VECTOR_MS)
     with pytest.raises(ValueError):
@@ -386,16 +437,19 @@ def test_fill_rejects_a_partial_uuid_buffer():
 
 
 def test_fill_empty_buffer_is_a_no_op():
+    """Filling an empty buffer does nothing."""
     hyperuuid.fill_v7(bytearray(0), RFC_TEST_VECTOR_MS)
     hyperuuid.fill_v6(bytearray(0), RFC_TEST_VECTOR_MS)
 
 
 def test_fill_v7_rejects_an_out_of_range_timestamp():
+    """fill_v7 raises ValueError for a timestamp past 48 bits."""
     with pytest.raises(ValueError):
         hyperuuid.fill_v7(bytearray(16), 1 << 48)
 
 
 def test_fill_v7_defaults_to_now():
+    """fill_v7 with no timestamp writes the current time."""
     buf = bytearray(16)
     before = time.time()
     hyperuuid.fill_v7(buf)
@@ -406,15 +460,13 @@ def test_fill_v7_defaults_to_now():
 
 def test_fill_fully_overwrites_a_reused_buffer():
     """The buffer-reuse case this API exists for: no byte of a previous fill may survive."""
-    buf = bytearray(b"\xAA" * (8 * 16))
+    buf = bytearray(b"\xaa" * (8 * 16))
     hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
     first = bytes(buf)
-    assert b"\xAA" * 16 not in first
+    assert b"\xaa" * 16 not in first
     hyperuuid.fill_v7(buf, RFC_TEST_VECTOR_MS)
     assert bytes(buf) != first, "second fill returned identical bytes"
-    assert all(
-        uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])).version == 7 for i in range(8)
-    )
+    assert all(uuid.UUID(bytes=bytes(buf[i * 16 : (i + 1) * 16])).version == 7 for i in range(8))
 
 
 @pytest.mark.parametrize(
@@ -429,7 +481,8 @@ def test_fill_fully_overwrites_a_reused_buffer():
     ],
 )
 def test_a_non_uuid_argument_is_a_type_error_naming_its_type(call):
-    # Every UUID argument reads the value's `int`; something with none is the TypeError the
-    # README promises for a wrong-typed argument, not the AttributeError reading it raises.
+    """Every UUID argument reads the value's `int`; something with none is the TypeError the README
+    promises for a wrong-typed argument, not the AttributeError reading it raises.
+    """
     with pytest.raises(TypeError, match=r"expected a uuid\.UUID, not "):
         call()

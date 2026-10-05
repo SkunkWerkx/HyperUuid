@@ -4,6 +4,7 @@ plugins {
     `java-library`
     `maven-publish`
     id("com.vanniktech.maven.publish") version "0.37.0"
+    id("com.diffplug.spotless") version "8.10.3"
 }
 
 // io.github.skunkwerkx — the SkunkWerkx org's own auto-verified Central Portal namespace
@@ -20,6 +21,17 @@ version = System.getenv("HYPERUUID_VERSION") ?: "0.6.1"
 
 repositories {
     mavenCentral()
+}
+
+// The formatter, over every Java file in the build: the library, its tests, the AOT smoke
+// test and the JMH benchmarks. palantir-java-format is google-java-format's rules at a
+// 4-space indent and 120 columns, the shape this code was already written in.
+// `./gradlew spotlessApply` formats; `./gradlew spotlessCheck` (CI) fails on any drift.
+spotless {
+    java {
+        target("src/**/*.java", "aot-smoke-test/src/**/*.java", "benchmarks/src/**/*.java")
+        palantirJavaFormat("2.102.0")
+    }
 }
 
 // GraalWasm, the wasm backend's runtime, is deliberately compileOnly: this jar's POM carries no

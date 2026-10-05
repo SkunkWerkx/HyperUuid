@@ -1,7 +1,7 @@
 """The typed surface of ``hyperuuid._native``, the PyO3 extension (``tests/test_typing.py``
-holds the loaded module to this file). ``hyperuuid`` validates and converts its arguments before calling in, so
-these are the already-narrowed shapes: a timestamp here is an ``int`` or ``None``, never a
-``datetime``.
+holds the loaded module to this file). ``hyperuuid`` validates and converts its arguments
+before calling in, so these are the already-narrowed shapes: a timestamp here is an ``int``
+or ``None``, never a ``datetime``.
 """
 
 import datetime

@@ -173,7 +173,9 @@ def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
     return _native.v6_timestamp(uuid_value)
 
 
-def new_v6_batch(count: int, unix_millis: int | datetime.datetime | None = None) -> list[_uuid.UUID]:
+def new_v6_batch(
+    count: int, unix_millis: int | datetime.datetime | None = None
+) -> list[_uuid.UUID]:
     """Create ``count`` time-sortable version 6 UUIDs sharing one timestamp capture — one
     native call and one random-bytes fetch instead of ``count`` of each.
 
@@ -259,7 +261,9 @@ def get_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime | None:
     return None
 
 
-def new_v7_batch(count: int, unix_millis: int | datetime.datetime | None = None) -> list[_uuid.UUID]:
+def new_v7_batch(
+    count: int, unix_millis: int | datetime.datetime | None = None
+) -> list[_uuid.UUID]:
     """Create ``count`` time-sortable version 7 UUIDs sharing one timestamp capture and one
     contiguous block of the monotonic counter — one native call and one random-bytes fetch
     instead of ``count`` of each.

@@ -107,10 +107,12 @@ public final class Main {
 
         byte[] raw = new byte[4 * 16];
         UuidGenerator.fillV7(raw, rfcTestVectorMs);
-        require(uuidAt(raw, 48).version() == 7 && UuidGenerator.v7UnixMillis(uuidAt(raw, 48)) == rfcTestVectorMs,
+        require(
+                uuidAt(raw, 48).version() == 7 && UuidGenerator.v7UnixMillis(uuidAt(raw, 48)) == rfcTestVectorMs,
                 "fillV7(byte[])");
         UuidGenerator.fillV6(raw, rfcTestVectorMs);
-        require(uuidAt(raw, 48).version() == 6 && UuidGenerator.v6UnixMillis(uuidAt(raw, 48)) == rfcTestVectorMs,
+        require(
+                uuidAt(raw, 48).version() == 6 && UuidGenerator.v6UnixMillis(uuidAt(raw, 48)) == rfcTestVectorMs,
                 "fillV6(byte[])");
         UuidGenerator.fillV7(raw);
         require(uuidAt(raw, 0).version() == 7, "fillV7(byte[]) at the current time");

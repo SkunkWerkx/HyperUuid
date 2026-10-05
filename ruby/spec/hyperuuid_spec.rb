@@ -494,9 +494,9 @@ RSpec.describe HyperUuid do
     it "rejects everything else as an ArgumentError" do
       canonical = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
       [
-        canonical.delete("-"),             # the bare 32 hex digits
+        canonical.delete("-"), # the bare 32 hex digits
         "6ba7b8109-dad-11d1-80b4-00c04fd430c8", # a hyphen in the wrong place
-        "-#{canonical.delete('-')}---",    # the right number of hyphens, nowhere right
+        "-#{canonical.delete('-')}---", # the right number of hyphens, nowhere right
         "{#{canonical}}", "urn:uuid:#{canonical}", " #{canonical}", "#{canonical}\n",
         canonical[0..-2], "#{canonical}0", canonical.tr("6", "g"), "", nil, 42
       ].each do |text|

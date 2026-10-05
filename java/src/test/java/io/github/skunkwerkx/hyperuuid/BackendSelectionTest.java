@@ -43,7 +43,8 @@ class BackendSelectionTest {
             Throwable thrown = failureOf(generator, "backend");
             // The message a consumer has to act on, not a bare NoClassDefFoundError and not
             // "could not start the wasm backend".
-            IllegalStateException failure = assertInstanceOf(IllegalStateException.class,
+            IllegalStateException failure = assertInstanceOf(
+                    IllegalStateException.class,
                     assertInstanceOf(ExceptionInInitializerError.class, thrown).getCause());
             assertTrue(failure.getMessage().contains("org.graalvm.polyglot:polyglot"), failure.getMessage());
             assertTrue(failure.getMessage().contains("org.graalvm.polyglot:wasm"), failure.getMessage());
@@ -72,7 +73,8 @@ class BackendSelectionTest {
             // With no GraalWasm behind this copy the fallback cannot start either, so the
             // failure thrown is the native one — and the wasm attempt it made rides along
             // suppressed, saying why wasm was tried at all.
-            Throwable nativeFailure = assertInstanceOf(ExceptionInInitializerError.class, thrown).getCause();
+            Throwable nativeFailure =
+                    assertInstanceOf(ExceptionInInitializerError.class, thrown).getCause();
             assertEquals(1, nativeFailure.getSuppressed().length, nativeFailure.toString());
             String wasmFailure = nativeFailure.getSuppressed()[0].getMessage();
             assertTrue(wasmFailure.contains("org.graalvm.polyglot:wasm"), wasmFailure);
@@ -91,8 +93,8 @@ class BackendSelectionTest {
         URL module = UuidGenerator.class.getResource(WasmBackend.RESOURCE_PATH);
         assumeTrue(module != null, "no wasm module staged, so there is no wasm path to select");
         String external = module.toExternalForm();
-        URL resources = URI.create(
-                external.substring(0, external.length() - WasmBackend.RESOURCE_PATH.length() + 1)).toURL();
+        URL resources = URI.create(external.substring(0, external.length() - WasmBackend.RESOURCE_PATH.length() + 1))
+                .toURL();
         URL classes = UuidGenerator.class.getProtectionDomain().getCodeSource().getLocation();
 
         URL[] path = new URL[ahead.length + 2];
@@ -114,21 +116,21 @@ class BackendSelectionTest {
     private static byte[] unloadableLibrary() {
         ByteBuffer elf = ByteBuffer.allocate(64 + 56).order(ByteOrder.LITTLE_ENDIAN);
         elf.put(new byte[] {0x7f, 'E', 'L', 'F', 2, 1, 1, 0}).position(16);
-        elf.putShort((short) 3)          // e_type: ET_DYN
-                .putShort((short) 0)     // e_machine: EM_NONE, which no host matches
-                .putInt(1)               // e_version
-                .putLong(0)              // e_entry
-                .putLong(64)             // e_phoff: the program header follows this one
-                .putLong(0)              // e_shoff
-                .putInt(0)               // e_flags
-                .putShort((short) 64)    // e_ehsize
-                .putShort((short) 56)    // e_phentsize
-                .putShort((short) 1)     // e_phnum
-                .putShort((short) 0)     // e_shentsize
-                .putShort((short) 0)     // e_shnum
-                .putShort((short) 0);    // e_shstrndx
-        elf.putInt(0x6474e551)           // p_type: PT_GNU_STACK
-                .putInt(6);              // p_flags: read + write, not execute
+        elf.putShort((short) 3) // e_type: ET_DYN
+                .putShort((short) 0) // e_machine: EM_NONE, which no host matches
+                .putInt(1) // e_version
+                .putLong(0) // e_entry
+                .putLong(64) // e_phoff: the program header follows this one
+                .putLong(0) // e_shoff
+                .putInt(0) // e_flags
+                .putShort((short) 64) // e_ehsize
+                .putShort((short) 56) // e_phentsize
+                .putShort((short) 1) // e_phnum
+                .putShort((short) 0) // e_shentsize
+                .putShort((short) 0) // e_shnum
+                .putShort((short) 0); // e_shstrndx
+        elf.putInt(0x6474e551) // p_type: PT_GNU_STACK
+                .putInt(6); // p_flags: read + write, not execute
         return elf.array();
     }
 

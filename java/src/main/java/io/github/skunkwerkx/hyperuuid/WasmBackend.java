@@ -96,8 +96,8 @@ final class WasmBackend implements Backend {
         byte[] module;
         try (InputStream in = WasmBackend.class.getResourceAsStream(RESOURCE_PATH)) {
             if (in == null) {
-                throw new IllegalStateException(RESOURCE_PATH
-                        + " classpath resource not found (this jar was built without the wasm module)");
+                throw new IllegalStateException(
+                        RESOURCE_PATH + " classpath resource not found (this jar was built without the wasm module)");
             }
             module = in.readAllBytes();
         } catch (IOException e) {
@@ -112,7 +112,8 @@ final class WasmBackend implements Backend {
             // half-added dependency, org.graalvm.polyglot:polyglot without :wasm.
             throw new IllegalStateException(GRAALWASM_MISSING, noWasmLanguage);
         }
-        Value instance = context.eval(Source.newBuilder("wasm", ByteSequence.create(module), "hyperuuid").buildLiteral())
+        Value instance = context.eval(Source.newBuilder("wasm", ByteSequence.create(module), "hyperuuid")
+                        .buildLiteral())
                 .newInstance();
         exports = instance.getMember("exports");
         memory = exports.getMember("memory");
@@ -257,7 +258,11 @@ final class WasmBackend implements Backend {
         if (count == 0) {
             return new UUID[0];
         }
-        int out = fillBatch(newV6BatchFn, "uuid_new_v6_batch", count, unixMillis,
+        int out = fillBatch(
+                newV6BatchFn,
+                "uuid_new_v6_batch",
+                count,
+                unixMillis,
                 "unixMillis does not fit the 60-bit v6 timestamp field");
         return readUuids(out, count, new UUID[count]);
     }
@@ -285,7 +290,11 @@ final class WasmBackend implements Backend {
         if (count == 0) {
             return new UUID[0];
         }
-        int out = fillBatch(newV7BatchFn, "uuid_new_v7_batch", count, unixMillis,
+        int out = fillBatch(
+                newV7BatchFn,
+                "uuid_new_v7_batch",
+                count,
+                unixMillis,
                 "unixMillis must be non-negative and fit within 48 bits");
         return readUuids(out, count, new UUID[count]);
     }
@@ -315,7 +324,11 @@ final class WasmBackend implements Backend {
         if (destination.length == 0) {
             return;
         }
-        int out = fillBatch(newV7BatchFn, "uuid_new_v7_batch", destination.length, unixMillis,
+        int out = fillBatch(
+                newV7BatchFn,
+                "uuid_new_v7_batch",
+                destination.length,
+                unixMillis,
                 "unixMillis does not fit this version's timestamp field");
         readUuids(out, destination.length, destination);
     }
@@ -325,7 +338,11 @@ final class WasmBackend implements Backend {
         if (destination.length == 0) {
             return;
         }
-        int out = fillBatch(newV6BatchFn, "uuid_new_v6_batch", destination.length, unixMillis,
+        int out = fillBatch(
+                newV6BatchFn,
+                "uuid_new_v6_batch",
+                destination.length,
+                unixMillis,
                 "unixMillis does not fit this version's timestamp field");
         readUuids(out, destination.length, destination);
     }
@@ -399,7 +416,11 @@ final class WasmBackend implements Backend {
         if (destination.length == 0) {
             return;
         }
-        int out = fillBatch(fn, name, destination.length / 16, unixMillis,
+        int out = fillBatch(
+                fn,
+                name,
+                destination.length / 16,
+                unixMillis,
                 "unixMillis does not fit this version's timestamp field");
         memory.readBuffer(out, destination, 0, destination.length);
     }
