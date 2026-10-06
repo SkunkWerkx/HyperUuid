@@ -119,6 +119,7 @@ unsafe extern "C" {}
 #[cfg_attr(not(target_feature = "crt-static"), link(name = "msvcrt"))]
 unsafe extern "C" {}
 
+mod entropy;
 mod ffi;
 mod timestamp;
 mod uuid;

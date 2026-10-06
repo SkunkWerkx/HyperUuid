@@ -173,12 +173,12 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 
 | method | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
-| `NewV7At` x1000 individually | 76,630 | 0 | 0 |
-| `NewV7BatchAt(1000)` | 14,425 | 16,384 | 1 |
-| `FillV7At` into an existing slice | 9,803 | **0** | **0** |
-| `FillV7BytesAt` into an existing buffer | 9,446 | **0** | **0** |
+| `NewV7At` x1000 individually | 65,413 | 0 | 0 |
+| `NewV7BatchAt(1000)` | 7,107 | 16,384 | 1 |
+| `FillV7At` into an existing slice | 3,624 | **0** | **0** |
+| `FillV7BytesAt` into an existing buffer | 3,599 | **0** | **0** |
 
-`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 4% of each other, since neither converts; the byte form exists for convenience, not speed.
+`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 1% of each other, since neither converts; the byte form exists for convenience, not speed.
 
 `NewV6BatchAt`/`NewV7BatchAt` now delegate to the fills, so the array-returning API is a single allocation with no intermediate copy — existing callers got faster without changing a line.
 
@@ -301,10 +301,10 @@ session, median of three runs:
 
 | Call | Time, allocations |
 | --- | ---: |
-| `NewV4` | 87 ns, 0 allocs |
-| `NewV5String` | 111 ns, 1 alloc |
-| `NewV6At` | 70 ns, 0 allocs |
-| `NewV7At` | 82 ns, 0 allocs |
+| `NewV4` | 60 ns, 0 allocs |
+| `NewV5String` | 98 ns, 1 alloc |
+| `NewV6At` | 54 ns, 0 allocs |
+| `NewV7At` | 65 ns, 0 allocs |
 
 No call allocates (the one `NewV5String` keeps is Go's own `[]byte(name)` conversion).
 `go build -gcflags=-m` is right that any Go pointer handed to a cgo call is conservatively
@@ -313,17 +313,17 @@ own stack and returns them as a struct, and takes a UUID argument the same way, 
 crosses by pointer except a caller's own slice. The same by-value shape took 30-50% off
 every door in HyperCast.
 
-**Batch is where the per-call toll goes away.** Most of those ~80 ns is the cgo crossing
-itself (about 50 ns — [the root README](../README.md#the-control-group-go) has why), not the
+**Batch is where the per-call toll goes away.** Most of those ~60 ns is the cgo crossing
+itself (about 40 ns — [the root README](../README.md#the-control-group-go) has why), not the
 core's work, so one crossing for 1000 UUIDs instead of 1000
 crossings is the whole win:
 
 | Call | Time, allocations |
 | --- | ---: |
-| `NewV6BatchAt(1000, ...)` | 16.6 µs, 1 alloc |
-| `NewV7BatchAt(1000, ...)` | 14.4 µs, 1 alloc |
+| `NewV6BatchAt(1000, ...)` | 7.9 µs, 1 alloc |
+| `NewV7BatchAt(1000, ...)` | 7.1 µs, 1 alloc |
 
-against 76.6 µs for 1000 individual `NewV7At` calls (see
+against 65.4 µs for 1000 individual `NewV7At` calls (see
 [Destination-buffer fills](#destination-buffer-fills), where `FillV7At` drops the one
 allocation too). If your workload can batch, batch.
 
@@ -335,8 +335,8 @@ genuine head-to-head, not a strawman. Same machine, same run:
 
 | Call | hyperuuid | `google/uuid`'s `id.Time()` |
 | --- | ---: | ---: |
-| v6 | 34 ns, 0 allocs | 1.4 ns, 0 allocs |
-| v7 | 32 ns, 0 allocs | 1.9 ns, 0 allocs |
+| v6 | 30 ns, 0 allocs | 1.3 ns, 0 allocs |
+| v7 | 29 ns, 0 allocs | 1.7 ns, 0 allocs |
 
 `google/uuid`'s `Time()` wins outright, by roughly 20x — it's pure Go bit-shifting over
 bytes already in the process, with no FFI boundary to cross.

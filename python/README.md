@@ -157,15 +157,15 @@ hyperuuid.fill_v7(buf)                      # 1000 v7 UUIDs, one timestamp captu
 first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifier parameter
 ```
 
-**This is roughly 15x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
+**This is roughly 35x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
 
 | path | µs / 1000 UUIDs |
 | --- | ---: |
-| `new_v7_batch(1000)` → `list[UUID]` | 142 |
-| `fill_v7(bytearray)` | **9.7** |
-| `fill_v7`, then build `uuid.UUID` objects in Python | 940 |
+| `new_v7_batch(1000)` → `list[UUID]` | 132 |
+| `fill_v7(bytearray)` | **3.7** |
+| `fill_v7`, then build `uuid.UUID` objects in Python | 888 |
 
-`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 9.7 µs, which is the same native ceiling the Go (9.8 µs) and C# (9.6 µs) bindings hit for identical work.
+`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the Go (3.6 µs) and C# (3.7 µs) bindings hit for identical work.
 
 The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is more than six times as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
 
@@ -189,10 +189,10 @@ Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-x64 on an Intel C
 
 | Call | hyperuuid | vs. closest stdlib equivalent |
 |---|---|---|
-| `hyperuuid.new_v4()` | 243 ns | `uuid.uuid4()`: 718 ns — **3.0x faster** |
-| `hyperuuid.new_v5(...)` | 374 ns | `uuid.uuid5(...)`: 1.58 µs — **4.2x faster** |
-| `hyperuuid.new_v6(...)` | 351 ns | `uuid.uuid6()` (3.14+): 1.26 µs — **3.6x faster** |
-| `hyperuuid.new_v7(...)` | 354 ns | `uuid.uuid7()` (3.14+): 1.28 µs — **3.6x faster** |
+| `hyperuuid.new_v4()` | 215 ns | `uuid.uuid4()`: 729 ns — **3.4x faster** |
+| `hyperuuid.new_v5(...)` | 372 ns | `uuid.uuid5(...)`: 1.58 µs — **4.2x faster** |
+| `hyperuuid.new_v6(...)` | 335 ns | `uuid.uuid6()` (3.14+): 1.30 µs — **3.9x faster** |
+| `hyperuuid.new_v7(...)` | 342 ns | `uuid.uuid7()` (3.14+): 1.29 µs — **3.8x faster** |
 
 Most of what a call costs is the `uuid.UUID` it hands back, so the extension builds that through the C API's own entry points — an instance allocated and its two slots set, no Python-level call — all of it inside the stable ABI, so one wheel still covers every CPython from 3.11.
 
@@ -200,8 +200,8 @@ Batch generation amortizes the rest of the per-call cost:
 
 | | Mean | vs. individual calls |
 |---|---|---|
-| `new_v6_batch(1000)` | 139 µs ± 5 µs | vs. 1000x `new_v6()`: 333 µs ± 8 µs — **2.4x** |
-| `new_v7_batch(1000)` | 135 µs ± 6 µs | vs. 1000x `new_v7()`: 339 µs ± 11 µs — **2.5x** |
+| `new_v6_batch(1000)` | 131 µs ± 3 µs | vs. 1000x `new_v6()`: 316 µs ± 8 µs — **2.4x** |
+| `new_v7_batch(1000)` | 132 µs ± 3 µs | vs. 1000x `new_v7()`: 323 µs ± 9 µs — **2.4x** |
 
 ### Timestamp extraction vs. stdlib's `.time` property
 
@@ -209,10 +209,10 @@ CPython 3.14's `uuid.UUID.time` has real version-aware extraction logic of its o
 
 | Call | hyperuuid | vs. stdlib `.time` |
 |---|---|---|
-| `hyperuuid.v6_unix_millis(...)` → `int` | 163 ns | `UUID.time` (v6): 479 ns — **2.9x faster** |
-| `hyperuuid.v7_unix_millis(...)` → `int` | 161 ns | `UUID.time` (v7): 401 ns — **2.5x faster** |
-| `hyperuuid.v6_timestamp(...)` → `datetime` | 250 ns | `UUID.time` (v6): 479 ns — **1.9x faster** |
-| `hyperuuid.v7_timestamp(...)` → `datetime` | 252 ns | `UUID.time` (v7): 401 ns — **1.6x faster** |
+| `hyperuuid.v6_unix_millis(...)` → `int` | 164 ns | `UUID.time` (v6): 484 ns — **3.0x faster** |
+| `hyperuuid.v7_unix_millis(...)` → `int` | 163 ns | `UUID.time` (v7): 396 ns — **2.4x faster** |
+| `hyperuuid.v6_timestamp(...)` → `datetime` | 250 ns | `UUID.time` (v6): 484 ns — **1.9x faster** |
+| `hyperuuid.v7_timestamp(...)` → `datetime` | 242 ns | `UUID.time` (v7): 396 ns — **1.6x faster** |
 
 `.time` returns an `int`, so the `*_unix_millis` rows are the like-for-like ones; the `*_timestamp` rows hand back a timezone-aware `datetime` and are still ahead. Reach for the integer form when the value is going to be stored, compared or forwarded as a number.
 
