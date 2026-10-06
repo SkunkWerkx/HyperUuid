@@ -28,16 +28,24 @@
 // entropy source getrandom uses there, so the link line names nothing else.
 //
 // The archives are committed (staticlib/README.md): a Go module is whatever is in the tree at
-// the resolved version, with no packing step to stage them in.
+// the resolved version, with no packing step to stage them in. The hyperuuid_local build tag
+// links the archive .github/scripts/local-core.sh builds from the checkout instead, so the
+// suite can run against the core as it stands without replacing a committed archive.
 package hyperuuid
 
 /*
-#cgo linux,amd64 LDFLAGS: ${SRCDIR}/staticlib/linux_amd64/libhyperuuid.a
-#cgo linux,arm64 LDFLAGS: ${SRCDIR}/staticlib/linux_arm64/libhyperuuid.a
-#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/staticlib/darwin_amd64/libhyperuuid.a
-#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/staticlib/darwin_arm64/libhyperuuid.a
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/staticlib/windows_amd64/libhyperuuid.a
-#cgo windows,arm64 LDFLAGS: ${SRCDIR}/staticlib/windows_arm64/libhyperuuid.a
+#cgo linux,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_amd64/libhyperuuid.a
+#cgo linux,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_arm64/libhyperuuid.a
+#cgo darwin,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_amd64/libhyperuuid.a
+#cgo darwin,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_arm64/libhyperuuid.a
+#cgo windows,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/windows_amd64/libhyperuuid.a
+#cgo windows,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/windows_arm64/libhyperuuid.a
+#cgo linux,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_amd64/libhyperuuid.a
+#cgo linux,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_arm64/libhyperuuid.a
+#cgo darwin,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_amd64/libhyperuuid.a
+#cgo darwin,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_arm64/libhyperuuid.a
+#cgo windows,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/windows_amd64/libhyperuuid.a
+#cgo windows,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/windows_arm64/libhyperuuid.a
 #include <stdint.h>
 
 // The core's C ABI — rust/src/ffi.rs, the thirteen exports every binding calls.
