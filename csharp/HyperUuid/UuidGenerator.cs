@@ -20,13 +20,17 @@ namespace HyperUuid;
 /// supported RID under <c>runtimes/{rid}/native/</c> (this package's own README's Platform
 /// support section has the list), and <see cref="IsAvailable"/> says whether one resolved.
 /// One compiled assembly covers every platform including <c>browser-wasm</c> (Blazor) — no
-/// separate build. Every native entry point is declared twice, unconditionally: once against
-/// <c>"hyperuuid"</c> (resolved via <c>dlopen</c> on every real native platform), once against
-/// <c>"*"</c> (resolves against the current module — the only thing that works for a
-/// statically-linked WASM native, which has no separate module to dlopen), sharing the same
-/// <see cref="LibraryImportAttribute.EntryPoint"/> so both point at the identical native
-/// symbol. <see cref="OperatingSystem.IsBrowser"/> picks the right one at the call site — a
-/// real runtime check, not just documentation, but one the .NET linker specifically knows how
+/// separate build. Every native entry point is declared three times, unconditionally: once
+/// against <c>"hyperuuid"</c> (resolved via <c>dlopen</c> on every real native platform), once
+/// against <c>"*"</c> (resolves against the current module — the only thing that works for a
+/// statically-linked WASM native, which has no separate module to dlopen), and once against
+/// <c>"__Internal"</c> (the app's own executable, which is where .NET for iOS and Mac Catalyst
+/// link a static library and the name their AOT compiler turns into a direct call), sharing
+/// the same <see cref="LibraryImportAttribute.EntryPoint"/> so all three point at the
+/// identical native symbol. <see cref="OperatingSystem.IsBrowser"/> and
+/// <see cref="OperatingSystem.IsIOS"/> (true on Mac Catalyst as well) pick the right one at
+/// the call site — real runtime checks, not just documentation, but ones the .NET linker
+/// specifically knows how
 /// to constant-fold per publish target (the same mechanism the BCL itself uses for
 /// platform-conditional code), so a trimmed/published build still only ships the branch that
 /// platform can actually reach, same as the old two-build split did — see
@@ -40,78 +44,117 @@ public static partial class UuidGenerator
 	private static partial uint hyperuuid_version_native();
 	[LibraryImport("*", EntryPoint = "hyperuuid_version")]
 	private static partial uint hyperuuid_version_browser();
+	[LibraryImport("__Internal", EntryPoint = "hyperuuid_version")]
+	private static partial uint hyperuuid_version_internal();
 	private static uint hyperuuid_version() =>
-		OperatingSystem.IsBrowser() ? hyperuuid_version_browser() : hyperuuid_version_native();
+		OperatingSystem.IsBrowser() ? hyperuuid_version_browser()
+			: OperatingSystem.IsIOS() ? hyperuuid_version_internal()
+			: hyperuuid_version_native();
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_new_v4")]
 	private static unsafe partial int uuid_new_v4_native(byte* outPtr);
 	[LibraryImport("*", EntryPoint = "uuid_new_v4")]
 	private static unsafe partial int uuid_new_v4_browser(byte* outPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_new_v4")]
+	private static unsafe partial int uuid_new_v4_internal(byte* outPtr);
 	private static unsafe int uuid_new_v4(byte* outPtr) =>
-		OperatingSystem.IsBrowser() ? uuid_new_v4_browser(outPtr) : uuid_new_v4_native(outPtr);
+		OperatingSystem.IsBrowser() ? uuid_new_v4_browser(outPtr)
+			: OperatingSystem.IsIOS() ? uuid_new_v4_internal(outPtr)
+			: uuid_new_v4_native(outPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_new_v5")]
 	private static unsafe partial int uuid_new_v5_native(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr);
 	[LibraryImport("*", EntryPoint = "uuid_new_v5")]
 	private static unsafe partial int uuid_new_v5_browser(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_new_v5")]
+	private static unsafe partial int uuid_new_v5_internal(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr);
 	private static unsafe int uuid_new_v5(byte* nsPtr, byte* namePtr, uint nameLen, byte* outPtr) =>
 		OperatingSystem.IsBrowser()
 			? uuid_new_v5_browser(nsPtr, namePtr, nameLen, outPtr)
-			: uuid_new_v5_native(nsPtr, namePtr, nameLen, outPtr);
+			: OperatingSystem.IsIOS()
+				? uuid_new_v5_internal(nsPtr, namePtr, nameLen, outPtr)
+				: uuid_new_v5_native(nsPtr, namePtr, nameLen, outPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_new_v6")]
 	private static unsafe partial int uuid_new_v6_native(long unixMillis, byte* outPtr);
 	[LibraryImport("*", EntryPoint = "uuid_new_v6")]
 	private static unsafe partial int uuid_new_v6_browser(long unixMillis, byte* outPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_new_v6")]
+	private static unsafe partial int uuid_new_v6_internal(long unixMillis, byte* outPtr);
 	private static unsafe int uuid_new_v6(long unixMillis, byte* outPtr) =>
-		OperatingSystem.IsBrowser() ? uuid_new_v6_browser(unixMillis, outPtr) : uuid_new_v6_native(unixMillis, outPtr);
+		OperatingSystem.IsBrowser() ? uuid_new_v6_browser(unixMillis, outPtr)
+			: OperatingSystem.IsIOS() ? uuid_new_v6_internal(unixMillis, outPtr)
+			: uuid_new_v6_native(unixMillis, outPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_v6_unix_millis")]
 	private static unsafe partial ulong uuid_v6_unix_millis_native(byte* uuidPtr);
 	[LibraryImport("*", EntryPoint = "uuid_v6_unix_millis")]
 	private static unsafe partial ulong uuid_v6_unix_millis_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v6_unix_millis")]
+	private static unsafe partial ulong uuid_v6_unix_millis_internal(byte* uuidPtr);
 	private static unsafe ulong uuid_v6_unix_millis(byte* uuidPtr) =>
-		OperatingSystem.IsBrowser() ? uuid_v6_unix_millis_browser(uuidPtr) : uuid_v6_unix_millis_native(uuidPtr);
+		OperatingSystem.IsBrowser() ? uuid_v6_unix_millis_browser(uuidPtr)
+			: OperatingSystem.IsIOS() ? uuid_v6_unix_millis_internal(uuidPtr)
+			: uuid_v6_unix_millis_native(uuidPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_new_v6_batch")]
 	private static unsafe partial int uuid_new_v6_batch_native(long unixMillis, uint count, byte* outPtr);
 	[LibraryImport("*", EntryPoint = "uuid_new_v6_batch")]
 	private static unsafe partial int uuid_new_v6_batch_browser(long unixMillis, uint count, byte* outPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_new_v6_batch")]
+	private static unsafe partial int uuid_new_v6_batch_internal(long unixMillis, uint count, byte* outPtr);
 	private static unsafe int uuid_new_v6_batch(long unixMillis, uint count, byte* outPtr) =>
 		OperatingSystem.IsBrowser()
 			? uuid_new_v6_batch_browser(unixMillis, count, outPtr)
-			: uuid_new_v6_batch_native(unixMillis, count, outPtr);
+			: OperatingSystem.IsIOS()
+				? uuid_new_v6_batch_internal(unixMillis, count, outPtr)
+				: uuid_new_v6_batch_native(unixMillis, count, outPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_new_v7")]
 	private static unsafe partial int uuid_new_v7_native(long unixMillis, byte* outPtr);
 	[LibraryImport("*", EntryPoint = "uuid_new_v7")]
 	private static unsafe partial int uuid_new_v7_browser(long unixMillis, byte* outPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_new_v7")]
+	private static unsafe partial int uuid_new_v7_internal(long unixMillis, byte* outPtr);
 	private static unsafe int uuid_new_v7(long unixMillis, byte* outPtr) =>
-		OperatingSystem.IsBrowser() ? uuid_new_v7_browser(unixMillis, outPtr) : uuid_new_v7_native(unixMillis, outPtr);
+		OperatingSystem.IsBrowser() ? uuid_new_v7_browser(unixMillis, outPtr)
+			: OperatingSystem.IsIOS() ? uuid_new_v7_internal(unixMillis, outPtr)
+			: uuid_new_v7_native(unixMillis, outPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_v7_unix_millis")]
 	private static unsafe partial ulong uuid_v7_unix_millis_native(byte* uuidPtr);
 	[LibraryImport("*", EntryPoint = "uuid_v7_unix_millis")]
 	private static unsafe partial ulong uuid_v7_unix_millis_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v7_unix_millis")]
+	private static unsafe partial ulong uuid_v7_unix_millis_internal(byte* uuidPtr);
 	private static unsafe ulong uuid_v7_unix_millis(byte* uuidPtr) =>
-		OperatingSystem.IsBrowser() ? uuid_v7_unix_millis_browser(uuidPtr) : uuid_v7_unix_millis_native(uuidPtr);
+		OperatingSystem.IsBrowser() ? uuid_v7_unix_millis_browser(uuidPtr)
+			: OperatingSystem.IsIOS() ? uuid_v7_unix_millis_internal(uuidPtr)
+			: uuid_v7_unix_millis_native(uuidPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_new_v7_batch")]
 	private static unsafe partial int uuid_new_v7_batch_native(long unixMillis, uint count, byte* outPtr);
 	[LibraryImport("*", EntryPoint = "uuid_new_v7_batch")]
 	private static unsafe partial int uuid_new_v7_batch_browser(long unixMillis, uint count, byte* outPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_new_v7_batch")]
+	private static unsafe partial int uuid_new_v7_batch_internal(long unixMillis, uint count, byte* outPtr);
 	private static unsafe int uuid_new_v7_batch(long unixMillis, uint count, byte* outPtr) =>
 		OperatingSystem.IsBrowser()
 			? uuid_new_v7_batch_browser(unixMillis, count, outPtr)
-			: uuid_new_v7_batch_native(unixMillis, count, outPtr);
+			: OperatingSystem.IsIOS()
+				? uuid_new_v7_batch_internal(unixMillis, count, outPtr)
+				: uuid_new_v7_batch_native(unixMillis, count, outPtr);
 
 	[LibraryImport("hyperuuid", EntryPoint = "uuid_v7_to_sql_order")]
 	private static unsafe partial void uuid_v7_to_sql_order_native(byte* uuidPtr);
 	[LibraryImport("*", EntryPoint = "uuid_v7_to_sql_order")]
 	private static unsafe partial void uuid_v7_to_sql_order_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v7_to_sql_order")]
+	private static unsafe partial void uuid_v7_to_sql_order_internal(byte* uuidPtr);
 	private static unsafe void uuid_v7_to_sql_order(byte* uuidPtr)
 	{
 		if (OperatingSystem.IsBrowser()) uuid_v7_to_sql_order_browser(uuidPtr);
+		else if (OperatingSystem.IsIOS()) uuid_v7_to_sql_order_internal(uuidPtr);
 		else uuid_v7_to_sql_order_native(uuidPtr);
 	}
 
@@ -119,9 +162,12 @@ public static partial class UuidGenerator
 	private static unsafe partial void uuid_v7_to_rfc_order_native(byte* uuidPtr);
 	[LibraryImport("*", EntryPoint = "uuid_v7_to_rfc_order")]
 	private static unsafe partial void uuid_v7_to_rfc_order_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v7_to_rfc_order")]
+	private static unsafe partial void uuid_v7_to_rfc_order_internal(byte* uuidPtr);
 	private static unsafe void uuid_v7_to_rfc_order(byte* uuidPtr)
 	{
 		if (OperatingSystem.IsBrowser()) uuid_v7_to_rfc_order_browser(uuidPtr);
+		else if (OperatingSystem.IsIOS()) uuid_v7_to_rfc_order_internal(uuidPtr);
 		else uuid_v7_to_rfc_order_native(uuidPtr);
 	}
 
@@ -129,9 +175,12 @@ public static partial class UuidGenerator
 	private static unsafe partial void uuid_v6_to_sql_order_native(byte* uuidPtr);
 	[LibraryImport("*", EntryPoint = "uuid_v6_to_sql_order")]
 	private static unsafe partial void uuid_v6_to_sql_order_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v6_to_sql_order")]
+	private static unsafe partial void uuid_v6_to_sql_order_internal(byte* uuidPtr);
 	private static unsafe void uuid_v6_to_sql_order(byte* uuidPtr)
 	{
 		if (OperatingSystem.IsBrowser()) uuid_v6_to_sql_order_browser(uuidPtr);
+		else if (OperatingSystem.IsIOS()) uuid_v6_to_sql_order_internal(uuidPtr);
 		else uuid_v6_to_sql_order_native(uuidPtr);
 	}
 
@@ -139,9 +188,12 @@ public static partial class UuidGenerator
 	private static unsafe partial void uuid_v6_to_rfc_order_native(byte* uuidPtr);
 	[LibraryImport("*", EntryPoint = "uuid_v6_to_rfc_order")]
 	private static unsafe partial void uuid_v6_to_rfc_order_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v6_to_rfc_order")]
+	private static unsafe partial void uuid_v6_to_rfc_order_internal(byte* uuidPtr);
 	private static unsafe void uuid_v6_to_rfc_order(byte* uuidPtr)
 	{
 		if (OperatingSystem.IsBrowser()) uuid_v6_to_rfc_order_browser(uuidPtr);
+		else if (OperatingSystem.IsIOS()) uuid_v6_to_rfc_order_internal(uuidPtr);
 		else uuid_v6_to_rfc_order_native(uuidPtr);
 	}
 

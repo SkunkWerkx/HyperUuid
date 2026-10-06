@@ -134,6 +134,11 @@ ext-ffi reports its own failures as `\Error`s (`FFI\Exception` extends `\Error`,
 missing extension is a plain `Error: Class "FFI" not found`), which `catch (\Exception)`
 does not see.
 
+Setting the `HYPERUUID_NATIVE_LIBRARY` environment variable to a path makes the binding load
+that library in place of the bundled one. It is there for running the suite against a core
+built from a checkout of this repository (`.github/scripts/local-core.sh` builds one and
+prints the command), and `nativeVersion()` reports whichever library answered.
+
 ## Bulk generation into bytes
 
 `newV6BatchBytes` and `newV7BatchBytes` return the batch as one binary string of raw RFC 9562-ordered bytes — 16 per UUID — instead of an array of `Uuid` objects:

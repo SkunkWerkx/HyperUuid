@@ -74,7 +74,7 @@ pub fn new_v6(unix_millis: u64) -> Result<Uuid, NewV6Error> {
     bytes[6..8].copy_from_slice(&time_low.to_be_bytes());
 
     let mut rand_bytes = [0u8; 8];
-    crate::entropy::fill(&mut rand_bytes).map_err(NewV6Error::Random)?;
+    crate::entropy::fill_at(&mut rand_bytes, unix_millis).map_err(NewV6Error::Random)?;
     // clock_seq (14 bits, octets 8-9 alongside the variant, written below by set_variant).
     bytes[8..10].copy_from_slice(&rand_bytes[0..2]);
     // node (48 bits, octets 10-15).
@@ -151,8 +151,11 @@ pub fn new_v6_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
     // onwards is item 2i's share or later. Walking the batch backwards therefore only
     // overwrites entropy that has already been consumed, and item i's own share is moved
     // before its own 16 bytes are written. Hence `.rev()`, which is load-bearing, not taste.
-    crate::entropy::fill(&mut out[..count as usize * RAND_BYTES_PER_ITEM])
-        .map_err(NewV6Error::Random)?;
+    crate::entropy::fill_at(
+        &mut out[..count as usize * RAND_BYTES_PER_ITEM],
+        unix_millis,
+    )
+    .map_err(NewV6Error::Random)?;
 
     for i in (0..count as usize).rev() {
         let src = i * RAND_BYTES_PER_ITEM;

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The package on iOS and Mac Catalyst, as an app: the same Program.cs the Native AOT smoke
+       test runs, crossing every native entry point, built for the two platforms where the
+       core is linked into the app's executable and reached as "__Internal". It needs a Mac
+       with Xcode and the ios and maccatalyst workloads, so it is not in HyperUuid.slnx,
+       which every other leg builds; CI's test-apple-mobile job builds it three ways (Mac
+       Catalyst, run as a process; the iOS simulator, installed and launched; an iOS device,
+       linked and inspected, since no runner has one). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationId>io.github.skunkwerkx.hyperuuid.applesmoketest</ApplicationId>
+    <ApplicationTitle>HyperUuid smoke test</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../HyperUuid.AotSmokeTest/Program.cs" Link="Program.cs" />
+    <ProjectReference Include="../HyperUuid/HyperUuid.csproj" />
+  </ItemGroup>
+
+  <!-- By hand, for the reason HyperUuid.AotSmokeTest gives: a project reference gets none of
+       a NuGet package's build/ imports, and this is the project that proves the branch of
+       that file a .NET iOS or Mac Catalyst consumer takes. The archive it links is
+       csharp/HyperUuid/staticlibs/{rid}/, staged from the static-libs artifact. -->
+  <Import Project="../HyperUuid/build/HyperUuid.targets" />
+
+</Project>

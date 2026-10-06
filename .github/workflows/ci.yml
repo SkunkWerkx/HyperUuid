@@ -47,6 +47,9 @@ jobs:
       project: HyperUuid
       crate: hyperuuid
       pure_env: HYPERUUID_PURE
+      # Four more static libraries in the static-libs artifact: iOS, the iOS simulator and
+      # Mac Catalyst (test-apple-mobile, below, is what links and runs them).
+      apple_mobile: true
       # Turns the package's Native AOT claim into a per-platform receipt: publish on all five
       # legs, fail on any ILxxxx/AOTxxxx trim diagnostic, then actually run the produced
       # binary and require exit 0. The log uploads as aot-report-{rid}. The smoke test
@@ -328,10 +331,203 @@ jobs:
             python /work/.github/scripts/cdylib_smoke.py "$lib" Cargo.toml
           '
 
+  # iOS and Mac Catalyst, for the three bindings that reach them. Neither platform loads a
+  # library: the core is linked into the app, from the static libraries build-native's
+  # build-static-libs job cross-compiles and attests (the forge's apple_mobile input), which
+  # are the bytes stage-native-binaries.yml commits for Swift and release.yml packs for C#.
+  # This job is the one place they are linked into something and run, and it needs what no
+  # build-native leg carries: Xcode, a simulator, and the .NET ios and maccatalyst workloads.
+  #
+  #  * Swift takes them from swift/HyperUuidCoreApple.xcframework, which swift/Package.swift
+  #    declares only when it is there. The binding's suite runs on an iOS simulator and as a
+  #    Mac Catalyst process, and the package is built for an iOS device. It also runs once
+  #    more for macOS itself, and the root manifest is built: with the XCFramework present
+  #    the manifest declares a second binary target and puts a platform condition on the
+  #    first, which is the package a macOS consumer resolves from a tag and the one shape of
+  #    it build-native's macOS leg, whose tree has no XCFramework yet, never sees.
+  #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/HyperUuid.targets.
+  #    HyperUuid.AppleSmokeTest is the Native AOT smoke test's Program.cs as an app: run as a
+  #    Mac Catalyst process, installed and launched in the simulator, and built for an iOS
+  #    device with signing off. No runner has a device, so that last one is proved as far as
+  #    a link goes: the app's executable must define the core's symbols.
+  #
+  #  * Go takes them from go/staticlib/, picked by build tag (lint-docs-go checks the picking
+  #    for every platform). The suite runs in the simulator through Go's own wrapper,
+  #    misc/ios/go_ios_exec.go, which is how the Go project tests its iOS port; the test that
+  #    reads rust/Cargo.toml is skipped there, since the wrapper carries the module into the
+  #    simulator and that file is outside it. A device build is linked and inspected. Mac
+  #    Catalyst is not linked from Go here: the same archive is linked and run by Swift and
+  #    C# above, and Go's part of it is the selection.
+  #
+  # The simulator hands back neither an exit code nor a console to a launched app, so the C#
+  # app also writes what it prints to a file in its container (SmokeLog.cs) and that file is
+  # what is checked.
+  test-apple-mobile:
+    needs: build-native
+    runs-on: macos-latest
+    env:
+      APP_ID: io.github.skunkwerkx.hyperuuid.applesmoketest
+      SMOKE_PROJECT: csharp/HyperUuid.AppleSmokeTest/HyperUuid.AppleSmokeTest.csproj
+      SMOKE_BIN: csharp/HyperUuid.AppleSmokeTest/bin/Release
+    steps:
+      - uses: actions/checkout@v7
+
+      # Over the checkout: the artifact is laid out by repository path, so the XCFramework
+      # lands whole under swift/ and the C# archives under csharp/HyperUuid/staticlibs/.
+      - uses: actions/download-artifact@v8
+        with:
+          name: static-libs
+          path: .
+
+      - name: What is installed, and what was staged
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+          (cd swift && xcodebuild -list)
+          find swift/HyperUuidCoreApple.xcframework -type f | sort
+          ls csharp/HyperUuid/staticlibs/{ios-arm64,iossimulator-arm64,maccatalyst-arm64,maccatalyst-x64}/libhyperuuid.a
+          ls go/staticlib/{ios_arm64,iossimulator_arm64,maccatalyst_arm64,maccatalyst_amd64}/libhyperuuid.a
+
+      - name: Boot an iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          def version(runtime):
+              return [int(n) for n in re.findall(r"\d+", runtime.rsplit("iOS", 1)[-1])]
+          for runtime in sorted((r for r in devices if "SimRuntime.iOS" in r), key=version, reverse=True):
+              for device in devices[runtime]:
+                  if device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      sys.exit(0)
+          sys.exit("no available iPhone simulator on this image")')
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Swift — macOS, with the XCFramework declared
+        run: |
+          set -euo pipefail
+          described=$(cd swift && swift package describe)
+          grep -q "HyperUuidCoreApple" <<<"$described" \
+            || { echo "::error::swift/Package.swift did not declare the XCFramework target"; exit 1; }
+          (cd swift && swift test)
+          swift build
+
+      - name: Swift — the suite on the iOS simulator
+        if: ${{ !cancelled() }}
+        working-directory: swift
+        run: xcodebuild test -scheme HyperUuid -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+
+      - name: Swift — the suite as a Mac Catalyst process
+        if: ${{ !cancelled() }}
+        working-directory: swift
+        run: xcodebuild test -scheme HyperUuid -destination "platform=macOS,variant=Mac Catalyst"
+
+      - name: Swift — the package builds for an iOS device
+        if: ${{ !cancelled() }}
+        working-directory: swift
+        run: xcodebuild build -scheme HyperUuid -destination "generic/platform=iOS"
+
+      - uses: actions/setup-go@v7
+        if: ${{ !cancelled() }}
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - name: Go — the suite in the iOS simulator
+        if: ${{ !cancelled() }}
+        working-directory: go
+        run: |
+          set -euo pipefail
+          # `go test` hands a cross-built test binary to go_{GOOS}_{GOARCH}_exec when one is
+          # on PATH; Go's wrapper installs it in the booted simulator and runs it there.
+          # clangwrap.sh is Go's own too, and targets the simulator SDK.
+          mkdir -p "$RUNNER_TEMP/go-ios"
+          go build -o "$RUNNER_TEMP/go-ios/go_ios_arm64_exec" "$(go env GOROOT)/misc/ios/go_ios_exec.go"
+          export PATH="$RUNNER_TEMP/go-ios:$PATH"
+          GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
+            go test -tags iossimulator -skip '^TestNativeVersionMatchesTheCrate$' -v . | tee "$RUNNER_TEMP/go-ios/test.log"
+          grep -q '^ok' "$RUNNER_TEMP/go-ios/test.log"
+
+      - name: Go — an iOS device build links the core in
+        if: ${{ !cancelled() }}
+        working-directory: go
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/go-ios"
+          GOOS=ios GOARCH=arm64 CGO_ENABLED=1 \
+            CC="$(xcrun --sdk iphoneos --find clang) -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0" \
+            go test -c -o "$RUNNER_TEMP/go-ios/hyperuuid-device.test" .
+          nm "$RUNNER_TEMP/go-ios/hyperuuid-device.test" > "$RUNNER_TEMP/go-ios/device-symbols.txt"
+          grep -q " [Tt] _uuid_new_v7\$" "$RUNNER_TEMP/go-ios/device-symbols.txt" \
+            || { echo "::error::the iOS device test binary does not define uuid_new_v7; the core was not linked in"; exit 1; }
+          echo "the iOS device test binary defines the core's exports"
+
+      - uses: actions/setup-dotnet@v6
+        if: ${{ !cancelled() }}
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install the .NET iOS and Mac Catalyst workloads
+        if: ${{ !cancelled() }}
+        run: dotnet workload install ios maccatalyst
+
+      - name: C# — a Mac Catalyst app, built and run
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          dotnet build "$SMOKE_PROJECT" -c Release -f net10.0-maccatalyst -r maccatalyst-arm64
+          app=$(find "$SMOKE_BIN/net10.0-maccatalyst/maccatalyst-arm64" -maxdepth 1 -name '*.app')
+          log="$TMPDIR/hyperuuid-smoke.log"
+          rm -f "$log"
+          "$app/Contents/MacOS/HyperUuid.AppleSmokeTest"
+          cat "$log"
+          grep -q "native: available=True version=$want" "$log"
+          grep -q "ALL NATIVE AOT CHECKS PASSED" "$log"
+
+      - name: C# — an iOS app, installed and launched in the simulator
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          udid="${{ steps.sim.outputs.udid }}"
+          dotnet build "$SMOKE_PROJECT" -c Release -f net10.0-ios -r iossimulator-arm64
+          app=$(find "$SMOKE_BIN/net10.0-ios/iossimulator-arm64" -maxdepth 1 -name '*.app')
+          xcrun simctl install "$udid" "$app"
+          xcrun simctl launch "$udid" "$APP_ID"
+          log="$(xcrun simctl get_app_container "$udid" "$APP_ID" data)/tmp/hyperuuid-smoke.log"
+          # The app exits when Program.cs returns; its last line, pass or fail, ends the wait.
+          for _ in $(seq 1 60); do
+            grep -q -E "ALL NATIVE AOT CHECKS PASSED|^FAIL" "$log" 2>/dev/null && break
+            sleep 2
+          done
+          cat "$log"
+          grep -q "native: available=True version=$want" "$log"
+          grep -q "ALL NATIVE AOT CHECKS PASSED" "$log"
+
+      - name: C# — an iOS device app links the core in
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          dotnet build "$SMOKE_PROJECT" -c Release -f net10.0-ios -r ios-arm64 -p:EnableCodeSigning=false
+          app=$(find "$SMOKE_BIN/net10.0-ios/ios-arm64" -maxdepth 1 -name '*.app')
+          nm -g "$app/HyperUuid.AppleSmokeTest" > device-symbols.txt
+          for symbol in hyperuuid_version uuid_new_v4 uuid_new_v7 uuid_new_v7_batch; do
+            grep -q " T _$symbol\$" device-symbols.txt \
+              || { echo "::error::the iOS device app does not define $symbol; the core was not linked in"; exit 1; }
+          done
+          echo "the iOS device app defines the core's exports"
+
   # Formatting and lints for the crate, every PR. clippy runs over each configuration that
   # compiles different code — the default (with tests, benches and the example), the
-  # bare-metal no_std rlib, the no_std shared library, and the python extension — with
-  # warnings as errors. The ruby and php features need their interpreters' headers to
+  # bare-metal no_std rlib, the no_std shared library, the python extension, and Android,
+  # whose entropy path (entropy.rs: ChaCha20 for batches, no pool) nothing else here compiles
+  # — with warnings as errors. The ruby and php features need their interpreters' headers to
   # compile at all; the forge builds both on every leg, and they were clean when this job
   # was added. Static analysis only, so it doesn't depend on build-native.
   lint-rust:
@@ -341,7 +537,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: thumbv7em-none-eabi,wasm32-unknown-unknown
+          targets: thumbv7em-none-eabi,wasm32-unknown-unknown,aarch64-linux-android
       - name: cargo fmt --check
         working-directory: rust
         run: |
@@ -355,6 +551,7 @@ jobs:
             cargo clippy --no-default-features --target thumbv7em-none-eabi -- -D warnings
           cargo clippy --no-default-features --features cdylib -- -D warnings
           cargo clippy --features python -- -D warnings
+          cargo clippy --target aarch64-linux-android -- -D warnings
           cargo clippy --manifest-path browser-test/Cargo.toml --target wasm32-unknown-unknown --all-targets -- -D warnings
 
   # rust-version in rust/Cargo.toml is a promise to every crates.io consumer, and nothing
@@ -413,6 +610,10 @@ jobs:
       - run: go install github.com/mgechev/revive@v1.16.0
       - working-directory: go
         run: revive -config revive.toml ./...
+      # Which archive each platform's build links, iOS, Mac Catalyst and the two that must
+      # not compile included; the script has why this needs holding to a table.
+      - name: Every Go build selects its own platform's archive
+        run: .github/scripts/check_go_archives.sh
       # revive does not check layout; gofmt is the formatter, over every file in the module.
       - name: gofmt
         working-directory: go

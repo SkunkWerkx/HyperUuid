@@ -119,6 +119,34 @@
              Text="HyperUuid's WebAssembly support needs .NET 11 or later, and this project targets $(TargetFramework), so the native core is not linked into this build. Where the wasm-tools workload relinks the runtime, the link fails on undefined uuid_* symbols; otherwise UuidGenerator.IsAvailable is false in the browser and every generator call throws. Target net11.0 or later." />
   </Target>
 
+  <!-- iOS and Mac Catalyst: link the core in, always.
+
+       An app on these platforms has no runtimes/{rid}/native/ to load a library from: the
+       .NET SDK for them links native code into the app's own executable, and a P/Invoke
+       reaches it under the library name "__Internal" (UuidGenerator.cs declares every entry
+       point a third time against that name, picked by OperatingSystem.IsIOS(), which is true
+       on Mac Catalyst too). NativeReference with Kind=Static is the item that SDK links, the
+       same one a binding project uses, and it is the SDK's own native link that consumes it
+       whether the app is compiled by Mono's AOT compiler, runs interpreted, or is published
+       with Native AOT. So this is one branch for all three, and the Native AOT block below
+       stands aside for these RIDs: its DirectPInvoke and NativeLibrary items are for ILC's
+       own link, which is not the one that runs here.
+
+       The archives are the same no_std static libraries, in staticlibs/{rid}/ for
+       ios-arm64, iossimulator-arm64, maccatalyst-arm64 and maccatalyst-x64. A universal Mac
+       Catalyst app (RuntimeIdentifiers with both) is built once per RID and merged by the
+       SDK, and each of those inner builds evaluates this with its own RuntimeIdentifier. An
+       RID with no archive here (iossimulator-x64, tvOS) gets nothing, and the app fails at
+       its native link on the undefined uuid_* symbols: at build time, not at run time. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <_HyperUuidAppleMobile Condition="$(RuntimeIdentifier.StartsWith('ios-')) Or $(RuntimeIdentifier.StartsWith('iossimulator-')) Or $(RuntimeIdentifier.StartsWith('maccatalyst-'))">true</_HyperUuidAppleMobile>
+    <_HyperUuidAppleMobileLibrary Condition="'$(_HyperUuidAppleMobile)' == 'true'">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidAppleMobileLibrary>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_HyperUuidAppleMobile)' == 'true' And Exists('$(_HyperUuidAppleMobileLibrary)')">
+    <NativeReference Include="$(_HyperUuidAppleMobileLibrary)" Kind="Static" />
+  </ItemGroup>
+
   <!-- Native AOT: link the core in.
 
        A Native AOT publish used to produce an executable with libhyperuuid.so (or the .dylib,
@@ -138,9 +166,10 @@
        applies and the publish loads the shared library exactly as it always did. Setting
        HyperUuidStaticLink to false asks for that on purpose.
 
-       Not for browser-wasm, which has its own wiring above, and not for anything but an AOT
-       publish: a JIT process cannot link an archive, so it still loads the shared library. -->
-  <PropertyGroup Condition="'$(PublishAot)' == 'true' And '$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'browser-wasm' And '$(HyperUuidStaticLink)' != 'false'">
+       Not for browser-wasm or for iOS and Mac Catalyst, which have their own wiring above,
+       and not for anything but an AOT publish: a JIT process cannot link an archive, so it
+       still loads the shared library. -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true' And '$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'browser-wasm' And '$(_HyperUuidAppleMobile)' != 'true' And '$(HyperUuidStaticLink)' != 'false'">
     <_HyperUuidStaticLibrary Condition="$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/hyperuuid.lib</_HyperUuidStaticLibrary>
     <_HyperUuidStaticLibrary Condition="!$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidStaticLibrary>
     <_HyperUuidStaticLibrary Condition="!Exists('$(_HyperUuidStaticLibrary)')"></_HyperUuidStaticLibrary>

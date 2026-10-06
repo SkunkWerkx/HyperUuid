@@ -9,21 +9,88 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-06
+
+### Added
+
+- **C# — iOS and Mac Catalyst.** A .NET iOS, MAUI or Mac Catalyst app can reference the
+  package and nothing else. Those platforms load no libraries, so the package now carries the
+  core as a static library for `ios-arm64`, `iossimulator-arm64`, `maccatalyst-arm64` and
+  `maccatalyst-x64` (about 7 KB each, 12 KB on x64), `build/HyperUuid.targets` hands the one
+  for the RID being built to the SDK as a static `NativeReference`, and `UuidGenerator`
+  declares every entry point a third time against `__Internal`, the name a P/Invoke reaches
+  the app's own executable by, picked by `OperatingSystem.IsIOS()`. One wiring covers Mono's
+  AOT compiler, the interpreter and Native AOT, because the native link is the SDK's in all
+  three. CI builds `HyperUuid.AppleSmokeTest` on a Mac from that run's archives: run as a
+  Mac Catalyst process, installed and launched in an iOS simulator, and linked for an iOS
+  device. Android, tvOS and the iOS simulator on Intel Macs remain unsupported. *(NuGet)*
+- **Swift — iOS and Mac Catalyst.** The package builds for iOS, the iOS simulator and Mac
+  Catalyst on arm64, linking the core from a second binary target,
+  `swift/HyperUuidCoreApple.xcframework`: an app for those platforms is built by Xcode, which
+  links a static library out of an XCFramework and does not read the static-library artifact
+  bundle the other platforms use. Both targets define the one `HyperUuidCore` module, and
+  the manifest declares the XCFramework only on a Mac, so Linux, Windows and WebAssembly
+  builds see the package they saw before. CI runs the suite on an iOS simulator and as a
+  Mac Catalyst process, and builds the package for an iOS device. *(SwiftPM)*
+- **Go — iOS and Mac Catalyst.** A cgo build for an iOS device, the iOS simulator on Apple
+  silicon, or Mac Catalyst on either architecture links the core from its own archive under
+  `go/staticlib/`. Go builds all of them as `GOOS=ios`, so build tags choose: none for a
+  device, `iossimulator` for the simulator (nothing sets it, so it is passed by hand), and
+  `maccatalyst`, which `gomobile` sets for that target. CI holds every platform and tag
+  combination to the archive it should select, runs the suite in an iOS simulator through
+  Go's own `go_ios_exec` wrapper, and links a device build. *(`go get`)*
+- **Every binding's C ABI is checked against the core on each PR.** Each binding declares the
+  core's thirteen exports by hand (C#'s `LibraryImport`s, Java's downcalls, Go's cgo
+  prototypes, the Swift header, PHP's `cdef`, Ruby's Fiddle handles, and the Python and Ruby
+  extensions' registrations), and `.github/scripts/check_exports.py`, CI's `check-exports`
+  job, holds each to the list in `rust/src/ffi.rs`. An export added to the core and missed in
+  one binding now fails in seconds, not on the one leg whose suite happens to call it. C#'s
+  three import sets (native, Blazor WebAssembly, and iOS and Mac Catalyst) are each held to
+  it. *(repository)*
+- **PHP, Go and Swift can be tested against a core built from the checkout.** Their suites
+  otherwise run against committed binaries. `.github/scripts/local-core.sh` builds the
+  shared library and the static archives under `rust/target/`, touching none of the committed
+  ones, and each binding has a switch that picks them up: PHP loads the library named by the
+  `HYPERUUID_NATIVE_LIBRARY` environment variable in place of the bundled one, Go links the
+  local archive under the `hyperuuid_local` build tag, and `swift/Package.swift` links the
+  local bundle when `HYPERUUID_LOCAL_CORE` is set (the root `Package.swift`, which consumers
+  resolve, has no such switch). *(Composer, `go get`, repository)*
+
 ### Changed
 
-- **Single UUIDs are about 2x faster on Linux, and 12x on musl.** `new_v4`, `new_v6` and
-  `new_v7` called `getrandom` for every UUID: 15-30 ns on glibc, whose `getrandom` runs in the
-  vDSO, and over 200 ns on musl, where it is a real syscall. On Linux they now draw from a pool
-  of buffered ChaCha20 generators in user space, built like the kernel's own vDSO generator:
-  each kilobyte of keystream makes the next key and the old one is gone (fast key erasure),
-  bytes are zeroed as they are handed out, and every slot takes a fresh `getrandom` key every
-  megabyte or so. The pool's memory is marked `MADV_WIPEONFORK`, so a forked child starts
-  unseeded instead of repeating its parent's bytes; a kernel without it (before 4.14) keeps
-  plain `getrandom`. Threads take slots with a try-lock and never wait. On linux-x64, `new_v4`
-  went from 38 to 18.5 ns on glibc and from 228 to 18 ns on musl, `new_v6` from 26 to 16 ns,
-  and `new_v7` from 31 to 26 ns. One trade, made knowingly: a virtual machine cloned from a
-  snapshot repeats the pool's bytes until each slot's next fresh key, where the kernel's own
-  generator detects the clone. Other platforms are unchanged. *(all packages)*
+- **`new_v4` is 1.7x faster on Linux, and 9x on musl; `new_v6` 1.3-1.4x.** `new_v4`,
+  `new_v6` and `new_v7` called `getrandom` for every UUID: 15-30 ns on glibc, whose
+  `getrandom` runs in the vDSO, and over 200 ns on musl, where it is a real syscall. On Linux
+  they now draw from a pool of buffered ChaCha20 generators in user space, built like the
+  kernel's own vDSO generator: each kilobyte of keystream makes the next key and the old one
+  is gone (fast key erasure), bytes are zeroed as they are handed out, and every slot takes a
+  fresh `getrandom` key every megabyte. Threads take slots with a try-lock and never wait.
+  On linux-x64, `new_v4` went from 38 to 23 ns on glibc and from 228 to 24 ns on musl,
+  `new_v6` from 26 to 20 ns, and `new_v7` from 31 to 30 ns; handed the current time, as a
+  `now` door hands it, `new_v6` takes 19 ns and `new_v7` 28. Other platforms are unchanged.
+  Buffered keystream is safe only while nothing else holds the same bytes, and two things
+  copy a process's memory:
+  - *A fork.* The pool's memory is marked `MADV_WIPEONFORK`, so a forked child starts
+    unseeded instead of repeating its parent's bytes. A kernel without it (before 4.14)
+    keeps plain `getrandom`, and so does a `madvise` that cannot be believed: one that
+    accepts advice that does not exist, as qemu's user-mode emulation once accepted
+    everything and applied nothing.
+  - *A snapshot.* A cloned virtual machine, AWS Lambda SnapStart, and a CRaC or CRIU
+    checkpoint all restore a process with the memory it had, possibly many times over, and
+    nothing tells the process. The kernel's generator is told and reseeds; a pool in user
+    space is not. So no key is used for more than a second of wall-clock time: a slot is
+    stamped when it draws a key from the OS, every draw checks the stamp against a coarse
+    clock read (3 to 4 ns, in the figures above), and a key more than a second old, or
+    stamped ahead of the clock, is discarded with everything buffered under it. A snapshot
+    taken more than a second after a slot's last key therefore restores a slot that is
+    already stale by its own clock. `new_v6` and `new_v7` skip the read when the timestamp
+    they are handed is within a second of the key's, which is where their second pair of
+    figures comes from; any other timestamp sends them to the clock, which alone retires a
+    key. What remains open: a snapshot taken within a second of a key being drawn and
+    restored onto a clock that has not moved on, where the copies share bytes until that
+    second runs out.
+
+  *(all packages)*
 - **Batches are about 2.5x faster on Linux, and 3.5x on musl.** `new_v6_batch` and
   `new_v7_batch` drew all their entropy from `getrandom`, and on Linux that was 83-91% of the
   call. A batch of 32 v7 or 24 v6 UUIDs or more now takes one 32-byte `getrandom` draw and
@@ -45,14 +112,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stores**, about 6% fewer cycles per item. *(all packages)*
 - **Every benchmark table re-measured against the new core**, on the same linux-x64 box,
   one harness at a time. What the bindings gained, single calls against the platform's own:
-  C# 8.4-11.8x faster than `Guid.NewGuid()` (was 5.7-8.1x), Java 2.9-7.4x faster than
-  `UUID.randomUUID()` (was 2.4-4.5x), Swift 9.6-16x faster than `Foundation.UUID()` (was
+  C# 7.5-10x faster than `Guid.NewGuid()` (was 5.7-8.1x), Java 2.8-6.2x faster than
+  `UUID.randomUUID()` (was 2.4-4.5x), Swift 11-16x faster than `Foundation.UUID()` (was
   9.5-13x), Ruby 5.5x faster than `SecureRandom.uuid` for v4 (was 4.9x), PHP 1.2-1.4x faster
-  than a naive inline v4 (was level to 1.2x), and Go's cgo calls 20-30% cheaper. A
-  1000-UUID byte fill now costs 3.6-4.9 µs in every binding, down from 9-12 µs. The Java
-  GraalWasm rows and PHP's native-extension spike table were not re-measured: the first is
-  unaffected by the entropy change, the second can no longer be run. *(repository)*
-
+  than a naive inline v4 (was level to 1.2x), and Go's cgo calls 15-25% cheaper. A
+  1000-UUID byte fill now costs 3.6-4.9 µs in every binding, down from 9-12 µs. Most
+  harnesses pass `new_v6` and `new_v7` a fixed timestamp from 2022, so their rows include
+  the pool's clock read; Swift's pass the current time and do not. The Python, Ruby and PHP
+  tables and Java's two Native Image cells were measured before the pool's one-second key
+  limit, which adds 3 to 4 ns to a v4 call there and to a v6 or v7 call on an old timestamp,
+  about 2% of a call in those three bindings. The Java GraalWasm rows and PHP's
+  native-extension spike table were not re-measured: the first is unaffected by the entropy
+  change, the second can no longer be run. *(repository)*
+- **CI compiles the crate for Android.** Its entropy path, ChaCha20 for batches and no pool,
+  is code no other job built; `lint-rust` now runs clippy over `aarch64-linux-android`.
+  *(repository)*
 - **Every language is formatted, and CI holds it there — library, tests, benchmarks and
   smoke tests alike.** Rust (`cargo fmt`) already was; Go now runs `gofmt` beside revive.
   New: ruff format and the docstring rules over all of `python/` (100 columns); PSR-12 via
@@ -62,6 +136,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   columns) over every Java source set; and `swift format` against `swift/.swift-format`
   (4 spaces, 120 columns, lint rules off). Whitespace and line breaks only — no behavior
   changed. *(repository)*
+
+### Fixed
+
+- **Go — Android and iOS no longer link another platform's archive.** Go counts
+  `GOOS=android` as satisfying `linux` and `GOOS=ios` as satisfying `darwin`, so a cgo build
+  for either got past the unsupported-platform compile error and was handed the Linux or the
+  macOS archive on its link line. iOS now selects its own archive (above), and Android and
+  the iOS simulator on amd64, which have none, stop at the same named compile error as every
+  other unsupported build. *(`go get`)*
 
 ## [0.6.1] — 2026-10-03
 
@@ -1030,7 +1113,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.4.0...v0.5.0

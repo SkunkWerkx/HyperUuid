@@ -83,9 +83,9 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 
 | Benchmark | Mean | B/op |
 | --- | ---: | ---: |
-| `newV7` x1000 individually | 32.4 µs | 32,000 |
-| `newV7Batch(1000)` | 9.7 µs | 52,104 |
-| `fillV7(UUID[])` into an existing array | 12.6 µs | 48,088 |
+| `newV7` x1000 individually | 34.9 µs | 32,000 |
+| `newV7Batch(1000)` | 9.3 µs | 52,104 |
+| `fillV7(UUID[])` into an existing array | 12.3 µs | 48,088 |
 | `fillV7(byte[])` into an existing buffer | **3.6 µs** | **0** |
 
 The middle two rows are still the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it now does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
@@ -102,11 +102,11 @@ Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`
 
 | Method | Mean | B/op | vs. `UUID.randomUUID()` |
 | --- | ---: | ---: | ---: |
-| `UUID.randomUUID()` | 162.9 ns | 128 | baseline |
-| `UuidGenerator.newV4()` | 28.0 ns | 32 | **5.8x faster** |
-| `UuidGenerator.newV5()` | 57.1 ns | 64 | **2.9x faster** |
-| `UuidGenerator.newV6()` | 21.9 ns | 32 | **7.4x faster** |
-| `UuidGenerator.newV7()` | 32.2 ns | 32 | **5.1x faster** |
+| `UUID.randomUUID()` | 160.6 ns | 128 | baseline |
+| `UuidGenerator.newV4()` | 31.5 ns | 32 | **5.1x faster** |
+| `UuidGenerator.newV5()` | 57.3 ns | 64 | **2.8x faster** |
+| `UuidGenerator.newV6()` | 25.8 ns | 32 | **6.2x faster** |
+| `UuidGenerator.newV7()` | 35.8 ns | 32 | **4.5x faster** |
 
 **Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
@@ -116,10 +116,10 @@ Batch generation vs. an equivalent loop:
 
 | Method | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v7 | 32.4 µs | 9.7 µs | **3.3x** |
-| v6 | 26.4 µs | 10.4 µs | **2.5x** |
+| v7 | 34.9 µs | 9.3 µs | **3.7x** |
+| v6 | 24.7 µs | 9.9 µs | **2.5x** |
 
-The batch multiplier is smaller than it was before the carrier rewrite, for the best reason available: the individual calls got faster, so there is less waste left to amortize. The `byte[]` fills are where the rest goes — 3.6 µs for v7 and 4.2 µs for v6, 9.0x and 6.2x over the loop.
+The batch multiplier is smaller than it was before the carrier rewrite, for the best reason available: the individual calls got faster, so there is less waste left to amortize. The `byte[]` fills are where the rest goes — 3.6 µs for v7 and 4.3 µs for v6, 9.8x and 5.8x over the loop.
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 
@@ -151,8 +151,8 @@ Then either set `-Dhyperuuid.backend=wasm` to force it, or do nothing: with the 
 
 | Runtime | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
 | --- | ---: | ---: | ---: |
-| FFM downcall, Temurin 25 | 32 ns | 3.6 µs | 12.6 µs |
-| FFM downcall, GraalVM CE 25.4 | 33 ns | 3.6 µs | 11.6 µs |
+| FFM downcall, Temurin 25 | 36 ns | 3.6 µs | 12.3 µs |
+| FFM downcall, GraalVM CE 25.4 | 36 ns | 3.6 µs | 11.2 µs |
 | GraalWasm on GraalVM CE 25.4 (JIT) | 93 ns | 11.0 µs | 24.2 µs |
 | GraalWasm on Temurin 25 (interpreter fallback) | 2.1 µs | 637 µs | 648 µs |
 

@@ -17,7 +17,7 @@ group = "io.github.skunkwerkx"
 // workflow_dispatch runs during testing don't collide with an already-published version —
 // the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so
 // it always uses this committed version as-is.
-version = System.getenv("HYPERUUID_VERSION") ?: "0.6.1"
+version = System.getenv("HYPERUUID_VERSION") ?: "0.7.0"
 
 repositories {
     mavenCentral()

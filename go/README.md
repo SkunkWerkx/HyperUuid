@@ -60,6 +60,7 @@ cgo, and so a C compiler wherever the module is **built** — nothing at run tim
 | macOS x64 / arm64 | the Xcode command-line tools (`xcode-select --install`) |
 | Windows x64 | MinGW-w64 gcc |
 | Windows arm64 | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) |
+| iOS, the iOS simulator, Mac Catalyst | Xcode's clang for that platform's SDK; see [iOS and Mac Catalyst](#ios-and-mac-catalyst) |
 
 Every other build fails at compile time, by name:
 
@@ -69,7 +70,9 @@ undefined: hyperuuid_needs_cgo_and_a_C_compiler_on_linux_darwin_or_windows_amd64
 
 That is `CGO_ENABLED=0` (which is also Go's default for a cross-compile — see
 [Building and cross-compiling](#building-and-cross-compiling)), any OS or architecture
-outside the six above, and stock Go compiled to WebAssembly (`GOOS=wasip1`, `GOOS=js`): Go's
+outside the ones above (Android and the iOS simulator on an Intel Mac among them, which
+Go's own rules would otherwise count as Linux and macOS), and stock Go compiled to
+WebAssembly (`GOOS=wasip1`, `GOOS=js`): Go's
 wasm toolchain links Go code only, with no cgo, so a foreign library has nowhere to go.
 For WebAssembly, build with [TinyGo](#in-the-browser-tinygo), which links the core there,
 browser included.
@@ -173,12 +176,12 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 
 | method | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
-| `NewV7At` x1000 individually | 65,413 | 0 | 0 |
-| `NewV7BatchAt(1000)` | 7,107 | 16,384 | 1 |
-| `FillV7At` into an existing slice | 3,624 | **0** | **0** |
-| `FillV7BytesAt` into an existing buffer | 3,599 | **0** | **0** |
+| `NewV7At` x1000 individually | 69,832 | 0 | 0 |
+| `NewV7BatchAt(1000)` | 6,965 | 16,384 | 1 |
+| `FillV7At` into an existing slice | 3,763 | **0** | **0** |
+| `FillV7BytesAt` into an existing buffer | 3,661 | **0** | **0** |
 
-`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 1% of each other, since neither converts; the byte form exists for convenience, not speed.
+`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 3% of each other, since neither converts; the byte form exists for convenience, not speed.
 
 `NewV6BatchAt`/`NewV7BatchAt` now delegate to the fills, so the array-returning API is a single allocation with no intermediate copy — existing callers got faster without changing a line.
 
@@ -211,6 +214,8 @@ points.
 | Linux x64 / arm64, glibc and musl (Alpine) | `staticlib/linux_amd64`, `staticlib/linux_arm64` | the C library |
 | macOS x64 / arm64 | `staticlib/darwin_amd64`, `staticlib/darwin_arm64` | the C library |
 | Windows x64 / arm64 | `staticlib/windows_amd64`, `staticlib/windows_arm64` | nothing (the C runtime) |
+| iOS arm64 — device, simulator | `staticlib/ios_arm64`, `staticlib/iossimulator_arm64` | the C library |
+| Mac Catalyst arm64 / x64 | `staticlib/maccatalyst_arm64`, `staticlib/maccatalyst_amd64` | the C library |
 | WebAssembly under [TinyGo](#in-the-browser-tinygo) — browser, WASI | `staticlib/wasm` | wasi-libc, which TinyGo links anyway |
 
 Each build names one archive on its link line and that is all it takes from this module:
@@ -225,6 +230,32 @@ the C library for nothing glibc and musl have not both had for a decade (`getran
 **Windows links the MSVC archive**, the same bytes the C# package's Native AOT publish
 links. MinGW's linker reads MSVC's COFF objects, and the archive carries its own import stub
 for `ProcessPrng`, the entropy source on Windows, so the link line names nothing else.
+
+### iOS and Mac Catalyst
+
+Go builds for all three as `GOOS=ios`, with cgo and the platform's own clang, which is what
+[`gomobile`](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile) arranges and what Go's own
+`misc/ios/clangwrap.sh` does for the simulator. A Mach-O object says which platform it was
+built for and the linker refuses a mismatch, so each has its own archive, and since the
+three are one `GOOS`/`GOARCH` pair to Go, build tags choose between them:
+
+| Building for | Tags | Archive |
+| --- | --- | --- |
+| An iOS device | none | `staticlib/ios_arm64` |
+| The iOS simulator, Apple silicon | `iossimulator` | `staticlib/iossimulator_arm64` |
+| Mac Catalyst | `maccatalyst` | `staticlib/maccatalyst_arm64`, `staticlib/maccatalyst_amd64` |
+
+`gomobile` sets `maccatalyst` itself for that target. Nothing sets `iossimulator`: gomobile
+builds a device and a simulator with the same tags, so a simulator build passes
+`-tags iossimulator` by hand, and a build that omits it links the device archive and fails
+at the simulator link. A `gomobile bind` covering both in one invocation gives them one set
+of tags, so they take two invocations. The simulator on an Intel Mac has no archive and is
+a compile error.
+
+CI checks that every platform and tag combination selects its own archive
+(`.github/scripts/check_go_archives.sh`), runs this suite in an iOS simulator through Go's
+`misc/ios/go_ios_exec.go`, and links a device build. Mac Catalyst is not linked from Go
+there; its archives are the ones the Swift and C# bindings link and run in the same job.
 
 ### Deploying
 
@@ -266,6 +297,11 @@ Xcode command-line tools' `clang`).
 This repo's own CI runs `go test ./...` natively, never cross-compiled, on every leg —
 Linux and Windows on x64 and arm64, macOS on arm64 — and on Alpine.
 
+The `hyperuuid_local` build tag is for working on the core in a checkout of this repository:
+`go test -tags hyperuuid_local ./...` links the archive `.github/scripts/local-core.sh` builds
+from the checkout, under `rust/target/local-core/`, in place of the committed one. A module
+fetched with `go get` has no such archive, so the tag fails at link time there.
+
 ## Why not `google/uuid`'s own `NewV6`/`NewV7`?
 
 This binding depends on `google/uuid` for the `uuid.UUID` type itself — it's already
@@ -301,10 +337,10 @@ session, median of three runs:
 
 | Call | Time, allocations |
 | --- | ---: |
-| `NewV4` | 60 ns, 0 allocs |
+| `NewV4` | 64 ns, 0 allocs |
 | `NewV5String` | 98 ns, 1 alloc |
-| `NewV6At` | 54 ns, 0 allocs |
-| `NewV7At` | 65 ns, 0 allocs |
+| `NewV6At` | 58 ns, 0 allocs |
+| `NewV7At` | 69 ns, 0 allocs |
 
 No call allocates (the one `NewV5String` keeps is Go's own `[]byte(name)` conversion).
 `go build -gcflags=-m` is right that any Go pointer handed to a cgo call is conservatively
@@ -313,17 +349,17 @@ own stack and returns them as a struct, and takes a UUID argument the same way, 
 crosses by pointer except a caller's own slice. The same by-value shape took 30-50% off
 every door in HyperCast.
 
-**Batch is where the per-call toll goes away.** Most of those ~60 ns is the cgo crossing
+**Batch is where the per-call toll goes away.** Most of those ~65 ns is the cgo crossing
 itself (about 40 ns — [the root README](../README.md#the-control-group-go) has why), not the
 core's work, so one crossing for 1000 UUIDs instead of 1000
 crossings is the whole win:
 
 | Call | Time, allocations |
 | --- | ---: |
-| `NewV6BatchAt(1000, ...)` | 7.9 µs, 1 alloc |
-| `NewV7BatchAt(1000, ...)` | 7.1 µs, 1 alloc |
+| `NewV6BatchAt(1000, ...)` | 7.8 µs, 1 alloc |
+| `NewV7BatchAt(1000, ...)` | 7.0 µs, 1 alloc |
 
-against 65.4 µs for 1000 individual `NewV7At` calls (see
+against 69.8 µs for 1000 individual `NewV7At` calls (see
 [Destination-buffer fills](#destination-buffer-fills), where `FillV7At` drops the one
 allocation too). If your workload can batch, batch.
 
@@ -336,7 +372,7 @@ genuine head-to-head, not a strawman. Same machine, same run:
 | Call | hyperuuid | `google/uuid`'s `id.Time()` |
 | --- | ---: | ---: |
 | v6 | 30 ns, 0 allocs | 1.3 ns, 0 allocs |
-| v7 | 29 ns, 0 allocs | 1.7 ns, 0 allocs |
+| v7 | 30 ns, 0 allocs | 1.8 ns, 0 allocs |
 
 `google/uuid`'s `Time()` wins outright, by roughly 20x — it's pure Go bit-shifting over
 bytes already in the process, with no FFI boundary to cross.
