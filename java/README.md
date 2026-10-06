@@ -83,12 +83,12 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 
 | Benchmark | Mean | B/op |
 | --- | ---: | ---: |
-| `newV7` x1000 individually | 43.2 µs | 32,000 |
-| `newV7Batch(1000)` | 18.2 µs | 52,104 |
-| `fillV7(UUID[])` into an existing array | 20.9 µs | 48,088 |
-| `fillV7(byte[])` into an existing buffer | **9.4 µs** | **0** |
+| `newV7` x1000 individually | 32.4 µs | 32,000 |
+| `newV7Batch(1000)` | 9.7 µs | 52,104 |
+| `fillV7(UUID[])` into an existing array | 12.6 µs | 48,088 |
+| `fillV7(byte[])` into an existing buffer | **3.6 µs** | **0** |
 
-The middle two rows are still the point: filling a `UUID[]` measures the same as allocating a fresh one, within overlapping error. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it now does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
+The middle two rows are still the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it now does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
 
 A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`.
 
@@ -102,11 +102,11 @@ Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`
 
 | Method | Mean | B/op | vs. `UUID.randomUUID()` |
 | --- | ---: | ---: | ---: |
-| `UUID.randomUUID()` | 172.9 ns | 128 | baseline |
-| `UuidGenerator.newV4()` | 57.5 ns | 32 | **3.0x faster** |
-| `UuidGenerator.newV5()` | 72.7 ns | 64 | **2.4x faster** |
-| `UuidGenerator.newV6()` | 38.5 ns | 32 | **4.5x faster** |
-| `UuidGenerator.newV7()` | 45.0 ns | 32 | **3.9x faster** |
+| `UUID.randomUUID()` | 162.9 ns | 128 | baseline |
+| `UuidGenerator.newV4()` | 28.0 ns | 32 | **5.8x faster** |
+| `UuidGenerator.newV5()` | 57.1 ns | 64 | **2.9x faster** |
+| `UuidGenerator.newV6()` | 21.9 ns | 32 | **7.4x faster** |
+| `UuidGenerator.newV7()` | 32.2 ns | 32 | **5.1x faster** |
 
 **Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
@@ -116,10 +116,10 @@ Batch generation vs. an equivalent loop:
 
 | Method | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v7 | 43.2 µs | 18.2 µs | **2.4x** |
-| v6 | 42.1 µs | 21.5 µs | **2.0x** |
+| v7 | 32.4 µs | 9.7 µs | **3.3x** |
+| v6 | 26.4 µs | 10.4 µs | **2.5x** |
 
-The batch multiplier is smaller than it was before the carrier rewrite, for the best reason available: the individual calls got faster, so there is less waste left to amortize. The `byte[]` fills are where the rest goes — 9.4 µs for v7 and 12.0 µs for v6, 4.6x and 3.5x over the loop.
+The batch multiplier is smaller than it was before the carrier rewrite, for the best reason available: the individual calls got faster, so there is less waste left to amortize. The `byte[]` fills are where the rest goes — 3.6 µs for v7 and 4.2 µs for v6, 9.0x and 6.2x over the loop.
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 
@@ -151,12 +151,12 @@ Then either set `-Dhyperuuid.backend=wasm` to force it, or do nothing: with the 
 
 | Runtime | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
 | --- | ---: | ---: | ---: |
-| FFM downcall, Temurin 25 | 45 ns | 9.4 µs | 20.9 µs |
-| FFM downcall, GraalVM CE 25.4 | 40 ns | 9.4 µs | 17.8 µs |
+| FFM downcall, Temurin 25 | 32 ns | 3.6 µs | 12.6 µs |
+| FFM downcall, GraalVM CE 25.4 | 33 ns | 3.6 µs | 11.6 µs |
 | GraalWasm on GraalVM CE 25.4 (JIT) | 93 ns | 11.0 µs | 24.2 µs |
 | GraalWasm on Temurin 25 (interpreter fallback) | 2.1 µs | 637 µs | 648 µs |
 
-Three things those rows say plainly. Under the JIT the wasm path costs about twice the FFM downcall per call — and is still faster than `UUID.randomUUID()` — and the batch doors are where the two paths meet: one crossing per thousand UUIDs, and the byte fill lands within 20% of FFM. What remains per call is the polyglot crossing itself — each export is resolved once and called through its cached `Value`, and a UUID comes back in one 16-byte read — plus the lock.
+Three things those rows say plainly. Under the JIT the wasm path costs about three times the FFM downcall per call — and is still faster than `UUID.randomUUID()` — and the batch doors are where the two paths come closest: one crossing per thousand UUIDs. They used to meet there, within 20% of each other; since the native core began drawing its entropy through SIMD ChaCha20 on Linux, which the wasm module cannot, the native byte fill is about three times faster. The GraalWasm rows were not re-measured for that change, which does not reach the wasm module. What remains per call is the polyglot crossing itself — each export is resolved once and called through its cached `Value`, and a UUID comes back in one 16-byte read — plus the lock.
 
 On a stock OpenJDK, GraalWasm has no JIT: the engine prints a fallback-runtime warning at startup (`-Dpolyglot.engine.WarnInterpreterOnly=false` silences it) and runs the module interpreted, at roughly 50x the FFM cost per call and slower than `UUID.randomUUID()`. The JIT numbers need a GraalVM JDK or a Native Image build; nothing in this jar can change that. Keep `org.graalvm.polyglot:polyglot` and `:wasm` at the same release as the GraalVM JDK you run on (25.4.4.1.1 here): Truffle will not use a compiler from a different release, so a mismatched pair runs the interpreter on the JVM and fails a Native Image build.
 
@@ -164,12 +164,12 @@ On a stock OpenJDK, GraalWasm has no JIT: the engine prints a fallback-runtime w
 
 | Runtime, hand loop | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
 | --- | ---: | ---: | ---: |
-| FFM downcall, GraalVM CE 25.4 JVM | 36 ns | 9.3 µs | 14.1 µs |
+| FFM downcall, GraalVM CE 25.4 JVM | 38 ns | 3.5 µs | 7.9 µs |
 | GraalWasm, GraalVM CE 25.4 JVM (JIT) | 102 ns | 12.1 µs | 24.2 µs |
-| FFM downcall, Native Image | 78 ns | 12.8 µs | 31 µs |
+| FFM downcall, Native Image | 57 ns | 3.7 µs | 19.5 µs |
 | GraalWasm, Native Image | 163 ns | 15.7 µs | 32 µs |
 
-Both paths cost about twice in a native image what they cost on the JVM, which is the ordinary price of an ahead-of-time compiler without a profile, and FFM stays the faster of the two.
+Both paths cost more in a native image than on the JVM, up to about twice, which is the ordinary price of an ahead-of-time compiler without a profile, and FFM stays the faster of the two. The byte fill is the exception, level in both, because nearly all of it is native work. The two GraalWasm rows predate the native core's entropy change and were not re-measured; it does not reach the wasm module.
 
 FFM is compiled in the image, not interpreted, because the downcall handles are constants there: they are created from the C signature alone in a class that needs nothing from the library, take the export's address as their first argument, and `META-INF/native-image/.../native-image.properties` in the jar has that class initialized at image build time. A consumer's `native-image` build inherits it with no configuration.
 

@@ -123,7 +123,7 @@ bytes = HyperUuid.new_v7_batch_bytes(1000)
 first = bytes[0, 16]        # ready for a BINARY(16) bind parameter
 ```
 
-**About 20x faster than `new_v7_batch`** for a 1000-UUID batch (10.4 µs versus 210 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
+**About 40x faster than `new_v7_batch`** for a 1000-UUID batch (4.9 µs versus 202 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `new_v7_batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
@@ -139,30 +139,30 @@ Real numbers, `benchmark-ips` on Ruby 4.0.7, linux-x64 on an Intel Core i9-11900
 
 | Call | i/s | vs `SecureRandom.uuid` |
 |---|---:|---:|
-| `SecureRandom.uuid` | 872,365 | baseline |
-| `HyperUuid.new_v4` | 4,278,000 | **4.9x faster** |
-| `HyperUuid.new_v7` (explicit ms) | 3,517,000 | **4.0x faster** |
-| `HyperUuid.new_v6` (explicit ms) | 3,487,000 | **4.0x faster** |
-| `HyperUuid.new_v6` (current time) | 3,324,000 | **3.8x faster** |
-| `HyperUuid.new_v7` (current time) | 3,320,000 | **3.8x faster** |
-| `HyperUuid.new_v5` | 1,838,000 | 2.1x faster |
+| `SecureRandom.uuid` | 943,917 | baseline |
+| `HyperUuid.new_v4` | 5,236,000 | **5.5x faster** |
+| `HyperUuid.new_v6` (explicit ms) | 3,811,000 | **4.0x faster** |
+| `HyperUuid.new_v7` (explicit ms) | 3,785,000 | **4.0x faster** |
+| `HyperUuid.new_v6` (current time) | 3,677,000 | **3.9x faster** |
+| `HyperUuid.new_v7` (current time) | 3,574,000 | **3.8x faster** |
+| `HyperUuid.new_v5` | 1,942,000 | 2.1x faster |
 
-A `HyperUuid.new_v4` — real entropy, correct version/variant bits, minted by the shared Rust core — costs a fifth of what `SecureRandom.uuid` does, because the Magnus extension is an ordinary native method call with nothing marshalled around it.
+A `HyperUuid.new_v4` — real entropy, correct version/variant bits, minted by the shared Rust core — costs less than a fifth of what `SecureRandom.uuid` does, because the Magnus extension is an ordinary native method call with nothing marshalled around it.
 
 The "current time" rows deserve a footnote, because they will not look like this everywhere. Here they land beside the explicit-ms rows: the only difference between the two is one `Process.clock_gettime(CLOCK_REALTIME)` wall-clock read, and on this machine that read is too cheap to see. On a machine with a slow clock it is the whole story — where a virtualized clock defeats the vDSO fast path the same read costs ~1µs, which puts both current-time rows at parity with `SecureRandom.uuid` while the explicit-ms rows stay well ahead of it. `SecureRandom.uuid` never reads a clock — random v4 is the only thing it does. If your clock is slow and you are minting many, read it once and pass the timestamp, or use the batch doors.
 
-The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.25x slower than `SecureRandom.uuid` for v4 (1.26 µs against 1.01 µs in its own run) and 1.45x slower for v6/v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
+The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.16x slower than `SecureRandom.uuid` for v4 (1.24 µs against 1.07 µs in its own run) and about 1.3x slower for v6/v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
 
 Batch generation still amortizes per-call cost on both backends — one native call for the whole batch:
 
 | Call | i/s (Magnus backend) |
 |---|---:|
-| `new_v6` × 1000 (individual) | 3,498 |
-| `new_v6_batch(1000)` | 4,633 (**1.3x**) |
-| `new_v7` × 1000 (individual) | 3,539 |
-| `new_v7_batch(1000)` | 4,677 (**1.3x**) |
+| `new_v6` × 1000 (individual) | 3,761 |
+| `new_v6_batch(1000)` | 4,857 (**1.3x**) |
+| `new_v7` × 1000 (individual) | 3,742 |
+| `new_v7_batch(1000)` | 4,850 (**1.3x**) |
 
-The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 214 µs on is building a thousand `Uuid` objects — the byte form above does the same native work in 10 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
+The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on is building a thousand `Uuid` objects — the byte form above does the same native work in 5 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
 
 ## Backends
 

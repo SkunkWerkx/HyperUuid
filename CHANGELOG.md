@@ -11,6 +11,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Single UUIDs are about 2x faster on Linux, and 12x on musl.** `new_v4`, `new_v6` and
+  `new_v7` called `getrandom` for every UUID: 15-30 ns on glibc, whose `getrandom` runs in the
+  vDSO, and over 200 ns on musl, where it is a real syscall. On Linux they now draw from a pool
+  of buffered ChaCha20 generators in user space, built like the kernel's own vDSO generator:
+  each kilobyte of keystream makes the next key and the old one is gone (fast key erasure),
+  bytes are zeroed as they are handed out, and every slot takes a fresh `getrandom` key every
+  megabyte or so. The pool's memory is marked `MADV_WIPEONFORK`, so a forked child starts
+  unseeded instead of repeating its parent's bytes; a kernel without it (before 4.14) keeps
+  plain `getrandom`. Threads take slots with a try-lock and never wait. On linux-x64, `new_v4`
+  went from 38 to 18.5 ns on glibc and from 228 to 18 ns on musl, `new_v6` from 26 to 16 ns,
+  and `new_v7` from 31 to 26 ns. One trade, made knowingly: a virtual machine cloned from a
+  snapshot repeats the pool's bytes until each slot's next fresh key, where the kernel's own
+  generator detects the clone. Other platforms are unchanged. *(all packages)*
+- **Batches are about 2.5x faster on Linux, and 3.5x on musl.** `new_v6_batch` and
+  `new_v7_batch` drew all their entropy from `getrandom`, and on Linux that was 83-91% of the
+  call. A batch of 32 v7 or 24 v6 UUIDs or more now takes one 32-byte `getrandom` draw and
+  stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind
+  `getrandom` itself. The key is used once and nothing outlives the call, so there is no state
+  to reseed, share between threads or duplicate across a `fork`. A 1000-UUID v7 batch went from
+  10.6 to 4.4 µs on linux-x64 with glibc 2.43, and from 12.5 to 3.4 ns per UUID on musl, where
+  each `getrandom` is a real syscall. Windows (`ProcessPrng` was already faster than ChaCha20
+  there) and wasm (the two came out level) keep `getrandom` for everything, so `chacha20` is a
+  dependency on Linux and Android only. The batch API, its errors and its zero-allocation,
+  no-panic guarantees are unchanged; every binding that calls the batch functions on Linux gets
+  the speedup. *(all packages)*
+- **`new_v5` is about 13% faster.** It pads SHA-1 itself and calls the `sha1` crate's
+  compression function directly instead of going through `Digest`, whose streaming buffer was
+  a fifth of the call: 54.7 to 47.3 ns on linux-x64. A new test checks it against the `uuid`
+  crate for every name length from 0 to 300 bytes, which covers every padding boundary.
+  *(all packages)*
+- **`new_v7_batch` writes each UUID's header as two big-endian stores instead of ten byte
+  stores**, about 6% fewer cycles per item. *(all packages)*
+- **Every benchmark table re-measured against the new core**, on the same linux-x64 box,
+  one harness at a time. What the bindings gained, single calls against the platform's own:
+  C# 8.4-11.8x faster than `Guid.NewGuid()` (was 5.7-8.1x), Java 2.9-7.4x faster than
+  `UUID.randomUUID()` (was 2.4-4.5x), Swift 9.6-16x faster than `Foundation.UUID()` (was
+  9.5-13x), Ruby 5.5x faster than `SecureRandom.uuid` for v4 (was 4.9x), PHP 1.2-1.4x faster
+  than a naive inline v4 (was level to 1.2x), and Go's cgo calls 20-30% cheaper. A
+  1000-UUID byte fill now costs 3.6-4.9 µs in every binding, down from 9-12 µs. The Java
+  GraalWasm rows and PHP's native-extension spike table were not re-measured: the first is
+  unaffected by the entropy change, the second can no longer be run. *(repository)*
+
 - **Every language is formatted, and CI holds it there — library, tests, benchmarks and
   smoke tests alike.** Rust (`cargo fmt`) already was; Go now runs `gofmt` beside revive.
   New: ruff format and the docstring rules over all of `python/` (100 columns); PSR-12 via

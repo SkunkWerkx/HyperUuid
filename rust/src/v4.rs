@@ -9,7 +9,7 @@ use crate::Uuid;
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v4() -> Result<Uuid, getrandom::Error> {
     let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes)?;
+    crate::entropy::fill(&mut bytes)?;
 
     let mut uuid = Uuid::from_bytes(bytes);
     uuid.set_version(4);

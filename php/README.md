@@ -143,7 +143,7 @@ $bytes = HyperUuid::newV7BatchBytes(1000);
 $first = substr($bytes, 0, 16);   // ready for a BINARY(16) bind parameter
 ```
 
-**About 8x faster than `newV7Batch`** for a 1000-UUID batch (9.6 µs versus 75.7 µs), and 30x faster than a thousand `newV7()` calls. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects and 1000 substrings on top of it.
+**About 16x faster than `newV7Batch`** for a 1000-UUID batch (4.2 µs versus 67.1 µs), and 64x faster than a thousand `newV7()` calls. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects and 1000 substrings on top of it.
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `newV7Batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
@@ -174,16 +174,16 @@ actually costs:
 
 | Call | Time | vs. naive inline (no FFI) |
 | --- | --- | --- |
-| Naive inline v4 (`random_bytes`, no RFC validation) | 287ns | — |
-| `newV4()` | 237ns | **1.2x faster** |
-| `newV6()` | 286ns | level |
-| `newV7()` | 288ns | level |
-| `newV5()` | 466ns | 1.6x slower — a SHA-1 the baseline has no equivalent of |
+| Naive inline v4 (`random_bytes`, no RFC validation) | 308ns | — |
+| `newV4()` | 224ns | **1.4x faster** |
+| `newV6()` | 255ns | **1.2x faster** |
+| `newV7()` | 265ns | **1.2x faster** |
+| `newV5()` | 502ns | 1.6x slower — a SHA-1 the baseline has no equivalent of |
 
 Read that top row again: the full RFC-complete v4 — real entropy, correct version and
 variant bits, crossing into native code and back — costs **less than the naive pure-PHP
-three-liner that doesn't even validate anything**, and the time-ordered versions cost the
-same as it. How far ahead depends on the machine, because most of the naive version is
+three-liner that doesn't even validate anything**, and the time-ordered versions beat it
+too. How far ahead depends on the machine, because most of the naive version is
 `random_bytes` and the operating system prices that: where the system random source is
 slow the gap is wider. The calls are this cheap because there is no wrapper left around
 the boundary: a single static out-buffer and zero-copy `const char *` string passes
@@ -195,8 +195,8 @@ which is most of what is left:
 
 | Call | Individual × 1000 | Batch → `Uuid[]` | Batch → bytes |
 | --- | ---: | ---: | ---: |
-| v6 | 293.5µs | 74.9µs (**3.9x**) | 11.6µs (**25x**) |
-| v7 | 284.8µs | 75.7µs (**3.8x**) | 9.6µs (**30x**) |
+| v6 | 280.9µs | 67.5µs (**4.2x**) | 4.5µs (**62x**) |
+| v7 | 267.0µs | 67.1µs (**4.0x**) | 4.2µs (**64x**) |
 
 ### Timestamp extraction vs. `ramsey/uuid`'s `getDateTime()`
 
@@ -208,10 +208,10 @@ flips the result:
 
 | Call | Time | vs. `ramsey/uuid` |
 | --- | ---: | ---: |
-| `->timestamp()` (v6) | 298ns | **85x faster** |
-| `ramsey/uuid`'s `->getDateTime()` (v6) | 25.2µs | baseline |
-| `->timestamp()` (v7) | 284ns | **47x faster** |
-| `ramsey/uuid`'s `->getDateTime()` (v7) | 13.5µs | baseline |
+| `->timestamp()` (v6) | 274ns | **88x faster** |
+| `ramsey/uuid`'s `->getDateTime()` (v6) | 24.0µs | baseline |
+| `->timestamp()` (v7) | 293ns | **45x faster** |
+| `ramsey/uuid`'s `->getDateTime()` (v7) | 13.2µs | baseline |
 
 `ramsey/uuid`'s `getDateTime()` does real work this package's native extraction doesn't have
 to: parsing a lazily-decoded UUID string representation and constructing a `DateTimeImmutable`

@@ -32,6 +32,13 @@ no-panic = { version = "0.1", optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2.189", default-features = false }
 
+# Entropy on Linux and Android: ChaCha20 in user space, keyed from `getrandom` (entropy.rs has
+# the two shapes, the measurements, and why it is only these two).
+# `cipher` is the one feature used. The crate is no_std, picks AVX2 or SSE2 at run time on x86,
+# and uses NEON on aarch64.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+chacha20 = { version = "0.10.2", default-features = false, features = ["cipher"] }
+
 # One crate, three optional native-extension entry points instead of three satellite
 # crates each path-depending back on this one. Nothing in a plain `cargo cdylib` (the
 # Fiddle/ext-ffi-consumed shared library every non-extension binding dlopens) changes —

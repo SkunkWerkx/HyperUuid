@@ -80,12 +80,12 @@ Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uu
 
 | Benchmark | p50 | mallocs |
 | --- | ---: | ---: |
-| `newV7` x1000 individually | 76 µs | 0 |
-| `newV7Batch(count: 1000)` | **10 µs** | 1 |
-| `fillV7(into: [UUID])` | 12 µs | 1 |
-| `fillV7(into: raw bytes)` | 12 µs | 1 |
+| `newV7` x1000 individually | 56 µs | 0 |
+| `newV7Batch(count: 1000)` | **3.8 µs** | 1 |
+| `fillV7(into: [UUID])` | 5.2 µs | 1 |
+| `fillV7(into: raw bytes)` | **3.7 µs** | 1 |
 
-There is no gap between `newV7Batch` and the fills: `newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work.
+`newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work — and lands with the raw-bytes fill. The `[UUID]` fill measures 1.4 µs more here.
 
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
 
@@ -95,15 +95,15 @@ The raw-buffer overload is for callers who want RFC-ordered bytes rather than `U
 
 ## Benchmarks
 
-Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-x64 on an Intel Core i9-11900H, Swift 6.3, p50 of 10,000 samples):
+Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmark) (`swift package benchmark run` in `Benchmarks/`, release build, linux-x64 on an Intel Core i9-11900H, Swift 6.3.3, p50 of 10,000 samples):
 
 | Call | p50 | vs. `Foundation.UUID()` | Malloc (total) |
 |---|---:|---:|---:|
-| `Foundation.UUID()` | 1,413 ns | baseline | 0 |
-| `UuidGenerator.newV4()` | 107 ns | **13x faster** | 0 |
-| `UuidGenerator.newV5(namespace:name:)` | 135 ns | **10x faster** | 0 |
-| `UuidGenerator.newV6()` | 148 ns | **9.5x faster** | 0 |
-| `UuidGenerator.newV7()` | 117 ns | **12x faster** | 0 |
+| `Foundation.UUID()` | 1,319 ns | baseline | 0 |
+| `UuidGenerator.newV4()` | 83 ns | **16x faster** | 0 |
+| `UuidGenerator.newV5(namespace:name:)` | 137 ns | **9.6x faster** | 0 |
+| `UuidGenerator.newV6()` | 94 ns | **14x faster** | 0 |
+| `UuidGenerator.newV7()` | 121 ns | **11x faster** | 0 |
 
 Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the call path is cheap, a direct call to a linked-in symbol — and none of them allocates. Each used to: a heap `[UInt8]` for the out-value and one more per input, neither of which this shape needs. Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
 
@@ -111,12 +111,12 @@ Batch generation amortizes the native call over the whole batch, and no longer p
 
 | Call | p50 | Per UUID |
 |---|---:|---:|
-| `newV6()` × 1000 (individual) | 70 µs | 70 ns |
-| `newV6Batch(count: 1000)` | **12 µs** | 12 ns |
-| `newV7()` × 1000 (individual) | 76 µs | 76 ns |
-| `newV7Batch(count: 1000)` | **10 µs** | 10 ns |
+| `newV6()` × 1000 (individual) | 43 µs | 43 ns |
+| `newV6Batch(count: 1000)` | **4.4 µs** | 4.4 ns |
+| `newV7()` × 1000 (individual) | 56 µs | 56 ns |
+| `newV7Batch(count: 1000)` | **3.8 µs** | 3.8 ns |
 
-**≈6x for v6, ≈7.5x for v7** — one native call, one clock read and one allocation instead of a thousand of each, with the batch doors landing on the same floor the fills reach. The multiple is the machine's as much as the binding's: the individual calls each read the wall clock, so where a clock read is expensive the loop costs far more and the batch, which reads it once, does not.
+**≈10x for v6, ≈15x for v7** — one native call, one clock read and one allocation instead of a thousand of each, with the batch doors landing on the same floor the fills reach. The multiple is the machine's as much as the binding's: the individual calls each read the wall clock, so where a clock read is expensive the loop costs far more and the batch, which reads it once, does not.
 
 ## Requirements
 

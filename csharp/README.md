@@ -4,7 +4,7 @@
 [![NuGet](https://img.shields.io/nuget/v/HyperUuid.svg)](https://www.nuget.org/packages/HyperUuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
-**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~5.7x — with zero heap allocation, on every version including v5 — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
+**`UuidGenerator.NewV4()` beats `Guid.NewGuid()` by ~9x — with zero heap allocation, on every version including v5 — because it calls straight into a native Rust core instead of the BCL's own managed generator.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling directly into the native `libhyperuuid` shared library via source-generated [`LibraryImport`](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/pinvoke-source-generation) P/Invoke — no runtime bridge, no reflection, AOT/trim-friendly. Ships as RID-specific native assets inside the package the standard NuGet way.
 
@@ -46,11 +46,11 @@ Before the first UUID, `UuidGenerator.IsAvailable` says whether the native libra
 
    | Method | Mean | Allocated |
    | --- | ---: | ---: |
-   | `Guid.NewGuid()` | 316.05 ns | 0 B |
-   | `UuidGenerator.NewV4()` | 55.33 ns (**5.71x faster**) | 0 B |
-   | `UuidGenerator.NewV5()` | 87.22 ns (3.62x faster) | 0 B |
-   | `UuidGenerator.NewV6()` | 39.07 ns (**8.09x faster**) | 0 B |
-   | `UuidGenerator.NewV7()` | 42.21 ns (7.49x faster) | 0 B |
+   | `Guid.NewGuid()` | 296.70 ns | 0 B |
+   | `UuidGenerator.NewV4()` | 32.58 ns (**9.11x faster**) | 0 B |
+   | `UuidGenerator.NewV5()` | 69.54 ns (4.27x faster) | 0 B |
+   | `UuidGenerator.NewV6()` | 25.06 ns (**11.84x faster**) | 0 B |
+   | `UuidGenerator.NewV7()` | 35.40 ns (8.38x faster) | 0 B |
 
    Including `NewV5(Guid, string)` — it used to allocate 40 B encoding the name to UTF-8 via `Encoding.UTF8.GetBytes(name)`; now it UTF-8-encodes into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods already used (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library). `NewV5(Guid, ReadOnlySpan<char>)` is the same path for a name you hold as a slice rather than a `string` — one field of a parsed line, a pooled buffer — so nothing has to be materialized first, and `NewV5(Guid, ReadOnlySpan<byte>)` skips the encode step entirely: it hashes the bytes exactly as given, which also makes it the overload for a name that is not text at all.
 
@@ -60,12 +60,12 @@ Before the first UUID, `UuidGenerator.IsAvailable` says whether the native libra
 
    | Method | Mean | vs. individual | Allocated |
    | --- | ---: | ---: | ---: |
-   | `NewV7()` x1000 individually | 41.01 µs | 1.00x | 0 B |
-   | `NewV7Batch(1000)` → new `Guid[]` | 11.84 µs | 3.46x faster | 16,024 B |
-   | `FillV7(Span<Guid>)` into an existing array | 11.13 µs | **3.68x faster** | **0 B** |
-   | `FillV7(Span<byte>)` into an existing buffer | 9.61 µs | **4.27x faster** | **0 B** |
+   | `NewV7()` x1000 individually | 33.51 µs | 1.00x | 0 B |
+   | `NewV7Batch(1000)` → new `Guid[]` | 5.93 µs | 5.66x faster | 16,024 B |
+   | `FillV7(Span<Guid>)` into an existing array | 5.07 µs | **6.61x faster** | **0 B** |
+   | `FillV7(Span<byte>)` into an existing buffer | 3.73 µs | **9.00x faster** | **0 B** |
 
-   The three rows amortize different things, which is why all three exist. `NewV7Batch` amortizes the FFI call but still allocates the result array. `FillV7(Span<Guid>)` drops the allocation entirely but still pays a `new Guid(chunk, bigEndian: true)` conversion per element, because `Guid`'s in-memory layout is mixed-endian and isn't RFC byte order. `FillV7(Span<byte>)` drops that conversion too — the native core already writes RFC-ordered bytes contiguously into your buffer — and that 1.5 µs gap between the last two rows *is* the per-element conversion cost, measured. `FillV6`/`NewV6Batch` behave the same way (13.98 / 13.20 / 11.70 µs respectively, against 36.83 µs for a thousand individual `NewV6()` calls).
+   The three rows amortize different things, which is why all three exist. `NewV7Batch` amortizes the FFI call but still allocates the result array. `FillV7(Span<Guid>)` drops the allocation entirely but still pays a `new Guid(chunk, bigEndian: true)` conversion per element, because `Guid`'s in-memory layout is mixed-endian and isn't RFC byte order. `FillV7(Span<byte>)` drops that conversion too — the native core already writes RFC-ordered bytes contiguously into your buffer — and that 1.3 µs gap between the last two rows *is* the per-element conversion cost, measured. `FillV6`/`NewV6Batch` behave the same way (6.57 / 5.76 / 4.40 µs respectively, against 23.72 µs for a thousand individual `NewV6()` calls).
 5. **Cross-language consistency.** The exact same Rust core also mints v5 namespace UUIDs for Ruby, Python, Go, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't C#-only, that's not something the BCL can offer at all.
 6. **SQL Server byte ordering, for free.** `UuidGenerator.V7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`V6ToSqlOrder` does the same for version 6), the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use. Verified directly against the real `SqlGuid` comparator in this package's own test suite, not a hand-rolled stand-in — and it's the same native function every other binding in this repo calls, not a C#-only reimplementation. Neither `Guid.NewGuid()` nor `Guid.CreateVersion7()` has any such concept.
 
