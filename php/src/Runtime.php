@@ -229,7 +229,13 @@ final class Runtime
     {
         [$rid, $libName] = NativePlatform::ridAndLibraryName();
         $path = __DIR__ . "/native/{$rid}/{$libName}";
-        if (!is_file($path)) {
+        // Development loop: HYPERUUID_NATIVE_LIBRARY names a library to load instead of the
+        // staged one, so the suite runs against a core built from the checkout without
+        // replacing committed files (.github/scripts/local-core.sh builds one and prints it).
+        $override = getenv('HYPERUUID_NATIVE_LIBRARY');
+        if (\is_string($override) && $override !== '') {
+            $path = $override;
+        } elseif (!is_file($path)) {
             // Development loop: fall back to the in-repo cargo build, exactly what the
             // other bindings' local staging does.
             $repoBuild = \dirname(__DIR__, 2) . "/rust/target/release/{$libName}";

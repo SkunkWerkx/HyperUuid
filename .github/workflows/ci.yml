@@ -227,6 +227,21 @@ jobs:
         working-directory: rust
         run: cargo build --release --example no_panic --features no-panic
 
+  # Every binding declares the core's C ABI by hand: C#'s LibraryImports, Java's downcalls,
+  # Go's cgo prototypes, the Swift header, PHP's cdef, Ruby's Fiddle handles, and the Python
+  # and Ruby extensions' registrations under their own spelling. This holds each of them to
+  # the export list in rust/src/ffi.rs (.github/scripts/check_exports.py), so an export added
+  # to the core and missed in one binding fails here, in seconds, not on the one leg whose
+  # suite happens to call it.
+  check-exports:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: python .github/scripts/check_exports.py
+
   # The shared library every binding loads is built without std (`cargo cdylib`; the
   # `cdylib` feature in rust/Cargo.toml has why), which leaves it carrying what std used to
   # bring by itself: the C runtime it links, and a hidden `rust_eh_personality` for core's
