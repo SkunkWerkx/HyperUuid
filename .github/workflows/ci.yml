@@ -472,9 +472,13 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # Pinned to a workload set whose iOS and Mac Catalyst SDKs are 26.5: each .NET for iOS
+      # release refuses an Xcode older than its own, and from 10.0.401.1 that is Xcode 27,
+      # which the macos-latest image does not carry yet (26.6 is its newest). An Xcode newer
+      # than the workload's is accepted, so lift the pin once the image has Xcode 27.
       - name: Install the .NET iOS and Mac Catalyst workloads
         if: ${{ !cancelled() }}
-        run: dotnet workload install ios maccatalyst
+        run: dotnet workload install ios maccatalyst --version 10.0.401
 
       - name: C# — a Mac Catalyst app, built and run
         if: ${{ !cancelled() }}
