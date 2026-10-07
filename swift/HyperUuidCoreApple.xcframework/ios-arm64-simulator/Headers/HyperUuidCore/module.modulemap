@@ -1,0 +1,4 @@
+module HyperUuidCore {
+    header "hyperuuid.h"
+    export *
+}
