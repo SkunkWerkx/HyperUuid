@@ -445,10 +445,16 @@ jobs:
           set -euo pipefail
           # `go test` hands a cross-built test binary to go_{GOOS}_{GOARCH}_exec when one is
           # on PATH; Go's wrapper installs it in the booted simulator and runs it there.
-          # clangwrap.sh is Go's own too, and targets the simulator SDK.
-          mkdir -p "$RUNNER_TEMP/go-ios"
-          go build -o "$RUNNER_TEMP/go-ios/go_ios_arm64_exec" "$(go env GOROOT)/misc/ios/go_ios_exec.go"
-          export PATH="$RUNNER_TEMP/go-ios:$PATH"
+          # clangwrap.sh is Go's own too, and targets the simulator SDK. The wrapper predates
+          # modules: it copies the package into the app by its path under GOROOT or GOPATH and
+          # stops if it is under neither, so it alone runs with the workspace as its GOPATH
+          # (go test keeps the real one, and its module cache).
+          mkdir -p "$RUNNER_TEMP/go-ios/bin"
+          go build -o "$RUNNER_TEMP/go-ios/go_ios_exec" "$(go env GOROOT)/misc/ios/go_ios_exec.go"
+          printf '#!/bin/sh\nGOPATH=%q exec %q "$@"\n' "$GITHUB_WORKSPACE" "$RUNNER_TEMP/go-ios/go_ios_exec" \
+            > "$RUNNER_TEMP/go-ios/bin/go_ios_arm64_exec"
+          chmod +x "$RUNNER_TEMP/go-ios/bin/go_ios_arm64_exec"
+          export PATH="$RUNNER_TEMP/go-ios/bin:$PATH"
           GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
             go test -tags iossimulator -skip '^TestNativeVersionMatchesTheCrate$' -v . | tee "$RUNNER_TEMP/go-ios/test.log"
           grep -q '^ok' "$RUNNER_TEMP/go-ios/test.log"
