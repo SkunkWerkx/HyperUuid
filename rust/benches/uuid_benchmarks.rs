@@ -24,7 +24,28 @@ fn bench_single_item(c: &mut Criterion) {
     group.bench_function("v7", |b| {
         b.iter(|| v7::new_v7(black_box(RFC_TEST_VECTOR_MS)).unwrap())
     });
+    // The same two calls handed the current time, as a `now` door hands it. On Linux the
+    // entropy pool takes a timestamp within a second of its key's as proof the key is fresh,
+    // and reads the clock itself when handed any other, which is what the rows above (and
+    // every other row in this file, on a timestamp from 2022) pay for. The clock is read once
+    // per Criterion sample, a few tens of milliseconds of iterations, outside the timed loop.
+    group.bench_function("v6_current_timestamp", |b| {
+        let now = now_ms();
+        b.iter(|| v6::new_v6(black_box(now)).unwrap())
+    });
+    group.bench_function("v7_current_timestamp", |b| {
+        let now = now_ms();
+        b.iter(|| v7::new_v7(black_box(now)).unwrap())
+    });
     group.finish();
+}
+
+fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before 1970")
+        .as_millis() as u64
 }
 
 // Head-to-head against the `uuid` crate (the de facto standard Rust UUID crate) — same

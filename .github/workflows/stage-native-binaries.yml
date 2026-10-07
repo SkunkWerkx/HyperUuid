@@ -193,9 +193,19 @@ jobs:
           # fails every consumer's build, and a Go build with no archive for its platform
           # does not link. info.json is generated text naming those nine paths and the crate
           # version; it rides along unattested, readable in the diff.
+          #
+          # And three for Swift's XCFramework: iOS, the iOS simulator and Mac Catalyst, arm64
+          # each. That tree is committed whole from the artifact, since nothing of it is
+          # source: beside the archives, its Info.plist and each slice's copy of the header
+          # and module map are generated text, unattested and readable in the diff like
+          # info.json. swift/Package.swift declares the target only when the Info.plist is
+          # there, so a tree from before this first ran simply has no iOS support yet.
+          # Go's tree takes the four Apple mobile archives as plain files beside its seven:
+          # iOS, the iOS simulator, and Mac Catalyst on both architectures.
           declare -A STATIC_TREES=(
             [swift/HyperUuidCore.artifactbundle]=9
-            [go/staticlib]=7
+            [swift/HyperUuidCoreApple.xcframework]=3
+            [go/staticlib]=11
           )
           for tree in "${!STATIC_TREES[@]}"; do
             archives=()
@@ -222,6 +232,19 @@ jobs:
           done
           install -m 644 "artifacts/static-libs/swift/HyperUuidCore.artifactbundle/info.json" \
             "swift/HyperUuidCore.artifactbundle/info.json"
+          xcframework=swift/HyperUuidCoreApple.xcframework
+          install -m 644 "artifacts/static-libs/$xcframework/Info.plist" "$xcframework/Info.plist"
+          for header in artifacts/static-libs/"$xcframework"/*/Headers/HyperUuidCore/*; do
+            dest="${header#artifacts/static-libs/}"
+            mkdir -p "$(dirname "$dest")"
+            install -m 644 "$header" "$dest"
+          done
+          for slice in "$xcframework"/*/; do
+            for file in hyperuuid.h module.modulemap; do
+              [ -f "$slice/Headers/HyperUuidCore/$file" ] \
+                || { echo "::error::$slice has no Headers/HyperUuidCore/$file in the static-libs artifact."; exit 1; }
+            done
+          done
 
           echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -236,7 +259,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add php/src/native swift/HyperUuidCore.artifactbundle
+          git add php/src/native swift/HyperUuidCore.artifactbundle swift/HyperUuidCoreApple.xcframework
           # -f: go/staticlib's archives are in .gitignore, so that this workflow is the only
           # thing that ever adds one — a developer's own build of them stays out of a commit.
           git add -f go/staticlib

@@ -73,6 +73,12 @@ SITES = [
         (),
     ),
     (
+        "C# (iOS and Mac Catalyst)",
+        [("csharp/HyperUuid/*.cs", r'LibraryImport\("__Internal", EntryPoint = "(\w+)"\)')],
+        "all",
+        (),
+    ),
+    (
         "Java (FFM)",
         [
             (

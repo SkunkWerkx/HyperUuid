@@ -1,6 +1,6 @@
 [package]
 name = "hyperuuid"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.85"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
@@ -59,8 +59,9 @@ default = ["std"]
 std = ["getrandom/std"]
 # The no_std static libraries, for the hosts that link the core in rather than load it: a
 # Blazor WebAssembly app (the NuGet package, wasm32-unknown-emscripten), a Swift executable
-# on Linux or WebAssembly, a Go binary built with cgo, and a C# Native AOT publish. A
-# static library is a final artifact as far as panics go, so with `std` off it needs the
+# on Linux or WebAssembly, a Go binary built with cgo, a C# Native AOT publish, and an iOS or
+# Mac Catalyst app in Swift or C#. A static library is a final artifact as far as panics go,
+# so with `std` off it needs the
 # `#[panic_handler]` std would have supplied; this feature is that handler and nothing else
 # (see lib.rs). It exists so those libraries carry no copy of Rust's standard library: two
 # Hyper* static libraries that each bundled std could not be linked into one program

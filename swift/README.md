@@ -80,12 +80,12 @@ Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uu
 
 | Benchmark | p50 | mallocs |
 | --- | ---: | ---: |
-| `newV7` x1000 individually | 56 µs | 0 |
-| `newV7Batch(count: 1000)` | **3.8 µs** | 1 |
-| `fillV7(into: [UUID])` | 5.2 µs | 1 |
-| `fillV7(into: raw bytes)` | **3.7 µs** | 1 |
+| `newV7` x1000 individually | 57 µs | 0 |
+| `newV7Batch(count: 1000)` | **3.7 µs** | 1 |
+| `fillV7(into: [UUID])` | 5.3 µs | 1 |
+| `fillV7(into: raw bytes)` | **3.8 µs** | 1 |
 
-`newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work — and lands with the raw-bytes fill. The `[UUID]` fill measures 1.4 µs more here.
+`newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work — and lands with the raw-bytes fill. The `[UUID]` fill measures 1.5 µs more here.
 
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
 
@@ -99,11 +99,11 @@ Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmar
 
 | Call | p50 | vs. `Foundation.UUID()` | Malloc (total) |
 |---|---:|---:|---:|
-| `Foundation.UUID()` | 1,319 ns | baseline | 0 |
-| `UuidGenerator.newV4()` | 83 ns | **16x faster** | 0 |
-| `UuidGenerator.newV5(namespace:name:)` | 137 ns | **9.6x faster** | 0 |
-| `UuidGenerator.newV6()` | 94 ns | **14x faster** | 0 |
-| `UuidGenerator.newV7()` | 121 ns | **11x faster** | 0 |
+| `Foundation.UUID()` | 1,325 ns | baseline | 0 |
+| `UuidGenerator.newV4()` | 85 ns | **16x faster** | 0 |
+| `UuidGenerator.newV5(namespace:name:)` | 122 ns | **11x faster** | 0 |
+| `UuidGenerator.newV6()` | 103 ns | **13x faster** | 0 |
+| `UuidGenerator.newV7()` | 107 ns | **12x faster** | 0 |
 
 Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the call path is cheap, a direct call to a linked-in symbol — and none of them allocates. Each used to: a heap `[UInt8]` for the out-value and one more per input, neither of which this shape needs. Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
 
@@ -111,10 +111,10 @@ Batch generation amortizes the native call over the whole batch, and no longer p
 
 | Call | p50 | Per UUID |
 |---|---:|---:|
-| `newV6()` × 1000 (individual) | 43 µs | 43 ns |
-| `newV6Batch(count: 1000)` | **4.4 µs** | 4.4 ns |
-| `newV7()` × 1000 (individual) | 56 µs | 56 ns |
-| `newV7Batch(count: 1000)` | **3.8 µs** | 3.8 ns |
+| `newV6()` × 1000 (individual) | 45 µs | 45 ns |
+| `newV6Batch(count: 1000)` | **4.6 µs** | 4.6 ns |
+| `newV7()` × 1000 (individual) | 57 µs | 57 ns |
+| `newV7Batch(count: 1000)` | **3.7 µs** | 3.7 ns |
 
 **≈10x for v6, ≈15x for v7** — one native call, one clock read and one allocation instead of a thousand of each, with the batch doors landing on the same floor the fills reach. The multiple is the machine's as much as the binding's: the individual calls each read the wall clock, so where a clock read is expensive the loop costs far more and the batch, which reads it once, does not.
 
@@ -126,13 +126,16 @@ Batch generation amortizes the native call over the whole batch, and no longer p
   runs Linux (glibc and musl) and WebAssembly again on 6.2 in Swift's own containers. macOS
   and Windows are tested on 6.4 only.
 - **Platforms.** Linux on glibc and on musl (Swift's static Linux SDK), macOS and Windows,
-  each on x86_64 and arm64, and WebAssembly (`wasm32-unknown-wasip1`), in WASI hosts and in
-  the browser. No `platforms:` floor is declared, so macOS takes SwiftPM's default
-  deployment target.
-- **Not supported: everything else.** iOS, tvOS, watchOS, visionOS, Android, and any other
-  architecture on the supported systems have no prebuilt core here, so the build stops at
-  compile time with no `HyperUuidCore` module (Swift Build first warns that the artifact
-  bundle has no matching variant) — never at run time.
+  each on x86_64 and arm64, WebAssembly (`wasm32-unknown-wasip1`), in WASI hosts and in
+  the browser, and iOS, the iOS simulator and Mac Catalyst on arm64. No `platforms:` floor
+  is declared, so each Apple platform takes SwiftPM's default deployment target; the iOS
+  simulator and Mac Catalyst archives are built for 14.0, the first release either ran on
+  arm64.
+- **Not supported: everything else.** tvOS, watchOS, visionOS, Android, the iOS simulator
+  and Mac Catalyst on Intel Macs, and any other architecture on the supported systems have
+  no prebuilt core here, so the build stops at compile time with no `HyperUuidCore` module
+  (Swift Build first warns that the artifact bundle has no matching variant) — never at
+  run time.
 
 ## Linking and deployment
 
@@ -143,6 +146,18 @@ resource bundle, and nothing to deploy beside the binary: a multi-stage Dockerfi
 copies only the executable works, so does a fully static build with
 `swift build --swift-sdk x86_64-swift-linux-musl`, and so does copying a macOS or Windows
 executable on its own. The core adds roughly 10–20 KB to it.
+
+iOS, the iOS simulator and Mac Catalyst get the same archives from a second binary target,
+`HyperUuidCoreApple.xcframework`: an app for those is built by Xcode, which links a static
+library out of an XCFramework and does not read a static-library artifact bundle. The
+manifest declares it only on a Mac, where those platforms can be built at all, and both
+targets define the one `HyperUuidCore` module the binding imports. CI's `test-apple-mobile`
+job runs the suite on an iOS simulator and as a Mac Catalyst process with `xcodebuild test`,
+and builds the package for an iOS device.
+
+In a checkout of this repository, `HYPERUUID_LOCAL_CORE=1 swift test` run from `swift/` links
+the bundle `.github/scripts/local-core.sh` builds from the checkout's core in place of the
+committed one. The root `Package.swift`, the one a dependency resolves, has no such switch.
 
 Every call `throws` only `UuidGenerator.Error` — a native call that ran and was refused
 (`.timestampOutOfRange`, `.randomSourceFailure(code:)`, …). `UuidGenerator.isAvailable` is

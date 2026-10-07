@@ -3,7 +3,8 @@
 The core as a static library, one per platform the module links it on:
 `staticlib/{goos}_{goarch}/libhyperuuid.a` for `linux_amd64`, `linux_arm64`, `darwin_amd64`,
 `darwin_arm64`, `windows_amd64` and `windows_arm64`, plus `staticlib/wasm/libhyperuuid.a`
-for TinyGo on WebAssembly. `backend_static.go` names the one for the build's platform on its
+for TinyGo on WebAssembly, and four that build as `GOOS=ios` and are chosen by build tag:
+`ios_arm64`, `iossimulator_arm64`, `maccatalyst_arm64` and `maccatalyst_amd64`. `backend_static.go` names the one for the build's platform on its
 cgo link line (`backend_tinygo.go` names `wasm` under TinyGo), and that archive is
 everything a build takes from this module — no shared libraries, nothing loaded or
 extracted at run time.
@@ -28,6 +29,12 @@ The `wasm` archive is the `wasm32-wasip1` build, byte for byte the one Swift's a
 bundle links for WebAssembly. TinyGo's browser target is a wasm32-wasi build underneath, so
 it links unchanged there too, and TinyGo's `wasm_exec.js` supplies the archive's one import,
 WASI's `random_get`, from `crypto.getRandomValues`.
+
+The four Apple mobile archives are the `aarch64-apple-ios`, `aarch64-apple-ios-sim`,
+`aarch64-apple-ios-macabi` and `x86_64-apple-ios-macabi` builds, the ones the C# package
+links for iOS and Mac Catalyst and (the arm64 three) the Swift XCFramework carries. They are
+separate files because a Mach-O object records the platform it was built for and the linker
+refuses any other; the module's README has the tags that select each.
 
 ## Building them yourself
 

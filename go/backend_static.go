@@ -1,4 +1,4 @@
-//go:build cgo && !tinygo && (darwin || linux || windows) && (amd64 || arm64)
+//go:build cgo && !tinygo && !android && (darwin || linux || windows) && (amd64 || arm64) && !(ios && amd64 && !maccatalyst)
 
 // The native backend: libhyperuuid linked into the binary. The core is a static library under
 // staticlib/{goos}_{goarch}/, named on the cgo link line below, and every call is an
@@ -27,6 +27,14 @@
 // MSVC's COFF objects, and the archive carries its own import stub for ProcessPrng, the
 // entropy source getrandom uses there, so the link line names nothing else.
 //
+// iOS and Mac Catalyst link an archive of their own, since Go builds for both as GOOS=ios
+// and every Mach-O object says which platform it was built for. GOOS=ios also satisfies the
+// darwin constraint (as android satisfies linux), so the macOS lines below say !ios, and the
+// constraint above turns Android away rather than hand it the Linux archive. The three
+// that share ios/arm64 are told apart by build tag: `maccatalyst`, which gomobile sets for
+// that target; `iossimulator`, which nothing sets, so a simulator build passes it by hand;
+// and neither, for a device. There is no archive for the simulator on amd64.
+//
 // The archives are committed (staticlib/README.md): a Go module is whatever is in the tree at
 // the resolved version, with no packing step to stage them in. The hyperuuid_local build tag
 // links the archive .github/scripts/local-core.sh builds from the checkout instead, so the
@@ -36,14 +44,18 @@ package hyperuuid
 /*
 #cgo linux,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_amd64/libhyperuuid.a
 #cgo linux,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_arm64/libhyperuuid.a
-#cgo darwin,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_amd64/libhyperuuid.a
-#cgo darwin,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_arm64/libhyperuuid.a
+#cgo darwin,!ios,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_amd64/libhyperuuid.a
+#cgo darwin,!ios,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_arm64/libhyperuuid.a
+#cgo ios,arm64,!iossimulator,!maccatalyst LDFLAGS: ${SRCDIR}/staticlib/ios_arm64/libhyperuuid.a
+#cgo ios,arm64,iossimulator,!maccatalyst LDFLAGS: ${SRCDIR}/staticlib/iossimulator_arm64/libhyperuuid.a
+#cgo ios,arm64,maccatalyst LDFLAGS: ${SRCDIR}/staticlib/maccatalyst_arm64/libhyperuuid.a
+#cgo ios,amd64,maccatalyst LDFLAGS: ${SRCDIR}/staticlib/maccatalyst_amd64/libhyperuuid.a
 #cgo windows,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/windows_amd64/libhyperuuid.a
 #cgo windows,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/windows_arm64/libhyperuuid.a
 #cgo linux,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_amd64/libhyperuuid.a
 #cgo linux,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_arm64/libhyperuuid.a
-#cgo darwin,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_amd64/libhyperuuid.a
-#cgo darwin,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_arm64/libhyperuuid.a
+#cgo darwin,!ios,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_amd64/libhyperuuid.a
+#cgo darwin,!ios,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_arm64/libhyperuuid.a
 #cgo windows,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/windows_amd64/libhyperuuid.a
 #cgo windows,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/windows_arm64/libhyperuuid.a
 #include <stdint.h>

@@ -99,7 +99,7 @@ pub fn new_v7(unix_millis: u64) -> Result<Uuid, NewV7Error> {
     let counter_val = counter().fetch_add(1, Ordering::Relaxed).wrapping_add(1) & COUNTER_MASK;
 
     let mut bytes = [0u8; 16];
-    crate::entropy::fill(&mut bytes[10..]).map_err(NewV7Error::Random)?;
+    crate::entropy::fill_at(&mut bytes[10..], unix_millis).map_err(NewV7Error::Random)?;
 
     // unix_ts_ms: 48-bit big-endian millisecond timestamp (octets 0-5).
     bytes[0] = (unix_millis >> 40) as u8;
@@ -186,8 +186,11 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
     // onwards is item 2i's share or later. Walking the batch backwards therefore only
     // overwrites entropy that has already been consumed, and item i's own share is moved
     // before its own 16 bytes are written. Hence `.rev()`, which is load-bearing, not taste.
-    crate::entropy::fill(&mut out[..count as usize * RAND_BYTES_PER_ITEM])
-        .map_err(NewV7Error::Random)?;
+    crate::entropy::fill_at(
+        &mut out[..count as usize * RAND_BYTES_PER_ITEM],
+        unix_millis,
+    )
+    .map_err(NewV7Error::Random)?;
 
     // unix_ts_ms in the top 48 bits of the u64 that becomes octets 0-7 of every item.
     let ts_shifted = unix_millis << 16;
