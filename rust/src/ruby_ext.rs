@@ -22,8 +22,9 @@ use magnus::{Error, ExceptionClass, RModule, RString, Ruby, function, prelude::*
 
 use crate as core;
 
-/// Constant-referenced classes are anchored by Ruby constants and never collected, so
-/// caching them is GC-safe.
+/// Constant-referenced classes are anchored by Ruby constants, so they are never collected —
+/// but a compacting GC can still move them, rewriting every reference it can see, which
+/// this static is not. `init` registers each with the GC, which pins it.
 struct Cached {
     random_source_error: Opaque<ExceptionClass>,
     timestamp_out_of_range_error: Opaque<ExceptionClass>,
@@ -200,13 +201,14 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // the pure-Fiddle Runtime; these redefinitions replace its methods in place.
     let hyperuuid = ruby.define_module("HyperUuid")?;
     let runtime: RModule = hyperuuid.define_module("Runtime")?;
+    let random_source_error: ExceptionClass = hyperuuid.const_get("RandomSourceError")?;
+    let timestamp_out_of_range_error: ExceptionClass =
+        hyperuuid.const_get("TimestampOutOfRangeError")?;
+    ruby.gc_register_mark_object(random_source_error);
+    ruby.gc_register_mark_object(timestamp_out_of_range_error);
     let _ = CACHED.set(Cached {
-        random_source_error: Opaque::from(
-            hyperuuid.const_get::<_, ExceptionClass>("RandomSourceError")?,
-        ),
-        timestamp_out_of_range_error: Opaque::from(
-            hyperuuid.const_get::<_, ExceptionClass>("TimestampOutOfRangeError")?,
-        ),
+        random_source_error: Opaque::from(random_source_error),
+        timestamp_out_of_range_error: Opaque::from(timestamp_out_of_range_error),
     });
     runtime.define_singleton_method("new_v4", function!(new_v4, 0))?;
     runtime.define_singleton_method("new_v5", function!(new_v5, 2))?;

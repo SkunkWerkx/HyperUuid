@@ -83,4 +83,25 @@ RSpec.describe "native backend" do
     expect(id.bytes).to be_frozen
     expect(id.bytes.bytesize).to eq(16)
   end
+
+  # The extension caches Ruby objects in Rust statics, out of the garbage collector's sight. A
+  # constant keeps them from being collected but not from being moved, so each is pinned when the
+  # extension loads; unpinned, a compacting collection moved them and the next call used whatever
+  # took their place (a segfault, or an exception class that was some other object). Every movable
+  # object is moved here first, in a subprocess so a regression fails this example, not the run.
+  it "keeps working after a compacting collection has moved everything it can" do
+    skip "this Ruby's GC does not compact" unless GC.respond_to?(:verify_compaction_references)
+
+    lib = File.expand_path("../lib", __dir__)
+    script = <<~RUBY
+      GC.verify_compaction_references(expand_heap: true, toward: :empty)
+      begin
+        HyperUuid.new_v7(1 << 60)
+      rescue HyperUuid::TimestampOutOfRangeError => e
+        print HyperUuid::BACKEND, " ", e.class
+      end
+    RUBY
+    out, status = Open3.capture2e(RbConfig.ruby, "-I", lib, "-r", "hyperuuid", "-e", script)
+    expect([status.success?, out]).to eq([true, "native HyperUuid::TimestampOutOfRangeError"])
+  end
 end

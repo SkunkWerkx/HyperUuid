@@ -9,6 +9,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ruby — the Magnus extension survives a compacting garbage collection.** It kept
+  `RandomSourceError` and `TimestampOutOfRangeError` in a Rust static, which a compacting
+  collection could move without updating, so raising either after one used whatever object
+  had taken its place — a segfault, reproduced with `GC.verify_compaction_references`. Both
+  are pinned when the extension loads, and a new spec moves every movable object before
+  raising one. *(ruby)*
+
 ## [0.7.0] — 2026-10-06
 
 ### Added
