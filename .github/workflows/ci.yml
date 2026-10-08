@@ -31,6 +31,15 @@ name: CI — build native, build wasm, test every binding
 on:
   pull_request:
   workflow_dispatch:
+  # The whole release-mode board once a week, so arm64, musl, iOS, the wheels and the second
+  # Ruby ABI are exercised between releases instead of first on release day.
+  schedule:
+    - cron: "0 6 * * 1"
+
+# A new push to a PR supersedes its running board; anything else runs to completion.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-native:
@@ -44,6 +53,8 @@ jobs:
       id-token: write
       attestations: write
     with:
+      # pr: every leg and suite, nothing only a release needs (see the forge's README).
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       project: HyperUuid
       crate: hyperuuid
       pure_env: HYPERUUID_PURE
@@ -96,6 +107,8 @@ jobs:
       id-token: write
       attestations: write
     with:
+      # pr: every leg and suite, nothing only a release needs (see the forge's README).
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       crate: hyperuuid
       project: HyperUuid
       # Every browser target runs in headless Chrome, not just built: the Blazor smoke app
@@ -117,6 +130,8 @@ jobs:
   # request; while they were built in release.yml, 0.4.0's osx-x64 wheel failed its first
   # install with four registries already published.
   build-wheels:
+    # Packaging (and the Pyodide suite) for the release to publish; nothing a PR ships.
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
     # Same two scopes build-native hands down, for the same reason: the forge attests each
     # wheel and cannot escalate past what this job was granted.
@@ -364,6 +379,8 @@ jobs:
   # what is checked.
   test-apple-mobile:
     needs: build-native
+    # 28 minutes of simulators, behind the slowest build-native leg: release mode only.
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     env:
       APP_ID: io.github.skunkwerkx.hyperuuid.applesmoketest

@@ -91,7 +91,8 @@ jobs:
           fi
           for sha in $(git log --format=%H -n 10 "$GITHUB_SHA"); do
             run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')
+              --commit "$sha" --status success --json databaseId,event \
+              --jq 'map(select(.event != "pull_request"))[0].databaseId // empty')
             if [ -n "$run_id" ]; then
               if [ "$sha" = "$GITHUB_SHA" ]; then
                 echo "::notice::Using ci.yml run $run_id from the tagged commit itself." >&2
