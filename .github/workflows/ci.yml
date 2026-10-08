@@ -114,9 +114,10 @@ jobs:
       # Every browser target runs in headless Chrome, not just built: the Blazor smoke app
       # linking the archive above, the crate itself for wasm32-unknown-unknown, and the Go
       # binding compiled by TinyGo with this commit's wasm32-wasip1 archive linked in. And
-      # the Magnus extension, built for each Ruby minor the -wasm gem carries, linked into a
-      # ruby.wasm interpreter and run under Node and in headless Chrome; those archives are
-      # uploaded as ruby-wasm-{minor} for release.yml.
+      # in release mode (weekly and release, not PRs) the Magnus extension, built for each
+      # Ruby minor the -wasm gem carries, linked into a ruby.wasm interpreter and run under
+      # Node and in headless Chrome; those archives are uploaded as ruby-wasm-{minor} for
+      # release.yml.
       blazor_check: csharp/HyperUuid.WasmSmokeTest/check.sh
       rust_browser_test: rust/browser-test
       go_tinygo_smoke: go/internal/tinygosmoke
@@ -130,8 +131,6 @@ jobs:
   # request; while they were built in release.yml, 0.4.0's osx-x64 wheel failed its first
   # install with four registries already published.
   build-wheels:
-    # Packaging (and the Pyodide suite) for the release to publish; nothing a PR ships.
-    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
     # Same two scopes build-native hands down, for the same reason: the forge attests each
     # wheel and cannot escalate past what this job was granted.
@@ -140,6 +139,8 @@ jobs:
       id-token: write
       attestations: write
     with:
+      # pr: the Pyodide wheel and its in-browser suite only; the native wheels are packaging.
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       crate: hyperuuid
 
   # rust/Cargo.toml publishes categories = ["no-std"], and rust/src/lib.rs is #![no_std]
