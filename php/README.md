@@ -93,6 +93,15 @@ isn't a SQL-ordered RFC 9562 v6 or v7, `unixMillis()` answers null, and `timesta
 each, and the other version's random bits can mimic it there, so the core checks the variant
 bits too, where each version puts them, and never confuses the two.
 
+The layout is the caller's to know, not something a value reveals: carry it with the value,
+as a column type already does, and pass it at every call site that can see a SQL-ordered
+value. Without a layout argument, `version()` and `isRfc()` read RFC order, so
+`$sqlOrdered->isRfc(7)` reads the wrong bytes; there is deliberately no layout-agnostic check.
+`variant()` is RFC order only, with no layout parameter, because in SQL Server order the
+variant sits at a different byte for each version: don't feed it a `toSqlOrder()` result or a
+`uniqueidentifier` read-back. `isRfc($version, UuidLayout::SqlServer)` is the guard for those;
+it checks the variant where that version puts it.
+
 ## Requirements
 
 - **PHP 8.2 or later**, 64-bit.
@@ -201,7 +210,11 @@ millisecond); a larger count is an `InvalidArgumentException` naming the limit, 
 anything is allocated. Every version 7 batch is in strictly increasing order: the counter is
 one process-wide sequence, so a batch can straddle the point where it wraps back to 0, and
 the UUIDs from there on carry the supplied timestamp plus one millisecond rather than sorting
-before the ones ahead of them.
+before the ones ahead of them. That orders one batch, not the stream: the next batch or
+`newV7()` call in the same real millisecond starts its counter just past the wrap and carries
+the supplied timestamp, so it sorts before the previous batch's tail, stamped a millisecond
+later. Two single `newV7()` calls either side of the wrap in one millisecond sort in reverse
+the same way. It happens at most once per 67,108,864 UUIDs the process mints.
 
 ## Why not `ramsey/uuid`?
 

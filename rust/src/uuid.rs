@@ -64,8 +64,11 @@ impl Uuid {
         }
     }
 
-    /// The variant field (RFC 9562 §4.1, the top bits of octet 8). Nil reads as
-    /// [`Variant::Ncs`] and Max as [`Variant::Future`], which is how the RFC classifies them.
+    /// The variant field (RFC 9562 §4.1, the top bits of octet 8) of a UUID in RFC 9562 order.
+    /// Nil reads as [`Variant::Ncs`] and Max as [`Variant::Future`], which is how the RFC
+    /// classifies them. There is no layout form: in SQL Server order the variant sits at a
+    /// different octet for each version, and [`is_rfc_in`](Self::is_rfc_in) is the check that
+    /// reads it there.
     pub const fn variant(&self) -> Variant {
         match self.0[8] >> 5 {
             0..=3 => Variant::Ncs,

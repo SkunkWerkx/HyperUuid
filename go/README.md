@@ -150,7 +150,11 @@ answer as `id.Version()` but read by the core. `Variant(id)` returns a `UuidVari
 `VariantNcs` (includes `Nil`), `VariantRfc9562`, `VariantMicrosoft` or `VariantFuture`
 (includes `Max`), never `VariantUnspecified`. `IsRfc(id, version)` asks both at once — the
 RFC variant and that version nibble, in one native call — and is the guard to run before
-trusting a value's version-specific fields. A version outside 0–15 is simply false.
+trusting a value's version-specific fields. A version outside 0–15 is simply false. All
+three read RFC 9562 order. `Variant` has no layout form at all: in SQL Server order the
+variant sits at a different byte for each version, so don't feed it a SQL-ordered value or a
+`uniqueidentifier` read-back; `IsRfcIn` with `LayoutSqlServer` is the check for those, and
+looks for the variant where that version puts it.
 
 A SQL-ordered value can be inspected where it is, without converting it back first. The
 `In` forms take a `UuidLayout`, `LayoutRfc9562` or `LayoutSqlServer` (the order
@@ -168,7 +172,10 @@ In `LayoutSqlServer` the only versions are 6 and 7: `VersionIn` answers 6 or 7 w
 bytes form a SQL-ordered v6 or v7, and 0 when they don't, and never confuses the two (the
 core checks each version's variant bits where that version puts them). The layout itself
 is yours to track: sixteen bytes carry no mark of their order, and an RFC-ordered value can
-happen to form a valid SQL-ordered v7 — about one random v4 in 16 does. `GetTimestampIn`
+happen to form a valid SQL-ordered v7 — about one random v4 in 16 does. Carry it with the
+value, as a column type already does, and pass it at every call site that can see a
+SQL-ordered value. The forms without a layout read RFC order, so `IsRfc(sqlOrdered, 7)` reads
+the wrong bytes; there is deliberately no layout-agnostic check. `GetTimestampIn`
 returns `ErrNotTimeBased` for anything that isn't an RFC 9562 v6/v7 in the given layout. The zero
 value, `LayoutUnspecified`, and any undefined layout return `ErrInvalidLayout`; a layout is
 never guessed. `VersionBytes`, `VariantBytes` and `IsRfcBytes` take 16 raw bytes already in
@@ -226,6 +233,8 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 ### Batch size and order
 
 One v7 batch or fill takes at most `MaxV7Batch` UUIDs — 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond — and every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it returns `ErrBatchTooLarge` before anything is allocated or written. Version 6 has no counter and no such limit.
+
+The roll-forward orders one batch, not the stream. The next batch or `NewV7At` call in the same real millisecond starts its counter just past the wrap and carries the supplied timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond later; two single calls either side of the wrap in one millisecond sort in reverse the same way. It happens at most once per `MaxV7Batch` UUIDs the process mints.
 
 ### Raw-byte SQL-order transforms
 

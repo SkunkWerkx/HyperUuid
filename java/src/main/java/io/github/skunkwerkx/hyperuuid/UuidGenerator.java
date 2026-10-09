@@ -938,6 +938,11 @@ public final class UuidGenerator {
      * the variant: use {@link #isRfc(UUID, int)} when the question is "an RFC 9562 UUID of
      * version N".
      *
+     * <p>Reads {@code uuid} as RFC 9562 order. For a value from {@link #v7ToSqlOrder(UUID)} or
+     * {@link #v6ToSqlOrder(UUID)}, or read back from a {@code uniqueidentifier} column, pass
+     * {@link UuidLayout#SQL_SERVER} to {@link #version(UUID, UuidLayout)}: this overload reads
+     * the wrong bytes there.
+     *
      * @param uuid any RFC 9562-ordered UUID
      * @return its version nibble
      */
@@ -966,7 +971,9 @@ public final class UuidGenerator {
     }
 
     /**
-     * {@link #version(UUID)} over 16 raw RFC 9562-ordered bytes.
+     * {@link #version(UUID)} over 16 raw RFC 9562-ordered bytes. The bytes SQL Server stores
+     * for a SQL-ordered value need {@link #version(byte[], UuidLayout)} with
+     * {@link UuidLayout#SQL_SERVER}: this overload reads the wrong bytes there.
      *
      * @param uuid the 16 bytes
      * @return their version nibble
@@ -1001,8 +1008,13 @@ public final class UuidGenerator {
      * The variant field of {@code uuid} (RFC 9562 §4.1): {@link UuidVariant#NCS} for
      * {@link #NIL}, {@link UuidVariant#FUTURE} for {@link #MAX}, and
      * {@link UuidVariant#RFC_9562} for anything this library or {@link UUID#randomUUID()}
-     * mints. Never {@link UuidVariant#UNSPECIFIED}. RFC 9562 order only: variant bits in a
-     * SQL-ordered value are what {@link #version(UUID, UuidLayout)} already checks.
+     * mints. Never {@link UuidVariant#UNSPECIFIED}.
+     *
+     * <p>RFC 9562 order only, and there is no layout overload: in SQL Server order the variant
+     * sits at a different byte for each version. Don't feed it a {@code uniqueidentifier}
+     * read-back or a {@link #v7ToSqlOrder(UUID)} result; to validate one of those, use
+     * {@link #isRfc(UUID, int, UuidLayout)} with {@link UuidLayout#SQL_SERVER}, which checks
+     * the variant where that version puts it.
      *
      * @param uuid any RFC 9562-ordered UUID
      * @return its variant
@@ -1015,7 +1027,9 @@ public final class UuidGenerator {
     }
 
     /**
-     * {@link #variant(UUID)} over 16 raw RFC 9562-ordered bytes.
+     * {@link #variant(UUID)} over 16 raw RFC 9562-ordered bytes. RFC 9562 order only, as
+     * there: for the bytes SQL Server stores, use {@link #isRfc(byte[], int, UuidLayout)} with
+     * {@link UuidLayout#SQL_SERVER}.
      *
      * @param uuid the 16 bytes
      * @return their variant
@@ -1034,6 +1048,13 @@ public final class UuidGenerator {
      * and that version nibble, in one call into the core. The guard to run before trusting a
      * value's version-specific fields, such as a version 7's timestamp. A {@code version}
      * outside 0-15 is simply never matched.
+     *
+     * <p>Reads {@code uuid} as RFC 9562 order. A SQL-ordered value — from
+     * {@link #v7ToSqlOrder(UUID)}, or read back from a {@code uniqueidentifier} column — needs
+     * {@link #isRfc(UUID, int, UuidLayout)} with {@link UuidLayout#SQL_SERVER}: this overload
+     * reads the wrong bytes there and answers for whatever they happen to hold. There is
+     * deliberately no layout-agnostic form: the caller holding the value knows its order, and
+     * only the layout it names says which bytes to read.
      *
      * @param uuid any RFC 9562-ordered UUID
      * @param version the version to check for
@@ -1067,7 +1088,9 @@ public final class UuidGenerator {
     }
 
     /**
-     * {@link #isRfc(UUID, int)} over 16 raw RFC 9562-ordered bytes.
+     * {@link #isRfc(UUID, int)} over 16 raw RFC 9562-ordered bytes. The bytes SQL Server
+     * stores for a SQL-ordered value need {@link #isRfc(byte[], int, UuidLayout)} with
+     * {@link UuidLayout#SQL_SERVER}: this overload reads the wrong bytes there.
      *
      * @param uuid the 16 bytes
      * @param version the version to check for
@@ -1225,7 +1248,8 @@ public final class UuidGenerator {
      * Creates {@code count} time-sortable version 7 UUIDs sharing one timestamp capture and
      * one contiguous block of the monotonic counter — one downcall and one random-bytes
      * fetch instead of {@code count} of each. In strictly increasing order however the batch
-     * lands on the counter; see {@link #MAX_V7_BATCH}.
+     * lands on the counter; see {@link #MAX_V7_BATCH}, which also says why that orders one
+     * batch rather than the stream across a counter wrap.
      *
      * @param count how many UUIDs to create
      * @param unixMillis the shared Unix-epoch millisecond timestamp to embed in each
@@ -1336,6 +1360,12 @@ public final class UuidGenerator {
      * than sorting before the ones ahead of them. A larger batch would have to reuse counter
      * values within one millisecond, so it is refused with {@link IllegalArgumentException},
      * before anything is allocated or written. Version 6 has no counter and no such limit.
+     *
+     * <p>The roll-forward orders one batch, not the stream. The next batch or {@code newV7}
+     * call in the same real millisecond starts its counter just past the wrap and carries the
+     * supplied timestamp, so it sorts before the previous batch's tail, stamped a millisecond
+     * later; two single calls either side of the wrap in one millisecond sort in reverse the
+     * same way. It happens at most once per {@code MAX_V7_BATCH} UUIDs the process mints.
      */
     public static final int MAX_V7_BATCH = 1 << 26;
 

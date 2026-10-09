@@ -107,6 +107,7 @@ The v7 counter is one process-wide sequence, seeded once and advanced atomically
 - **A batch is always in strictly increasing order.** A batch that straddles the wrap stamps its UUIDs from the wrap on with the supplied timestamp plus one millisecond, as RFC 9562 §6.2 allows on counter overflow. No embedded timestamp is ever more than a millisecond ahead of the supplied one.
 - **A batch takes at most 67,108,864 UUIDs** (`MaxV7Batch` and its spellings). A larger one would have to reuse counter values within one millisecond, so every binding refuses it with an argument error before allocating anything. v6 has no counter and no such limit.
 - **Two individual calls in the same millisecond on either side of the wrap sort in reverse.** Individual calls share no state but the counter, so they have nothing to roll forward with. This happens at most once per 67,108,864 calls, and only when the two calls land in the same millisecond.
+- **A batch's rolled-forward tail runs ahead of whatever comes next in the real millisecond.** The roll-forward orders one batch, not the stream: the next batch or call in the same millisecond starts its counter just past the wrap, carries the supplied timestamp, and so sorts before the previous batch's tail stamped a millisecond later. Same cause as the point above, and just as rare.
 
 The timestamp is the caller's, trusted as given: nothing detects a clock that goes backwards, and a v7 minted after one sorts before the values minted ahead of it.
 

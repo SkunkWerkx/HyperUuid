@@ -25,6 +25,12 @@ final class HyperUuid
      * than sorting before the ones ahead of them. A larger batch would have to reuse counter
      * values within one millisecond, so it is refused with an InvalidArgumentException before
      * anything is allocated. Version 6 has no counter and no such limit.
+     *
+     * The roll-forward orders one batch, not the stream. The next batch or {@see newV7()} call in
+     * the same real millisecond starts its counter just past the wrap and carries the supplied
+     * timestamp, so it sorts before the previous batch's tail, stamped a millisecond later; two
+     * single calls either side of the wrap in one millisecond sort in reverse the same way. It
+     * happens at most once per {@see MAX_V7_BATCH} UUIDs the process mints.
      */
     public const MAX_V7_BATCH = 1 << 26;
 
@@ -177,7 +183,8 @@ final class HyperUuid
      *
      * The batch is in strictly increasing order. If it crosses the point where the 26-bit
      * counter wraps, the UUIDs from there on carry the supplied timestamp plus one millisecond
-     * (see {@see MAX_V7_BATCH}).
+     * (see {@see MAX_V7_BATCH}). That orders this batch, not the stream: the next batch or
+     * {@see newV7()} call in the same real millisecond sorts before its rolled-forward tail.
      *
      * @param int $count how many UUIDs to create, 0 to {@see MAX_V7_BATCH}
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or

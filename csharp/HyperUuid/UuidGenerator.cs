@@ -318,6 +318,13 @@ public static partial class UuidGenerator
 	/// values within one millisecond, so it is refused: the throwing forms throw
 	/// <see cref="ArgumentOutOfRangeException"/> and the <c>Try</c> forms return
 	/// <see langword="false"/>. Version 6 has no counter and no such limit.
+	/// <para>
+	/// The roll-forward orders one batch, not the stream. The next batch or <c>NewV7</c> call in
+	/// the same real millisecond starts its counter just past the wrap and carries the supplied
+	/// timestamp, so it sorts before the previous batch's tail, stamped a millisecond later; two
+	/// single calls either side of the wrap in one millisecond sort in reverse the same way.
+	/// It happens at most once per <see cref="MaxV7Batch"/> UUIDs the process mints.
+	/// </para>
 	/// </remarks>
 	public const int MaxV7Batch = 1 << 26;
 
@@ -948,6 +955,12 @@ public static partial class UuidGenerator
 	/// <see cref="Nil"/>, 15 for <see cref="Max"/>. Says nothing about the variant: use
 	/// <see cref="IsRfc(Guid, int)"/> when the question is "an RFC 9562 UUID of version N".
 	/// </summary>
+	/// <remarks>
+	/// Reads <paramref name="uuid"/> as RFC 9562 order. For a value from
+	/// <see cref="V7ToSqlOrder(Guid)"/> or <see cref="V6ToSqlOrder(Guid)"/>, or read back from a
+	/// <c>uniqueidentifier</c> column, pass <see cref="UuidLayout.SqlServer"/> to
+	/// <see cref="Version(Guid, UuidLayout)"/>: this overload reads the wrong bytes there.
+	/// </remarks>
 	public static int Version(Guid uuid) => Version(uuid, UuidLayout.Rfc9562);
 
 	/// <summary>
@@ -999,6 +1012,13 @@ public static partial class UuidGenerator
 	/// <see cref="Guid.NewGuid"/>/<see cref="Guid.CreateVersion7()"/> mints. Never
 	/// <see cref="UuidVariant.Unspecified"/>.
 	/// </summary>
+	/// <remarks>
+	/// RFC 9562 order only, and there is no layout overload: in SQL Server order the variant
+	/// sits at a different byte for each version. Don't feed it a <c>uniqueidentifier</c>
+	/// read-back or a <see cref="V7ToSqlOrder(Guid)"/> result; to validate one of those, use
+	/// <see cref="IsRfc(Guid, int, UuidLayout)"/> with <see cref="UuidLayout.SqlServer"/>, which
+	/// checks the variant where that version puts it.
+	/// </remarks>
 	public static unsafe UuidVariant Variant(Guid uuid)
 	{
 		Span<byte> bytes = stackalloc byte[16];
@@ -1026,6 +1046,14 @@ public static partial class UuidGenerator
 	/// call. The guard to run before trusting a value's version-specific fields, such as a
 	/// version 7's timestamp.
 	/// </summary>
+	/// <remarks>
+	/// Reads <paramref name="uuid"/> as RFC 9562 order. A SQL-ordered value — from
+	/// <see cref="V7ToSqlOrder(Guid)"/>, or read back from a <c>uniqueidentifier</c> column —
+	/// needs <see cref="IsRfc(Guid, int, UuidLayout)"/> with <see cref="UuidLayout.SqlServer"/>:
+	/// this overload reads the wrong bytes there and answers for whatever they happen to hold.
+	/// There is deliberately no layout-agnostic form: the caller holding the value knows its
+	/// order, and only the layout it names says which bytes to read.
+	/// </remarks>
 	public static bool IsRfc(Guid uuid, int version) => IsRfc(uuid, version, UuidLayout.Rfc9562);
 
 	/// <summary>

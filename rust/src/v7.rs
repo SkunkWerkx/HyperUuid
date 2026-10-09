@@ -179,7 +179,10 @@ pub fn new_v7_at(timestamp: Timestamp) -> Result<Uuid, NewV7Error> {
 /// refused with [`NewV7Error::BatchTooLarge`], and a batch that would roll forward from
 /// [`MAX_UNIX_MILLIS`] with [`NewV7Error::TimestampOutOfRange`]. Individual [`new_v7`] calls
 /// don't roll forward: they share no state but the counter, so two calls in the same
-/// millisecond either side of the wrap sort in reverse, as they always have. Nor does
+/// millisecond either side of the wrap sort in reverse, as they always have. For the same
+/// reason the roll-forward orders one batch, not the stream: the next batch or call in the
+/// same real millisecond starts its counter just past the wrap at the supplied timestamp, so
+/// it sorts before the previous batch's tail, stamped a millisecond later. Nor does
 /// anything here notice a clock that goes backwards; the timestamp is the caller's, trusted
 /// as given.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]

@@ -198,6 +198,12 @@ func GetTimestamp(id uuid.UUID) (time.Time, error) {
 // than sorting before the ones ahead of them. A larger batch would have to reuse counter
 // values within one millisecond, so it is refused with ErrBatchTooLarge before anything is
 // allocated or written. Version 6 has no counter and no such limit.
+//
+// The roll-forward orders one batch, not the stream. The next batch or NewV7At call in the
+// same real millisecond starts its counter just past the wrap and carries the supplied
+// timestamp, so it sorts before the previous batch's tail, stamped a millisecond later; two
+// single calls either side of the wrap in one millisecond sort in reverse the same way. It
+// happens at most once per MaxV7Batch UUIDs the process mints.
 const MaxV7Batch = 1 << 26
 
 // errV7BatchTooLarge is the ErrBatchTooLarge a v7 batch of count returns.
@@ -215,7 +221,7 @@ func NewV7Batch(count int) ([]uuid.UUID, error) {
 // NewV7BatchAt creates count time-sortable version 7 UUIDs sharing one unixMillis timestamp
 // capture and one contiguous block of the monotonic counter, in strictly increasing order: if
 // the batch straddles the counter's wrap, the UUIDs from the wrap on carry unixMillis + 1 (see
-// MaxV7Batch). A count of 0 returns a nil slice; a negative one returns ErrNegativeCount, and
+// MaxV7Batch, which also covers how a following batch orders against them). A count of 0 returns a nil slice; a negative one returns ErrNegativeCount, and
 // one past MaxV7Batch ErrBatchTooLarge, before the result is allocated.
 func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if count < 0 {
@@ -375,7 +381,7 @@ func FillV7(dst []uuid.UUID) error {
 // FillV7At fills dst with version 7 UUIDs sharing the given unixMillis timestamp capture and
 // one contiguous block of the monotonic counter, in strictly increasing order: if the batch
 // straddles the counter's wrap, the UUIDs from the wrap on carry unixMillis + 1 (see
-// MaxV7Batch). A dst longer than MaxV7Batch returns ErrBatchTooLarge with nothing written.
+// MaxV7Batch, which also covers how a following batch orders against them). A dst longer than MaxV7Batch returns ErrBatchTooLarge with nothing written.
 func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
 	if len(dst) > MaxV7Batch {
 		return errV7BatchTooLarge(len(dst))

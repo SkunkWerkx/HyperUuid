@@ -29,6 +29,15 @@ module HyperUuid
   # 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. A larger
   # count is refused with ArgumentError before anything is allocated. Version 6 has no counter
   # and no such limit.
+  #
+  # Every batch up to this size is in strictly increasing order: the counter is one
+  # process-wide sequence, so a batch can straddle the point where it wraps back to 0, and the
+  # UUIDs from there on carry a timestamp one millisecond later than the one supplied.
+  # The roll-forward orders one batch, not the stream: the next batch or single #new_v7 in
+  # the same real millisecond starts its counter just past the wrap and carries the supplied
+  # timestamp, so it sorts before this batch's tail, which was stamped a millisecond later.
+  # Two single #new_v7 calls either side of the wrap in one millisecond sort in reverse the
+  # same way. It happens at most once per 2**26 UUIDs the process mints.
   MAX_V7_BATCH = Runtime::MAX_V7_BATCH
 
   # Creates a random UUID version 4 (RFC 9562 §5.4).
@@ -135,6 +144,12 @@ module HyperUuid
   # a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a
   # timestamp one millisecond later than the one supplied rather than sorting before the ones
   # ahead of them. That is also why one batch takes at most MAX_V7_BATCH.
+  #
+  # The roll-forward orders one batch, not the stream: the next batch or single #new_v7 in
+  # the same real millisecond starts its counter just past the wrap and carries the supplied
+  # timestamp, so it sorts before this batch's tail, which was stamped a millisecond later.
+  # Two single #new_v7 calls either side of the wrap in one millisecond sort in reverse the
+  # same way. It happens at most once per 2**26 UUIDs the process mints.
   #
   # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.

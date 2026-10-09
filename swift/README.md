@@ -67,7 +67,11 @@ try UuidGenerator.isRfc(id4, version: 7)      // true: the RFC variant and that 
                                               // run before trusting version-specific fields
 ```
 
-A `version` outside 0–15 is never matched; it is `false`, not an error. Each also has a raw
+A `version` outside 0–15 is never matched; it is `false`, not an error. `variant` reads
+RFC 9562 order only and has no layout form, because in SQL Server order the variant sits at
+a different byte for each version: don't feed it a `v7ToSqlOrder` result or a
+`uniqueidentifier` read-back. To validate one of those, use `isRfc` with
+`layout: .sqlServer`, which checks the variant where that version puts it. Each also has a raw
 form over 16 bytes, `version(bytes:)`, `variant(bytes:)` and `isRfc(bytes:version:)`, taking
 an `UnsafeRawBufferPointer` and throwing `Error.bufferNotWholeUUIDs` unless it is exactly 16
 bytes.
@@ -91,7 +95,10 @@ SQL-ordered v6 or v7 read as 0. The version nibble sits at a different byte for 
 v6's random bits can mimic a v7's there, so the core checks the variant bits where each
 version puts them and never confuses the two. Which layout a value is held in is yours to
 track: the bytes alone can't say, and an RFC-ordered UUID read as `.sqlServer` can
-genuinely form a SQL-ordered v7 (about one random v4 in 16 does). `UuidLayout`'s raw values are the core's layout codes; the core
+genuinely form a SQL-ordered v7 (about one random v4 in 16 does). Carry it with the value
+and pass it at every call site that can see a SQL-ordered value. With the default layout,
+`version` and `isRfc` read RFC order, so `isRfc(sqlOrdered, version: 7)` reads the wrong
+bytes; there is deliberately no layout-agnostic check. `UuidLayout`'s raw values are the core's layout codes; the core
 reserves 0 for "no layout", which a Swift enum cannot hold, so there is no invalid layout to
 pass and no error for one. Every 48-bit v7 timestamp has a `Date`, up to 2⁴⁸ − 1 ms in year
 10889.
@@ -134,7 +141,7 @@ The raw-buffer overload is for callers who want RFC-ordered bytes rather than `U
 
 ### The v7 batch limit
 
-One v7 batch or fill — `newV7Batch` or `fillV7`, either destination — mints at most `UuidGenerator.maxV7Batch` UUIDs: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. Every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it throws `Error.batchTooLarge(count:)` before anything is allocated or written. Version 6 has no counter and no such limit; a v6 batch whose count doesn't fit the native call's 32-bit count (over 4,294,967,295) throws `Error.batchNotAddressable(count:)` instead.
+One v7 batch or fill — `newV7Batch` or `fillV7`, either destination — mints at most `UuidGenerator.maxV7Batch` UUIDs: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. Every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it throws `Error.batchTooLarge(count:)` before anything is allocated or written. The roll-forward orders one batch, not the stream: the next batch or `newV7` call in the same real millisecond starts its counter just past the wrap and carries the supplied timestamp, so it sorts before the previous batch's tail, stamped a millisecond later. Two single calls either side of the wrap in one millisecond sort in reverse the same way. It happens at most once per 67,108,864 UUIDs the process mints. Version 6 has no counter and no such limit; a v6 batch whose count doesn't fit the native call's 32-bit count (over 4,294,967,295) throws `Error.batchNotAddressable(count:)` instead.
 
 ### Raw-byte SQL-order transforms
 

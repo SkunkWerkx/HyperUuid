@@ -71,6 +71,11 @@ module HyperUuid
     # version has a SQL Server order. It reads the bytes as given: an RFC-ordered value can
     # happen to form a SQL-ordered v6 or v7, so the layout is the caller's to know.
     #
+    # With the default layout, the value is read as RFC 9562 order. A SQL-ordered value — from
+    # #to_sql_order, or a +uniqueidentifier+ read back from SQL Server — needs
+    # +layout: :sql_server+, because the RFC-order read looks at the wrong bytes there. There
+    # is deliberately no layout-agnostic check: whoever holds the value knows its order.
+    #
     # @raise [ArgumentError] if +layout+ isn't one of LAYOUTS' keys.
     def version(layout: :rfc9562)
       Runtime.version(bytes, layout_code(layout))
@@ -80,6 +85,12 @@ module HyperUuid
     # Symbol: +:rfc9562+ (+10xx+, every UUID this gem mints, and the only variant that has
     # versions), +:ncs+ (+0xxx+, Nil among them), +:microsoft+ (+110x+) or +:future+ (+111x+,
     # Max among them).
+    #
+    # RFC 9562 order only. There is no layout form, because in SQL Server order the variant
+    # sits at a different byte for each version, so don't hand it a SQL-ordered value or a
+    # +uniqueidentifier+ read back from SQL Server. To validate one of those, use
+    # <tt>rfc?(version, layout: :sql_server)</tt>, which checks the variant where that version
+    # puts it.
     def variant
       VARIANTS.fetch(Runtime.variant(bytes))
     end
@@ -88,6 +99,11 @@ module HyperUuid
     # the RFC 9562 variant and that version together, the guard to run before trusting a
     # value's version-specific fields. In +:sql_server+ only 6 and 7 can be true. A version
     # outside 0-15 is simply false.
+    #
+    # With the default layout, the value is read as RFC 9562 order. A SQL-ordered value — from
+    # #to_sql_order, or a +uniqueidentifier+ read back from SQL Server — needs
+    # +layout: :sql_server+, because the RFC-order read looks at the wrong bytes there. There
+    # is deliberately no layout-agnostic check: whoever holds the value knows its order.
     #
     # @raise [TypeError] if +version+ isn't an Integer.
     # @raise [ArgumentError] if +layout+ isn't one of LAYOUTS' keys.

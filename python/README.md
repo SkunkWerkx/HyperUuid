@@ -130,6 +130,12 @@ batch holds at most `hyperuuid.MAX_V7_BATCH` (67,108,864) UUIDs: a larger `count
 `fill_v7` buffer of more than that many, is a `ValueError` naming the limit, raised before
 anything is allocated or written. Version 6 has no counter and no such limit.
 
+The roll-forward orders one batch, not the stream. The next batch or `new_v7` call in the
+same real millisecond starts its counter just past the wrap and carries the supplied
+timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond
+later; two single `new_v7` calls either side of the wrap in one millisecond sort in reverse
+the same way. It happens at most once per `MAX_V7_BATCH` UUIDs the process mints.
+
 ## Inspecting a UUID
 
 ```python
@@ -152,7 +158,10 @@ nibble whatever the variant (stdlib's `id.version` is `None` for a non-RFC varia
 not), Nil reads as 0 and Max as 15, and `is_rfc(id, n)` is the check that means "an RFC 9562
 UUID of version n" — `False`, never an error, for an `n` outside 0 to 15. `variant(id)` is a
 `Variant` — `NCS` (Nil included), `RFC9562`, `MICROSOFT` or `FUTURE` (Max included) — read in
-RFC 9562 order.
+RFC 9562 order only. It has no layout form, because in SQL Server order the variant sits at a
+different byte for each version, so don't hand it a SQL-ordered value or a `uniqueidentifier`
+read-back; `is_rfc(id, n, Layout.SQL_SERVER)` is the check for one of those, and it tests the
+variant where that version puts it.
 
 `Layout` says which byte order a `uuid.UUID` is held in: `Layout.RFC9562`, what every other
 function here takes and returns and the default everywhere, or `Layout.SQL_SERVER`, the order
@@ -164,7 +173,10 @@ have an order: `version` is 6 or 7 for bytes that form a SQL-ordered v6 or v7, a
 that don't, and the core checks the variant where each version puts it, so a SQL-ordered v6
 never reads as a v7 or the other way round. The bytes alone cannot say which layout a value
 is in — an RFC-ordered random v4 forms a valid SQL-ordered v7 one time in 16 — so the caller
-must keep track of the layout.
+must keep track of the layout, carry it with the value, and pass it at every call site that
+can see a SQL-ordered value. With the default layout, `version` and `is_rfc` read RFC order,
+so `is_rfc(sql_ordered, 7)` reads the wrong bytes; there is deliberately no layout-agnostic
+check.
 
 `Layout` and `Variant` are `IntEnum`s holding the native core's codes (`Layout.RFC9562 == 1`,
 `Layout.SQL_SERVER == 2`; `Variant.NCS == 1` through `Variant.FUTURE == 4`), and a plain `int`

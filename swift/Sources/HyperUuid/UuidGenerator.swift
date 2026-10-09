@@ -341,13 +341,20 @@ public enum UuidGenerator {
     /// rather than sorting before the ones ahead of them. A larger batch would have to reuse
     /// counter values within one millisecond, so it throws ``Error/batchTooLarge(count:)``
     /// before anything is allocated or written. Version 6 has no counter and no such limit.
+    ///
+    /// The roll-forward orders one batch, not the stream. The next batch or `newV7` call in the
+    /// same real millisecond starts its counter just past the wrap and carries the supplied
+    /// timestamp, so it sorts before the previous batch's tail, stamped a millisecond later;
+    /// two single calls either side of the wrap in one millisecond sort in reverse the same
+    /// way. It happens at most once per ``maxV7Batch`` UUIDs the process mints.
     public static let maxV7Batch = 1 << 26
 
     /// Creates `count` time-sortable version 7 UUIDs sharing one Unix-epoch millisecond
     /// timestamp capture and one contiguous block of the monotonic counter — one native call
     /// and one random-bytes fetch instead of `count` of each. The batch is strictly
     /// increasing; if it crosses the counter's wrap, the UUIDs from there on carry
-    /// `unixMillis + 1` (see ``maxV7Batch``).
+    /// `unixMillis + 1`. That orders this batch, not the stream: a batch or `newV7` call in
+    /// the same real millisecond after it can sort before its tail (see ``maxV7Batch``).
     ///
     /// A `count` over ``maxV7Batch`` throws ``Error/batchTooLarge(count:)`` before the array
     /// is allocated.
@@ -437,7 +444,8 @@ public enum UuidGenerator {
     /// the caller already owns, which is what lets a hot path reuse one buffer across batches.
     /// `destination` is raw RFC 9562-ordered bytes, 16 per UUID, and its length must be a whole
     /// multiple of 16. The UUIDs are strictly increasing, with the same possible
-    /// `unixMillis + 1` as ``newV7Batch(count:unixMillis:)``; more than ``maxV7Batch`` of them
+    /// `unixMillis + 1` as ``newV7Batch(count:unixMillis:)``, which orders this fill, not the
+    /// stream (see ``maxV7Batch``); more than ``maxV7Batch`` of them
     /// throws ``Error/batchTooLarge(count:)`` with nothing written.
     public static func fillV7(into destination: UnsafeMutableRawBufferPointer, unixMillis: UInt64) throws {
         try fill(into: destination, unixMillis: unixMillis, limit: maxV7Batch) { l in l.newV7Batch }
@@ -592,6 +600,11 @@ public enum UuidGenerator {
     /// where each version puts them, and the answer never confuses the two. The layout is the
     /// caller's to know: an RFC-ordered UUID's bytes can genuinely form a SQL-ordered v7 (one
     /// random v4 in 16 does), so reading one as ``UuidLayout/sqlServer`` can answer 7.
+    ///
+    /// With the default layout this reads `uuid` as RFC 9562 order. A value from
+    /// `v7ToSqlOrder` or `v6ToSqlOrder`, or read back from a `uniqueidentifier` column, needs
+    /// `layout: .sqlServer`: the default reads the wrong bytes there. There is deliberately no
+    /// layout-agnostic form: the caller holding the value knows its order.
     public static func version(_ uuid: UUID, layout: UuidLayout = .rfc9562) throws -> Int {
         let l = try loaded()
         return Int(withBytes(of: uuid) { l.uuidVersion($0, layout.rawValue) })
@@ -599,7 +612,8 @@ public enum UuidGenerator {
 
     /// ``version(_:layout:)`` over 16 raw bytes already in `layout`'s order (RFC 9562 network
     /// order by default). Throws ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid` is
-    /// exactly 16 bytes.
+    /// exactly 16 bytes. With the default layout the bytes are read as RFC 9562 order; SQL
+    /// Server wire bytes need `layout: .sqlServer`.
     public static func version(bytes uuid: UnsafeRawBufferPointer, layout: UuidLayout = .rfc9562) throws -> Int {
         let l = try loaded()
         return Int(try withSingleUuid(uuid) { l.uuidVersion($0, layout.rawValue) })
@@ -608,13 +622,20 @@ public enum UuidGenerator {
     /// The variant field of an RFC 9562-ordered `uuid` (RFC 9562 §4.1): ``UuidVariant/ncs``
     /// for Nil, ``UuidVariant/future`` for Max, and ``UuidVariant/rfc9562`` for anything this
     /// library or Foundation's `UUID()` mints.
+    ///
+    /// RFC 9562 order only, and there is no layout form: in SQL Server order the variant sits
+    /// at a different byte for each version. Don't feed it a `uniqueidentifier` read-back or a
+    /// `v7ToSqlOrder`/`v6ToSqlOrder` result; to validate one of those, use
+    /// ``isRfc(_:version:layout:)`` with `layout: .sqlServer`, which checks the variant where
+    /// that version puts it.
     public static func variant(_ uuid: UUID) throws -> UuidVariant {
         let l = try loaded()
         return variantOf(withBytes(of: uuid) { l.uuidVariant($0) })
     }
 
-    /// ``variant(_:)`` over 16 raw RFC 9562-ordered bytes. Throws
-    /// ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid` is exactly 16 bytes.
+    /// ``variant(_:)`` over 16 raw RFC 9562-ordered bytes, never SQL Server wire bytes (see
+    /// ``variant(_:)``). Throws ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid` is exactly
+    /// 16 bytes.
     public static func variant(bytes uuid: UnsafeRawBufferPointer) throws -> UuidVariant {
         let l = try loaded()
         return variantOf(try withSingleUuid(uuid) { l.uuidVariant($0) })
@@ -625,6 +646,12 @@ public enum UuidGenerator {
     /// before trusting a value's version-specific fields, such as a version 7's timestamp. In
     /// ``UuidLayout/sqlServer`` only versions 6 and 7 can be `true` (see
     /// ``version(_:layout:)``). A `version` outside 0–15 is simply never matched.
+    ///
+    /// With the default layout this reads `uuid` as RFC 9562 order. A SQL-ordered value — from
+    /// `v7ToSqlOrder`, or read back from a `uniqueidentifier` column — needs
+    /// `layout: .sqlServer`: the default reads the wrong bytes there and answers for whatever
+    /// they happen to hold. There is deliberately no layout-agnostic form: the caller holding
+    /// the value knows its order, and only the layout it names says which bytes to read.
     public static func isRfc(_ uuid: UUID, version: Int, layout: UuidLayout = .rfc9562) throws -> Bool {
         let l = try loaded()
         guard let code = versionCode(version) else { return false }
@@ -633,7 +660,8 @@ public enum UuidGenerator {
 
     /// ``isRfc(_:version:layout:)`` over 16 raw bytes already in `layout`'s order (RFC 9562
     /// network order by default). Throws ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid`
-    /// is exactly 16 bytes.
+    /// is exactly 16 bytes. With the default layout the bytes are read as RFC 9562 order; SQL
+    /// Server wire bytes need `layout: .sqlServer`.
     public static func isRfc(
         bytes uuid: UnsafeRawBufferPointer, version: Int, layout: UuidLayout = .rfc9562
     ) throws -> Bool {

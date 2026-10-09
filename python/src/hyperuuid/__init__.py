@@ -69,6 +69,13 @@ MAX = _uuid.UUID(bytes=b"\xff" * 16)
 #: any larger would have to wrap that counter twice and could not stay in order, so it is
 #: refused with ``ValueError`` before anything is allocated or written. Version 6 has no
 #: counter and no such limit.
+#:
+#: The roll-forward over the counter wrap (see :func:`new_v7_batch`) orders one batch, not the
+#: stream. The next batch or :func:`new_v7` call in the same real millisecond starts its
+#: counter just past the wrap and carries the supplied timestamp, so it sorts before the
+#: previous batch's tail, which was stamped a millisecond later; two single :func:`new_v7`
+#: calls either side of the wrap in one millisecond sort in reverse the same way. It happens
+#: at most once per ``MAX_V7_BATCH`` UUIDs the process mints.
 MAX_V7_BATCH: int = _native.MAX_V7_BATCH
 
 
@@ -374,6 +381,12 @@ def version(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> int:
     for a non-RFC variant; this is not). Use :func:`is_rfc` when the answer has to mean "an
     RFC 9562 UUID of version N".
 
+    With the default layout, this reads ``uuid_value`` as RFC 9562 order. A SQL-ordered value —
+    from :func:`v7_to_sql_order`/:func:`v6_to_sql_order`, or read back from a
+    ``uniqueidentifier`` column — needs ``layout=Layout.SQL_SERVER``, because the RFC-order read
+    looks at the wrong bytes there. There is deliberately no layout-agnostic check: the caller
+    holding the value knows its order.
+
     In :attr:`Layout.SQL_SERVER` only versions 6 and 7 have an order, so this is 6 or 7 for
     bytes that form a SQL-ordered version 6 or 7 RFC 9562 UUID, and 0 for bytes that don't.
     The two versions put their version nibble at different octets, and the native core checks
@@ -394,6 +407,12 @@ def variant(uuid_value: _uuid.UUID) -> Variant:
     as :attr:`Variant.NCS` and Max as :attr:`Variant.FUTURE`, which is how the RFC classifies
     them.
 
+    RFC 9562 order only, and there is no layout form: in SQL Server order the variant sits at a
+    different byte for each version. Don't pass it a SQL-ordered value or a
+    ``uniqueidentifier`` read-back. To validate one of those, use
+    ``is_rfc(uuid_value, version, Layout.SQL_SERVER)``, which checks the variant where that
+    version puts it.
+
     :raises TypeError: if ``uuid_value`` is not a ``uuid.UUID``.
     """
     return _VARIANTS[_native.variant(uuid_value) - 1]
@@ -403,6 +422,12 @@ def is_rfc(uuid_value: _uuid.UUID, version: int, layout: Layout = Layout.RFC9562
     """Whether ``uuid_value``, held in ``layout``'s byte order, is an RFC 9562 UUID of version
     ``version``: the RFC variant and that version, in one call. The guard to run before
     trusting a value's version-specific fields, such as a version 7's timestamp.
+
+    With the default layout, this reads ``uuid_value`` as RFC 9562 order. A SQL-ordered value —
+    from :func:`v7_to_sql_order`/:func:`v6_to_sql_order`, or read back from a
+    ``uniqueidentifier`` column — needs ``layout=Layout.SQL_SERVER``, because the RFC-order read
+    looks at the wrong bytes there: ``is_rfc(sql_ordered, 7)`` is not the check. There is
+    deliberately no layout-agnostic check: the caller holding the value knows its order.
 
     In :attr:`Layout.SQL_SERVER` only versions 6 and 7 can be true; see :func:`version`. A
     ``version`` outside 0 to 15 is simply ``False``.
@@ -438,6 +463,13 @@ def new_v7_batch(
     carry ``unix_millis + 1`` rather than sorting before the ones ahead of them, so an embedded
     timestamp can be one millisecond past the one supplied, never more. That is also why a
     batch holds at most :data:`MAX_V7_BATCH` UUIDs.
+
+    The roll-forward orders one batch, not the stream. The next batch or :func:`new_v7` call
+    in the same real millisecond starts its counter just past the wrap and carries the supplied
+    timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond
+    later; two single :func:`new_v7` calls either side of the wrap in one millisecond sort in
+    reverse the same way. It happens at most once per :data:`MAX_V7_BATCH` UUIDs the process
+    mints.
 
     :raises TypeError: if ``count`` is not an int, or ``unix_millis`` is not an int, a
         ``datetime.datetime`` or ``None``.
@@ -534,7 +566,8 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     zero). Defaults to the current time; pass a ``datetime.datetime`` or a Unix-epoch
     millisecond timestamp to embed a specific time instead. The UUIDs are in strictly
     increasing order, with the same possible one-millisecond roll-forward as
-    :func:`new_v7_batch`.
+    :func:`new_v7_batch`, which likewise orders this one fill, not the stream: the next batch,
+    fill or :func:`new_v7` call in the same millisecond can sort before its tail.
 
     ``bytearray`` specifically, not ``memoryview`` or NumPy arrays, for now: the general
     writable buffer protocol needs ``Py_buffer``, which entered CPython's stable ABI in 3.11.

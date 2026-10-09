@@ -79,8 +79,16 @@ bits, so a v6 whose random `clock_seq` byte reads as a v7 nibble is still a v6).
 `#version`, `#rfc?` and `#timestamp` take the byte order the value is held in as `layout:`, a
 Symbol: `:rfc9562` (the default, what every other method takes and returns) or `:sql_server`
 (what `#to_sql_order` returns, defined for versions 6 and 7 only). `Uuid::LAYOUTS` lists them.
-Anything else is an `ArgumentError`, never a guess. `#variant` has no layout form: the variant
-is an RFC-order field.
+Anything else is an `ArgumentError`, never a guess. With the default, `#version` and `#rfc?`
+read the value as RFC 9562 order, which looks at the wrong bytes of a SQL-ordered value (one
+from `#to_sql_order`, or a `uniqueidentifier` read back from SQL Server), so pass
+`layout: :sql_server` at every call site that can see one. There is deliberately no
+layout-agnostic check: whoever holds the value knows its order.
+
+`#variant` reads RFC 9562 order only and has no layout form, because in SQL Server order the
+variant sits at a different byte for each version. Don't hand it a SQL-ordered value or a
+`uniqueidentifier` read-back; to validate one, `#rfc?(version, layout: :sql_server)` checks the
+variant where that version puts it.
 
 ```ruby
 sql = HyperUuid.new_v6.to_sql_order
@@ -102,6 +110,12 @@ allocated. Every batch is in strictly increasing order: the counter is one proce
 sequence, so a batch can straddle the point where it wraps back to 0, and the UUIDs from there
 on carry a timestamp one millisecond later than the one supplied rather than sorting before the
 ones ahead of them. Version 6 has no counter and no such limit.
+
+That roll-forward orders one batch, not the stream. The next batch or single `new_v7` in the
+same real millisecond starts its counter just past the wrap and carries the supplied timestamp,
+so it sorts before the previous batch's tail, which was stamped a millisecond later. Two single
+`new_v7` calls either side of the wrap in one millisecond sort in reverse the same way. It
+happens at most once per 2²⁶ UUIDs the process mints.
 
 ### Errors
 

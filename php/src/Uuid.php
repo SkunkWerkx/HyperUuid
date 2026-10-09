@@ -66,6 +66,10 @@ final class Uuid implements \JsonSerializable, \Stringable
      * {@see nil()}, 15 for {@see max()}. It says nothing about the variant; use
      * {@see isRfc()} when the question is "an RFC 9562 UUID of version N".
      *
+     * With the default layout this reads the value as RFC 9562 order. For a value from
+     * {@see toSqlOrder()}, or read back from a `uniqueidentifier` column, pass
+     * {@see UuidLayout::SqlServer}: the RFC-order read uses the wrong bytes there.
+     *
      * {@see UuidLayout::SqlServer} is defined only for the two versions that have a SQL Server
      * order, and answers 6, 7, or 0 for anything that isn't a SQL-ordered version 6 or 7 RFC
      * 9562 UUID (a value straight from {@see toSqlOrder()}). The version nibble lands at a
@@ -86,6 +90,11 @@ final class Uuid implements \JsonSerializable, \Stringable
      * {@see UuidVariant::Ncs} for {@see nil()}, {@see UuidVariant::Future} for {@see max()},
      * and {@see UuidVariant::Rfc9562} for anything this library mints.
      *
+     * RFC 9562 order only, and there is no layout parameter: in SQL Server order the variant
+     * sits at a different byte for each version. Don't feed it a `uniqueidentifier` read-back
+     * or a {@see toSqlOrder()} result; to validate one of those, use {@see isRfc()} with
+     * {@see UuidLayout::SqlServer}, which checks the variant where that version puts it.
+     *
      * @return UuidVariant the variant
      */
     public function variant(): UuidVariant
@@ -99,6 +108,13 @@ final class Uuid implements \JsonSerializable, \Stringable
      * a value's version-specific fields, such as a version 7's timestamp. In
      * {@see UuidLayout::SqlServer} only versions 6 and 7 can match (see {@see version()}). A
      * `$version` outside 0-15 is simply never matched.
+     *
+     * With the default layout this reads the value as RFC 9562 order. A SQL-ordered value —
+     * from {@see toSqlOrder()}, or read back from a `uniqueidentifier` column — needs
+     * {@see UuidLayout::SqlServer}: the RFC-order read uses the wrong bytes there and answers
+     * for whatever they happen to hold. There is deliberately no layout-agnostic check: the
+     * caller holding the value knows its order, and only the layout it names says which bytes
+     * to read.
      *
      * @param int $version the version to test for
      * @param UuidLayout $layout the byte order this UUID is held in
