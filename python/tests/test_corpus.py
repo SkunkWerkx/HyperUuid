@@ -18,6 +18,11 @@ from hyperuuid import Layout, Variant
 
 
 def _corpus_directory() -> Path:
+    # tests/corpus is a symlink to the root corpus/, so the vectors travel with this directory
+    # when it is copied without the rest of the checkout: the Pyodide pass (the forge's
+    # pyodide-suite action) copies tests/ alone into the interpreter's filesystem. Where the
+    # link is checked out as a plain file (Windows without core.symlinks) it is not a
+    # directory, and the walk carries on up to the root's own corpus/.
     for parent in Path(__file__).resolve().parents:
         corpus = parent / "corpus"
         if corpus.is_dir():

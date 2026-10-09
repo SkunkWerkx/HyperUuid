@@ -117,10 +117,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   binding's RNG error in C#, Go, Java, PHP, Ruby's Fiddle backend and Swift; it is now an
   argument error, as Python and Ruby's Magnus backend already reported it. *(all bindings
   except Python)*
-- **Go's corpus replay in the iOS simulator.** Go's `go_ios_exec` carries only the module
-  into the simulator, so the new corpus test could not find `corpus/` there;
-  `test-apple-mobile` now stages it as `go/testdata/corpus`, which the test also reads.
-  *(repository)*
+- **The corpus replay where a runner carries only the binding's tests.** Go's `go_ios_exec`
+  carries only the module into the iOS simulator, so `test-apple-mobile` stages the corpus
+  as `go/testdata/corpus`, which the test also reads. The Pyodide pass copies `python/tests/`
+  alone into the interpreter's filesystem, so `python/tests/corpus` is a committed symlink to
+  the root `corpus/` (HyperCast's arrangement), and the vectors travel with it. *(repository)*
 - **C# Blazor smoke test: rebuilds from clean.** `check.sh` now clears the project's
   `obj`/`bin` first. The .NET wasm SDK recompiles `runtime.c` only when that file changes, not
   when the interop signature header it includes gains an entry. So after a P/Invoke with a new

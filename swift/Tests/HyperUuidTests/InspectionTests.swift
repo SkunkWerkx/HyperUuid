@@ -36,7 +36,11 @@ final class InspectionTests: XCTestCase {
     func testAVersionOutsideTheNibbleNeverMatches() throws {
         let id = try UuidGenerator.newV7(unixMillis: ms)
         let bytes = id.rfcBytes
-        for version in [7 + 256, 7 + (1 << 32), -1, Int.min, Int.max] {
+        // 7 + 2^32 would read as 7 if narrowed to a UInt32, so it is a case only where Int is
+        // 64 bits: on a 32-bit Int (wasm32) `1 << 32` is 0, and the value simply is 7.
+        var versions = [7 + 256, -1, Int.min, Int.max]
+        if Int.bitWidth == 64 { versions.append(7 + (1 << 32)) }
+        for version in versions {
             XCTAssertFalse(try UuidGenerator.isRfc(id, version: version), "\(version)")
             try bytes.withUnsafeBytes { raw in
                 XCTAssertFalse(try UuidGenerator.isRfc(bytes: raw, version: version), "\(version)")
