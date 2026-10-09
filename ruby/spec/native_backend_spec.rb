@@ -75,8 +75,11 @@ RSpec.describe "native backend" do
     RUBY
     probe = eval(probe_source)
     native = values.map { |id| probe.(id) }
-    script = "Marshal.dump(#{values.map(&:to_s).inspect}.map { |s| (#{probe_source}).(HyperUuid::Uuid.parse(s)) })"
-    expect(Marshal.load(fiddle_eval(script))).to eq(native)
+    # Base64 across the pipe: Marshal's output is binary, and Windows writes the subprocess's
+    # stdout in text mode, turning every 0x0A byte into CRLF and the stream into garbage.
+    dump = "Marshal.dump(#{values.map(&:to_s).inspect}.map { |s| (#{probe_source}).(HyperUuid::Uuid.parse(s)) })"
+    script = "[#{dump}].pack('m0')"
+    expect(Marshal.load(fiddle_eval(script).unpack1("m0"))).to eq(native)
   end
 
   it "agrees with the Fiddle backend on from_sql_order's v6/v7 detection" do
