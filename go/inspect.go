@@ -161,8 +161,7 @@ func Variant(id uuid.UUID) UuidVariant {
 }
 
 // VariantBytes is Variant over 16 raw RFC 9562-ordered bytes, with the same RFC-order-only
-// caveat. A buffer that isn't exactly 16
-// bytes returns ErrNotOneUUID.
+// caveat. A buffer that isn't exactly 16 bytes returns ErrNotOneUUID.
 func VariantBytes(b []byte) (UuidVariant, error) {
 	id, err := oneUUID(b)
 	if err != nil {

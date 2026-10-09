@@ -92,8 +92,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which would have to reuse counter values within a millisecond, is refused with an argument
   error in every binding before anything is allocated, and with the new code 4 at the C ABI
   (`NewV7Error::BatchTooLarge` in Rust). Individual `new_v7` calls keep their documented wrap
-  behavior. The README's new [v7 ordering, precisely](README.md#v7-ordering-precisely) section
-  sets out all of it, including that the core trusts the caller's clock. In C#,
+  behavior. The roll-forward orders one batch, not the stream: the next batch or call in the
+  same real millisecond starts just past the wrap at the supplied timestamp, so it sorts
+  before the previous batch's tail, at most once per 2^26 UUIDs. The README's new
+  [v7 ordering, precisely](README.md#v7-ordering-precisely) section sets out all of it,
+  including that the core trusts the caller's clock. In C#,
   `FillV7(Span<Guid>)` past the limit now throws `ArgumentOutOfRangeException` (an
   `ArgumentException`, as before) instead of renting a scratch buffer of up to 2 GiB first
   (#32). *(all packages)*
@@ -128,13 +131,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   signature shape (here `ulong f(byte*, uint)`), a rerun in a used checkout linked a stale
   `runtime.o`, and the first such call aborted the runtime. CI's fresh checkouts never hit
   this. *(repository)*
-
 - **Ruby — the Magnus extension survives a compacting garbage collection.** It kept
   `RandomSourceError` and `TimestampOutOfRangeError` in a Rust static, which a compacting
   collection could move without updating, so raising either after one used whatever object
   had taken its place — a segfault, reproduced with `GC.verify_compaction_references`. Both
   are pinned when the extension loads, and a new spec moves every movable object before
-  raising one. *(ruby)*
+  raising one. *(RubyGems)*
 
 ## [0.7.0] — 2026-10-06
 
