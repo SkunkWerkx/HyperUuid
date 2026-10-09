@@ -3,7 +3,7 @@
   "artifacts": {
     "HyperUuidCore": {
       "type": "staticLibrary",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "variants": [
         {
           "path": "x86_64-unknown-linux-gnu/libhyperuuid.a",
@@ -72,6 +72,22 @@
         {
           "path": "wasm32-unknown-wasip1/libhyperuuid.a",
           "supportedTriples": ["wasm32-unknown-wasip1"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "aarch64-unknown-linux-android/libhyperuuid.a",
+          "supportedTriples": ["aarch64-unknown-linux-android"],
+          "staticLibraryMetadata": {
+            "headerPaths": ["include"],
+            "moduleMapPath": "include/module.modulemap"
+          }
+        },
+        {
+          "path": "x86_64-unknown-linux-android/libhyperuuid.a",
+          "supportedTriples": ["x86_64-unknown-linux-android"],
           "staticLibraryMetadata": {
             "headerPaths": ["include"],
             "moduleMapPath": "include/module.modulemap"
