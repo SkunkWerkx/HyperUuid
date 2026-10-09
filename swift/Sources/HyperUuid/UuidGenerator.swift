@@ -15,8 +15,16 @@ public enum UuidGenerator {
         case randomSourceFailure(code: Int32)
         /// The Unix millisecond timestamp doesn't fit the timestamp field being generated.
         case timestampOutOfRange
-        /// A destination buffer's length wasn't a whole number of 16-byte UUIDs.
+        /// A destination buffer's length wasn't a whole number of 16-byte UUIDs, or a buffer
+        /// that holds one UUID wasn't exactly 16 bytes.
         case bufferNotWholeUUIDs(count: Int)
+        /// A version 7 batch or fill asked for `count` UUIDs, more than
+        /// ``UuidGenerator/maxV7Batch``. Refused before anything is allocated or written.
+        case batchTooLarge(count: Int)
+        /// A batch or fill of `count` UUIDs is too large for one native call on this
+        /// platform: its byte length can't be addressed, or the count doesn't fit the
+        /// call's 32-bit count. Refused before anything is allocated or written.
+        case batchNotAddressable(count: Int)
 
         /// What was refused, in one line.
         public var description: String {
@@ -28,6 +36,11 @@ public enum UuidGenerator {
             case .bufferNotWholeUUIDs(let count):
                 return
                     "hyperuuid: destination length must be a multiple of 16 (one whole UUID per 16 bytes); got \(count)"
+            case .batchTooLarge(let count):
+                return
+                    "hyperuuid: a single version 7 batch takes at most \(UuidGenerator.maxV7Batch) UUIDs (the 26-bit counter space); got \(count)"
+            case .batchNotAddressable(let count):
+                return "hyperuuid: a batch of \(count) UUIDs is too large for one native call on this platform"
             }
         }
 
@@ -52,6 +65,12 @@ public enum UuidGenerator {
     private typealias UuidV6ToSqlOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias UuidV6ToRfcOrderFn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Void
     private typealias VersionFn = @convention(c) () -> UInt32
+    private typealias UuidVersionFn = @convention(c) (UnsafePointer<UInt8>?, UInt32) -> UInt32
+    private typealias UuidVariantFn = @convention(c) (UnsafePointer<UInt8>?) -> UInt32
+    private typealias UuidIsRfcFn = @convention(c) (UnsafePointer<UInt8>?, UInt32, UInt32) -> UInt32
+    private typealias UuidUnixMillisInFn = @convention(c) (UnsafePointer<UInt8>?, UInt32) -> UInt64
+    private typealias UuidGetTimestampFn =
+        @convention(c) (UnsafePointer<UInt8>?, UInt32, UnsafeMutablePointer<UInt64>?) -> UInt32
 
     // The native exports as one table, so every door reaches them the same way. A class:
     // a reference is one retain where a struct of function pointers would be copied.
@@ -70,6 +89,12 @@ public enum UuidGenerator {
         let v6ToSqlOrder: UuidV6ToSqlOrderFn
         let v6ToRfcOrder: UuidV6ToRfcOrderFn
         let version: VersionFn
+        let uuidVersion: UuidVersionFn
+        let uuidVariant: UuidVariantFn
+        let uuidIsRfc: UuidIsRfcFn
+        let v6UnixMillisIn: UuidUnixMillisInFn
+        let v7UnixMillisIn: UuidUnixMillisInFn
+        let getTimestamp: UuidGetTimestampFn
 
         init(
             newV4: UuidNewV4Fn, newV5: UuidNewV5Fn,
@@ -77,7 +102,10 @@ public enum UuidGenerator {
             newV7: UuidNewV7Fn, v7UnixMillis: UuidV7UnixMillisFn, newV7Batch: UuidNewV7BatchFn,
             v7ToSqlOrder: UuidV7ToSqlOrderFn, v7ToRfcOrder: UuidV7ToRfcOrderFn,
             v6ToSqlOrder: UuidV6ToSqlOrderFn, v6ToRfcOrder: UuidV6ToRfcOrderFn,
-            version: VersionFn
+            version: VersionFn,
+            uuidVersion: UuidVersionFn, uuidVariant: UuidVariantFn, uuidIsRfc: UuidIsRfcFn,
+            v6UnixMillisIn: UuidUnixMillisInFn, v7UnixMillisIn: UuidUnixMillisInFn,
+            getTimestamp: UuidGetTimestampFn
         ) {
             self.newV4 = newV4; self.newV5 = newV5
             self.newV6 = newV6; self.v6UnixMillis = v6UnixMillis; self.newV6Batch = newV6Batch
@@ -85,6 +113,9 @@ public enum UuidGenerator {
             self.v7ToSqlOrder = v7ToSqlOrder; self.v7ToRfcOrder = v7ToRfcOrder
             self.v6ToSqlOrder = v6ToSqlOrder; self.v6ToRfcOrder = v6ToRfcOrder
             self.version = version
+            self.uuidVersion = uuidVersion; self.uuidVariant = uuidVariant; self.uuidIsRfc = uuidIsRfc
+            self.v6UnixMillisIn = v6UnixMillisIn; self.v7UnixMillisIn = v7UnixMillisIn
+            self.getTimestamp = getTimestamp
         }
     }
 
@@ -125,7 +156,10 @@ public enum UuidGenerator {
         newV7: uuid_new_v7, v7UnixMillis: uuid_v7_unix_millis, newV7Batch: uuid_new_v7_batch,
         v7ToSqlOrder: uuid_v7_to_sql_order, v7ToRfcOrder: uuid_v7_to_rfc_order,
         v6ToSqlOrder: uuid_v6_to_sql_order, v6ToRfcOrder: uuid_v6_to_rfc_order,
-        version: hyperuuid_version)
+        version: hyperuuid_version,
+        uuidVersion: uuid_version, uuidVariant: uuid_variant, uuidIsRfc: uuid_is_rfc,
+        v6UnixMillisIn: uuid_v6_unix_millis_in, v7UnixMillisIn: uuid_v7_unix_millis_in,
+        getTimestamp: uuid_get_timestamp)
 
     // `throws` only so every door keeps one shape; the core is always there.
     private static func loaded() throws -> LoadedLibrary {
@@ -235,6 +269,7 @@ public enum UuidGenerator {
     public static func newV6Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
         precondition(count >= 0, "count must not be negative; got \(count)")
         guard count > 0 else { return [] }
+        guard UInt64(count) <= UInt64(UInt32.max) else { throw Error.batchNotAddressable(count: count) }
         // The result array is the destination: one native call writes every UUID in place,
         // with no scratch buffer and no per-element construction — the fill's own path.
         var result = [UUID](repeating: UUID(uuid: zero), count: count)
@@ -286,29 +321,43 @@ public enum UuidGenerator {
         Date(timeIntervalSince1970: Double(try v7UnixMillis(uuid)) / 1000)
     }
 
-    /// Recovers the UTC timestamp embedded in `uuid` as a `Date`, or `nil` if it isn't a
-    /// version 6 or 7 UUID. Unlike `v6Timestamp`/`v7Timestamp`, this reads the version nibble
-    /// itself first, so a caller doesn't need to already know (or separately check) which
-    /// version `uuid` is before asking — delegates straight to whichever of those two methods
-    /// applies, no bit-layout logic duplicated here. Still `throws` for a real native-load
-    /// failure, same as every other call in this type.
+    /// Recovers the UTC timestamp embedded in `uuid` as a `Date`, or `nil` for anything that
+    /// isn't an RFC 9562 version 6 or 7 UUID. Unlike `v6Timestamp`/`v7Timestamp`, this checks
+    /// the variant as well as the version, in one native call, so a caller doesn't need to
+    /// already know (or separately check) what `uuid` is before asking — a 6 or 7 nibble under
+    /// another variant has no RFC version and so no timestamp. No bit-layout logic here. Every 48-bit v7 timestamp
+    /// has a `Date`, up to 2^48 − 1 ms (year 10889).
     public static func getTimestamp(_ uuid: UUID) throws -> Date? {
-        switch uuid.uuid.6 >> 4 {
-        case 6: return try v6Timestamp(uuid)
-        case 7: return try v7Timestamp(uuid)
-        default: return nil
-        }
+        try getTimestamp(uuid, layout: .rfc9562)
     }
+
+    /// The most UUIDs one version 7 batch (`newV7Batch`, `fillV7` and their overloads)
+    /// mints: 67,108,864, the size of the 26-bit counter that orders UUIDs within a
+    /// millisecond.
+    ///
+    /// Every batch up to this size is in strictly increasing order. The counter is one
+    /// process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
+    /// UUIDs from there on carry a timestamp one millisecond later than the one supplied
+    /// rather than sorting before the ones ahead of them. A larger batch would have to reuse
+    /// counter values within one millisecond, so it throws ``Error/batchTooLarge(count:)``
+    /// before anything is allocated or written. Version 6 has no counter and no such limit.
+    public static let maxV7Batch = 1 << 26
 
     /// Creates `count` time-sortable version 7 UUIDs sharing one Unix-epoch millisecond
     /// timestamp capture and one contiguous block of the monotonic counter — one native call
-    /// and one random-bytes fetch instead of `count` of each.
+    /// and one random-bytes fetch instead of `count` of each. The batch is strictly
+    /// increasing; if it crosses the counter's wrap, the UUIDs from there on carry
+    /// `unixMillis + 1` (see ``maxV7Batch``).
+    ///
+    /// A `count` over ``maxV7Batch`` throws ``Error/batchTooLarge(count:)`` before the array
+    /// is allocated.
     ///
     /// - Precondition: `count` is not negative — a caller bug, the same one
     ///   `Array(repeating:count:)` traps on. Zero is an empty array.
     public static func newV7Batch(count: Int, unixMillis: UInt64) throws -> [UUID] {
         precondition(count >= 0, "count must not be negative; got \(count)")
         guard count > 0 else { return [] }
+        guard count <= maxV7Batch else { throw Error.batchTooLarge(count: count) }
         // The result array is the destination: one native call writes every UUID in place,
         // with no scratch buffer and no per-element construction — the fill's own path.
         var result = [UUID](repeating: UUID(uuid: zero), count: count)
@@ -387,9 +436,11 @@ public enum UuidGenerator {
     /// `newV7Batch(count:)` allocates a fresh array on every call; this writes into storage
     /// the caller already owns, which is what lets a hot path reuse one buffer across batches.
     /// `destination` is raw RFC 9562-ordered bytes, 16 per UUID, and its length must be a whole
-    /// multiple of 16.
+    /// multiple of 16. The UUIDs are strictly increasing, with the same possible
+    /// `unixMillis + 1` as ``newV7Batch(count:unixMillis:)``; more than ``maxV7Batch`` of them
+    /// throws ``Error/batchTooLarge(count:)`` with nothing written.
     public static func fillV7(into destination: UnsafeMutableRawBufferPointer, unixMillis: UInt64) throws {
-        try fill(into: destination, unixMillis: unixMillis) { l in l.newV7Batch }
+        try fill(into: destination, unixMillis: unixMillis, limit: maxV7Batch) { l in l.newV7Batch }
     }
 
     /// Fills `destination` with version 7 UUIDs sharing the current time.
@@ -402,7 +453,7 @@ public enum UuidGenerator {
     /// version 7 there is no monotonic counter, so items are not guaranteed to sort in
     /// creation order.
     public static func fillV6(into destination: UnsafeMutableRawBufferPointer, unixMillis: UInt64) throws {
-        try fill(into: destination, unixMillis: unixMillis) { l in l.newV6Batch }
+        try fill(into: destination, unixMillis: unixMillis, limit: nil) { l in l.newV6Batch }
     }
 
     /// Fills `destination` with version 6 UUIDs sharing the current time.
@@ -414,9 +465,10 @@ public enum UuidGenerator {
     ///
     /// Foundation's `UUID` wraps `uuid_t` — 16 bytes in RFC 9562 order — so a contiguous
     /// `[UUID]` is exactly the layout the native core writes and no per-element conversion is
-    /// needed. The layout is asserted at runtime rather than assumed.
+    /// needed. The layout is asserted at runtime rather than assumed. Strictly increasing and
+    /// limited to ``maxV7Batch`` UUIDs, as the raw-buffer `fillV7` is.
     public static func fillV7(into destination: inout [UUID], unixMillis: UInt64) throws {
-        try fillUUIDs(into: &destination, unixMillis: unixMillis) { l in l.newV7Batch }
+        try fillUUIDs(into: &destination, unixMillis: unixMillis, limit: maxV7Batch) { l in l.newV7Batch }
     }
 
     /// Fills `destination` with version 7 UUIDs sharing the current time, writing straight
@@ -427,7 +479,7 @@ public enum UuidGenerator {
 
     /// Fills `destination` with version 6 UUIDs, writing straight into the array's storage.
     public static func fillV6(into destination: inout [UUID], unixMillis: UInt64) throws {
-        try fillUUIDs(into: &destination, unixMillis: unixMillis) { l in l.newV6Batch }
+        try fillUUIDs(into: &destination, unixMillis: unixMillis, limit: nil) { l in l.newV6Batch }
     }
 
     /// Fills `destination` with version 6 UUIDs sharing the current time, writing straight
@@ -436,24 +488,33 @@ public enum UuidGenerator {
         try fillV6(into: &destination, unixMillis: unixMillis(of: Date()))
     }
 
+    // `limit` is the v7 counter space, checked here before the native call so the core's
+    // own refusal (code 4) is a backstop; v6 has none. Either way the count must fit the
+    // call's UInt32, which a conversion would otherwise trap on.
     private static func fill(
         into destination: UnsafeMutableRawBufferPointer,
         unixMillis: UInt64,
+        limit: Int?,
         _ pick: (LoadedLibrary) -> UuidNewV7BatchFn
     ) throws {
         guard destination.count % 16 == 0 else {
             throw Error.bufferNotWholeUUIDs(count: destination.count)
         }
-        guard destination.count > 0 else { return }
+        let count = destination.count / 16
+        guard count > 0 else { return }
+        if let limit, count > limit { throw Error.batchTooLarge(count: count) }
+        guard let nativeCount = UInt32(exactly: count) else { throw Error.batchNotAddressable(count: count) }
         let l = try loaded()
         let rc = pick(l)(
             unixMillis,
-            UInt32(destination.count / 16),
+            nativeCount,
             destination.baseAddress?.assumingMemoryBound(to: UInt8.self)
         )
         switch rc {
         case 0: return
         case 2: throw Error.timestampOutOfRange
+        case 3: throw Error.batchNotAddressable(count: count)
+        case 4: throw Error.batchTooLarge(count: count)
         default: throw Error.randomSourceFailure(code: rc)
         }
     }
@@ -461,6 +522,7 @@ public enum UuidGenerator {
     private static func fillUUIDs(
         into destination: inout [UUID],
         unixMillis: UInt64,
+        limit: Int?,
         _ pick: (LoadedLibrary) -> UuidNewV7BatchFn
     ) throws {
         guard !destination.isEmpty else { return }
@@ -470,7 +532,7 @@ public enum UuidGenerator {
         )
         var thrown: Swift.Error?
         destination.withUnsafeMutableBytes { raw in
-            do { try fill(into: raw, unixMillis: unixMillis, pick) } catch { thrown = error }
+            do { try fill(into: raw, unixMillis: unixMillis, limit: limit, pick) } catch { thrown = error }
         }
         if let thrown { throw thrown }
     }
@@ -506,6 +568,145 @@ public enum UuidGenerator {
         guard uuid.count == 16 else { throw Error.bufferNotWholeUUIDs(count: uuid.count) }
         let l = try loaded()
         pick(l)(uuid.baseAddress?.assumingMemoryBound(to: UInt8.self))
+    }
+
+    // MARK: - Inspection and layout-aware timestamps
+    //
+    // The layout knowledge lives in the core: these only hand it the value's own 16 bytes and
+    // the layout's code. A SQL-ordered UUID is the one `v7ToSqlOrder`/`v6ToSqlOrder` return,
+    // whose `uuid` bytes are the SQL Server wire bytes, and an RFC-ordered one's `uuid` bytes
+    // are RFC 9562 order, so `uuid.uuid` is the right input in either layout with no
+    // conversion. Every `UuidLayout` is a defined layout, so none of these can be handed an
+    // unknown one.
+
+    /// The version of a `uuid` held in `layout`'s byte order.
+    ///
+    /// In ``UuidLayout/rfc9562`` (the default) this is the RFC 9562 version nibble, 0 through
+    /// 15 — 0 for Nil, 15 for Max — and says nothing about the variant: use
+    /// ``isRfc(_:version:layout:)`` when the question is "an RFC 9562 UUID of version N".
+    ///
+    /// ``UuidLayout/sqlServer`` is defined only for the two versions that have a SQL Server
+    /// order, and answers 6, 7, or 0 when the bytes don't form a SQL-ordered version 6 or 7
+    /// RFC 9562 UUID. The version nibble lands at a different byte for each, and the other
+    /// version's random bits can mimic it there, so the core checks the variant bits too,
+    /// where each version puts them, and the answer never confuses the two. The layout is the
+    /// caller's to know: an RFC-ordered UUID's bytes can genuinely form a SQL-ordered v7 (one
+    /// random v4 in 16 does), so reading one as ``UuidLayout/sqlServer`` can answer 7.
+    public static func version(_ uuid: UUID, layout: UuidLayout = .rfc9562) throws -> Int {
+        let l = try loaded()
+        return Int(withBytes(of: uuid) { l.uuidVersion($0, layout.rawValue) })
+    }
+
+    /// ``version(_:layout:)`` over 16 raw bytes already in `layout`'s order (RFC 9562 network
+    /// order by default). Throws ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid` is
+    /// exactly 16 bytes.
+    public static func version(bytes uuid: UnsafeRawBufferPointer, layout: UuidLayout = .rfc9562) throws -> Int {
+        let l = try loaded()
+        return Int(try withSingleUuid(uuid) { l.uuidVersion($0, layout.rawValue) })
+    }
+
+    /// The variant field of an RFC 9562-ordered `uuid` (RFC 9562 §4.1): ``UuidVariant/ncs``
+    /// for Nil, ``UuidVariant/future`` for Max, and ``UuidVariant/rfc9562`` for anything this
+    /// library or Foundation's `UUID()` mints.
+    public static func variant(_ uuid: UUID) throws -> UuidVariant {
+        let l = try loaded()
+        return variantOf(withBytes(of: uuid) { l.uuidVariant($0) })
+    }
+
+    /// ``variant(_:)`` over 16 raw RFC 9562-ordered bytes. Throws
+    /// ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid` is exactly 16 bytes.
+    public static func variant(bytes uuid: UnsafeRawBufferPointer) throws -> UuidVariant {
+        let l = try loaded()
+        return variantOf(try withSingleUuid(uuid) { l.uuidVariant($0) })
+    }
+
+    /// Whether a `uuid` held in `layout`'s byte order is an RFC 9562 UUID of version
+    /// `version` — the RFC variant and that version, in one native call. The guard to run
+    /// before trusting a value's version-specific fields, such as a version 7's timestamp. In
+    /// ``UuidLayout/sqlServer`` only versions 6 and 7 can be `true` (see
+    /// ``version(_:layout:)``). A `version` outside 0–15 is simply never matched.
+    public static func isRfc(_ uuid: UUID, version: Int, layout: UuidLayout = .rfc9562) throws -> Bool {
+        let l = try loaded()
+        guard let code = versionCode(version) else { return false }
+        return withBytes(of: uuid) { l.uuidIsRfc($0, code, layout.rawValue) } != 0
+    }
+
+    /// ``isRfc(_:version:layout:)`` over 16 raw bytes already in `layout`'s order (RFC 9562
+    /// network order by default). Throws ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid`
+    /// is exactly 16 bytes.
+    public static func isRfc(
+        bytes uuid: UnsafeRawBufferPointer, version: Int, layout: UuidLayout = .rfc9562
+    ) throws -> Bool {
+        let l = try loaded()
+        let answer = try withSingleUuid(uuid) { p in versionCode(version).map { l.uuidIsRfc(p, $0, layout.rawValue) } }
+        return answer.map { $0 != 0 } ?? false
+    }
+
+    /// ``getTimestamp(_:)`` for a `uuid` held in `layout`'s byte order — in
+    /// ``UuidLayout/sqlServer``, the timestamp of a value straight from `v7ToSqlOrder` or
+    /// `v6ToSqlOrder` (or a `uniqueidentifier` column), read from its permuted bytes in one
+    /// native call with no conversion back first. `nil` when the bytes don't form an RFC
+    /// 9562 version 6 or 7 UUID in that layout; the variant is checked in either layout (see
+    /// ``version(_:layout:)`` for how SQL-ordered v6 and v7 are told apart, and why the layout
+    /// is the caller's to track).
+    public static func getTimestamp(_ uuid: UUID, layout: UuidLayout) throws -> Date? {
+        let l = try loaded()
+        var millis: UInt64 = 0
+        let version = withBytes(of: uuid) { l.getTimestamp($0, layout.rawValue, &millis) }
+        return version == 0 ? nil : date(unixMillis: millis)
+    }
+
+    /// ``v7UnixMillis(_:)`` for a `uuid` held in `layout`'s byte order, reading a SQL-ordered
+    /// value's permuted bytes directly. Meaningful only for a genuine version 7 UUID in that
+    /// layout; ``isRfc(_:version:layout:)`` is the check.
+    public static func v7UnixMillis(_ uuid: UUID, layout: UuidLayout) throws -> UInt64 {
+        let l = try loaded()
+        return withBytes(of: uuid) { l.v7UnixMillisIn($0, layout.rawValue) }
+    }
+
+    /// ``v7Timestamp(_:)`` for a `uuid` held in `layout`'s byte order; see
+    /// ``v7UnixMillis(_:layout:)``.
+    public static func v7Timestamp(_ uuid: UUID, layout: UuidLayout) throws -> Date {
+        date(unixMillis: try v7UnixMillis(uuid, layout: layout))
+    }
+
+    /// ``v6UnixMillis(_:)`` for a `uuid` held in `layout`'s byte order, reading a SQL-ordered
+    /// value's permuted bytes directly. Meaningful only for a genuine version 6 UUID in that
+    /// layout; ``isRfc(_:version:layout:)`` is the check.
+    public static func v6UnixMillis(_ uuid: UUID, layout: UuidLayout) throws -> UInt64 {
+        let l = try loaded()
+        return withBytes(of: uuid) { l.v6UnixMillisIn($0, layout.rawValue) }
+    }
+
+    /// ``v6Timestamp(_:)`` for a `uuid` held in `layout`'s byte order; see
+    /// ``v6UnixMillis(_:layout:)``.
+    public static func v6Timestamp(_ uuid: UUID, layout: UuidLayout) throws -> Date {
+        date(unixMillis: try v6UnixMillis(uuid, layout: layout))
+    }
+
+    private static func date(unixMillis: UInt64) -> Date {
+        Date(timeIntervalSince1970: Double(unixMillis) / 1000)
+    }
+
+    // A version the nibble can hold, as the core's u32; nil (never a match) otherwise.
+    private static func versionCode(_ version: Int) -> UInt32? {
+        (0...15).contains(version) ? UInt32(version) : nil
+    }
+
+    private static func variantOf(_ code: UInt32) -> UuidVariant {
+        guard let variant = UuidVariant(rawValue: code) else {
+            preconditionFailure("hyperuuid: the native core returned variant code \(code)")
+        }
+        return variant
+    }
+
+    private static func withSingleUuid<T>(
+        _ uuid: UnsafeRawBufferPointer, _ body: (UnsafePointer<UInt8>) -> T
+    ) throws -> T {
+        guard uuid.count == 16, let base = uuid.baseAddress else {
+            throw Error.bufferNotWholeUUIDs(count: uuid.count)
+        }
+        return body(base.assumingMemoryBound(to: UInt8.self))
     }
 
     // MARK: - The native library itself

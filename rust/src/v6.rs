@@ -1,7 +1,7 @@
 //! RFC 9562 Section 5.6 — UUID version 6: a field-compatible reordering of version 1's
 //! time-based layout for better sort/index locality, without version 7's monotonic counter.
 
-use crate::{Timestamp, Uuid};
+use crate::{Layout, Timestamp, Uuid};
 
 /// Number of 100-nanosecond intervals between the UUID Gregorian epoch (1582-10-15) and the
 /// Unix epoch (1970-01-01) — the same well-known constant every UUID v1/v6 implementation
@@ -62,29 +62,34 @@ pub fn new_v6(unix_millis: u64) -> Result<Uuid, NewV6Error> {
         .filter(|&v| v <= MAX_60_BIT)
         .ok_or(NewV6Error::TimestampOutOfRange)?;
 
+    // clock_seq (14 bits, octets 8-9 alongside the variant) then node (48 bits, octets
+    // 10-15), drawn straight into place; write_fields fixes up the bits they share.
     let mut bytes = [0u8; 16];
+    crate::entropy::fill_at(&mut bytes[8..], unix_millis).map_err(NewV6Error::Random)?;
+    write_fields(&mut bytes, ticks_since_epoch);
+    Ok(Uuid::from_bytes(bytes))
+}
 
+/// Writes a version 6 UUID's deterministic fields around the random `clock_seq` and `node`
+/// already in octets 8-15: the 60-bit Gregorian timestamp and version (octets 0-7), the
+/// variant over `clock_seq`'s top bits, and the multicast bit flagging `node` as random. The
+/// one deterministic piece of [`new_v6`], kept separate so the corpus
+/// (`corpus/v6_layout.json`) can pin every field's placement without going through the
+/// random source. `ticks_since_epoch` is 100 ns ticks since 1582-10-15, already checked to fit
+/// 60 bits.
+#[inline]
+pub(crate) fn write_fields(bytes: &mut [u8; 16], ticks_since_epoch: u64) {
     let time_high = (ticks_since_epoch >> 28) as u32;
     let time_mid = ((ticks_since_epoch >> 12) & 0xFFFF) as u16;
-    // Occupies octets 6-7 alongside the version nibble, written below by set_version.
-    let time_low = (ticks_since_epoch & 0x0FFF) as u16;
+    // Occupies octets 6-7 under the version nibble.
+    let time_low = 0x6000 | (ticks_since_epoch & 0x0FFF) as u16;
 
     bytes[0..4].copy_from_slice(&time_high.to_be_bytes());
     bytes[4..6].copy_from_slice(&time_mid.to_be_bytes());
     bytes[6..8].copy_from_slice(&time_low.to_be_bytes());
-
-    let mut rand_bytes = [0u8; 8];
-    crate::entropy::fill_at(&mut rand_bytes, unix_millis).map_err(NewV6Error::Random)?;
-    // clock_seq (14 bits, octets 8-9 alongside the variant, written below by set_variant).
-    bytes[8..10].copy_from_slice(&rand_bytes[0..2]);
-    // node (48 bits, octets 10-15).
-    bytes[10..16].copy_from_slice(&rand_bytes[2..8]);
+    bytes[8] = 0x80 | (bytes[8] & 0x3F);
+    // Multicast bit, flagging the node ID as random rather than a real MAC.
     bytes[10] |= 0x01;
-
-    let mut uuid = Uuid::from_bytes(bytes);
-    uuid.set_version(6);
-    uuid.set_variant();
-    Ok(uuid)
 }
 
 /// Creates a new UUID version 6 from a [`Timestamp`] instead of a raw millisecond count —
@@ -185,6 +190,25 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
     let time_high = u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as u64;
     let time_mid = u16::from_be_bytes([b[4], b[5]]) as u64;
     let time_low = (u16::from_be_bytes([b[6], b[7]]) & 0x0FFF) as u64;
+    let ticks_since_epoch = (time_high << 28) | (time_mid << 12) | time_low;
+    ticks_since_epoch.saturating_sub(GREGORIAN_OFFSET_100NS) / 10_000
+}
+
+/// [`unix_millis`] for a version 6 UUID held in `layout`'s byte order, reading a SQL-ordered
+/// value's permuted octets directly rather than converting it back first. Meaningful only for
+/// a genuine version 6 UUID in that layout, the same as [`unix_millis`];
+/// [`Uuid::is_rfc_in`] is the check.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub fn unix_millis_in(uuid: &Uuid, layout: Layout) -> u64 {
+    let b = uuid.as_bytes();
+    let (high, mid, low) = match layout {
+        Layout::Rfc9562 => (0, 4, 6),
+        // to_sql_order moves octets 0-5 to 10-15 and octets 6-7 to 8-9, each run unchanged.
+        Layout::SqlServer => (10, 14, 8),
+    };
+    let time_high = u32::from_be_bytes([b[high], b[high + 1], b[high + 2], b[high + 3]]) as u64;
+    let time_mid = u16::from_be_bytes([b[mid], b[mid + 1]]) as u64;
+    let time_low = (u16::from_be_bytes([b[low], b[low + 1]]) & 0x0FFF) as u64;
     let ticks_since_epoch = (time_high << 28) | (time_mid << 12) | time_low;
     ticks_since_epoch.saturating_sub(GREGORIAN_OFFSET_100NS) / 10_000
 }

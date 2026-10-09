@@ -133,3 +133,54 @@ func TestBatchAllocatesOnlyItsResult(t *testing.T) {
 		}
 	})
 }
+
+func TestInspectionDoesNotAllocate(t *testing.T) {
+	v7, err := NewV7At(rfcTestVectorMs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql, err := V7ToSqlOrder(v7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := make([]byte, 16)
+	copy(raw, sql[:])
+	assertAllocs(t, "Version/Variant/IsRfc", 0, func() {
+		if Version(v7) != 7 || Variant(v7) != VariantRfc9562 || !IsRfc(v7, 7) {
+			t.Fatal("not an RFC v7")
+		}
+	})
+	assertAllocs(t, "VersionIn/IsRfcIn", 0, func() {
+		if v, err := VersionIn(sql, LayoutSqlServer); err != nil || v != 7 {
+			t.Fatal(v, err)
+		}
+		if ok, err := IsRfcIn(sql, 7, LayoutSqlServer); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	})
+	assertAllocs(t, "VersionBytes/VariantBytes/IsRfcBytes", 0, func() {
+		if v, err := VersionBytes(raw, LayoutSqlServer); err != nil || v != 7 {
+			t.Fatal(v, err)
+		}
+		if ok, err := IsRfcBytes(raw, 7, LayoutSqlServer); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		if _, err := VariantBytes(v7[:]); err != nil {
+			t.Fatal(err)
+		}
+	})
+	assertAllocs(t, "V7TimestampIn/GetTimestampIn", 0, func() {
+		if _, err := V7TimestampIn(sql, LayoutSqlServer); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := GetTimestampIn(sql, LayoutSqlServer); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// A value that isn't time-based returns the sentinel itself, not a wrapped copy.
+	assertAllocs(t, "GetTimestamp of a non-time-based UUID", 0, func() {
+		if _, err := GetTimestamp(Nil); err != ErrNotTimeBased {
+			t.Fatal(err)
+		}
+	})
+}

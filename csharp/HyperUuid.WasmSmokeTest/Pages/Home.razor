@@ -26,7 +26,7 @@
         // lands in the statically linked wasm module via LibraryImport("*"), so an entry point
         // missing from build/HyperUuid.targets' EmccExportedFunction list fails here at
         // runtime, not at the link. That only holds for an entry point this page actually
-        // calls, so it calls all thirteen: the twelve uuid_* functions and hyperuuid_version.
+        // calls, so it calls all nineteen: the eighteen uuid_* functions and hyperuuid_version.
         try
         {
             // The probe must name the core that actually linked in. First, because it is the
@@ -103,6 +103,17 @@
                 Fail($"v6 SQL order does not round-trip for {v6}");
             else
                 lines.Add($"ok   v6 SQL order: {v6Sql} round-trips");
+
+            // Inspection and the layout-aware reads: uuid_version, uuid_variant, uuid_is_rfc
+            // and both uuid_v*_unix_millis_in, the last two on SQL-ordered values in place.
+            if (UuidGenerator.Version(v7) != 7 || UuidGenerator.Variant(v7) != UuidVariant.Rfc9562
+                || !UuidGenerator.IsRfc(v7Sql, 7, UuidLayout.SqlServer) || UuidGenerator.Version(v6Sql, UuidLayout.SqlServer) != 6
+                || UuidGenerator.V7UnixMillis(v7Sql, UuidLayout.SqlServer) != UuidGenerator.V7UnixMillis(v7)
+                || UuidGenerator.V6UnixMillis(v6Sql, UuidLayout.SqlServer) != UuidGenerator.V6UnixMillis(v6)
+                || UuidGenerator.GetTimestamp(v7Sql, UuidLayout.SqlServer) != UuidGenerator.V7Timestamp(v7))
+                Fail($"inspection disagrees for {v7} / {v6}");
+            else
+                lines.Add("ok   inspection: version, variant, IsRfc and SQL-layout timestamps agree");
         }
         catch (Exception ex)
         {

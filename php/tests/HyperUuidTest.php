@@ -8,6 +8,7 @@ use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
 use HyperUuid\TimestampOutOfRangeException;
 use HyperUuid\Uuid;
+use HyperUuid\UuidVariant;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -23,7 +24,7 @@ final class HyperUuidTest extends TestCase
     {
         $id = HyperUuid::newV4();
         self::assertSame(4, $id->version());
-        self::assertSame(0b10, $id->variant());
+        self::assertSame(UuidVariant::Rfc9562, $id->variant());
     }
 
     public function testV4IsNonDeterministic(): void
@@ -89,7 +90,7 @@ final class HyperUuidTest extends TestCase
     {
         $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
         self::assertSame(6, $id->version());
-        self::assertSame(0b10, $id->variant());
+        self::assertSame(UuidVariant::Rfc9562, $id->variant());
     }
 
     public function testV6SetsTheNodeIdMulticastBit(): void
@@ -161,7 +162,7 @@ final class HyperUuidTest extends TestCase
     {
         $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
         self::assertSame(7, $id->version());
-        self::assertSame(0b10, $id->variant());
+        self::assertSame(UuidVariant::Rfc9562, $id->variant());
     }
 
     public function testV7OverflowTimestampThrows(): void
@@ -544,7 +545,8 @@ final class HyperUuidTest extends TestCase
     public function testANegativeBatchCountIsACallerBug(string $door): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('count must be between 0 and 4294967295, got -1');
+        // v6 names the uint32_t range, v7 its counter-space limit (HyperUuid::MAX_V7_BATCH).
+        $this->expectExceptionMessageMatches('/^count must be between 0 and \\d+.*, got -1$/');
         HyperUuid::$door(-1, self::RFC_TEST_VECTOR_MS);
     }
 

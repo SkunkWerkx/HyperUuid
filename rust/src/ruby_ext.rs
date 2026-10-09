@@ -10,10 +10,10 @@
 //! doors and their argument checks, batch slicing) is shared byte-for-byte between backends,
 //! which is exactly what keeps them provably in agreement. Exceptions stay the package's own
 //! `HyperUuid::RandomSourceError` / `HyperUuid::TimestampOutOfRangeError`, with the same
-//! messages `lib/hyperuuid/runtime.rb` gives the Fiddle backend — the two texts
-//! below are that file's `V6_TIMESTAMP_OUT_OF_RANGE` / `V7_TIMESTAMP_OUT_OF_RANGE`, and
-//! `random_source_error` is its `random_source_failure`. `HYPERUUID_PURE=1` (checked
-//! Ruby-side) keeps Fiddle.
+//! messages `lib/hyperuuid/runtime.rb` gives the Fiddle backend — the texts below are that
+//! file's `V6_TIMESTAMP_OUT_OF_RANGE` / `V7_TIMESTAMP_OUT_OF_RANGE` / `V7_BATCH_TOO_LARGE` /
+//! `BATCH_TOO_LARGE_TO_ADDRESS`, and `random_source_error` is its `random_source_failure`.
+//! `HYPERUUID_PURE=1` (checked Ruby-side) keeps Fiddle.
 
 use std::sync::OnceLock;
 
@@ -21,6 +21,7 @@ use magnus::value::Opaque;
 use magnus::{Error, ExceptionClass, RModule, RString, Ruby, function, prelude::*};
 
 use crate as core;
+use crate::{Layout, Variant};
 
 /// Constant-referenced classes are anchored by Ruby constants, so they are never collected —
 /// but a compacting GC can still move them, rewriting every reference it can see, which
@@ -44,6 +45,34 @@ fn exception_class(ruby: &Ruby, pick: fn(&Cached) -> Opaque<ExceptionClass>) -> 
 
 const V6_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis does not fit the 60-bit v6 timestamp field";
 const V7_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis must fit within the RFC 9562 48-bit field";
+const V7_BATCH_TOO_LARGE: &str =
+    "a single version 7 batch takes at most 67108864 UUIDs (the 26-bit counter space)";
+const BATCH_TOO_LARGE_TO_ADDRESS: &str = "the batch is too large to address on this platform";
+
+// The Ruby text spells MAX_BATCH out; this keeps the two from drifting apart.
+const _: () = assert!(core::v7::MAX_BATCH == 67_108_864);
+
+fn arg_error(ruby: &Ruby, message: &'static str) -> Error {
+    Error::new(ruby.exception_arg_error(), message)
+}
+
+/// The batch's byte length, or the argument error the C ABI reports as code 3: on a 32-bit
+/// target (ruby.wasm) `count * 16` can overflow `usize`.
+fn batch_len(ruby: &Ruby, count: u32) -> Result<usize, Error> {
+    (count as usize)
+        .checked_mul(16)
+        .ok_or_else(|| arg_error(ruby, BATCH_TOO_LARGE_TO_ADDRESS))
+}
+
+/// The core's layout codes, as `ffi.rs` reads them. Uuid has already refused anything else;
+/// an unknown code still answers the way the C ABI does (0, false) rather than raising.
+const fn layout(code: u32) -> Option<Layout> {
+    match code {
+        1 => Some(Layout::Rfc9562),
+        2 => Some(Layout::SqlServer),
+        _ => None,
+    }
+}
 
 /// The one message every backend raises for a failed random source: the C-ABI export the
 /// call corresponds to, and nothing backend-specific — the Fiddle backend only ever sees a
@@ -113,7 +142,7 @@ fn new_v6_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
     if count == 0 {
         return Ok(ruby.str_from_slice(&[]));
     }
-    let mut out = vec![0u8; count as usize * 16];
+    let mut out = vec![0u8; batch_len(ruby, count)?];
     match core::v6::new_v6_batch(unix_millis, count, &mut out) {
         Ok(()) => Ok(ruby.str_from_slice(&out)),
         Err(core::v6::NewV6Error::TimestampOutOfRange) => {
@@ -132,6 +161,7 @@ fn new_v7(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
         Err(core::v7::NewV7Error::TimestampOutOfRange) => {
             Err(timestamp_out_of_range(ruby, V7_TIMESTAMP_OUT_OF_RANGE))
         }
+        Err(core::v7::NewV7Error::BatchTooLarge) => Err(arg_error(ruby, V7_BATCH_TOO_LARGE)),
         Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
             Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
@@ -147,17 +177,65 @@ fn new_v7_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
     if count == 0 {
         return Ok(ruby.str_from_slice(&[]));
     }
-    let mut out = vec![0u8; count as usize * 16];
+    // Before the buffer, as runtime.rb does: the core would refuse it only after the allocation.
+    if count > core::v7::MAX_BATCH {
+        return Err(arg_error(ruby, V7_BATCH_TOO_LARGE));
+    }
+    let mut out = vec![0u8; batch_len(ruby, count)?];
     match core::v7::new_v7_batch(unix_millis, count, &mut out) {
         Ok(()) => Ok(ruby.str_from_slice(&out)),
         Err(core::v7::NewV7Error::TimestampOutOfRange) => {
             Err(timestamp_out_of_range(ruby, V7_TIMESTAMP_OUT_OF_RANGE))
         }
+        Err(core::v7::NewV7Error::BatchTooLarge) => Err(arg_error(ruby, V7_BATCH_TOO_LARGE)),
         Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
             Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
         Err(core::v7::NewV7Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v7_batch")),
     }
+}
+
+fn version(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<u32, Error> {
+    let uuid = uuid_arg(ruby, bytes)?;
+    Ok(layout(layout_code).map_or(0, |layout| uuid.version_in(layout) as u32))
+}
+
+/// The variant as the C ABI's code (1 NCS, 2 RFC 9562, 3 Microsoft, 4 future).
+fn variant(ruby: &Ruby, bytes: RString) -> Result<u32, Error> {
+    Ok(match uuid_arg(ruby, bytes)?.variant() {
+        Variant::Ncs => 1,
+        Variant::Rfc9562 => 2,
+        Variant::Microsoft => 3,
+        Variant::Future => 4,
+    })
+}
+
+fn is_rfc(ruby: &Ruby, bytes: RString, version: u32, layout_code: u32) -> Result<bool, Error> {
+    let uuid = uuid_arg(ruby, bytes)?;
+    Ok(match (layout(layout_code), u8::try_from(version)) {
+        (Some(layout), Ok(version)) => uuid.is_rfc_in(version, layout),
+        _ => false,
+    })
+}
+
+/// The strict, version-agnostic read: the Unix ms of an RFC 9562 version 6 or 7 UUID held in
+/// `layout`'s order, `nil` for anything else (another version, another variant, an unknown
+/// layout code) — the C ABI's `uuid_get_timestamp`, which the Fiddle backend calls.
+fn get_timestamp(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<Option<u64>, Error> {
+    let uuid = uuid_arg(ruby, bytes)?;
+    Ok(layout(layout_code)
+        .and_then(|layout| core::get_timestamp_in(&uuid, layout))
+        .map(|timestamp| timestamp.to_unix_millis()))
+}
+
+fn v6_unix_millis_in(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<u64, Error> {
+    let uuid = uuid_arg(ruby, bytes)?;
+    Ok(layout(layout_code).map_or(0, |layout| core::v6::unix_millis_in(&uuid, layout)))
+}
+
+fn v7_unix_millis_in(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<u64, Error> {
+    let uuid = uuid_arg(ruby, bytes)?;
+    Ok(layout(layout_code).map_or(0, |layout| core::v7::unix_millis_in(&uuid, layout)))
 }
 
 fn v7_to_sql_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
@@ -222,6 +300,12 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     runtime.define_singleton_method("v7_to_rfc_order", function!(v7_to_rfc_order, 1))?;
     runtime.define_singleton_method("v6_to_sql_order", function!(v6_to_sql_order, 1))?;
     runtime.define_singleton_method("v6_to_rfc_order", function!(v6_to_rfc_order, 1))?;
+    runtime.define_singleton_method("version", function!(version, 2))?;
+    runtime.define_singleton_method("variant", function!(variant, 1))?;
+    runtime.define_singleton_method("is_rfc", function!(is_rfc, 3))?;
+    runtime.define_singleton_method("get_timestamp", function!(get_timestamp, 2))?;
+    runtime.define_singleton_method("v6_unix_millis_in", function!(v6_unix_millis_in, 2))?;
+    runtime.define_singleton_method("v7_unix_millis_in", function!(v7_unix_millis_in, 2))?;
     runtime.define_singleton_method("packed_version", function!(packed_version, 0))?;
     Ok(())
 }

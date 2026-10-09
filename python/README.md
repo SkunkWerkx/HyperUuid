@@ -67,7 +67,9 @@ id4 = hyperuuid.new_v7()
 hyperuuid.v7_timestamp(id4) # recover the embedded UTC datetime.datetime
 hyperuuid.v7_unix_millis(id4) # the same instant as Unix-epoch milliseconds, an int
 hyperuuid.get_timestamp(id4) # None instead of assuming id4 is v6/v7
-hyperuuid.v7_to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs to sort by creation order
+hyperuuid.is_rfc(id4, 7) # True: the RFC 9562 variant and version 7, in one call
+stored = hyperuuid.v7_to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs to sort by creation order
+hyperuuid.v7_unix_millis(stored, hyperuuid.Layout.SQL_SERVER) # read in place, no conversion back
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
 batch = hyperuuid.new_v7_batch(1000)
@@ -95,9 +97,10 @@ the whole 48-bit field. `new_v6`/`new_v7` also accept a
 integer arithmetic and truncated to the millisecond, never rounded into the next one; a
 naive `datetime` is read as local time, the way `datetime.timestamp()` reads it.
 `get_timestamp(id)`
-is the version-agnostic counterpart to `v6_timestamp`/`v7_timestamp` — it checks
-`id.version` itself and returns `None` for anything but a genuine v6/v7 UUID, instead
-of assuming the caller already knows. `hyperuuid.new_v6_batch(count)`/
+is the version-agnostic counterpart to `v6_timestamp`/`v7_timestamp` — it checks the
+value itself, in one native call, and returns `None` for anything that isn't an RFC 9562
+version 6 or 7 UUID, instead of assuming the caller already knows. The variant is part of
+that check: a 6 or 7 in the version nibble under another variant carries no timestamp. `hyperuuid.new_v6_batch(count)`/
 `new_v7_batch(count)` generate `count` UUIDs sharing one timestamp capture and one
 native call, instead of `count` of each. `hyperuuid.v7_to_sql_order(id)`/
 `v7_from_sql_order(id)` convert a version 7 UUID to and from the byte order SQL
@@ -112,8 +115,63 @@ v6 limitation plain order already has.
 
 A caller's bug is an exception: an argument of the
 wrong type is a `TypeError`; a timestamp no field can hold (negative, or past v7's 48 bits
-or v6's 60) and a batch `count` outside 0 to 4294967295 are a `ValueError`; a batch too
-large to allocate is a `MemoryError`, never a batch of some other size.
+or v6's 60), a batch `count` outside 0 to 4294967295 (0 to `MAX_V7_BATCH` for v7) and a
+`layout` that is not a `Layout` are a `ValueError`; a batch too large to allocate is a
+`MemoryError`, never a batch of some other size.
+
+### Version 7 batches
+
+A v7 batch (`new_v7_batch`, `fill_v7`) is always in strictly increasing order. The 26-bit
+counter that orders UUIDs within a millisecond is one process-wide sequence that wraps every
+2^26 values, so a batch can straddle the wrap; the UUIDs from the wrap on carry
+`unix_millis + 1` rather than sorting before the ones ahead of them, so an embedded
+timestamp can be one millisecond past the one supplied, never more. For the same reason one
+batch holds at most `hyperuuid.MAX_V7_BATCH` (67,108,864) UUIDs: a larger `count`, or a
+`fill_v7` buffer of more than that many, is a `ValueError` naming the limit, raised before
+anything is allocated or written. Version 6 has no counter and no such limit.
+
+## Inspecting a UUID
+
+```python
+import hyperuuid
+from hyperuuid import Layout, Variant
+
+hyperuuid.version(id4)                     # 7: the version nibble, 0-15
+hyperuuid.variant(id4)                     # Variant.RFC9562
+hyperuuid.is_rfc(id4, 7)                   # True: the guard before trusting v7 fields
+
+stored = hyperuuid.v7_to_sql_order(id4)
+hyperuuid.version(stored, Layout.SQL_SERVER)       # 7
+hyperuuid.is_rfc(stored, 7, Layout.SQL_SERVER)     # True
+hyperuuid.get_timestamp(stored, Layout.SQL_SERVER) # the embedded datetime, read in place
+```
+
+`version`, `variant` and `is_rfc` are answered by the native core, the same functions every
+other binding calls, so no bit-reading is duplicated here. `version(id)` is the version
+nibble whatever the variant (stdlib's `id.version` is `None` for a non-RFC variant; this is
+not), Nil reads as 0 and Max as 15, and `is_rfc(id, n)` is the check that means "an RFC 9562
+UUID of version n" — `False`, never an error, for an `n` outside 0 to 15. `variant(id)` is a
+`Variant` — `NCS` (Nil included), `RFC9562`, `MICROSOFT` or `FUTURE` (Max included) — read in
+RFC 9562 order.
+
+`Layout` says which byte order a `uuid.UUID` is held in: `Layout.RFC9562`, what every other
+function here takes and returns and the default everywhere, or `Layout.SQL_SERVER`, the order
+`v6_to_sql_order`/`v7_to_sql_order` return (and a `uniqueidentifier` column holds).
+`version`, `is_rfc`, `v6_unix_millis`/`v7_unix_millis`, `v6_timestamp`/`v7_timestamp` and
+`get_timestamp` all take one as their last argument, and read a SQL-ordered value's permuted
+bytes in place, with no conversion back first. In `Layout.SQL_SERVER` only versions 6 and 7
+have an order: `version` is 6 or 7 for bytes that form a SQL-ordered v6 or v7, and 0 for bytes
+that don't, and the core checks the variant where each version puts it, so a SQL-ordered v6
+never reads as a v7 or the other way round. The bytes alone cannot say which layout a value
+is in — an RFC-ordered random v4 forms a valid SQL-ordered v7 one time in 16 — so the caller
+must keep track of the layout.
+
+`Layout` and `Variant` are `IntEnum`s holding the native core's codes (`Layout.RFC9562 == 1`,
+`Layout.SQL_SERVER == 2`; `Variant.NCS == 1` through `Variant.FUTURE == 4`), and a plain `int`
+equal to a layout code is accepted where a `Layout` is. Neither has an "unspecified" member:
+the layout defaults to `Layout.RFC9562`, and anything else — an unknown code is a
+`ValueError`, a non-integer a `TypeError` — is refused rather than guessed at. There is no
+raw-bytes form; wrap 16 bytes in `uuid.UUID(bytes=...)` first, exactly as they are held.
 
 `hyperuuid.native_version()` names the core actually loaded, `"major.minor.patch"`, decoded
 from the same packed `hyperuuid_version` export every other binding probes.
@@ -169,7 +227,7 @@ first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifi
 
 The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is more than six times as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
 
-`len(buffer)` must be a multiple of 16, and a zero-length buffer writes nothing. Both functions take an optional `datetime` or Unix-epoch millisecond timestamp, same as the rest of the API.
+`len(buffer)` must be a multiple of 16, a zero-length buffer writes nothing, and `fill_v7` takes at most `MAX_V7_BATCH` UUIDs' worth ([above](#version-7-batches)). Both functions take an optional `datetime` or Unix-epoch millisecond timestamp, same as the rest of the API.
 
 One deliberate limitation: these take a `bytearray`, not any writable buffer. Supporting `memoryview`, `mmap` or NumPy arrays needs `Py_buffer`, which entered CPython's stable ABI in 3.11. That is this extension's floor as of this release (`abi3-py311`), so the wider buffer protocol is no longer ruled out; it is simply not built yet.
 

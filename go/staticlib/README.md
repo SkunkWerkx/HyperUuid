@@ -3,8 +3,9 @@
 The core as a static library, one per platform the module links it on:
 `staticlib/{goos}_{goarch}/libhyperuuid.a` for `linux_amd64`, `linux_arm64`, `darwin_amd64`,
 `darwin_arm64`, `windows_amd64` and `windows_arm64`, plus `staticlib/wasm/libhyperuuid.a`
-for TinyGo on WebAssembly, and four that build as `GOOS=ios` and are chosen by build tag:
-`ios_arm64`, `iossimulator_arm64`, `maccatalyst_arm64` and `maccatalyst_amd64`. `backend_static.go` names the one for the build's platform on its
+for TinyGo on WebAssembly, four that build as `GOOS=ios` and are chosen by build tag:
+`ios_arm64`, `iossimulator_arm64`, `maccatalyst_arm64` and `maccatalyst_amd64`, and two
+for `GOOS=android`: `android_arm64` and `android_amd64`. `backend_static.go` names the one for the build's platform on its
 cgo link line (`backend_tinygo.go` names `wasm` under TinyGo), and that archive is
 everything a build takes from this module — no shared libraries, nothing loaded or
 extracted at run time.
@@ -36,6 +37,12 @@ links for iOS and Mac Catalyst and (the arm64 three) the Swift XCFramework carri
 separate files because a Mach-O object records the platform it was built for and the linker
 refuses any other; the module's README has the tags that select each.
 
+The two Android archives are the `aarch64-linux-android` and `x86_64-linux-android` builds,
+byte for byte the ones the C# package links under Native AOT on Android and Swift's artifact
+bundle carries for the Swift SDK for Android. They are separate from the Linux pair because
+`GOOS=android` links against Bionic through the NDK's clang, and an archive built for musl
+asks for symbols under names Bionic does not promise.
+
 ## Building them yourself
 
 `go test` needs the archive for your platform. On a checkout that has none — a branch that
@@ -48,8 +55,9 @@ repository:
 ```
 
 Name the Rust target for your platform (`aarch64-unknown-linux-musl`, `x86_64-apple-darwin`,
-`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`, or
-`wasm32-wasip1` for TinyGo); with no target
+`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`,
+`aarch64-linux-android`, `x86_64-linux-android`, or `wasm32-wasip1` for TinyGo); with no
+target
 it builds every one. A static library is compiled
 and never linked, so all of them cross-compile from any machine with `rustup`.
 

@@ -27,7 +27,7 @@ id, err = hyperuuid.NewV7()
 batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
 sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
-created, err := hyperuuid.GetTimestamp(id) // version-agnostic: ErrNotTimeBased instead of assuming id is v6/v7
+created, err := hyperuuid.GetTimestamp(id) // version-agnostic: ErrNotTimeBased unless id is an RFC 9562 v6/v7
 ```
 
 ## Install
@@ -61,6 +61,7 @@ cgo, and so a C compiler wherever the module is **built** — nothing at run tim
 | Windows x64 | MinGW-w64 gcc |
 | Windows arm64 | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) |
 | iOS, the iOS simulator, Mac Catalyst | Xcode's clang for that platform's SDK; see [iOS and Mac Catalyst](#ios-and-mac-catalyst) |
+| Android arm64 / x64 | the NDK's clang; see [Android](#android) |
 
 Every other build fails at compile time, by name:
 
@@ -70,8 +71,8 @@ undefined: hyperuuid_needs_cgo_and_a_C_compiler_on_linux_darwin_or_windows_amd64
 
 That is `CGO_ENABLED=0` (which is also Go's default for a cross-compile — see
 [Building and cross-compiling](#building-and-cross-compiling)), any OS or architecture
-outside the ones above (Android and the iOS simulator on an Intel Mac among them, which
-Go's own rules would otherwise count as Linux and macOS), and stock Go compiled to
+outside the ones above (the iOS simulator on an Intel Mac among them, which Go's own rules
+would otherwise count as macOS), and stock Go compiled to
 WebAssembly (`GOOS=wasip1`, `GOOS=js`): Go's
 wasm toolchain links Go code only, with no cgo, so a foreign library has nowhere to go.
 For WebAssembly, build with [TinyGo](#in-the-browser-tinygo), which links the core there,
@@ -132,13 +133,47 @@ v6 UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter, so
 `clock_seq`/`node` (not the timestamp) decide ties, the same pre-existing RFC 9562
 v6 limitation plain order already has. `NewV6AtTime`/`NewV7AtTime` accept a `time.Time`
 directly in place of `NewV6At`/`NewV7At`'s raw millisecond count. `GetTimestamp` is
-the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — it checks
-`id.Version()` itself and returns `ErrNotTimeBased` for anything but a genuine v6/v7
-`uuid.UUID`, instead of assuming the caller already knows.
+the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — one core call checks the
+variant and version and reads the timestamp, and `GetTimestamp` returns `ErrNotTimeBased`
+for anything that isn't an RFC 9562 version 6 or 7 UUID, instead of assuming the caller
+already knows. The variant is checked too: a 6 or 7 nibble under another variant has no
+version, and so no timestamp.
 
 `NewV5` is the raw-byte form `NewV5String` converts into: a name is bytes, not text, and
 nothing requires it to be valid UTF-8. An empty or nil name is valid and hashes the
 namespace alone.
+
+### Version, variant and layout
+
+`Version(id)` is the RFC 9562 version nibble, 0–15 (0 for `Nil`, 15 for `Max`), the same
+answer as `id.Version()` but read by the core. `Variant(id)` returns a `UuidVariant`:
+`VariantNcs` (includes `Nil`), `VariantRfc9562`, `VariantMicrosoft` or `VariantFuture`
+(includes `Max`), never `VariantUnspecified`. `IsRfc(id, version)` asks both at once — the
+RFC variant and that version nibble, in one native call — and is the guard to run before
+trusting a value's version-specific fields. A version outside 0–15 is simply false.
+
+A SQL-ordered value can be inspected where it is, without converting it back first. The
+`In` forms take a `UuidLayout`, `LayoutRfc9562` or `LayoutSqlServer` (the order
+`V6ToSqlOrder`/`V7ToSqlOrder` return, and what a `uniqueidentifier` column holds):
+
+```go
+sql, _ := hyperuuid.V7ToSqlOrder(id)
+v, err := hyperuuid.VersionIn(sql, hyperuuid.LayoutSqlServer)          // 7
+ok, err := hyperuuid.IsRfcIn(sql, 7, hyperuuid.LayoutSqlServer)        // true
+created, err := hyperuuid.GetTimestampIn(sql, hyperuuid.LayoutSqlServer)
+millis, err := hyperuuid.V7UnixMillisIn(sql, hyperuuid.LayoutSqlServer) // also V6UnixMillisIn, V6/V7TimestampIn
+```
+
+In `LayoutSqlServer` the only versions are 6 and 7: `VersionIn` answers 6 or 7 when the
+bytes form a SQL-ordered v6 or v7, and 0 when they don't, and never confuses the two (the
+core checks each version's variant bits where that version puts them). The layout itself
+is yours to track: sixteen bytes carry no mark of their order, and an RFC-ordered value can
+happen to form a valid SQL-ordered v7 — about one random v4 in 16 does. `GetTimestampIn`
+returns `ErrNotTimeBased` for anything that isn't an RFC 9562 v6/v7 in the given layout. The zero
+value, `LayoutUnspecified`, and any undefined layout return `ErrInvalidLayout`; a layout is
+never guessed. `VersionBytes`, `VariantBytes` and `IsRfcBytes` take 16 raw bytes already in
+the given layout's order (`VariantBytes` is RFC order only). Every one of these is
+allocation-free.
 
 ### Errors
 
@@ -150,10 +185,13 @@ sentinels, all matched with `errors.Is`:
 | --- | --- |
 | `ErrRandomSource` | the core's random source failed — `NewV4`, the v6 and v7 generators, and their batch and Fill forms. `NewV5` draws no entropy and never returns it |
 | `ErrTimestampOutOfRange` | `unixMillis` doesn't fit the version's own timestamp field — every v6 and v7 generator. Version 7 holds 48 bits of Unix milliseconds; version 6's 60-bit count of 100 ns ticks since 1582-10-15 runs out earlier, in the year 5236 |
-| `ErrNotTimeBased` | `GetTimestamp` was given a UUID that isn't version 6 or 7 |
+| `ErrNotTimeBased` | `GetTimestamp`/`GetTimestampIn` was given a UUID that isn't an RFC 9562 version 6 or 7 (in that layout): another version, or another variant |
 | `ErrNegativeCount` | `NewV6Batch`/`NewV7Batch` (and their `At` forms) were given a negative count. A count of 0 returns a nil slice |
+| `ErrBatchTooLarge` | a v7 batch or fill asked for more than `MaxV7Batch` UUIDs, checked before anything is allocated or written |
+| `ErrBatchUnaddressable` | the core can't address `count*16` bytes on this platform — reachable only on a 32-bit target |
 | `ErrBufferNotWholeUUIDs` | a `FillV6Bytes`/`FillV7Bytes` destination isn't a multiple of 16 bytes long |
-| `ErrNotOneUUID` | a raw-byte SQL-order transform was given a buffer that isn't exactly 16 bytes |
+| `ErrNotOneUUID` | a raw-byte SQL-order transform, or `VersionBytes`/`VariantBytes`/`IsRfcBytes`, was given a buffer that isn't exactly 16 bytes |
+| `ErrInvalidLayout` | a function that takes a `UuidLayout` was given `LayoutUnspecified` or an undefined value |
 
 `ErrNativeUnavailable` is deprecated and never returned; it stays so code that tests for it
 keeps compiling.
@@ -183,11 +221,15 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 
 `FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 3% of each other, since neither converts; the byte form exists for convenience, not speed.
 
-`NewV6BatchAt`/`NewV7BatchAt` now delegate to the fills, so the array-returning API is a single allocation with no intermediate copy — existing callers got faster without changing a line.
+`NewV6BatchAt`/`NewV7BatchAt` delegate to the fills, so the array-returning API is a single allocation with no intermediate copy.
+
+### Batch size and order
+
+One v7 batch or fill takes at most `MaxV7Batch` UUIDs — 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond — and every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it returns `ErrBatchTooLarge` before anything is allocated or written. Version 6 has no counter and no such limit.
 
 ### Raw-byte SQL-order transforms
 
-`V6/V7ToSqlOrderBytes` and `V6/V7FromSqlOrderBytes` apply the same native permutation as `V7ToSqlOrder` in place on a caller's 16-byte slice. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo now makes against the one native implementation.
+`V6/V7ToSqlOrderBytes` and `V6/V7FromSqlOrderBytes` apply the same native permutation as `V7ToSqlOrder` in place on a caller's 16-byte slice. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo makes against the one native implementation.
 
 ## The native library: `Available`, `LoadError`, `NativeVersion`
 
@@ -216,6 +258,7 @@ points.
 | Windows x64 / arm64 | `staticlib/windows_amd64`, `staticlib/windows_arm64` | nothing (the C runtime) |
 | iOS arm64 — device, simulator | `staticlib/ios_arm64`, `staticlib/iossimulator_arm64` | the C library |
 | Mac Catalyst arm64 / x64 | `staticlib/maccatalyst_arm64`, `staticlib/maccatalyst_amd64` | the C library |
+| [Android](#android) arm64 / x64 (API 21+) | `staticlib/android_arm64`, `staticlib/android_amd64` | Bionic, the C library |
 | WebAssembly under [TinyGo](#in-the-browser-tinygo) — browser, WASI | `staticlib/wasm` | wasi-libc, which TinyGo links anyway |
 
 Each build names one archive on its link line and that is all it takes from this module:
@@ -256,6 +299,28 @@ CI checks that every platform and tag combination selects its own archive
 (`.github/scripts/check_go_archives.sh`), runs this suite in an iOS simulator through Go's
 `misc/ios/go_ios_exec.go`, and links a device build. Mac Catalyst is not linked from Go
 there; its archives are the ones the Swift and C# bindings link and run in the same job.
+
+### Android
+
+`GOOS=android` with cgo, the NDK's clang as `CC`, as `gomobile` arranges and as any cgo
+package on Android needs:
+
+```shell
+CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
+  GOOS=android GOARCH=arm64 CGO_ENABLED=1 go build ./...
+```
+
+(`x86_64-linux-android21-clang` and `GOARCH=amd64` for the emulator.) `GOOS=android` also
+satisfies Go's `linux` constraint, so the Linux link lines exclude it and it takes its own
+archives, built for Android against Bionic. Page alignment is the final link's: NDK r28 and
+later align to the 16 KB pages Android 15 devices may use by default, and an older NDK
+needs `-extldflags=-Wl,-z,max-page-size=16384`.
+
+CI checks that both select their own archive (`.github/scripts/check_go_archives.sh`),
+cross-compiles this whole suite for `android/amd64`, and runs it in an x86_64 emulator whose
+image uses 16 KB pages (`.github/scripts/android_build_suite.sh` and
+`android_device_test.sh`, which run the same way against a local emulator), with `-short`
+so the one 1 GiB batch test is left to the other platforms; `android/arm64` is linked.
 
 ### Deploying
 

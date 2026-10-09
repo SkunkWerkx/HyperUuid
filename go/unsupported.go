@@ -1,10 +1,9 @@
-//go:build !((cgo && !tinygo && !android && (darwin || linux || windows) && (amd64 || arm64) && !(ios && amd64 && !maccatalyst)) || tinygo.wasm)
+//go:build !((cgo && !tinygo && (darwin || linux || windows) && (amd64 || arm64) && !(ios && amd64 && !maccatalyst)) || tinygo.wasm)
 
 // Every build neither backend covers lands here, and stops: CGO_ENABLED=0 (Go's default for
 // a cross-compile, and whenever no C compiler is found), stock Go's GOOS=wasip1 and js, TinyGo
-// on anything but WebAssembly, and any platform there is no archive for (Android and the iOS
-// simulator on amd64 among them, which the linux and darwin constraints would otherwise let
-// through). Go has no #error, so
+// on anything but WebAssembly, and any platform there is no archive for (the iOS simulator
+// on amd64 among them, which the darwin constraint would otherwise let through). Go has no #error, so
 // the stop is a reference to an identifier that does not exist, named to read as the
 // explanation in the compiler's "undefined:" message. The alternative was a build that
 // compiles and then fails every call at run time, which is what this module used to do on

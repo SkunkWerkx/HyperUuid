@@ -67,6 +67,12 @@
     <EmccExportedFunction Include="_uuid_v7_to_rfc_order" />
     <EmccExportedFunction Include="_uuid_v6_to_sql_order" />
     <EmccExportedFunction Include="_uuid_v6_to_rfc_order" />
+    <EmccExportedFunction Include="_uuid_version" />
+    <EmccExportedFunction Include="_uuid_variant" />
+    <EmccExportedFunction Include="_uuid_is_rfc" />
+    <EmccExportedFunction Include="_uuid_get_timestamp" />
+    <EmccExportedFunction Include="_uuid_v6_unix_millis_in" />
+    <EmccExportedFunction Include="_uuid_v7_unix_millis_in" />
   </ItemGroup>
 
   <!-- .NET 11 and later link browser-wasm with the new (exnref) exception-handling encoding,

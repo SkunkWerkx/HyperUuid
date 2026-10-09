@@ -1,6 +1,6 @@
 [package]
 name = "hyperuuid"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.85"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
@@ -92,6 +92,7 @@ no-panic = ["dep:no-panic"]
 
 [dev-dependencies]
 criterion = "0.8.2"
+serde_json = "1"
 uuid = { version = "1", features = ["v4", "v5", "v6", "v7"] }
 
 [[bench]]

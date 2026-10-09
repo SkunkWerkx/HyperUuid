@@ -28,6 +28,17 @@ module HyperUuid
     V6_TIMESTAMP_OUT_OF_RANGE = "unix_millis does not fit the 60-bit v6 timestamp field"
     V7_TIMESTAMP_OUT_OF_RANGE = "unix_millis must fit within the RFC 9562 48-bit field"
 
+    # The two batch-size refusals, shared the same way: a version 7 batch past the 26-bit
+    # counter space (the core's return code 4, which the doors in hyperuuid.rb refuse before
+    # either backend sees it), and a batch whose byte length the platform cannot address
+    # (code 3, reachable only on a 32-bit target such as ruby.wasm). Both are argument
+    # errors, never a random source failure.
+    V7_BATCH_TOO_LARGE = "a single version 7 batch takes at most 67108864 UUIDs (the 26-bit counter space)"
+    BATCH_TOO_LARGE_TO_ADDRESS = "the batch is too large to address on this platform"
+
+    # The core's v7::MAX_BATCH, which hyperuuid.rb publishes as HyperUuid::MAX_V7_BATCH.
+    MAX_V7_BATCH = 1 << 26
+
     NATIVE_DIR = File.join(__dir__, "native")
 
     @mutex = Mutex.new
@@ -76,6 +87,7 @@ module HyperUuid
         case rc
         when 0 then out[0, count * 16]
         when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
+        when 3 then raise ArgumentError, BATCH_TOO_LARGE_TO_ADDRESS
         else raise random_source_failure("uuid_new_v6_batch")
         end
       end
@@ -96,14 +108,53 @@ module HyperUuid
 
       def new_v7_batch(count, unix_millis)
         return "" if count.zero?
+        # Before the buffer: a count past the counter space would otherwise allocate up to
+        # 64 GiB only for the core to refuse it with code 4.
+        raise ArgumentError, V7_BATCH_TOO_LARGE if count > MAX_V7_BATCH
 
         out = buffer(count * 16)
         rc = functions[:new_v7_batch].call(unix_millis, count, out)
         case rc
         when 0 then out[0, count * 16]
         when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
+        when 3 then raise ArgumentError, BATCH_TOO_LARGE_TO_ADDRESS
+        when 4 then raise ArgumentError, V7_BATCH_TOO_LARGE
         else raise random_source_failure("uuid_new_v7_batch")
         end
+      end
+
+      # The inspection exports. +layout+ is the core's layout code (1 RFC 9562, 2 SQL Server),
+      # which Uuid has already validated; +bytes+ are 16, held in that layout's order.
+      def version(bytes, layout)
+        functions[:version].call(bytes, layout)
+      end
+
+      # The core's variant code: 1 NCS, 2 RFC 9562, 3 Microsoft, 4 future (Uuid#variant maps
+      # it to a Symbol, for both backends).
+      def variant(bytes)
+        functions[:variant].call(bytes)
+      end
+
+      # +version+ is 0-15 here: Uuid#rfc? answers false for anything else without asking.
+      def is_rfc(bytes, version, layout)
+        functions[:is_rfc].call(bytes, version, layout) == 1
+      end
+
+      # The Unix ms of an RFC 9562 version 6 or 7 UUID held in +layout+'s order, or nil for
+      # anything else — another version, another variant. One core call; the version it
+      # answers with is not needed above Runtime, so it is dropped here.
+      def get_timestamp(bytes, layout)
+        out = millis_scratch
+        version = functions[:get_timestamp].call(bytes, layout, out)
+        version.zero? ? nil : out[0, 8].unpack1("Q")
+      end
+
+      def v6_unix_millis_in(bytes, layout)
+        functions[:v6_unix_millis_in].call(bytes, layout)
+      end
+
+      def v7_unix_millis_in(bytes, layout)
+        functions[:v7_unix_millis_in].call(bytes, layout)
       end
 
       def v7_to_sql_order(bytes)
@@ -126,7 +177,7 @@ module HyperUuid
       # library's zero-argument hyperuuid_version export. HyperUuid.native_version unpacks
       # it; like every method here, each backend replaces this one in place.
       def packed_version
-        functions[:version].call
+        functions[:packed_version].call
       end
 
       # The one failure every generating export shares, with the one message every backend
@@ -185,6 +236,12 @@ module HyperUuid
       # magnitude. Batches keep a per-call buffer: one malloc amortized over `count` IDs.
       def scratch
         Thread.current[:hyperuuid_scratch] ||= buffer(16)
+      end
+
+      # The u64 get_timestamp writes, per thread for the same reason as #scratch, and apart from
+      # it so the UUID bytes passed in are never the buffer being written.
+      def millis_scratch
+        Thread.current[:hyperuuid_millis_scratch] ||= buffer(8)
       end
 
       # Every Fiddle allocation goes through here, and loads the library first: that is what
@@ -274,8 +331,34 @@ module HyperUuid
             [Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_VOID
           ),
+          version: Fiddle::Function.new(
+            handle["uuid_version"],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T],
+            Fiddle::TYPE_UINT32_T
+          ),
+          variant: Fiddle::Function.new(handle["uuid_variant"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_UINT32_T),
+          is_rfc: Fiddle::Function.new(
+            handle["uuid_is_rfc"],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_UINT32_T],
+            Fiddle::TYPE_UINT32_T
+          ),
+          get_timestamp: Fiddle::Function.new(
+            handle["uuid_get_timestamp"],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
+            Fiddle::TYPE_UINT32_T
+          ),
+          v6_unix_millis_in: Fiddle::Function.new(
+            handle["uuid_v6_unix_millis_in"],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T],
+            Fiddle::TYPE_UINT64_T
+          ),
+          v7_unix_millis_in: Fiddle::Function.new(
+            handle["uuid_v7_unix_millis_in"],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T],
+            Fiddle::TYPE_UINT64_T
+          ),
           # The one export that mints nothing: the zero-argument version probe.
-          version: Fiddle::Function.new(handle["hyperuuid_version"], [], Fiddle::TYPE_UINT32_T),
+          packed_version: Fiddle::Function.new(handle["hyperuuid_version"], [], Fiddle::TYPE_UINT32_T),
         }
       end
     end

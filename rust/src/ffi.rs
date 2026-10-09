@@ -7,9 +7,15 @@
 //!
 //! Return codes: `0` success, `1` random source failure, `2` timestamp out of range, `3` a
 //! batch too large to address (`count * 16` overflows `usize`, which only a 32-bit target can
-//! reach, and where no buffer that size can exist).
+//! reach, and where no buffer that size can exist), `4` a version 7 batch larger than the
+//! 26-bit counter space.
+//!
+//! Enum codes reserve 0 as "unspecified", so a code a binding failed to set is detectable:
+//! layout `1` RFC 9562, `2` SQL Server; variant `1` NCS, `2` RFC 9562, `3` Microsoft,
+//! `4` Future. An export handed a layout code it doesn't know answers as it would for a value
+//! the layout doesn't apply to (0 / false) rather than guessing.
 
-use crate::{Uuid, v4, v5, v6, v7};
+use crate::{Layout, Uuid, Variant, v4, v5, v6, v7};
 use core::slice;
 
 /// This library's version, packed `major << 16 | minor << 8 | patch` from the crate's own
@@ -34,6 +40,59 @@ pub extern "C" fn hyperuuid_version() -> u32 {
         | (field(env!("CARGO_PKG_VERSION_MINOR")) << 8)
         | field(env!("CARGO_PKG_VERSION_PATCH"));
     VERSION
+}
+
+/// The layout behind an ABI layout code, or `None` for an unknown one.
+#[inline]
+const fn layout(code: u32) -> Option<Layout> {
+    match code {
+        1 => Some(Layout::Rfc9562),
+        2 => Some(Layout::SqlServer),
+        _ => None,
+    }
+}
+
+/// Reads the 16 bytes at `uuid_ptr`.
+#[inline]
+fn read(uuid_ptr: *const u8) -> Uuid {
+    // SAFETY: caller guarantees `uuid_ptr` points to 16 live bytes, per the module contract.
+    Uuid::from_bytes(unsafe { core::ptr::read(uuid_ptr.cast::<[u8; 16]>()) })
+}
+
+/// The version of the UUID at `uuid_ptr` (16 bytes) held in `layout`'s byte order (see
+/// [`Uuid::version_in`]): the version nibble, 0-15, in RFC 9562 order; 6, 7, or 0 for "not a
+/// SQL-ordered v6/v7" in SQL Server order; 0 for an unknown layout code.
+#[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub extern "C" fn uuid_version(uuid_ptr: *const u8, layout_code: u32) -> u32 {
+    match layout(layout_code) {
+        Some(layout) => read(uuid_ptr).version_in(layout) as u32,
+        None => 0,
+    }
+}
+
+/// The variant of the UUID at `uuid_ptr` (16 bytes, RFC 9562 order) as a variant code, 1-4.
+#[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub extern "C" fn uuid_variant(uuid_ptr: *const u8) -> u32 {
+    match read(uuid_ptr).variant() {
+        Variant::Ncs => 1,
+        Variant::Rfc9562 => 2,
+        Variant::Microsoft => 3,
+        Variant::Future => 4,
+    }
+}
+
+/// 1 if the UUID at `uuid_ptr` (16 bytes, held in `layout`'s byte order) is an RFC 9562 UUID
+/// of version `version`, else 0 (see [`Uuid::is_rfc_in`]) — the one-call guard. 0 for an
+/// unknown layout code or a `version` past 15.
+#[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub extern "C" fn uuid_is_rfc(uuid_ptr: *const u8, version: u32, layout_code: u32) -> u32 {
+    match (layout(layout_code), u8::try_from(version)) {
+        (Some(layout), Ok(version)) => read(uuid_ptr).is_rfc_in(version, layout) as u32,
+        _ => 0,
+    }
 }
 
 /// Writes a random UUID version 4 (RFC 9562 §5.4) to `out_ptr` (16 bytes).
@@ -111,6 +170,40 @@ pub extern "C" fn uuid_v6_unix_millis(uuid_ptr: *const u8) -> u64 {
     v6::unix_millis(&Uuid::from_bytes(bytes))
 }
 
+/// The version-agnostic timestamp read ([`crate::get_timestamp_in`]) in one call: for an RFC
+/// 9562 version 6 or 7 UUID at `uuid_ptr` (16 bytes, held in `layout`'s byte order), writes
+/// its Unix-epoch milliseconds to `millis_out` and returns the version, 6 or 7. For anything
+/// else — another version, another variant, an unknown layout code — returns 0 and leaves
+/// `millis_out` untouched.
+#[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub extern "C" fn uuid_get_timestamp(
+    uuid_ptr: *const u8,
+    layout_code: u32,
+    millis_out: *mut u64,
+) -> u32 {
+    match layout(layout_code).and_then(|layout| crate::timestamp_in(&read(uuid_ptr), layout)) {
+        Some((version, millis)) => {
+            // SAFETY: caller guarantees `millis_out` points to a live, writable u64.
+            unsafe { millis_out.write_unaligned(millis) };
+            version as u32
+        }
+        None => 0,
+    }
+}
+
+/// [`uuid_v6_unix_millis`] for a version 6 UUID held in `layout`'s byte order, reading a
+/// SQL-ordered value's permuted octets directly. Meaningful only for a genuine version 6
+/// UUID in that layout ([`uuid_is_rfc`] is the check); 0 for an unknown layout code.
+#[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub extern "C" fn uuid_v6_unix_millis_in(uuid_ptr: *const u8, layout_code: u32) -> u64 {
+    match layout(layout_code) {
+        Some(layout) => v6::unix_millis_in(&read(uuid_ptr), layout),
+        None => 0,
+    }
+}
+
 /// Writes `count` time-sortable UUID version 6 values to `out_ptr` (`count * 16` bytes),
 /// sharing one `unix_millis` timestamp capture. `clock_seq` and `node` are randomly
 /// generated per item. A `count` of 0 is a no-op success.
@@ -179,6 +272,7 @@ pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
         // Only a batch has a buffer to be short of; mapped anyway rather than panicking.
         Err(v7::NewV7Error::BufferTooSmall) => 3,
+        Err(v7::NewV7Error::BatchTooLarge) => 4,
     }
 }
 
@@ -193,11 +287,24 @@ pub extern "C" fn uuid_v7_unix_millis(uuid_ptr: *const u8) -> u64 {
     v7::unix_millis(&Uuid::from_bytes(bytes))
 }
 
+/// [`uuid_v7_unix_millis`] for a version 7 UUID held in `layout`'s byte order, reading a
+/// SQL-ordered value's permuted octets directly. Meaningful only for a genuine version 7
+/// UUID in that layout ([`uuid_is_rfc`] is the check); 0 for an unknown layout code.
+#[unsafe(no_mangle)]
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub extern "C" fn uuid_v7_unix_millis_in(uuid_ptr: *const u8, layout_code: u32) -> u64 {
+    match layout(layout_code) {
+        Some(layout) => v7::unix_millis_in(&read(uuid_ptr), layout),
+        None => 0,
+    }
+}
+
 /// Writes `count` time-sortable UUID version 7 values to `out_ptr` (`count * 16` bytes),
 /// sharing one `unix_millis` timestamp capture and one contiguous block of the monotonic
-/// counter. A `count` of 0 is a no-op success.
+/// counter. A `count` of 0 is a no-op success. Items past the counter's wrap are stamped
+/// `unix_millis + 1`, so the batch is always in order (see [`v7::new_v7_batch`]).
 /// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
-/// 3 if `count * 16` overflows `usize` (32-bit targets only).
+/// 4 if `count` exceeds [`v7::MAX_BATCH`] (2^26).
 #[unsafe(no_mangle)]
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32 {
@@ -217,6 +324,7 @@ pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut 
         Err(v7::NewV7Error::Random(_)) => 1,
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
         Err(v7::NewV7Error::BufferTooSmall) => 3,
+        Err(v7::NewV7Error::BatchTooLarge) => 4,
     }
 }
 

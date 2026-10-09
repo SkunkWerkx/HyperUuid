@@ -179,34 +179,50 @@ func NewV7AtTime(t time.Time) (uuid.UUID, error) {
 }
 
 // GetTimestamp recovers the UTC timestamp embedded in id as a time.Time, or ErrNotTimeBased if
-// id isn't a version 6 or 7 UUID. Unlike V6Timestamp/V7Timestamp, this checks id.Version()
-// itself first, so a caller doesn't need to already know (or separately check) which version id
-// is before asking — delegates straight to whichever of those two functions applies, no
-// bit-layout logic duplicated here.
+// id isn't an RFC 9562 version 6 or 7 UUID. Unlike V6Timestamp/V7Timestamp, this checks the
+// variant and version itself, so a caller doesn't need to already know (or separately check)
+// which version id is before asking: a 6 or 7 nibble under a variant other than RFC 9562's
+// has no version, and so no timestamp. One core call does the check and the read, with no
+// bit-layout logic here. GetTimestampIn is the form for a SQL-ordered value.
 func GetTimestamp(id uuid.UUID) (time.Time, error) {
-	switch id.Version() {
-	case 6:
-		return V6Timestamp(id)
-	case 7:
-		return V7Timestamp(id)
-	default:
-		return time.Time{}, ErrNotTimeBased
-	}
+	return timestampIn(id, uint32(LayoutRfc9562))
+}
+
+// MaxV7Batch is the most UUIDs one version 7 batch (NewV7Batch, NewV7BatchAt and the FillV7
+// family) mints: 67,108,864, the size of the 26-bit counter that orders UUIDs within a
+// millisecond.
+//
+// Every batch up to this size is in strictly increasing order. The counter is one
+// process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
+// UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
+// than sorting before the ones ahead of them. A larger batch would have to reuse counter
+// values within one millisecond, so it is refused with ErrBatchTooLarge before anything is
+// allocated or written. Version 6 has no counter and no such limit.
+const MaxV7Batch = 1 << 26
+
+// errV7BatchTooLarge is the ErrBatchTooLarge a v7 batch of count returns.
+func errV7BatchTooLarge(count int) error {
+	return fmt.Errorf("%w: got %d", ErrBatchTooLarge, count)
 }
 
 // NewV7Batch creates count time-sortable version 7 UUIDs sharing one timestamp capture and
 // one contiguous block of the monotonic counter, using the current time — one native call and
-// one random-bytes fetch instead of count of each.
+// one random-bytes fetch instead of count of each. Same order and limits as NewV7BatchAt.
 func NewV7Batch(count int) ([]uuid.UUID, error) {
 	return NewV7BatchAt(count, uint64(time.Now().UnixMilli()))
 }
 
 // NewV7BatchAt creates count time-sortable version 7 UUIDs sharing one unixMillis timestamp
-// capture and one contiguous block of the monotonic counter. A count of 0 returns a nil
-// slice; a negative one returns ErrNegativeCount.
+// capture and one contiguous block of the monotonic counter, in strictly increasing order: if
+// the batch straddles the counter's wrap, the UUIDs from the wrap on carry unixMillis + 1 (see
+// MaxV7Batch). A count of 0 returns a nil slice; a negative one returns ErrNegativeCount, and
+// one past MaxV7Batch ErrBatchTooLarge, before the result is allocated.
 func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if count < 0 {
 		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
+	}
+	if count > MaxV7Batch {
+		return nil, errV7BatchTooLarge(count)
 	}
 	if count == 0 {
 		return nil, nil
@@ -298,6 +314,10 @@ func errBatch(fn string, rc int32) error {
 		return nil
 	case 2:
 		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrTimestampOutOfRange)
+	case 3:
+		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrBatchUnaddressable)
+	case 4:
+		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrBatchTooLarge)
 	default:
 		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrRandomSource)
 	}
@@ -346,14 +366,20 @@ func FillV6At(dst []uuid.UUID, unixMillis uint64) error {
 }
 
 // FillV7 fills dst with time-sortable version 7 UUIDs sharing one timestamp capture and one
-// contiguous block of the monotonic counter, using the current time.
+// contiguous block of the monotonic counter, using the current time. Same order and limits
+// as FillV7At.
 func FillV7(dst []uuid.UUID) error {
 	return FillV7At(dst, uint64(time.Now().UnixMilli()))
 }
 
 // FillV7At fills dst with version 7 UUIDs sharing the given unixMillis timestamp capture and
-// one contiguous block of the monotonic counter.
+// one contiguous block of the monotonic counter, in strictly increasing order: if the batch
+// straddles the counter's wrap, the UUIDs from the wrap on carry unixMillis + 1 (see
+// MaxV7Batch). A dst longer than MaxV7Batch returns ErrBatchTooLarge with nothing written.
 func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
+	if len(dst) > MaxV7Batch {
+		return errV7BatchTooLarge(len(dst))
+	}
 	return fillUUIDs(dst, unixMillis, "uuid_new_v7_batch",
 		newV7Batch)
 }
@@ -380,8 +406,13 @@ func FillV7Bytes(dst []byte) error {
 }
 
 // FillV7BytesAt fills dst with raw RFC 9562-ordered version 7 UUID bytes sharing the given
-// unixMillis timestamp capture and one contiguous block of the monotonic counter.
+// unixMillis timestamp capture and one contiguous block of the monotonic counter, in strictly
+// increasing order (see FillV7At). A dst of more than MaxV7Batch UUIDs returns
+// ErrBatchTooLarge with nothing written.
 func FillV7BytesAt(dst []byte, unixMillis uint64) error {
+	if len(dst)%16 == 0 && len(dst)/16 > MaxV7Batch {
+		return errV7BatchTooLarge(len(dst) / 16)
+	}
 	return fillBytes(dst, unixMillis, "uuid_new_v7_batch",
 		newV7Batch)
 }

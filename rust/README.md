@@ -24,12 +24,20 @@ let sql_ordered6 = v6::to_sql_order(&id3); // same, for a version 6 UUID
 let ts2: Option<hyperuuid::Timestamp> = hyperuuid::get_timestamp(&id4);
 let id5 = v7::new_v7_at(ts2.unwrap())?; // pulls the millis back off Timestamp, same as new_v7
 
-// One random-bytes fetch, one counter reservation for the whole batch:
+// Inspection: is this an RFC 9562 UUID of version 7? And the same questions of a value
+// still in SQL Server order, read from its permuted bytes in place:
+use hyperuuid::{Layout, Variant};
+assert!(id4.is_rfc(7) && id4.variant() == Variant::Rfc9562);
+assert_eq!(sql_ordered.version_in(Layout::SqlServer), 7);
+let ts3 = hyperuuid::get_timestamp_in(&sql_ordered, Layout::SqlServer);
+
+// One random-bytes fetch, one counter reservation for the whole batch (at most
+// v7::MAX_BATCH, the 26-bit counter space; always strictly increasing):
 let mut out = vec![0u8; 1000 * 16];
 v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 ```
 
-`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for any other version), and [`v6::new_v6_at`]/[`v7::new_v7_at`] accept one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v6`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed once here and verified against the real `System.Data.SqlTypes.SqlGuid` comparator. `v6::to_sql_order`/`v6::to_rfc_order` do the same for version 6 — a much simpler whole-byte-group relocation, since v6 has no counter to repack at the bit level, just its 60-bit timestamp; note that same-millisecond v6 UUIDs aren't guaranteed to sort in creation order even after this conversion, since `clock_seq`/`node` are random per call rather than a counter (a pre-existing RFC 9562 v6 limitation, not something this introduces). This crate's own test suite verifies that sort behavior against a comparator replicating `SqlGuid`'s documented byte order. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. The draw is one `getrandom` call, except that on Linux and Android a batch of 32 v7 or 24 v6 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.5x faster on glibc and 3.5x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
+`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v6 or v7 — the variant is checked too), and [`v6::new_v6_at`]/[`v7::new_v7_at`] accept one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v6`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed once here and verified against the real `System.Data.SqlTypes.SqlGuid` comparator. `v6::to_sql_order`/`v6::to_rfc_order` do the same for version 6 — a much simpler whole-byte-group relocation, since v6 has no counter to repack at the bit level, just its 60-bit timestamp; note that same-millisecond v6 UUIDs aren't guaranteed to sort in creation order even after this conversion, since `clock_seq`/`node` are random per call rather than a counter (a pre-existing RFC 9562 v6 limitation, not something this introduces). This crate's own test suite verifies that sort behavior against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v6::unix_millis_in`/`v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there only versions 6 and 7 exist, and the two are never confused, because each check includes the variant bits where that version puts them. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 v7 or 24 v6 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.5x faster on glibc and 3.5x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
 
 ## Why not the `uuid` crate?
 
@@ -113,7 +121,7 @@ Unlike the native library, the module is built with std: its allocator exports c
 wasi-libc by way of std's allocator, and a `no_std` module does not link wasi-libc at all.
 
 That config adds two linker flags for this target only, `--export=malloc` and
-`--export=free`, so the module's exports are the twelve `uuid_*` functions and
+`--export=free`, so the module's exports are the eighteen `uuid_*` functions and
 `hyperuuid_version` from `ffi.rs` plus wasi-libc's allocator. A wasm host cannot hand this library a pointer into its own
 memory, so every embedder — GraalWasm inside the Java binding here — asks the guest for the
 buffer it will fill and reads the result back out of the exported `memory`. The exported allocator is what makes that safe: dlmalloc
@@ -123,7 +131,7 @@ allocation. The module imports five `wasi_snapshot_preview1` functions (`random_
 wasi-libc's `environ_*`, `fd_write` and `proc_exit`) and nothing else; there is no clock,
 because `now_v7` is compiled out on `wasm32` and every other door takes the host's
 timestamp. `ffi.rs` itself is untouched by any of this; on every native target the C ABI is
-still exactly those thirteen exports.
+still exactly those nineteen exports.
 
 The C# binding's Blazor WebAssembly support takes a second wasm build, the
 `wasm32-unknown-emscripten` static library its NuGet package links into the app:
@@ -194,7 +202,7 @@ paths across those boundaries in, and fails the link for the generators; thin LT
 
 ```toml
 [dependencies]
-hyperuuid = { version = "0.6", features = ["no-panic"] }
+hyperuuid = { version = "0.8", features = ["no-panic"] }
 
 [profile.release]
 lto = true

@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "hyperuuid"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chacha20",
  "criterion",
@@ -770,6 +770,7 @@ dependencies = [
  "magnus",
  "no-panic",
  "pyo3",
+ "serde_json",
  "sha1",
  "uuid",
 ]

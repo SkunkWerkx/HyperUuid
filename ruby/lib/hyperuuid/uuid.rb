@@ -38,6 +38,17 @@ module HyperUuid
     HYPHENATED = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
     private_constant :HYPHENATED
 
+    # The byte orders a Uuid can hold, as the +layout:+ keyword of #version, #rfc? and
+    # #timestamp takes them, mapped to the native core's layout codes. +:rfc9562+ is RFC 9562
+    # order, what every other method here takes and returns. +:sql_server+ is the order
+    # #to_sql_order returns, defined for versions 6 and 7 only.
+    LAYOUTS = { rfc9562: 1, sql_server: 2 }.freeze
+
+    # The Symbols #variant returns, indexed by the native core's variant code (1-4; 0 is
+    # reserved and never returned). The one place that code becomes a Symbol, for both backends.
+    VARIANTS = [nil, :ncs, :rfc9562, :microsoft, :future].freeze
+    private_constant :VARIANTS
+
     # Parses an 8-4-4-4-12 hyphenated hex UUID string — exactly the shape #to_s produces, in
     # either case. Nothing else parses: not the bare 32 hex digits, not hyphens anywhere but
     # those four positions, not braces or a `urn:uuid:` prefix.
@@ -51,14 +62,40 @@ module HyperUuid
       new([string.delete("-")].pack("H*"))
     end
 
-    # The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6).
-    def version
-      (bytes.getbyte(6) >> 4) & 0x0F
+    # The version of this UUID, read by the native core in +layout+'s byte order.
+    #
+    # In +:rfc9562+ (the default) it is the version nibble (bits 48-51, the high nibble of
+    # octet 6), 0 through 15: Nil reads as 0 and Max as 15. It says nothing about the variant;
+    # #rfc? checks both. In +:sql_server+, the order #to_sql_order returns, it is 6 or 7 for a
+    # SQL-ordered version 6 or 7 UUID and 0 when the bytes don't form one, since no other
+    # version has a SQL Server order. It reads the bytes as given: an RFC-ordered value can
+    # happen to form a SQL-ordered v6 or v7, so the layout is the caller's to know.
+    #
+    # @raise [ArgumentError] if +layout+ isn't one of LAYOUTS' keys.
+    def version(layout: :rfc9562)
+      Runtime.version(bytes, layout_code(layout))
     end
 
-    # The RFC 9562 variant bits (top two bits of octet 8). +0b10+ means RFC 9562/4122.
+    # The variant of this UUID (RFC 9562 §4.1), read by the native core in RFC 9562 order, as a
+    # Symbol: +:rfc9562+ (+10xx+, every UUID this gem mints, and the only variant that has
+    # versions), +:ncs+ (+0xxx+, Nil among them), +:microsoft+ (+110x+) or +:future+ (+111x+,
+    # Max among them).
     def variant
-      (bytes.getbyte(8) >> 6) & 0b11
+      VARIANTS.fetch(Runtime.variant(bytes))
+    end
+
+    # Whether this is an RFC 9562 UUID of version +version+, read in +layout+'s byte order —
+    # the RFC 9562 variant and that version together, the guard to run before trusting a
+    # value's version-specific fields. In +:sql_server+ only 6 and 7 can be true. A version
+    # outside 0-15 is simply false.
+    #
+    # @raise [TypeError] if +version+ isn't an Integer.
+    # @raise [ArgumentError] if +layout+ isn't one of LAYOUTS' keys.
+    def rfc?(version, layout: :rfc9562)
+      raise TypeError, "version must be an Integer; got #{version.class}" unless version.is_a?(Integer)
+
+      code = layout_code(layout)
+      version.between?(0, 15) && Runtime.is_rfc(bytes, version, code)
     end
 
     # The 8-4-4-4-12 hyphenated hex string representation.
@@ -68,26 +105,24 @@ module HyperUuid
     end
     alias_method :to_str, :to_s
 
-    # The UTC timestamp embedded in a version 6 or 7 UUID's timestamp field. Only meaningful
-    # when `version` is 6 or 7 — the RFC 9562 bit layout doesn't distinguish "not a time-based
-    # UUID" from "time-based UUID with a very early timestamp", so the caller is responsible
-    # for checking `version` first if that matters.
+    # The UTC timestamp embedded in an RFC 9562 version 6 or 7 UUID, held in +layout+'s byte
+    # order: +:rfc9562+ (the default), or +:sql_server+ for a value #to_sql_order returned. One
+    # native call that checks the variant as well as the version: a 6 or 7 in the version
+    # nibble under any variant but +:rfc9562+ is not a version 6 or 7 UUID, so it has no
+    # timestamp (#rfc? is the same check on its own).
     #
-    # Raises by default for any other version; pass `raise_on_mismatch: false` to get `nil`
-    # back instead — for a caller that doesn't already know (or want to separately check)
-    # whether this UUID is time-based.
-    def timestamp(raise_on_mismatch: true)
-      millis =
-        case version
-        when 6 then Runtime.v6_unix_millis(bytes)
-        when 7 then Runtime.v7_unix_millis(bytes)
-        else
-          raise ArgumentError,
-                "timestamp is only defined for version 6 or 7 UUIDs, got version #{version}" if raise_on_mismatch
+    # Raises by default for anything that isn't an RFC 9562 version 6 or 7 UUID; pass
+    # `raise_on_mismatch: false` to get `nil` back instead — for a caller that doesn't already
+    # know (or want to separately check) whether this UUID is time-based.
+    #
+    # @raise [ArgumentError] if this isn't an RFC 9562 version 6 or 7 UUID in +layout+ (unless
+    #   +raise_on_mismatch+ is false), or +layout+ isn't one of LAYOUTS' keys.
+    def timestamp(raise_on_mismatch: true, layout: :rfc9562)
+      millis = Runtime.get_timestamp(bytes, layout_code(layout))
+      return Time.at(millis / 1000, millis % 1000, :millisecond).utc if millis
+      return nil unless raise_on_mismatch
 
-          return nil
-        end
-      Time.at(millis / 1000, millis % 1000, :millisecond).utc
+      raise ArgumentError, timestamp_mismatch(layout)
     end
 
     # Converts an RFC 9562-ordered version 6 or 7 UUID to the byte order SQL Server's
@@ -130,29 +165,22 @@ module HyperUuid
     # Inverse of #to_sql_order — converts a SQL-Server-ordered version 6 or 7 UUID back to
     # RFC 9562 order.
     #
-    # A SQL-ordered value's version nibble sits at a different octet depending on which
-    # version produced it (octet 7's top nibble = 7 for v7-sql-order, octet 8's top nibble =
-    # 6 for v6-sql-order — #version itself assumes RFC order's octet 6 and can't tell these
-    # apart), so this checks both fixed positions directly rather than calling #version.
+    # A SQL-ordered value's version sits at a different octet depending on which version
+    # produced it, so this asks the native core which one it is — `version(layout:
+    # :sql_server)`, which checks each version's nibble together with its variant bits and
+    # so never mistakes a v6 whose random `clock_seq` byte happens to read as a v7 nibble.
     #
-    # Order matters here and isn't arbitrary: octet 8 must be checked *first*. For v6-sql-order
-    # it's deterministic (top nibble always 0x6, by construction), and for v7-sql-order it's
-    # also deterministic but structurally excluded from ever reading 0x6 (its top two bits are
-    # the fixed variant `10`, so the nibble only ever lands in 0x8-0xB) — no collision either
-    # way. Octet 7, by contrast, is *not* safe to check first: for v7-sql-order it's
-    # deterministically 0x7, but for v6-sql-order it holds `clock_seq`'s fully random low
-    # byte, which has a real (~1-in-16) chance of a top nibble that also happens to read 0x7 —
-    # confirmed by an actual test failure during development, not a hypothetical. Checking
-    # octet 8 first rules v6 in or out unambiguously before octet 7's reading can matter.
+    # The layout is the caller's to know: bytes alone cannot say which order they are in. A
+    # value that was never SQL-ordered can still read as one, and is then converted rather
+    # than refused (a random RFC-ordered v4 reads as a SQL-ordered v7 one time in 16, since its
+    # octet 8 already carries the RFC variant and its octet 7 is random).
+    #
+    # @raise [ArgumentError] if this isn't a SQL-ordered version 6 or 7 UUID.
     def from_sql_order
-      octet8_version = (bytes.getbyte(8) >> 4) & 0x0F
-      octet7_version = (bytes.getbyte(7) >> 4) & 0x0F
-      if octet8_version == 6
-        self.class.new(Runtime.v6_to_rfc_order(bytes), true)
-      elsif octet7_version == 7
-        self.class.new(Runtime.v7_to_rfc_order(bytes), true)
-      else
-        raise ArgumentError, "from_sql_order: not a recognized version 6 or 7 SQL-ordered UUID"
+      case Runtime.version(bytes, LAYOUTS[:sql_server])
+      when 6 then self.class.new(Runtime.v6_to_rfc_order(bytes), true)
+      when 7 then self.class.new(Runtime.v7_to_rfc_order(bytes), true)
+      else raise ArgumentError, "from_sql_order: not a recognized version 6 or 7 SQL-ordered UUID"
       end
     end
 
@@ -177,6 +205,25 @@ module HyperUuid
     # Debug representation, e.g. <tt>#<HyperUuid::Uuid ...></tt>.
     def inspect
       "#<HyperUuid::Uuid #{self}>"
+    end
+
+    private
+
+    # Why #timestamp found none: the message is worked out only once it is going to be raised.
+    def timestamp_mismatch(layout)
+      return "timestamp: not a SQL-ordered version 6 or 7 UUID" if layout == :sql_server
+
+      found = version
+      message = "timestamp is only defined for version 6 or 7 UUIDs, got version #{found}"
+      [6, 7].include?(found) ? "#{message} with the #{variant.inspect} variant" : message
+    end
+
+    # The native core's code for +layout+, the one place a layout is checked: an unknown one
+    # is refused here, never passed through to the core.
+    def layout_code(layout)
+      LAYOUTS.fetch(layout) do
+        raise ArgumentError, "layout must be one of #{LAYOUTS.keys.map(&:inspect).join(', ')}; got #{layout.inspect}"
+      end
     end
   end
 end

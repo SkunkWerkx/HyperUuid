@@ -24,7 +24,18 @@ func TestAvailableAndLoadErrorAgree(t *testing.T) {
 
 func TestNativeVersionMatchesTheCrate(t *testing.T) {
 	// The expectation is the crate's own manifest, walked up to from the test directory, so
-	// a release bump never leaves a stale literal here.
+	// a release bump never leaves a stale literal here. A device run (Android, through
+	// .github/scripts/android_device_test.sh) has no source tree and is handed it.
+	if want := os.Getenv("HYPERUUID_CRATE_VERSION"); want != "" {
+		got, err := NativeVersion()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %q, HYPERUUID_CRATE_VERSION says %q", got, want)
+		}
+		return
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

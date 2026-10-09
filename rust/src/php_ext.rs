@@ -96,7 +96,9 @@ pub fn hyperuuid_native_new_v7(unix_millis: u64) -> PhpResult<Binary<u8>> {
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PhpException::from_message(
             "unix_millis must fit within the RFC 9562 48-bit field".into(),
         )),
-        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PhpException::from_message(e.to_string())),
+        Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
+            Err(PhpException::from_message(e.to_string()))
+        }
         Err(v7::NewV7Error::Random(e)) => Err(PhpException::from_message(format!(
             "uuid_new_v7 failed: {e}"
         ))),
@@ -121,7 +123,9 @@ pub fn hyperuuid_native_new_v7_batch(count: u32, unix_millis: u64) -> PhpResult<
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PhpException::from_message(
             "unix_millis must fit within the RFC 9562 48-bit field".into(),
         )),
-        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PhpException::from_message(e.to_string())),
+        Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
+            Err(PhpException::from_message(e.to_string()))
+        }
         Err(v7::NewV7Error::Random(e)) => Err(PhpException::from_message(format!(
             "uuid_new_v7_batch failed: {e}"
         ))),

@@ -188,10 +188,14 @@ jobs:
           # there, so a tree from before this first ran simply has no iOS support yet.
           # Go's tree takes the four Apple mobile archives as plain files beside its seven:
           # iOS, the iOS simulator, and Mac Catalyst on both architectures.
+          #
+          # And Android, arm64 and x86_64, in both of the first trees: two more variants in
+          # Swift's bundle, which the Swift SDK for Android links, and two more archives in
+          # Go's, which cgo links under GOOS=android. That makes eleven and thirteen.
           declare -A STATIC_TREES=(
-            [swift/HyperUuidCore.artifactbundle]=9
+            [swift/HyperUuidCore.artifactbundle]=11
             [swift/HyperUuidCoreApple.xcframework]=3
-            [go/staticlib]=11
+            [go/staticlib]=13
           )
           for tree in "${!STATIC_TREES[@]}"; do
             archives=()

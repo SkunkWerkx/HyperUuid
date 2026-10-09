@@ -35,7 +35,7 @@ package hyperuuid
 #cgo LDFLAGS: -Lstaticlib/wasm -lhyperuuid
 #include <stdint.h>
 
-// The core's C ABI — rust/src/ffi.rs, the thirteen exports every binding calls.
+// The core's C ABI — rust/src/ffi.rs, the nineteen exports every binding calls.
 uint32_t hyperuuid_version(void);
 int32_t uuid_new_v4(uint8_t *out_ptr);
 int32_t uuid_new_v5(const uint8_t *ns_ptr, const uint8_t *name_ptr, uint32_t name_len, uint8_t *out_ptr);
@@ -49,6 +49,12 @@ int32_t uuid_new_v7_batch(uint64_t unix_millis, uint32_t count, uint8_t *out_ptr
 uint64_t uuid_v7_unix_millis(const uint8_t *uuid_ptr);
 void uuid_v7_to_sql_order(uint8_t *uuid_ptr);
 void uuid_v7_to_rfc_order(uint8_t *uuid_ptr);
+uint32_t uuid_version(const uint8_t *uuid_ptr, uint32_t layout_code);
+uint32_t uuid_variant(const uint8_t *uuid_ptr);
+uint32_t uuid_is_rfc(const uint8_t *uuid_ptr, uint32_t version, uint32_t layout_code);
+uint64_t uuid_v6_unix_millis_in(const uint8_t *uuid_ptr, uint32_t layout_code);
+uint64_t uuid_v7_unix_millis_in(const uint8_t *uuid_ptr, uint32_t layout_code);
+uint32_t uuid_get_timestamp(const uint8_t *uuid_ptr, uint32_t layout_code, uint64_t *millis_out);
 */
 import "C"
 
@@ -109,3 +115,24 @@ func v7ToSqlOrderBytes(p unsafe.Pointer) { C.uuid_v7_to_sql_order((*C.uint8_t)(p
 func v7ToRfcOrderBytes(p unsafe.Pointer) { C.uuid_v7_to_rfc_order((*C.uint8_t)(p)) }
 func v6ToSqlOrderBytes(p unsafe.Pointer) { C.uuid_v6_to_sql_order((*C.uint8_t)(p)) }
 func v6ToRfcOrderBytes(p unsafe.Pointer) { C.uuid_v6_to_rfc_order((*C.uint8_t)(p)) }
+
+func version(id uuid.UUID, layout uint32) uint32 {
+	return uint32(C.uuid_version(ptr(&id), C.uint32_t(layout)))
+}
+func variant(id uuid.UUID) uint32 { return uint32(C.uuid_variant(ptr(&id))) }
+func isRfc(id uuid.UUID, version, layout uint32) bool {
+	return C.uuid_is_rfc(ptr(&id), C.uint32_t(version), C.uint32_t(layout)) != 0
+}
+func v6UnixMillisIn(id uuid.UUID, layout uint32) uint64 {
+	return uint64(C.uuid_v6_unix_millis_in(ptr(&id), C.uint32_t(layout)))
+}
+func v7UnixMillisIn(id uuid.UUID, layout uint32) uint64 {
+	return uint64(C.uuid_v7_unix_millis_in(ptr(&id), C.uint32_t(layout)))
+}
+
+// getTimestamp returns the version (6 or 7, or 0 for no RFC 9562 timestamp in this layout)
+// and the Unix milliseconds the core read, in one call.
+func getTimestamp(id uuid.UUID, layout uint32) (version uint32, millis uint64) {
+	version = uint32(C.uuid_get_timestamp(ptr(&id), C.uint32_t(layout), (*C.uint64_t)(unsafe.Pointer(&millis))))
+	return version, millis
+}

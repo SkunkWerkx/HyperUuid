@@ -23,6 +23,11 @@ dest="$here/../HyperUuid/runtimes/browser-wasm/nativeassets/net10.0"
 mkdir -p "$dest"
 cp "$staticlib" "$dest/libhyperuuid.a"
 
+# From clean, every time: the SDK recompiles runtime.c only when runtime.c changes, not when
+# the interp-to-native signature header it includes (wasm_m2n_invoke.g.h) gains an entry, so
+# after a binding adds a P/Invoke with a new signature shape a stale runtime.o makes the
+# first such call abort the runtime at startup (aot-runtime-wasm.c), with an empty page.
+rm -rf "$here/obj" "$here/bin"
 (cd "$here" && dotnet publish -c Release -o "$out/app")
 (cd "$out/app/wwwroot" && exec python3 -m http.server "$port" >/dev/null 2>&1) &
 server=$!

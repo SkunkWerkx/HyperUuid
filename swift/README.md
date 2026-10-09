@@ -36,11 +36,13 @@ accept a `Date` directly in place of `newV6(unixMillis:)`/`newV7(unixMillis:)`'s
 millisecond count (a date before 1970, or one that isn't a finite instant, throws
 `timestampOutOfRange` like any other timestamp the field can't hold), and
 `getTimestamp(_:)` is the version-agnostic counterpart to
-`v6Timestamp`/`v7Timestamp` — it checks the version nibble itself and returns `nil`
-for anything but a genuine v6/v7 UUID, instead of assuming the caller already knows.
+`v6Timestamp`/`v7Timestamp` — it checks the variant as well as the version, in one native
+call, and returns `nil` for anything that isn't an RFC 9562 version 6 or 7 UUID (a 6 or 7
+nibble under another variant has no timestamp), instead of assuming the caller already knows.
 `UuidGenerator.newV6Batch(count:unixMillis:)`/`newV7Batch(count:unixMillis:)` generate
 `count` UUIDs sharing one timestamp capture and one native call, instead of `count`
-of each. `UuidGenerator.v7ToSqlOrder(_:)`/`v7FromSqlOrder(_:)` convert a version 7
+of each (a v7 batch is capped at `UuidGenerator.maxV7Batch`; see
+[The v7 batch limit](#the-v7-batch-limit)). `UuidGenerator.v7ToSqlOrder(_:)`/`v7FromSqlOrder(_:)` convert a version 7
 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to
 sort by creation order — computed once in the native Rust core rather than
 reimplemented in Swift, and verified there (and independently against the real
@@ -52,6 +54,47 @@ RFC 9562 v6 limitation plain order already has. `UuidGenerator.nativeVersion()` 
 the linked core's own `major.minor.patch` (`hyperuuid_version`), so a caller can prove
 the binary it resolved is the one this binding was built against before minting the first
 UUID — see [Linking and deployment](#linking-and-deployment).
+
+## Version, variant and SQL Server order
+
+`version(_:)`, `variant(_:)` and `isRfc(_:version:)` classify any `UUID`, in one native
+call each with no bit-reading in Swift:
+
+```swift
+try UuidGenerator.version(id4)                // 7: the version nibble, 0-15 (0 for Nil, 15 for Max)
+try UuidGenerator.variant(id4)                // .rfc9562 (UuidVariant: .ncs, .rfc9562, .microsoft, .future)
+try UuidGenerator.isRfc(id4, version: 7)      // true: the RFC variant and that version, the guard to
+                                              // run before trusting version-specific fields
+```
+
+A `version` outside 0–15 is never matched; it is `false`, not an error. Each also has a raw
+form over 16 bytes, `version(bytes:)`, `variant(bytes:)` and `isRfc(bytes:version:)`, taking
+an `UnsafeRawBufferPointer` and throwing `Error.bufferNotWholeUUIDs` unless it is exactly 16
+bytes.
+
+`version`, `isRfc` and the timestamp doors also take a `layout: UuidLayout`, the byte order
+the value is held in: `.rfc9562` (the default, and what every other method takes) or
+`.sqlServer`, what `v6ToSqlOrder`/`v7ToSqlOrder` return. A SQL-ordered value is read where
+it is, with no conversion back first:
+
+```swift
+let stored = try UuidGenerator.v7ToSqlOrder(id4)            // what goes in the uniqueidentifier column
+try UuidGenerator.version(stored, layout: .sqlServer)       // 7
+try UuidGenerator.isRfc(stored, version: 7, layout: .sqlServer)
+try UuidGenerator.v7UnixMillis(stored, layout: .sqlServer)  // the same millis as v7UnixMillis(id4)
+try UuidGenerator.getTimestamp(stored, layout: .sqlServer)  // Date?, nil unless the bytes form a SQL-ordered RFC 9562 v6/v7
+```
+
+`v6UnixMillis(_:layout:)`, `v6Timestamp(_:layout:)` and `v7Timestamp(_:layout:)` complete
+the set. In SQL Server order the only versions are 6 and 7, and bytes that don't form a
+SQL-ordered v6 or v7 read as 0. The version nibble sits at a different byte for each, and a
+v6's random bits can mimic a v7's there, so the core checks the variant bits where each
+version puts them and never confuses the two. Which layout a value is held in is yours to
+track: the bytes alone can't say, and an RFC-ordered UUID read as `.sqlServer` can
+genuinely form a SQL-ordered v7 (about one random v4 in 16 does). `UuidLayout`'s raw values are the core's layout codes; the core
+reserves 0 for "no layout", which a Swift enum cannot hold, so there is no invalid layout to
+pass and no error for one. Every 48-bit v7 timestamp has a `Date`, up to 2⁴⁸ − 1 ms in year
+10889.
 
 ## Why not Foundation's `UUID()`?
 
@@ -88,6 +131,10 @@ Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uu
 `newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work — and lands with the raw-bytes fill. The `[UUID]` fill measures 1.5 µs more here.
 
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
+
+### The v7 batch limit
+
+One v7 batch or fill — `newV7Batch` or `fillV7`, either destination — mints at most `UuidGenerator.maxV7Batch` UUIDs: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. Every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it throws `Error.batchTooLarge(count:)` before anything is allocated or written. Version 6 has no counter and no such limit; a v6 batch whose count doesn't fit the native call's 32-bit count (over 4,294,967,295) throws `Error.batchNotAddressable(count:)` instead.
 
 ### Raw-byte SQL-order transforms
 
@@ -127,11 +174,12 @@ Batch generation amortizes the native call over the whole batch, and no longer p
   and Windows are tested on 6.4 only.
 - **Platforms.** Linux on glibc and on musl (Swift's static Linux SDK), macOS and Windows,
   each on x86_64 and arm64, WebAssembly (`wasm32-unknown-wasip1`), in WASI hosts and in
-  the browser, and iOS, the iOS simulator and Mac Catalyst on arm64. No `platforms:` floor
+  the browser, iOS, the iOS simulator and Mac Catalyst on arm64, and Android on arm64 and
+  x86_64 (the Swift SDK for Android, Swift 6.3 or later, API 28 or later). No `platforms:` floor
   is declared, so each Apple platform takes SwiftPM's default deployment target; the iOS
   simulator and Mac Catalyst archives are built for 14.0, the first release either ran on
   arm64.
-- **Not supported: everything else.** tvOS, watchOS, visionOS, Android, the iOS simulator
+- **Not supported: everything else.** tvOS, watchOS, visionOS, the iOS simulator
   and Mac Catalyst on Intel Macs, and any other architecture on the supported systems have
   no prebuilt core here, so the build stops at compile time with no `HyperUuidCore` module
   (Swift Build first warns that the artifact bundle has no matching variant) — never at
@@ -155,12 +203,24 @@ targets define the one `HyperUuidCore` module the binding imports. CI's `test-ap
 job runs the suite on an iOS simulator and as a Mac Catalyst process with `xcodebuild test`,
 and builds the package for an iOS device.
 
+Android uses the same artifact bundle: it carries the core for `aarch64-unknown-linux-android`
+and `x86_64-unknown-linux-android`, and a package built with the
+[Swift SDK for Android](https://www.swift.org/documentation/articles/swift-sdk-for-android-getting-started.html)
+(`swift build --swift-sdk aarch64-unknown-linux-android28`; Swift 6.3 or later, API 28 or
+later) links it like any other triple. Page alignment is the final link's, which the SDK
+does with the NDK's linker; NDK r28 and later align to the 16 KB pages Android 15 devices
+may use by default, and an older NDK needs `-Xlinker -z -Xlinker max-page-size=16384`. CI's
+`test-android` job cross-builds this whole suite for x86_64 and runs it in an emulator whose
+image uses 16 KB pages, and links the aarch64 build (`.github/scripts/android_build_suite.sh`
+and `android_device_test.sh`, which run the same way against a local emulator). The two
+1 GiB batch tests skip there.
+
 In a checkout of this repository, `HYPERUUID_LOCAL_CORE=1 swift test` run from `swift/` links
 the bundle `.github/scripts/local-core.sh` builds from the checkout's core in place of the
 committed one. The root `Package.swift`, the one a dependency resolves, has no such switch.
 
 Every call `throws` only `UuidGenerator.Error` — a native call that ran and was refused
-(`.timestampOutOfRange`, `.randomSourceFailure(code:)`, …). `UuidGenerator.isAvailable` is
+(`.timestampOutOfRange`, `.randomSourceFailure(code:)`, `.batchTooLarge(count:)`, …). `UuidGenerator.isAvailable` is
 always `true`, and the `NativeLibraryError` type is deprecated and has no cases: both are
 left from when macOS and Windows loaded a shared library, so existing code that checks
 them still compiles.

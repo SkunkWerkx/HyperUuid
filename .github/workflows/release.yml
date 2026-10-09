@@ -171,6 +171,9 @@ jobs:
       crate: hyperuuid
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
       runtimes_dir: csharp/HyperUuid/runtimes
+      # android-arm64 and android-x64 for .NET for Android (MAUI); ci.yml's build-native has
+      # the matching `android` input on.
+      android: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
 
   # No pack step here — nuget-org-pack (above) already produced the .nupkg, in this same

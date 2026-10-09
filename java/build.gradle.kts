@@ -17,7 +17,7 @@ group = "io.github.skunkwerkx"
 // workflow_dispatch runs during testing don't collide with an already-published version —
 // the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so
 // it always uses this committed version as-is.
-version = System.getenv("HYPERUUID_VERSION") ?: "0.7.0"
+version = System.getenv("HYPERUUID_VERSION") ?: "0.8.0"
 
 repositories {
     mavenCentral()
@@ -156,6 +156,13 @@ tasks.jar {
     manifest {
         attributes("Automatic-Module-Name" to "io.github.skunkwerkx.hyperuuid")
     }
+}
+
+// InspectionTest fills one version 7 batch of exactly UuidGenerator.MAX_V7_BATCH (1 GiB of
+// bytes), and refuses one a UUID past it from a caller array that size: past the test JVM's
+// 512 MiB default either way, on both backends.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "3g"
 }
 
 tasks.test {

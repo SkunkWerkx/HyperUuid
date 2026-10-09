@@ -1,6 +1,8 @@
 package io.github.skunkwerkx.hyperuuid.aotsmoketest;
 
 import io.github.skunkwerkx.hyperuuid.UuidGenerator;
+import io.github.skunkwerkx.hyperuuid.UuidLayout;
+import io.github.skunkwerkx.hyperuuid.UuidVariant;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -20,7 +22,8 @@ public final class Main {
     /**
      * Calls every public method of {@code UuidGenerator} — the probe, each generator in each
      * of its overloads, the batch and fill forms, and the byte-order conversions in both
-     * their {@code UUID} and raw-byte forms — and fails on the first wrong answer.
+     * their {@code UUID} and raw-byte forms, and the version/variant/layout inspection — and
+     * fails on the first wrong answer.
      *
      * @param args ignored
      */
@@ -78,6 +81,12 @@ public final class Main {
         require(UuidGenerator.getTimestamp(v6).equals(Optional.of(rfcTestVector)), "getTimestamp(v6)");
         require(UuidGenerator.getTimestamp(v7).equals(Optional.of(rfcTestVector)), "getTimestamp(v7)");
         require(UuidGenerator.getTimestamp(v4).isEmpty(), "getTimestamp(v4) should be empty");
+        // A 7 nibble under the Microsoft variant (110x) is no RFC version, so no timestamp.
+        UUID microsoftV7 =
+                new UUID(v7.getMostSignificantBits(), (v7.getLeastSignificantBits() & ~(0x7L << 61)) | (0x6L << 61));
+        require(
+                UuidGenerator.getTimestamp(microsoftV7).isEmpty(),
+                "getTimestamp(Microsoft-variant v7) should be empty");
 
         require(UuidGenerator.NIL.toString().equals("00000000-0000-0000-0000-000000000000"), "NIL mismatch");
         require(UuidGenerator.MAX.toString().equals("ffffffff-ffff-ffff-ffff-ffffffffffff"), "MAX mismatch");
@@ -141,6 +150,38 @@ public final class Main {
         require(Arrays.equals(v6Bytes, bytesOf(v6Sql)), "v6ToSqlOrder(byte[]) disagrees with the UUID form");
         UuidGenerator.v6FromSqlOrder(v6Bytes);
         require(Arrays.equals(v6Bytes, bytesOf(v6)), "v6 raw-byte SQL-order round-trip failed");
+
+        // The inspection exports: three more downcall signatures ((ADDRESS, INT)INT,
+        // (ADDRESS, INT, INT)INT, (ADDRESS, INT)LONG), plus (ADDRESS)INT for the variant,
+        // over both the scratch segment (UUID forms) and a pinned caller array (byte[] forms).
+        require(UuidGenerator.version(v7) == 7, "version(v7)");
+        require(UuidGenerator.version(bytesOf(v6)) == 6, "version(byte[])");
+        require(UuidGenerator.version(v7Sql, UuidLayout.SQL_SERVER) == 7, "version(v7Sql, SQL_SERVER)");
+        require(UuidGenerator.version(bytesOf(v6Sql), UuidLayout.SQL_SERVER) == 6, "version(byte[], SQL_SERVER)");
+        require(UuidGenerator.variant(v4) == UuidVariant.RFC_9562, "variant(v4)");
+        require(UuidGenerator.variant(bytesOf(UuidGenerator.MAX)) == UuidVariant.FUTURE, "variant(byte[] MAX)");
+        require(UuidGenerator.isRfc(v5, 5) && !UuidGenerator.isRfc(v5, 4), "isRfc(v5)");
+        require(UuidGenerator.isRfc(v6Sql, 6, UuidLayout.SQL_SERVER), "isRfc(v6Sql, 6, SQL_SERVER)");
+        require(UuidGenerator.isRfc(bytesOf(v7Sql), 7, UuidLayout.SQL_SERVER), "isRfc(byte[], 7, SQL_SERVER)");
+        require(UuidGenerator.v7UnixMillis(v7Sql, UuidLayout.SQL_SERVER) == rfcTestVectorMs, "v7UnixMillis(SQL)");
+        require(UuidGenerator.v6UnixMillis(v6Sql, UuidLayout.SQL_SERVER) == rfcTestVectorMs, "v6UnixMillis(SQL)");
+        require(UuidGenerator.v7Timestamp(v7Sql, UuidLayout.SQL_SERVER).equals(rfcTestVector), "v7Timestamp(SQL)");
+        require(UuidGenerator.v6Timestamp(v6Sql, UuidLayout.SQL_SERVER).equals(rfcTestVector), "v6Timestamp(SQL)");
+        require(
+                UuidGenerator.getTimestamp(v7Sql, UuidLayout.SQL_SERVER).equals(Optional.of(rfcTestVector)),
+                "getTimestamp(v7Sql, SQL_SERVER)");
+        require(
+                UuidGenerator.getTimestamp(UuidGenerator.NIL, UuidLayout.SQL_SERVER)
+                        .isEmpty(),
+                "getTimestamp(NIL, SQL_SERVER) should be empty");
+        try {
+            UuidGenerator.newV7Batch(UuidGenerator.MAX_V7_BATCH + 1, rfcTestVectorMs);
+            throw new AssertionError("a v7 batch past MAX_V7_BATCH was not refused");
+        } catch (IllegalArgumentException expected) {
+            require(
+                    expected.getMessage().contains(Integer.toString(UuidGenerator.MAX_V7_BATCH)),
+                    "batch limit message");
+        }
 
         System.out.println("hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v6=" + v6 + " v7="
                 + v7 + " v7Batch[0]=" + v7Batch[0] + " v6Batch[0]=" + v6Batch[0] + " v7Sql=" + v7Sql

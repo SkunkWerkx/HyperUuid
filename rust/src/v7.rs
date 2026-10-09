@@ -1,6 +1,6 @@
 //! RFC 9562 Section 6.2 Method 1 — UUID version 7: time-ordered, monotonically increasing.
 
-use crate::{Timestamp, Uuid};
+use crate::{Layout, Timestamp, Uuid};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// Largest Unix-epoch millisecond timestamp that fits the 48-bit `unix_ts_ms` field
@@ -9,6 +9,13 @@ pub const MAX_UNIX_MILLIS: u64 = 0x0000_FFFF_FFFF_FFFF;
 
 /// 26-bit counter mask (67,108,864 values) spanning `rand_a` and the top of `rand_b`.
 const COUNTER_MASK: u32 = 0x03FF_FFFF;
+
+/// The most UUIDs one [`new_v7_batch`] call mints: the size of the 26-bit counter space
+/// (67,108,864). A batch this size or smaller crosses the counter's wrap at most once, which
+/// the batch absorbs by moving the timestamp forward a millisecond (see [`new_v7_batch`]); a
+/// larger one would have to reuse counter values within a single millisecond, so it is
+/// refused with [`NewV7Error::BatchTooLarge`].
+pub const MAX_BATCH: u32 = COUNTER_MASK + 1;
 
 /// Random octets each version 7 UUID needs: `rand_b`'s trailing 48 bits (octets 10-15).
 const RAND_BYTES_PER_ITEM: usize = 6;
@@ -25,6 +32,8 @@ pub enum NewV7Error {
     Random(getrandom::Error),
     /// The batch output buffer is shorter than `count * 16` bytes.
     BufferTooSmall,
+    /// The batch `count` exceeds [`MAX_BATCH`].
+    BatchTooLarge,
 }
 
 impl core::fmt::Display for NewV7Error {
@@ -35,6 +44,10 @@ impl core::fmt::Display for NewV7Error {
             }
             Self::Random(e) => write!(f, "random source failed: {e}"),
             Self::BufferTooSmall => write!(f, "output buffer is shorter than count * 16 bytes"),
+            Self::BatchTooLarge => write!(
+                f,
+                "batch count exceeds the 26-bit counter space ({MAX_BATCH} per call)"
+            ),
         }
     }
 }
@@ -100,6 +113,17 @@ pub fn new_v7(unix_millis: u64) -> Result<Uuid, NewV7Error> {
 
     let mut bytes = [0u8; 16];
     crate::entropy::fill_at(&mut bytes[10..], unix_millis).map_err(NewV7Error::Random)?;
+    write_fields(&mut bytes, unix_millis, counter_val);
+    Ok(Uuid::from_bytes(bytes))
+}
+
+/// Writes octets 0-9 of a version 7 UUID — timestamp, version, counter and variant — around
+/// the random tail already in octets 10-15. The one deterministic piece of [`new_v7`], kept
+/// separate so the corpus (`corpus/v7_layout.json`) can pin every field's placement without
+/// going through the random source.
+#[inline]
+pub(crate) fn write_fields(bytes: &mut [u8; 16], unix_millis: u64, counter: u32) {
+    let counter = counter & COUNTER_MASK;
 
     // unix_ts_ms: 48-bit big-endian millisecond timestamp (octets 0-5).
     bytes[0] = (unix_millis >> 40) as u8;
@@ -109,18 +133,15 @@ pub fn new_v7(unix_millis: u64) -> Result<Uuid, NewV7Error> {
     bytes[4] = (unix_millis >> 8) as u8;
     bytes[5] = unix_millis as u8;
 
-    // rand_a: upper 12 bits of the 26-bit counter (octets 6-7).
-    bytes[6] = (counter_val >> 22) as u8;
-    bytes[7] = ((counter_val >> 14) & 0xFF) as u8;
+    // The version nibble (0111) over rand_a, the upper 12 bits of the 26-bit counter
+    // (octets 6-7).
+    bytes[6] = 0x70 | (counter >> 22) as u8;
+    bytes[7] = ((counter >> 14) & 0xFF) as u8;
 
-    // rand_b extension: lower 14 bits of the counter (octets 8-9).
-    bytes[8] = ((counter_val >> 8) & 0x3F) as u8;
-    bytes[9] = (counter_val & 0xFF) as u8;
-
-    let mut uuid = Uuid::from_bytes(bytes);
-    uuid.set_version(7);
-    uuid.set_variant();
-    Ok(uuid)
+    // The variant (10) over the rand_b extension, the lower 14 bits of the counter
+    // (octets 8-9).
+    bytes[8] = 0x80 | ((counter >> 8) & 0x3F) as u8;
+    bytes[9] = (counter & 0xFF) as u8;
 }
 
 /// Creates a new UUID version 7 from a [`Timestamp`] instead of a raw millisecond count —
@@ -147,8 +168,20 @@ pub fn new_v7_at(timestamp: Timestamp) -> Result<Uuid, NewV7Error> {
 /// [`NewV7Error::BufferTooSmall`] when `out` is shorter than `count * 16` bytes. The entropy
 /// is drawn before any item is assembled, so on [`NewV7Error::Random`] no UUID has been
 /// written at all — but the front of `out` may hold partial entropy from the failed draw, so
-/// treat the buffer as clobbered rather than untouched. A very large `count` can still wrap
-/// the 26-bit counter mid-batch, the same wrap-boundary caveat individual calls already carry.
+/// treat the buffer as clobbered rather than untouched.
+///
+/// Every batch is in strictly increasing order, however it lands on the counter. The counter
+/// is one process-wide sequence that wraps every 2^26 values, so a batch can straddle the
+/// wrap; the items from the wrap on are stamped `unix_millis + 1` rather than letting them
+/// sort before the items ahead of them (RFC 9562 §6.2 Method 1 lets the timestamp run ahead
+/// on counter overflow), so an embedded timestamp is never more than a millisecond ahead of
+/// the one supplied. A `count` past [`MAX_BATCH`] would have to cross the wrap twice and is
+/// refused with [`NewV7Error::BatchTooLarge`], and a batch that would roll forward from
+/// [`MAX_UNIX_MILLIS`] with [`NewV7Error::TimestampOutOfRange`]. Individual [`new_v7`] calls
+/// don't roll forward: they share no state but the counter, so two calls in the same
+/// millisecond either side of the wrap sort in reverse, as they always have. Nor does
+/// anything here notice a clock that goes backwards; the timestamp is the caller's, trusted
+/// as given.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), NewV7Error> {
     if unix_millis > MAX_UNIX_MILLIS {
@@ -156,6 +189,9 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
     }
     if count == 0 {
         return Ok(());
+    }
+    if count > MAX_BATCH {
+        return Err(NewV7Error::BatchTooLarge);
     }
 
     // Narrowed once, up front, so the entropy fill and the per-item writes below both stay
@@ -170,8 +206,30 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
 
     // Reserves [base+1, base+count] in this one call, continuing the same global sequence a
     // series of individual fetch_add(1) calls would have produced (matching new_v7's own
-    // base.wrapping_add(1) convention below).
+    // base.wrapping_add(1) convention).
     let base = counter().fetch_add(count, Ordering::Relaxed);
+    fill_batch(unix_millis, count, out, base)
+}
+
+/// The rest of [`new_v7_batch`], once its counter block `[base+1, base+count]` is reserved:
+/// separate so a test can hand it a block that straddles the wrap without first minting
+/// 67 million UUIDs to get the shared counter there. `out` is exactly `count * 16` bytes and
+/// `count` is 1 to [`MAX_BATCH`].
+///
+/// `inline(always)`, not a hint: the indexing below is proven in bounds only by
+/// [`new_v7_batch`]'s narrowing of `out` to `count * 16`, so it has to be optimized as one
+/// function for `no-panic` to see that proof (without it the check fails the link).
+#[inline(always)]
+fn fill_batch(unix_millis: u64, count: u32, out: &mut [u8], base: u32) -> Result<(), NewV7Error> {
+    // Items before `wrap_at` count up to the top of the 26-bit space; the item at `wrap_at`
+    // comes back round to 0 and would sort before them, so it and everything after it move a
+    // millisecond on. A block that starts at 0 has nothing before it to wrap from, and gives
+    // MAX_BATCH, which no count reaches past. (`first` is at most COUNTER_MASK, so no overflow.)
+    let first = base.wrapping_add(1) & COUNTER_MASK;
+    let wrap_at = (MAX_BATCH - first) as usize;
+    if wrap_at < count as usize && unix_millis == MAX_UNIX_MILLIS {
+        return Err(NewV7Error::TimestampOutOfRange);
+    }
 
     // One entropy draw for the whole batch (entropy.rs), with no scratch buffer of any kind:
     // not a heap one (this crate has no allocator to get it from) and not a fixed stack one
@@ -192,8 +250,10 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
     )
     .map_err(NewV7Error::Random)?;
 
-    // unix_ts_ms in the top 48 bits of the u64 that becomes octets 0-7 of every item.
+    // unix_ts_ms in the top 48 bits of the u64 that becomes octets 0-7 of every item, and
+    // the same a millisecond on for the items past the wrap.
     let ts_shifted = unix_millis << 16;
+    let ts_rolled = (unix_millis + 1) << 16;
 
     for i in (0..count as usize).rev() {
         let src = i * RAND_BYTES_PER_ITEM;
@@ -206,7 +266,8 @@ pub fn new_v7_batch(unix_millis: u64, count: u32, out: &mut [u8]) -> Result<(), 
         // Octets 0-9 as two big-endian stores rather than ten single-byte ones:
         // unix_ts_ms (octets 0-5, identical for every item in the batch), then the version
         // nibble (0111) and rand_a, the upper 12 bits of the 26-bit counter (octets 6-7)...
-        let head = ts_shifted | 0x7000 | u64::from(counter_val >> 14);
+        let ts = if i < wrap_at { ts_shifted } else { ts_rolled };
+        let head = ts | 0x7000 | u64::from(counter_val >> 14);
         item[..8].copy_from_slice(&head.to_be_bytes());
         // ...then the variant (10) and the lower 14 bits of the counter (octets 8-9).
         let tail = 0x8000 | (counter_val & 0x3FFF) as u16;
@@ -268,6 +329,27 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
         | ((b[3] as u64) << 16)
         | ((b[4] as u64) << 8)
         | (b[5] as u64)
+}
+
+/// [`unix_millis`] for a version 7 UUID held in `layout`'s byte order, reading a SQL-ordered
+/// value's permuted octets directly rather than converting it back first. Meaningful only for
+/// a genuine version 7 UUID in that layout, the same as [`unix_millis`];
+/// [`Uuid::is_rfc_in`] is the check.
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub fn unix_millis_in(uuid: &Uuid, layout: Layout) -> u64 {
+    let b = uuid.as_bytes();
+    match layout {
+        Layout::Rfc9562 => unix_millis(uuid),
+        // to_sql_order moves octets 0-5, the timestamp, to octets 10-15 unchanged.
+        Layout::SqlServer => {
+            ((b[10] as u64) << 40)
+                | ((b[11] as u64) << 32)
+                | ((b[12] as u64) << 24)
+                | ((b[13] as u64) << 16)
+                | ((b[14] as u64) << 8)
+                | (b[15] as u64)
+        }
+    }
 }
 
 /// Converts an RFC 9562-ordered version 7 UUID's bytes to the byte order SQL Server's
@@ -358,4 +440,96 @@ pub fn to_rfc_order(uuid: &Uuid) -> Uuid {
     rfc[15] = sql[3];
 
     Uuid::from_bytes(rfc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MS: u64 = 1_750_000_000_123;
+
+    fn items(out: &[u8]) -> Vec<Uuid> {
+        out.chunks_exact(16)
+            .map(|c| Uuid::from_bytes(c.try_into().unwrap()))
+            .collect()
+    }
+
+    fn counter_of(id: &Uuid) -> u32 {
+        let b = id.as_bytes();
+        ((b[6] as u32 & 0x0F) << 22)
+            | ((b[7] as u32) << 14)
+            | ((b[8] as u32 & 0x3F) << 8)
+            | b[9] as u32
+    }
+
+    // A block straddling the wrap: counters 0x3FFFFFE and 0x3FFFFFF at MS, then 0, 1, 2 at
+    // MS + 1, and the batch stays in order end to end.
+    #[test]
+    fn a_batch_across_the_counter_wrap_rolls_forward_a_millisecond() {
+        let mut out = [0u8; 5 * 16];
+        fill_batch(MS, 5, &mut out, COUNTER_MASK - 2).unwrap();
+        let ids = items(&out);
+        let stamps: Vec<u64> = ids.iter().map(unix_millis).collect();
+        let counters: Vec<u32> = ids.iter().map(counter_of).collect();
+        assert_eq!(stamps, [MS, MS, MS + 1, MS + 1, MS + 1]);
+        assert_eq!(counters, [COUNTER_MASK - 1, COUNTER_MASK, 0, 1, 2]);
+        assert!(ids.windows(2).all(|w| w[0] < w[1]));
+        assert!(ids.iter().all(|id| id.is_rfc(7)));
+    }
+
+    #[test]
+    fn a_batch_that_starts_at_zero_or_ends_at_the_top_does_not_roll() {
+        let mut out = [0u8; 3 * 16];
+        fill_batch(MS, 3, &mut out, u32::MAX).unwrap(); // base + 1 wraps to counter 0
+        assert!(items(&out).iter().all(|id| unix_millis(id) == MS));
+        fill_batch(MS, 3, &mut out, COUNTER_MASK - 3).unwrap(); // last item is 0x3FFFFFF
+        let ids = items(&out);
+        assert!(ids.iter().all(|id| unix_millis(id) == MS));
+        assert_eq!(counter_of(&ids[2]), COUNTER_MASK);
+    }
+
+    #[test]
+    fn rolling_forward_past_the_last_millisecond_is_out_of_range() {
+        let mut out = [0u8; 2 * 16];
+        assert_eq!(
+            fill_batch(MAX_UNIX_MILLIS, 2, &mut out, COUNTER_MASK - 1),
+            Err(NewV7Error::TimestampOutOfRange)
+        );
+        // The same batch without a wrap fits.
+        fill_batch(MAX_UNIX_MILLIS, 2, &mut out, 10).unwrap();
+    }
+
+    #[test]
+    fn a_batch_past_the_counter_space_is_refused_before_the_buffer_is_checked() {
+        let mut out = [0u8; 16];
+        assert_eq!(
+            new_v7_batch(MS, MAX_BATCH + 1, &mut out),
+            Err(NewV7Error::BatchTooLarge)
+        );
+        assert_eq!(
+            new_v7_batch(MS, u32::MAX, &mut out),
+            Err(NewV7Error::BatchTooLarge)
+        );
+        assert_eq!(
+            new_v7_batch(MS, MAX_BATCH, &mut out),
+            Err(NewV7Error::BufferTooSmall)
+        );
+    }
+
+    // The full counter space in one call: 1 GiB of output, so opt-in
+    // (`cargo test --release -- --ignored`).
+    #[test]
+    #[ignore = "allocates 1 GiB"]
+    fn a_batch_of_the_whole_counter_space_is_strictly_increasing() {
+        let mut out = vec![0u8; MAX_BATCH as usize * 16];
+        new_v7_batch(MS, MAX_BATCH, &mut out).unwrap();
+        assert!(
+            out.chunks_exact(16)
+                .collect::<Vec<_>>()
+                .windows(2)
+                .all(|w| w[0] < w[1])
+        );
+        let last = Uuid::from_bytes(out[out.len() - 16..].try_into().unwrap());
+        assert!(unix_millis(&last) <= MS + 1);
+    }
 }

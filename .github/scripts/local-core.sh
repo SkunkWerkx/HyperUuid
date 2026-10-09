@@ -14,6 +14,10 @@
 # and swift/ are the output directories above. Only the host's targets are built: the musl
 # archive Go links on Linux, and the archive Swift picks for the host triple.
 #
+# With ANDROID=1 it also builds the two Android archives (aarch64 and x86_64), which Go
+# (GOOS=android) and Swift (the Swift SDK for Android) link, for a suite cross-compiled and
+# run on an emulator or device (.github/scripts/android_build_suite.sh).
+#
 # usage: .github/scripts/local-core.sh    (FORGE=<path> if the SkunkWerkx/.github checkout
 #                                          is not ../.github beside this repository)
 set -euo pipefail
@@ -29,6 +33,8 @@ case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) targets=(aarch64-apple-darwin) lib=libhyperuuid.dylib ;;
   *) echo "error: no local core for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
+
+[ "${ANDROID:-}" = 1 ] && targets+=(aarch64-linux-android x86_64-linux-android)
 
 (cd "$repo/rust" && cargo cdylib)
 

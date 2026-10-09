@@ -197,6 +197,72 @@ public static partial class UuidGenerator
 		else uuid_v6_to_rfc_order_native(uuidPtr);
 	}
 
+	[LibraryImport("hyperuuid", EntryPoint = "uuid_version")]
+	private static unsafe partial uint uuid_version_native(byte* uuidPtr, uint layoutCode);
+	[LibraryImport("*", EntryPoint = "uuid_version")]
+	private static unsafe partial uint uuid_version_browser(byte* uuidPtr, uint layoutCode);
+	[LibraryImport("__Internal", EntryPoint = "uuid_version")]
+	private static unsafe partial uint uuid_version_internal(byte* uuidPtr, uint layoutCode);
+	private static unsafe uint uuid_version(byte* uuidPtr, uint layoutCode) =>
+		OperatingSystem.IsBrowser() ? uuid_version_browser(uuidPtr, layoutCode)
+			: OperatingSystem.IsIOS() ? uuid_version_internal(uuidPtr, layoutCode)
+			: uuid_version_native(uuidPtr, layoutCode);
+
+	[LibraryImport("hyperuuid", EntryPoint = "uuid_variant")]
+	private static unsafe partial uint uuid_variant_native(byte* uuidPtr);
+	[LibraryImport("*", EntryPoint = "uuid_variant")]
+	private static unsafe partial uint uuid_variant_browser(byte* uuidPtr);
+	[LibraryImport("__Internal", EntryPoint = "uuid_variant")]
+	private static unsafe partial uint uuid_variant_internal(byte* uuidPtr);
+	private static unsafe uint uuid_variant(byte* uuidPtr) =>
+		OperatingSystem.IsBrowser() ? uuid_variant_browser(uuidPtr)
+			: OperatingSystem.IsIOS() ? uuid_variant_internal(uuidPtr)
+			: uuid_variant_native(uuidPtr);
+
+	[LibraryImport("hyperuuid", EntryPoint = "uuid_is_rfc")]
+	private static unsafe partial uint uuid_is_rfc_native(byte* uuidPtr, uint version, uint layoutCode);
+	[LibraryImport("*", EntryPoint = "uuid_is_rfc")]
+	private static unsafe partial uint uuid_is_rfc_browser(byte* uuidPtr, uint version, uint layoutCode);
+	[LibraryImport("__Internal", EntryPoint = "uuid_is_rfc")]
+	private static unsafe partial uint uuid_is_rfc_internal(byte* uuidPtr, uint version, uint layoutCode);
+	private static unsafe uint uuid_is_rfc(byte* uuidPtr, uint version, uint layoutCode) =>
+		OperatingSystem.IsBrowser() ? uuid_is_rfc_browser(uuidPtr, version, layoutCode)
+			: OperatingSystem.IsIOS() ? uuid_is_rfc_internal(uuidPtr, version, layoutCode)
+			: uuid_is_rfc_native(uuidPtr, version, layoutCode);
+
+	[LibraryImport("hyperuuid", EntryPoint = "uuid_get_timestamp")]
+	private static unsafe partial uint uuid_get_timestamp_native(byte* uuidPtr, uint layoutCode, ulong* millisOut);
+	[LibraryImport("*", EntryPoint = "uuid_get_timestamp")]
+	private static unsafe partial uint uuid_get_timestamp_browser(byte* uuidPtr, uint layoutCode, ulong* millisOut);
+	[LibraryImport("__Internal", EntryPoint = "uuid_get_timestamp")]
+	private static unsafe partial uint uuid_get_timestamp_internal(byte* uuidPtr, uint layoutCode, ulong* millisOut);
+	private static unsafe uint uuid_get_timestamp(byte* uuidPtr, uint layoutCode, ulong* millisOut) =>
+		OperatingSystem.IsBrowser() ? uuid_get_timestamp_browser(uuidPtr, layoutCode, millisOut)
+			: OperatingSystem.IsIOS() ? uuid_get_timestamp_internal(uuidPtr, layoutCode, millisOut)
+			: uuid_get_timestamp_native(uuidPtr, layoutCode, millisOut);
+
+	[LibraryImport("hyperuuid", EntryPoint = "uuid_v6_unix_millis_in")]
+	private static unsafe partial ulong uuid_v6_unix_millis_in_native(byte* uuidPtr, uint layoutCode);
+	[LibraryImport("*", EntryPoint = "uuid_v6_unix_millis_in")]
+	private static unsafe partial ulong uuid_v6_unix_millis_in_browser(byte* uuidPtr, uint layoutCode);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v6_unix_millis_in")]
+	private static unsafe partial ulong uuid_v6_unix_millis_in_internal(byte* uuidPtr, uint layoutCode);
+	private static unsafe ulong uuid_v6_unix_millis_in(byte* uuidPtr, uint layoutCode) =>
+		OperatingSystem.IsBrowser() ? uuid_v6_unix_millis_in_browser(uuidPtr, layoutCode)
+			: OperatingSystem.IsIOS() ? uuid_v6_unix_millis_in_internal(uuidPtr, layoutCode)
+			: uuid_v6_unix_millis_in_native(uuidPtr, layoutCode);
+
+	[LibraryImport("hyperuuid", EntryPoint = "uuid_v7_unix_millis_in")]
+	private static unsafe partial ulong uuid_v7_unix_millis_in_native(byte* uuidPtr, uint layoutCode);
+	[LibraryImport("*", EntryPoint = "uuid_v7_unix_millis_in")]
+	private static unsafe partial ulong uuid_v7_unix_millis_in_browser(byte* uuidPtr, uint layoutCode);
+	[LibraryImport("__Internal", EntryPoint = "uuid_v7_unix_millis_in")]
+	private static unsafe partial ulong uuid_v7_unix_millis_in_internal(byte* uuidPtr, uint layoutCode);
+	private static unsafe ulong uuid_v7_unix_millis_in(byte* uuidPtr, uint layoutCode) =>
+		OperatingSystem.IsBrowser() ? uuid_v7_unix_millis_in_browser(uuidPtr, layoutCode)
+			: OperatingSystem.IsIOS() ? uuid_v7_unix_millis_in_internal(uuidPtr, layoutCode)
+			: uuid_v7_unix_millis_in_native(uuidPtr, layoutCode);
+
 	// Batch calls marshal through a byte scratch buffer rather than Span<Guid> directly —
 	// Guid's in-memory field layout isn't RFC-byte-order (it's mixed-endian and not
 	// guaranteed stable across runtimes), so each 16-byte chunk still needs the same
@@ -225,16 +291,35 @@ public static partial class UuidGenerator
 				paramName);
 	}
 
-	static void ThrowOnBatchFailure(int rc, string entryPoint, string outOfRangeMessage)
+	static void ThrowOnBatchFailure(int rc, string entryPoint, string outOfRangeMessage, string countParamName)
 	{
 		if (rc == 0)
 			return;
 		throw rc switch
 		{
 			2 => new ArgumentOutOfRangeException("unixMilliseconds", outOfRangeMessage),
+			3 => new ArgumentException("The batch is too large to address on this platform.", countParamName),
+			4 => new ArgumentOutOfRangeException(countParamName,
+				$"A single version 7 batch takes at most {MaxV7Batch} UUIDs (the 26-bit counter space)."),
 			_ => new InvalidOperationException($"{entryPoint} failed with code {rc} (random source failure)."),
 		};
 	}
+
+	/// <summary>
+	/// The most UUIDs one version 7 batch (<see cref="FillV7(Span{Guid}, long)"/>,
+	/// <see cref="NewV7Batch(int, long)"/> and their overloads) mints: 67,108,864, the size of
+	/// the 26-bit counter that orders UUIDs within a millisecond.
+	/// </summary>
+	/// <remarks>
+	/// Every batch up to this size is in strictly increasing order. The counter is one
+	/// process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
+	/// UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
+	/// than sorting before the ones ahead of them. A larger batch would have to reuse counter
+	/// values within one millisecond, so it is refused: the throwing forms throw
+	/// <see cref="ArgumentOutOfRangeException"/> and the <c>Try</c> forms return
+	/// <see langword="false"/>. Version 6 has no counter and no such limit.
+	/// </remarks>
+	public const int MaxV7Batch = 1 << 26;
 
 	static readonly Lazy<Version?> _nativeVersion = new(ProbeNativeVersion, LazyThreadSafetyMode.PublicationOnly);
 
@@ -496,10 +581,10 @@ public static partial class UuidGenerator
 
 	/// <summary>
 	/// Recovers the UTC timestamp embedded in a version 6 UUID as a <see cref="DateTimeOffset"/>.
-	/// Unlike <see cref="V7Timestamp"/>, this can't throw <see cref="ArgumentOutOfRangeException"/>:
+	/// Unlike <see cref="V7Timestamp(Guid)"/>, this can't throw <see cref="ArgumentOutOfRangeException"/>:
 	/// v6's 60-bit tick count, offset from the 1582 UUID epoch rather than 1970, tops out
 	/// around the year 5236 — well short of <see cref="DateTimeOffset"/>'s own year-9999 ceiling.
-	/// A timestamp before 1970 reads back as the Unix epoch; see <see cref="V6UnixMillis"/>.
+	/// A timestamp before 1970 reads back as the Unix epoch; see <see cref="V6UnixMillis(Guid)"/>.
 	/// </summary>
 	public static DateTimeOffset V6Timestamp(Guid uuid) =>
 		DateTimeOffset.FromUnixTimeMilliseconds(V6UnixMillis(uuid));
@@ -520,7 +605,8 @@ public static partial class UuidGenerator
 	{
 		RequireFillable(destination, nameof(destination));
 		ThrowOnBatchFailure(CoreFillV6(destination, unixMilliseconds), "uuid_new_v6_batch",
-			"Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field.");
+			"Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field.",
+			nameof(destination));
 	}
 
 	/// <summary>
@@ -559,7 +645,8 @@ public static partial class UuidGenerator
 	{
 		RequireWholeUuids(destination, nameof(destination));
 		ThrowOnBatchFailure(CoreFillV6Bytes(destination, unixMilliseconds), "uuid_new_v6_batch",
-			"Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field.");
+			"Unix millisecond timestamp must be non-negative and fit the 60-bit v6 timestamp field.",
+			nameof(destination));
 	}
 
 	/// <summary>
@@ -726,23 +813,253 @@ public static partial class UuidGenerator
 
 	/// <summary>
 	/// Recovers the UTC timestamp embedded in <paramref name="uuid"/>, or <see langword="null"/>
-	/// if it isn't a version 6 or 7 UUID. Unlike <see cref="V6Timestamp"/>/<see cref="V7Timestamp"/>,
-	/// this reads the version nibble itself first, so a caller doesn't need to already know (or
-	/// separately check) which version <paramref name="uuid"/> is before asking — delegates
-	/// straight to whichever of those two methods applies, no bit-layout logic duplicated here.
+	/// if it isn't an RFC 9562 version 6 or 7 UUID: the variant is checked as well as the version
+	/// nibble (see <see cref="IsRfc(Guid, int)"/>), so a 6 or 7 under another variant carries no
+	/// timestamp. Unlike <see cref="V6Timestamp(Guid)"/>/<see cref="V7Timestamp(Guid)"/>,
+	/// this reads the version itself first, so a caller doesn't need to already know (or
+	/// separately check) which version <paramref name="uuid"/> is before asking — the core
+	/// answers both, with no bit-layout logic here.
 	/// Both of their edges come with it: a v6 timestamp before 1970 reads back as the Unix
 	/// epoch, and a v7 timestamp past year 9999 throws <see cref="ArgumentOutOfRangeException"/>.
 	/// </summary>
-	public static unsafe DateTimeOffset? GetTimestamp(Guid uuid)
+	public static DateTimeOffset? GetTimestamp(Guid uuid) => GetTimestamp(uuid, UuidLayout.Rfc9562);
+
+	/// <summary>
+	/// <see cref="GetTimestamp(Guid)"/> for a <paramref name="uuid"/> held in
+	/// <paramref name="layout"/>'s byte order — in <see cref="UuidLayout.SqlServer"/>, the
+	/// timestamp of a value straight from <see cref="V7ToSqlOrder(Guid)"/> or
+	/// <see cref="V6ToSqlOrder(Guid)"/> (or a <c>uniqueidentifier</c> column), read from its
+	/// permuted bytes in one native call with no conversion back first, or
+	/// <see langword="null"/> for anything that isn't a SQL-ordered version 6 or 7 UUID (see
+	/// <see cref="Version(Guid, UuidLayout)"/> for how the two are told apart). Same edges as
+	/// <see cref="GetTimestamp(Guid)"/>.
+	/// </summary>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe DateTimeOffset? GetTimestamp(Guid uuid, UuidLayout layout)
+	{
+		var code = LayoutCode(layout);
+		Span<byte> bytes = stackalloc byte[16];
+		WriteBytes(uuid, layout, bytes);
+		ulong millis;
+		fixed (byte* p = bytes)
+		{
+			if (uuid_get_timestamp(p, code, &millis) == 0)
+				return null;
+		}
+		return DateTimeOffset.FromUnixTimeMilliseconds((long)millis);
+	}
+
+	/// <summary>
+	/// <see cref="V7UnixMillis(Guid)"/> for a <paramref name="uuid"/> held in
+	/// <paramref name="layout"/>'s byte order, reading a SQL-ordered value's permuted bytes
+	/// directly. Meaningful only for a genuine version 7 UUID in that layout;
+	/// <see cref="IsRfc(Guid, int, UuidLayout)"/> is the check.
+	/// </summary>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe long V7UnixMillis(Guid uuid, UuidLayout layout)
+	{
+		var code = LayoutCode(layout);
+		Span<byte> bytes = stackalloc byte[16];
+		WriteBytes(uuid, layout, bytes);
+		fixed (byte* p = bytes)
+		{
+			return (long)uuid_v7_unix_millis_in(p, code);
+		}
+	}
+
+	/// <summary>
+	/// <see cref="V7Timestamp(Guid)"/> for a <paramref name="uuid"/> held in
+	/// <paramref name="layout"/>'s byte order; see <see cref="V7UnixMillis(Guid, UuidLayout)"/>.
+	/// </summary>
+	/// <exception cref="ArgumentOutOfRangeException">
+	/// <paramref name="layout"/> is not a defined layout, or the embedded timestamp is past
+	/// year 9999 (see <see cref="V7Timestamp(Guid)"/>).
+	/// </exception>
+	public static DateTimeOffset V7Timestamp(Guid uuid, UuidLayout layout) =>
+		DateTimeOffset.FromUnixTimeMilliseconds(V7UnixMillis(uuid, layout));
+
+	/// <summary>
+	/// <see cref="V6UnixMillis(Guid)"/> for a <paramref name="uuid"/> held in
+	/// <paramref name="layout"/>'s byte order, reading a SQL-ordered value's permuted bytes
+	/// directly. Meaningful only for a genuine version 6 UUID in that layout;
+	/// <see cref="IsRfc(Guid, int, UuidLayout)"/> is the check.
+	/// </summary>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe long V6UnixMillis(Guid uuid, UuidLayout layout)
+	{
+		var code = LayoutCode(layout);
+		Span<byte> bytes = stackalloc byte[16];
+		WriteBytes(uuid, layout, bytes);
+		fixed (byte* p = bytes)
+		{
+			return (long)uuid_v6_unix_millis_in(p, code);
+		}
+	}
+
+	/// <summary>
+	/// <see cref="V6Timestamp(Guid)"/> for a <paramref name="uuid"/> held in
+	/// <paramref name="layout"/>'s byte order; see <see cref="V6UnixMillis(Guid, UuidLayout)"/>.
+	/// </summary>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static DateTimeOffset V6Timestamp(Guid uuid, UuidLayout layout) =>
+		DateTimeOffset.FromUnixTimeMilliseconds(V6UnixMillis(uuid, layout));
+
+	// ---- Inspection ---------------------------------------------------------------------
+	//
+	// The layout knowledge lives in the core: these only get a Guid's bytes into the order
+	// its layout means. That is the one subtle step, the same asymmetry the SQL-order
+	// transforms below explain: an RFC-ordered Guid is read with `bigEndian: true`, but a
+	// SQL-ordered one came from `new Guid(bytes)` (no conversion) and is read back the same
+	// way, so its bytes are the SQL Server wire bytes the core expects.
+
+	static uint LayoutCode(UuidLayout layout) => layout switch
+	{
+		UuidLayout.Rfc9562 => 1,
+		UuidLayout.SqlServer => 2,
+		_ => throw new ArgumentOutOfRangeException(nameof(layout), layout,
+			"Layout must be UuidLayout.Rfc9562 or UuidLayout.SqlServer."),
+	};
+
+	static void WriteBytes(Guid uuid, UuidLayout layout, Span<byte> bytes)
+	{
+		if (layout == UuidLayout.SqlServer)
+			uuid.TryWriteBytes(bytes);
+		else
+			uuid.TryWriteBytes(bytes, bigEndian: true, out _);
+	}
+
+	static UuidVariant VariantOf(uint code) => code switch
+	{
+		1 => UuidVariant.Ncs,
+		2 => UuidVariant.Rfc9562,
+		3 => UuidVariant.Microsoft,
+		4 => UuidVariant.Future,
+		_ => UuidVariant.Unspecified,
+	};
+
+	static void RequireSingleUuid(ReadOnlySpan<byte> uuid, string paramName)
+	{
+		if (uuid.Length != 16)
+			throw new ArgumentException($"A UUID is exactly 16 bytes; got {uuid.Length}.", paramName);
+	}
+
+	/// <summary>
+	/// The RFC 9562 version nibble of <paramref name="uuid"/>, 0 through 15 — 0 for
+	/// <see cref="Nil"/>, 15 for <see cref="Max"/>. Says nothing about the variant: use
+	/// <see cref="IsRfc(Guid, int)"/> when the question is "an RFC 9562 UUID of version N".
+	/// </summary>
+	public static int Version(Guid uuid) => Version(uuid, UuidLayout.Rfc9562);
+
+	/// <summary>
+	/// The version of a <paramref name="uuid"/> held in <paramref name="layout"/>'s byte order.
+	/// </summary>
+	/// <remarks>
+	/// In <see cref="UuidLayout.Rfc9562"/> this is <see cref="Version(Guid)"/>.
+	/// <see cref="UuidLayout.SqlServer"/> is defined only for the two versions that have a SQL
+	/// Server order, and answers 6, 7, or 0 for anything that isn't a SQL-ordered version 6 or
+	/// 7 RFC 9562 UUID. The version nibble lands at a different byte for each, and the other
+	/// version's random bits can mimic it there, so the core checks the variant bits too, where
+	/// each version puts them, and the answer never confuses the two. What it cannot know is
+	/// whether <paramref name="uuid"/> really is in that layout; that is the caller's to track.
+	/// An RFC-ordered value can happen to form a valid SQL-ordered version 7 (a random v4 does
+	/// one time in 16), and is then reported as one.
+	/// </remarks>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe int Version(Guid uuid, UuidLayout layout)
+	{
+		var code = LayoutCode(layout);
+		Span<byte> bytes = stackalloc byte[16];
+		WriteBytes(uuid, layout, bytes);
+		fixed (byte* p = bytes)
+		{
+			return (int)uuid_version(p, code);
+		}
+	}
+
+	/// <summary>
+	/// <see cref="Version(Guid, UuidLayout)"/> over 16 raw bytes already in
+	/// <paramref name="layout"/>'s order (RFC 9562 network order by default).
+	/// </summary>
+	/// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe int Version(ReadOnlySpan<byte> uuid, UuidLayout layout = UuidLayout.Rfc9562)
+	{
+		var code = LayoutCode(layout);
+		RequireSingleUuid(uuid, nameof(uuid));
+		fixed (byte* p = uuid)
+		{
+			return (int)uuid_version(p, code);
+		}
+	}
+
+	/// <summary>
+	/// The variant field of <paramref name="uuid"/> (RFC 9562 §4.1): <see cref="UuidVariant.Ncs"/>
+	/// for <see cref="Nil"/>, <see cref="UuidVariant.Future"/> for <see cref="Max"/>, and
+	/// <see cref="UuidVariant.Rfc9562"/> for anything this library or
+	/// <see cref="Guid.NewGuid"/>/<see cref="Guid.CreateVersion7()"/> mints. Never
+	/// <see cref="UuidVariant.Unspecified"/>.
+	/// </summary>
+	public static unsafe UuidVariant Variant(Guid uuid)
 	{
 		Span<byte> bytes = stackalloc byte[16];
 		uuid.TryWriteBytes(bytes, bigEndian: true, out _);
-		return (bytes[6] >> 4) switch
+		fixed (byte* p = bytes)
 		{
-			6 => V6Timestamp(uuid),
-			7 => V7Timestamp(uuid),
-			_ => null,
-		};
+			return VariantOf(uuid_variant(p));
+		}
+	}
+
+	/// <summary><see cref="Variant(Guid)"/> over 16 raw RFC 9562-ordered bytes.</summary>
+	/// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+	public static unsafe UuidVariant Variant(ReadOnlySpan<byte> uuid)
+	{
+		RequireSingleUuid(uuid, nameof(uuid));
+		fixed (byte* p = uuid)
+		{
+			return VariantOf(uuid_variant(p));
+		}
+	}
+
+	/// <summary>
+	/// Whether <paramref name="uuid"/> is an RFC 9562 UUID of version
+	/// <paramref name="version"/> — the RFC variant and that version nibble, in one native
+	/// call. The guard to run before trusting a value's version-specific fields, such as a
+	/// version 7's timestamp.
+	/// </summary>
+	public static bool IsRfc(Guid uuid, int version) => IsRfc(uuid, version, UuidLayout.Rfc9562);
+
+	/// <summary>
+	/// <see cref="IsRfc(Guid, int)"/> for a <paramref name="uuid"/> held in
+	/// <paramref name="layout"/>'s byte order — in <see cref="UuidLayout.SqlServer"/>, only
+	/// versions 6 and 7 can be <see langword="true"/> (see <see cref="Version(Guid, UuidLayout)"/>).
+	/// A <paramref name="version"/> outside 0-15 is simply never matched.
+	/// </summary>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe bool IsRfc(Guid uuid, int version, UuidLayout layout)
+	{
+		var code = LayoutCode(layout);
+		Span<byte> bytes = stackalloc byte[16];
+		WriteBytes(uuid, layout, bytes);
+		fixed (byte* p = bytes)
+		{
+			return uuid_is_rfc(p, (uint)version, code) != 0;
+		}
+	}
+
+	/// <summary>
+	/// <see cref="IsRfc(Guid, int, UuidLayout)"/> over 16 raw bytes already in
+	/// <paramref name="layout"/>'s order (RFC 9562 network order by default).
+	/// </summary>
+	/// <exception cref="ArgumentException"><paramref name="uuid"/> is not exactly 16 bytes.</exception>
+	/// <exception cref="ArgumentOutOfRangeException"><paramref name="layout"/> is not a defined layout.</exception>
+	public static unsafe bool IsRfc(ReadOnlySpan<byte> uuid, int version, UuidLayout layout = UuidLayout.Rfc9562)
+	{
+		var code = LayoutCode(layout);
+		RequireSingleUuid(uuid, nameof(uuid));
+		fixed (byte* p = uuid)
+		{
+			return uuid_is_rfc(p, (uint)version, code) != 0;
+		}
 	}
 
 	/// <summary>
@@ -910,41 +1227,34 @@ public static partial class UuidGenerator
 		fixed (byte* p = uuid) { uuid_v6_to_rfc_order(p); }
 	}
 
-	static void RequireSingleUuid(Span<byte> uuid, string paramName)
-	{
-		if (uuid.Length != 16)
-			throw new ArgumentException($"A UUID is exactly 16 bytes; got {uuid.Length}.", paramName);
-	}
 
 	/// <summary>
 	/// Fills <paramref name="destination"/> with time-sortable version 7 UUIDs sharing one
 	/// timestamp capture and one contiguous block of the monotonic counter — one native call
 	/// and one random-bytes fetch instead of <paramref name="destination"/>'s length worth of
-	/// each.
+	/// each. In strictly increasing order however it lands on the counter; see
+	/// <see cref="MaxV7Batch"/>.
 	/// </summary>
-	/// <exception cref="ArgumentException">
-	/// <paramref name="destination"/> is longer than a single fill takes (more than
-	/// <c>int.MaxValue / 16</c> elements).
-	/// </exception>
 	/// <exception cref="ArgumentOutOfRangeException">
+	/// <paramref name="destination"/> holds more than <see cref="MaxV7Batch"/> elements, or
 	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
 	/// </exception>
 	public static void FillV7(Span<Guid> destination, long unixMilliseconds)
 	{
-		RequireFillable(destination, nameof(destination));
 		ThrowOnBatchFailure(CoreFillV7(destination, unixMilliseconds), "uuid_new_v7_batch",
-			"Unix millisecond timestamp must be non-negative and fit within 48 bits.");
+			"Unix millisecond timestamp must be non-negative and fit within 48 bits.",
+			nameof(destination));
 	}
 
 	/// <summary>
 	/// Non-throwing counterpart to <see cref="FillV7(Span{Guid}, long)"/> — returns
 	/// <see langword="false"/> instead of throwing when the native call reports a random-source
 	/// failure or an out-of-range <paramref name="unixMilliseconds"/>, and for a
-	/// <paramref name="destination"/> too long for a single fill. On failure
+	/// <paramref name="destination"/> longer than <see cref="MaxV7Batch"/>. On failure
 	/// <paramref name="destination"/> is left untouched. See <see cref="TryNewV4"/> for why.
 	/// </summary>
 	public static bool TryFillV7(Span<Guid> destination, long unixMilliseconds) =>
-		destination.Length <= MaxGuidsPerFill && CoreFillV7(destination, unixMilliseconds) == 0;
+		CoreFillV7(destination, unixMilliseconds) == 0;
 
 	/// <summary>
 	/// Fills <paramref name="destination"/> with raw RFC 9562-ordered version 7 UUID bytes —
@@ -968,11 +1278,16 @@ public static partial class UuidGenerator
 	/// <exception cref="ArgumentException">
 	/// <paramref name="destination"/>'s length is not a multiple of 16.
 	/// </exception>
+	/// <exception cref="ArgumentOutOfRangeException">
+	/// <paramref name="destination"/> holds more than <see cref="MaxV7Batch"/> UUIDs, or
+	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// </exception>
 	public static void FillV7(Span<byte> destination, long unixMilliseconds)
 	{
 		RequireWholeUuids(destination, nameof(destination));
 		ThrowOnBatchFailure(CoreFillV7Bytes(destination, unixMilliseconds), "uuid_new_v7_batch",
-			"Unix millisecond timestamp must be non-negative and fit within 48 bits.");
+			"Unix millisecond timestamp must be non-negative and fit within 48 bits.",
+			nameof(destination));
 	}
 
 	/// <summary>
@@ -989,6 +1304,10 @@ public static partial class UuidGenerator
 	{
 		if (destination.IsEmpty)
 			return 0;
+		// The core refuses this too (code 4), but only after a scratch buffer of up to 2 GiB
+		// had been rented to hand it; answer for it here instead.
+		if (destination.Length > MaxV7Batch)
+			return 4;
 
 		int totalBytes = destination.Length * 16;
 		Span<byte> stackBuf = stackalloc byte[BatchStackThresholdBytes];
@@ -1037,15 +1356,16 @@ public static partial class UuidGenerator
 
 	/// <summary>
 	/// Creates an array of <paramref name="count"/> time-sortable version 7 UUIDs sharing one
-	/// timestamp capture.
+	/// timestamp capture, in strictly increasing order (see <see cref="MaxV7Batch"/>).
 	/// </summary>
 	/// <exception cref="ArgumentOutOfRangeException">
-	/// <paramref name="count"/> is negative, or <paramref name="unixMilliseconds"/> is negative
-	/// or does not fit within 48 bits.
+	/// <paramref name="count"/> is negative or greater than <see cref="MaxV7Batch"/>, or
+	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
 	/// </exception>
 	public static Guid[] NewV7Batch(int count, long unixMilliseconds)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegative(count);
+		ArgumentOutOfRangeException.ThrowIfGreaterThan(count, MaxV7Batch);
 		var result = new Guid[count];
 		FillV7(result, unixMilliseconds);
 		return result;

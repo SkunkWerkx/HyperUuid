@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -131,6 +132,25 @@ public final class UuidGenerator {
         // (uuid), rewritten in place — the four uuid_v{6,7}_to_{sql,rfc}_order exports
         private static final MethodHandle REORDER =
                 LINKER.downcallHandle(FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), CRITICAL);
+        // (uuid, layout) -> version — uuid_version
+        private static final MethodHandle VERSION_IN = LINKER.downcallHandle(
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), CRITICAL);
+        // (uuid) -> variant code — uuid_variant
+        private static final MethodHandle VARIANT =
+                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
+        // (uuid, version, layout) -> 1/0 — uuid_is_rfc
+        private static final MethodHandle IS_RFC = LINKER.downcallHandle(
+                FunctionDescriptor.of(
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+                CRITICAL);
+        // (uuid, layout, millis_out) -> 6/7/0 — uuid_get_timestamp
+        private static final MethodHandle GET_TIMESTAMP = LINKER.downcallHandle(
+                FunctionDescriptor.of(
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
+                CRITICAL);
+        // (uuid, layout) -> unix_millis — uuid_v6_unix_millis_in, uuid_v7_unix_millis_in
+        private static final MethodHandle UNIX_MILLIS_IN = LINKER.downcallHandle(
+                FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), CRITICAL);
         // () -> packed version — the probe. Nothing crosses, so it is not linked critical.
         private static final MethodHandle VERSION = LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT));
 
@@ -228,6 +248,12 @@ public final class UuidGenerator {
         private static final MemorySegment UUID_V7_TO_RFC_ORDER = export("uuid_v7_to_rfc_order");
         private static final MemorySegment UUID_V6_TO_SQL_ORDER = export("uuid_v6_to_sql_order");
         private static final MemorySegment UUID_V6_TO_RFC_ORDER = export("uuid_v6_to_rfc_order");
+        private static final MemorySegment UUID_VERSION = export("uuid_version");
+        private static final MemorySegment UUID_VARIANT = export("uuid_variant");
+        private static final MemorySegment UUID_IS_RFC = export("uuid_is_rfc");
+        private static final MemorySegment UUID_GET_TIMESTAMP = export("uuid_get_timestamp");
+        private static final MemorySegment UUID_V6_UNIX_MILLIS_IN = export("uuid_v6_unix_millis_in");
+        private static final MemorySegment UUID_V7_UNIX_MILLIS_IN = export("uuid_v7_unix_millis_in");
         private static final MemorySegment HYPERUUID_VERSION = export("hyperuuid_version");
 
         // Null when the wasm backend is active — the addresses above are then never used, and
@@ -552,7 +578,8 @@ public final class UuidGenerator {
      * Recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's timestamp
      * field. Only meaningful when {@code uuid}'s version nibble is 6 — the RFC 9562 bit
      * layout doesn't distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp",
-     * so the caller is responsible for checking that first if it matters.
+     * so the caller is responsible for checking that first if it matters ({@link #isRfc(UUID, int)}
+     * is the check).
      *
      * @param uuid a version 6 UUID
      * @return the embedded Unix-epoch millisecond timestamp
@@ -609,11 +636,8 @@ public final class UuidGenerator {
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v6_batch downcall failed unexpectedly", t);
         }
-        if (rc == 2) {
-            throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
-        }
         if (rc != 0) {
-            throw new IllegalStateException("uuid_new_v6_batch failed with code " + rc + " (random source failure)");
+            throw batchFailure(rc, "uuid_new_v6_batch", count, "unixMillis does not fit the 60-bit v6 timestamp field");
         }
         UUID[] result = new UUID[count];
         for (int i = 0; i < count; i++) {
@@ -687,7 +711,8 @@ public final class UuidGenerator {
      * Recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
      * {@code unix_ts_ms} field. Only meaningful when {@code uuid}'s version nibble is 7 — the
      * RFC 9562 bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
-     * timestamp", so the caller is responsible for checking that first if it matters.
+     * timestamp", so the caller is responsible for checking that first if it matters
+     * ({@link #isRfc(UUID, int)} is the check).
      *
      * @param uuid a version 7 UUID
      * @return the embedded Unix-epoch millisecond timestamp
@@ -719,20 +744,359 @@ public final class UuidGenerator {
 
     /**
      * Recovers the UTC timestamp embedded in {@code uuid}, or {@link Optional#empty()} if it
-     * isn't a version 6 or 7 UUID. Unlike {@link #v6Timestamp}/{@link #v7Timestamp}, this checks
-     * {@code uuid.version()} itself first, so a caller doesn't need to already know (or
-     * separately check) which version {@code uuid} is before asking — delegates straight to
-     * whichever of those two methods applies, no bit-layout logic duplicated here.
+     * isn't an RFC 9562 version 6 or 7 UUID. Unlike {@link #v6Timestamp}/{@link #v7Timestamp},
+     * this checks first, so a caller doesn't need to already know (or separately check) which
+     * version {@code uuid} is before asking. The variant is checked as well as the version: a
+     * 6 or 7 nibble under the NCS, Microsoft or future variant is not an RFC version and has
+     * no timestamp. One call into the core, with no bit-layout logic here.
      *
-     * @param uuid any UUID
-     * @return the embedded UTC timestamp, or empty if {@code uuid} isn't version 6 or 7
+     * @param uuid any RFC 9562-ordered UUID
+     * @return the embedded UTC timestamp, or empty if {@code uuid} isn't an RFC 9562 version 6
+     *     or 7 UUID
      */
     public static Optional<Instant> getTimestamp(UUID uuid) {
-        return switch (uuid.version()) {
-            case 6 -> Optional.of(v6Timestamp(uuid));
-            case 7 -> Optional.of(v7Timestamp(uuid));
-            default -> Optional.empty();
-        };
+        return getTimestamp(uuid, UuidLayout.RFC_9562);
+    }
+
+    /**
+     * {@link #getTimestamp(UUID)} for a {@code uuid} held in {@code layout}'s byte order — in
+     * {@link UuidLayout#SQL_SERVER}, the timestamp of a value straight from
+     * {@link #v7ToSqlOrder(UUID)} or {@link #v6ToSqlOrder(UUID)} (or a {@code uniqueidentifier}
+     * column), read from its permuted bytes with no conversion back first, or empty for
+     * anything that isn't a SQL-ordered RFC 9562 version 6 or 7 UUID (see
+     * {@link #version(UUID, UuidLayout)} for how the two are told apart). The variant is
+     * checked in either layout.
+     *
+     * @param uuid any UUID, held in {@code layout}'s byte order
+     * @param layout the byte order {@code uuid} is held in
+     * @return the embedded UTC timestamp, or empty if {@code uuid} isn't an RFC 9562 version 6
+     *     or 7 UUID in {@code layout}
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static Optional<Instant> getTimestamp(UUID uuid, UuidLayout layout) {
+        int code = layoutCode(layout);
+        if (Core.WASM != null) {
+            return Core.WASM.getTimestamp(uuid, code);
+        }
+        // One call: the core checks the variant and the version and reads the timestamp,
+        // writing the millis into the out scratch only when it answers 6 or 7.
+        Scratch scratch = SCRATCH.get();
+        MemorySegment seg = writeUuid(scratch.in, uuid);
+        int version;
+        try {
+            version = (int) Downcalls.GET_TIMESTAMP.invokeExact(Core.UUID_GET_TIMESTAMP, seg, code, scratch.out);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_get_timestamp downcall failed unexpectedly", t);
+        }
+        if (version == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(Instant.ofEpochMilli(scratch.out.get(ValueLayout.JAVA_LONG, 0)));
+    }
+
+    /**
+     * {@link #v6UnixMillis(UUID)} for a {@code uuid} held in {@code layout}'s byte order,
+     * reading a SQL-ordered value's permuted bytes directly. Meaningful only for a genuine
+     * version 6 UUID in that layout; {@link #isRfc(UUID, int, UuidLayout)} is the check.
+     *
+     * @param uuid a version 6 UUID, held in {@code layout}'s byte order
+     * @param layout the byte order {@code uuid} is held in
+     * @return the embedded Unix-epoch millisecond timestamp
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static long v6UnixMillis(UUID uuid, UuidLayout layout) {
+        return v6UnixMillisIn(uuid, layoutCode(layout));
+    }
+
+    /**
+     * {@link #v6Timestamp(UUID)} for a {@code uuid} held in {@code layout}'s byte order; see
+     * {@link #v6UnixMillis(UUID, UuidLayout)}.
+     *
+     * @param uuid a version 6 UUID, held in {@code layout}'s byte order
+     * @param layout the byte order {@code uuid} is held in
+     * @return the embedded UTC timestamp
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static Instant v6Timestamp(UUID uuid, UuidLayout layout) {
+        return Instant.ofEpochMilli(v6UnixMillis(uuid, layout));
+    }
+
+    /**
+     * {@link #v7UnixMillis(UUID)} for a {@code uuid} held in {@code layout}'s byte order,
+     * reading a SQL-ordered value's permuted bytes directly. Meaningful only for a genuine
+     * version 7 UUID in that layout; {@link #isRfc(UUID, int, UuidLayout)} is the check.
+     *
+     * @param uuid a version 7 UUID, held in {@code layout}'s byte order
+     * @param layout the byte order {@code uuid} is held in
+     * @return the embedded Unix-epoch millisecond timestamp
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static long v7UnixMillis(UUID uuid, UuidLayout layout) {
+        return v7UnixMillisIn(uuid, layoutCode(layout));
+    }
+
+    /**
+     * {@link #v7Timestamp(UUID)} for a {@code uuid} held in {@code layout}'s byte order; see
+     * {@link #v7UnixMillis(UUID, UuidLayout)}. Cannot overflow, for the same reason.
+     *
+     * @param uuid a version 7 UUID, held in {@code layout}'s byte order
+     * @param layout the byte order {@code uuid} is held in
+     * @return the embedded UTC timestamp
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static Instant v7Timestamp(UUID uuid, UuidLayout layout) {
+        return Instant.ofEpochMilli(v7UnixMillis(uuid, layout));
+    }
+
+    // ---- Inspection ------------------------------------------------------------------
+    //
+    // The layout knowledge lives in the core: these only hand it a UUID's sixteen bytes. In
+    // either layout those are the UUID's two longs, most significant first — exactly how
+    // v7ToSqlOrder/v6ToSqlOrder write their input and read their result back — so a
+    // SQL-ordered UUID's bytes are the SQL Server wire bytes the core expects, with no
+    // layout-dependent conversion on this side.
+
+    private static int layoutCode(UuidLayout layout) {
+        Objects.requireNonNull(layout, "layout");
+        if (layout == UuidLayout.UNSPECIFIED) {
+            throw new IllegalArgumentException(
+                    "layout must be UuidLayout.RFC_9562 or UuidLayout.SQL_SERVER; got UNSPECIFIED");
+        }
+        return layout.code();
+    }
+
+    private static void requireSingleUuid(byte[] uuid) {
+        if (uuid.length != 16) {
+            throw new IllegalArgumentException("a UUID is exactly 16 bytes; got " + uuid.length);
+        }
+    }
+
+    private static int versionIn(UUID uuid, int layout) {
+        if (Core.WASM != null) {
+            return Core.WASM.uuidVersion(uuid, layout);
+        }
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        return versionNative(seg, layout);
+    }
+
+    private static int versionNative(MemorySegment seg, int layout) {
+        try {
+            return (int) Downcalls.VERSION_IN.invokeExact(Core.UUID_VERSION, seg, layout);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_version downcall failed unexpectedly", t);
+        }
+    }
+
+    private static int variantNative(MemorySegment seg) {
+        try {
+            return (int) Downcalls.VARIANT.invokeExact(Core.UUID_VARIANT, seg);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_variant downcall failed unexpectedly", t);
+        }
+    }
+
+    private static boolean isRfcNative(MemorySegment seg, int version, int layout) {
+        try {
+            return (int) Downcalls.IS_RFC.invokeExact(Core.UUID_IS_RFC, seg, version, layout) != 0;
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_is_rfc downcall failed unexpectedly", t);
+        }
+    }
+
+    private static long v6UnixMillisIn(UUID uuid, int layout) {
+        if (Core.WASM != null) {
+            return Core.WASM.v6UnixMillisIn(uuid, layout);
+        }
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            return (long) Downcalls.UNIX_MILLIS_IN.invokeExact(Core.UUID_V6_UNIX_MILLIS_IN, seg, layout);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v6_unix_millis_in downcall failed unexpectedly", t);
+        }
+    }
+
+    private static long v7UnixMillisIn(UUID uuid, int layout) {
+        if (Core.WASM != null) {
+            return Core.WASM.v7UnixMillisIn(uuid, layout);
+        }
+        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
+        try {
+            return (long) Downcalls.UNIX_MILLIS_IN.invokeExact(Core.UUID_V7_UNIX_MILLIS_IN, seg, layout);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: uuid_v7_unix_millis_in downcall failed unexpectedly", t);
+        }
+    }
+
+    /**
+     * The RFC 9562 version nibble of {@code uuid}, 0 through 15 — 0 for {@link #NIL}, 15 for
+     * {@link #MAX}. Agrees with {@link UUID#version()}, read by the core. Says nothing about
+     * the variant: use {@link #isRfc(UUID, int)} when the question is "an RFC 9562 UUID of
+     * version N".
+     *
+     * @param uuid any RFC 9562-ordered UUID
+     * @return its version nibble
+     */
+    public static int version(UUID uuid) {
+        return versionIn(uuid, UuidLayout.RFC_9562.code());
+    }
+
+    /**
+     * The version of a {@code uuid} held in {@code layout}'s byte order.
+     *
+     * <p>In {@link UuidLayout#RFC_9562} this is {@link #version(UUID)}.
+     * {@link UuidLayout#SQL_SERVER} is defined only for the two versions that have a SQL
+     * Server order, and answers 6, 7, or 0 for anything that isn't a SQL-ordered version 6 or
+     * 7 RFC 9562 UUID. The version nibble lands at a different byte for each, and the other
+     * version's random bits can mimic it there, so the core checks the variant bits too,
+     * where each version puts them, and the answer never confuses the two.
+     *
+     * @param uuid any UUID, held in {@code layout}'s byte order
+     * @param layout the byte order {@code uuid} is held in
+     * @return its version in that layout
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static int version(UUID uuid, UuidLayout layout) {
+        return versionIn(uuid, layoutCode(layout));
+    }
+
+    /**
+     * {@link #version(UUID)} over 16 raw RFC 9562-ordered bytes.
+     *
+     * @param uuid the 16 bytes
+     * @return their version nibble
+     * @throws IllegalArgumentException if {@code uuid} is not exactly 16 bytes
+     */
+    public static int version(byte[] uuid) {
+        return version(uuid, UuidLayout.RFC_9562);
+    }
+
+    /**
+     * {@link #version(UUID, UuidLayout)} over 16 raw bytes already in {@code layout}'s order —
+     * in {@link UuidLayout#SQL_SERVER}, the bytes SQL Server stores, as
+     * {@link #v7ToSqlOrder(byte[])} writes them.
+     *
+     * @param uuid the 16 bytes, in {@code layout}'s order
+     * @param layout the byte order {@code uuid} is in
+     * @return their version in that layout
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}, or
+     *     {@code uuid} is not exactly 16 bytes
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static int version(byte[] uuid, UuidLayout layout) {
+        int code = layoutCode(layout);
+        requireSingleUuid(uuid);
+        if (Core.WASM != null) {
+            return Core.WASM.uuidVersion(uuid, code);
+        }
+        return versionNative(MemorySegment.ofArray(uuid), code);
+    }
+
+    /**
+     * The variant field of {@code uuid} (RFC 9562 §4.1): {@link UuidVariant#NCS} for
+     * {@link #NIL}, {@link UuidVariant#FUTURE} for {@link #MAX}, and
+     * {@link UuidVariant#RFC_9562} for anything this library or {@link UUID#randomUUID()}
+     * mints. Never {@link UuidVariant#UNSPECIFIED}. RFC 9562 order only: variant bits in a
+     * SQL-ordered value are what {@link #version(UUID, UuidLayout)} already checks.
+     *
+     * @param uuid any RFC 9562-ordered UUID
+     * @return its variant
+     */
+    public static UuidVariant variant(UUID uuid) {
+        if (Core.WASM != null) {
+            return UuidVariant.of(Core.WASM.uuidVariant(uuid));
+        }
+        return UuidVariant.of(variantNative(writeUuid(SCRATCH.get().in, uuid)));
+    }
+
+    /**
+     * {@link #variant(UUID)} over 16 raw RFC 9562-ordered bytes.
+     *
+     * @param uuid the 16 bytes
+     * @return their variant
+     * @throws IllegalArgumentException if {@code uuid} is not exactly 16 bytes
+     */
+    public static UuidVariant variant(byte[] uuid) {
+        requireSingleUuid(uuid);
+        if (Core.WASM != null) {
+            return UuidVariant.of(Core.WASM.uuidVariant(uuid));
+        }
+        return UuidVariant.of(variantNative(MemorySegment.ofArray(uuid)));
+    }
+
+    /**
+     * Whether {@code uuid} is an RFC 9562 UUID of version {@code version} — the RFC variant
+     * and that version nibble, in one call into the core. The guard to run before trusting a
+     * value's version-specific fields, such as a version 7's timestamp. A {@code version}
+     * outside 0-15 is simply never matched.
+     *
+     * @param uuid any RFC 9562-ordered UUID
+     * @param version the version to check for
+     * @return {@code true} if {@code uuid} is an RFC 9562 UUID of that version
+     */
+    public static boolean isRfc(UUID uuid, int version) {
+        return isRfcIn(uuid, version, UuidLayout.RFC_9562.code());
+    }
+
+    /**
+     * {@link #isRfc(UUID, int)} for a {@code uuid} held in {@code layout}'s byte order — in
+     * {@link UuidLayout#SQL_SERVER}, only versions 6 and 7 can be {@code true} (see
+     * {@link #version(UUID, UuidLayout)}).
+     *
+     * @param uuid any UUID, held in {@code layout}'s byte order
+     * @param version the version to check for
+     * @param layout the byte order {@code uuid} is held in
+     * @return {@code true} if {@code uuid} is an RFC 9562 UUID of that version in that layout
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static boolean isRfc(UUID uuid, int version, UuidLayout layout) {
+        return isRfcIn(uuid, version, layoutCode(layout));
+    }
+
+    private static boolean isRfcIn(UUID uuid, int version, int layout) {
+        if (Core.WASM != null) {
+            return Core.WASM.isRfc(uuid, version, layout);
+        }
+        return isRfcNative(writeUuid(SCRATCH.get().in, uuid), version, layout);
+    }
+
+    /**
+     * {@link #isRfc(UUID, int)} over 16 raw RFC 9562-ordered bytes.
+     *
+     * @param uuid the 16 bytes
+     * @param version the version to check for
+     * @return {@code true} if the bytes are an RFC 9562 UUID of that version
+     * @throws IllegalArgumentException if {@code uuid} is not exactly 16 bytes
+     */
+    public static boolean isRfc(byte[] uuid, int version) {
+        return isRfc(uuid, version, UuidLayout.RFC_9562);
+    }
+
+    /**
+     * {@link #isRfc(UUID, int, UuidLayout)} over 16 raw bytes already in {@code layout}'s
+     * order.
+     *
+     * @param uuid the 16 bytes, in {@code layout}'s order
+     * @param version the version to check for
+     * @param layout the byte order {@code uuid} is in
+     * @return {@code true} if the bytes are an RFC 9562 UUID of that version in that layout
+     * @throws IllegalArgumentException if {@code layout} is {@link UuidLayout#UNSPECIFIED}, or
+     *     {@code uuid} is not exactly 16 bytes
+     * @throws NullPointerException if {@code layout} is {@code null}
+     */
+    public static boolean isRfc(byte[] uuid, int version, UuidLayout layout) {
+        int code = layoutCode(layout);
+        requireSingleUuid(uuid);
+        if (Core.WASM != null) {
+            return Core.WASM.isRfc(uuid, version, code);
+        }
+        return isRfcNative(MemorySegment.ofArray(uuid), version, code);
     }
 
     /**
@@ -860,17 +1224,18 @@ public final class UuidGenerator {
     /**
      * Creates {@code count} time-sortable version 7 UUIDs sharing one timestamp capture and
      * one contiguous block of the monotonic counter — one downcall and one random-bytes
-     * fetch instead of {@code count} of each.
+     * fetch instead of {@code count} of each. In strictly increasing order however the batch
+     * lands on the counter; see {@link #MAX_V7_BATCH}.
      *
      * @param count how many UUIDs to create
      * @param unixMillis the shared Unix-epoch millisecond timestamp to embed in each
      * @return {@code count} new version 7 UUIDs
      * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
-     *     within 48 bits, or {@code count} is negative or more than one batch can carry
-     *     ({@code Integer.MAX_VALUE / 16})
+     *     within 48 bits, or {@code count} is negative or greater than {@link #MAX_V7_BATCH}
      */
     public static UUID[] newV7Batch(int count, long unixMillis) {
         requireBatchCount(count);
+        requireV7BatchCount(count);
         if (Core.WASM != null) {
             return Core.WASM.newV7Batch(count, unixMillis);
         }
@@ -885,11 +1250,9 @@ public final class UuidGenerator {
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
         }
-        if (rc == 2) {
-            throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
-        }
         if (rc != 0) {
-            throw new IllegalStateException("uuid_new_v7_batch failed with code " + rc + " (random source failure)");
+            throw batchFailure(
+                    rc, "uuid_new_v7_batch", count, "unixMillis must be non-negative and fit within 48 bits");
         }
         UUID[] result = new UUID[count];
         for (int i = 0; i < count; i++) {
@@ -929,12 +1292,23 @@ public final class UuidGenerator {
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
         }
-        if (rc == 2) {
-            throw new IllegalArgumentException("unixMillis does not fit this version's timestamp field");
-        }
         if (rc != 0) {
-            throw new IllegalStateException(fn + " failed with code " + rc + " (random source failure)");
+            throw batchFailure(rc, fn, count, "unixMillis does not fit this version's timestamp field");
         }
+    }
+
+    // A batch export's non-zero return code as the exception it means, shared with the wasm
+    // backend so both paths say the same thing: 2 is the caller's timestamp, 3 a batch too
+    // large to address on this platform (count * 16 overflowing the core's usize, a 32-bit
+    // host only), 4 a v7 batch past MAX_V7_BATCH. Only 1 is the random source.
+    static RuntimeException batchFailure(int rc, String fn, int count, String outOfRangeMessage) {
+        return switch (rc) {
+            case 2 -> new IllegalArgumentException(outOfRangeMessage);
+            case 3 ->
+                new IllegalArgumentException("a batch of " + count + " UUIDs is too large to address on this platform");
+            case 4 -> v7BatchTooLarge(count);
+            default -> new IllegalStateException(fn + " failed with code " + rc + " (random source failure)");
+        };
     }
 
     // The most UUIDs one batch can carry: its count * 16 bytes of output still have to be an
@@ -951,6 +1325,33 @@ public final class UuidGenerator {
         }
     }
 
+    /**
+     * The most UUIDs one version 7 batch ({@link #newV7Batch(int, long)},
+     * {@link #fillV7(UUID[], long)}, {@link #fillV7(byte[], long)} and their overloads) mints:
+     * 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond.
+     *
+     * <p>Every batch up to this size is in strictly increasing order. The counter is one
+     * process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
+     * UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
+     * than sorting before the ones ahead of them. A larger batch would have to reuse counter
+     * values within one millisecond, so it is refused with {@link IllegalArgumentException},
+     * before anything is allocated or written. Version 6 has no counter and no such limit.
+     */
+    public static final int MAX_V7_BATCH = 1 << 26;
+
+    private static IllegalArgumentException v7BatchTooLarge(int count) {
+        return new IllegalArgumentException(
+                "a version 7 batch holds at most " + MAX_V7_BATCH + " UUIDs (the 26-bit counter space); got " + count);
+    }
+
+    // Checked after requireBatchCount, before anything is allocated: the core refuses this
+    // too (code 4), but only once a buffer of up to 1 GiB had been allocated to hand it.
+    private static void requireV7BatchCount(int count) {
+        if (count > MAX_V7_BATCH) {
+            throw v7BatchTooLarge(count);
+        }
+    }
+
     private static void requireWholeUuids(int length) {
         if (length % 16 != 0) {
             throw new IllegalArgumentException(
@@ -960,7 +1361,8 @@ public final class UuidGenerator {
 
     /**
      * Fills {@code destination} with time-sortable version 7 UUIDs sharing one timestamp
-     * capture and one contiguous block of the monotonic counter.
+     * capture and one contiguous block of the monotonic counter, in strictly increasing order
+     * (see {@link #MAX_V7_BATCH}).
      *
      * <p>Writes into an array the caller already owns rather than allocating a new one. Each
      * element is still rebuilt from the native bytes, because {@link UUID} is two longs and
@@ -969,11 +1371,11 @@ public final class UuidGenerator {
      * @param destination the array to fill; its length determines how many UUIDs are generated
      * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
-     *     within 48 bits, or {@code destination} is longer than one batch can carry
-     *     ({@code Integer.MAX_VALUE / 16})
+     *     within 48 bits, or {@code destination} is longer than {@link #MAX_V7_BATCH}
      */
     public static void fillV7(UUID[] destination, long unixMillis) {
         requireBatchCount(destination.length);
+        requireV7BatchCount(destination.length);
         if (Core.WASM != null) {
             Core.WASM.fillV7(destination, unixMillis);
             return;
@@ -1032,7 +1434,8 @@ public final class UuidGenerator {
     }
 
     /**
-     * Fills {@code destination} with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID.
+     * Fills {@code destination} with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID,
+     * in strictly increasing order (see {@link #MAX_V7_BATCH}).
      *
      * <p>This is the conversion-free form: the native core already writes RFC-ordered bytes
      * contiguously, so nothing is rebuilt on the way out. Prefer it when the destination is a
@@ -1042,9 +1445,12 @@ public final class UuidGenerator {
      * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      *
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of
-     *     16, or {@code unixMillis} is negative or doesn't fit within 48 bits
+     *     16 or holds more than {@link #MAX_V7_BATCH} UUIDs, or {@code unixMillis} is
+     *     negative or doesn't fit within 48 bits
      */
     public static void fillV7(byte[] destination, long unixMillis) {
+        requireWholeUuids(destination.length);
+        requireV7BatchCount(destination.length / 16);
         if (Core.WASM != null) {
             Core.WASM.fillV7(destination, unixMillis);
             return;

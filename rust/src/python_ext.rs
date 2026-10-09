@@ -28,7 +28,7 @@ use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyList, PyString};
 
-use crate::{Uuid, v4, v5, v6, v7};
+use crate::{Layout, Uuid, Variant, v4, v5, v6, v7};
 
 static UUID_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
 static IS_SAFE_UNKNOWN: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -229,7 +229,9 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis must be non-negative and fit within 48 bits",
         )),
-        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
+        Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
+            Err(PyValueError::new_err(e.to_string()))
+        }
         Err(_) => Err(PyRuntimeError::new_err(
             "uuid_new_v7: random source failure",
         )),
@@ -282,13 +284,22 @@ fn new_v6_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
 #[pyfunction]
 #[pyo3(signature = (count, unix_millis = None))]
 fn new_v7_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
+    // Refused before the buffer is allocated: the core would refuse it anyway, but only after
+    // a gigabyte or more had been reserved and zeroed for nothing.
+    if count > v7::MAX_BATCH {
+        return Err(PyValueError::new_err(
+            v7::NewV7Error::BatchTooLarge.to_string(),
+        ));
+    }
     let mut raw = batch_buffer(count)?;
     match v7::new_v7_batch(millis_or_now(unix_millis), count, &mut raw) {
         Ok(()) => Ok(batch_list(py, &raw)?.into_any().unbind()),
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis must be non-negative and fit within 48 bits",
         )),
-        Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
+        Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
+            Err(PyValueError::new_err(e.to_string()))
+        }
         Err(_) => Err(PyRuntimeError::new_err(
             "uuid_new_v7_batch: random source failure",
         )),
@@ -365,20 +376,102 @@ fn v7_unix_millis(uuid_value: Bound<'_, PyAny>) -> PyResult<u64> {
     Ok(v7::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
 }
 
+/// The layout behind a layout code — the core's own codes, 1 for RFC 9562 and 2 for SQL Server,
+/// which `hyperuuid.Layout` carries. `hyperuuid` refuses anything else before calling in; this
+/// refuses it again for a direct caller rather than guessing.
+fn layout_of(code: u32) -> PyResult<Layout> {
+    match code {
+        1 => Ok(Layout::Rfc9562),
+        2 => Ok(Layout::SqlServer),
+        _ => Err(PyValueError::new_err(format!(
+            "layout must be 1 (RFC 9562) or 2 (SQL Server), not {code}"
+        ))),
+    }
+}
+
+/// The version of a UUID held in `layout`'s byte order: the nibble, 0-15, in RFC 9562 order;
+/// in SQL Server order 6 or 7 for bytes that form a SQL-ordered v6/v7, 0 for bytes that don't.
 #[pyfunction]
-fn v6_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+#[pyo3(signature = (uuid_value, layout = 1))]
+fn version(uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<u8> {
+    let layout = layout_of(layout)?;
+    Ok(Uuid::from_bytes(uuid_bytes(&uuid_value)?).version_in(layout))
+}
+
+/// The variant of an RFC 9562-ordered UUID as its core code: 1 NCS, 2 RFC 9562, 3 Microsoft,
+/// 4 future.
+#[pyfunction]
+fn variant(uuid_value: Bound<'_, PyAny>) -> PyResult<u8> {
+    Ok(match Uuid::from_bytes(uuid_bytes(&uuid_value)?).variant() {
+        Variant::Ncs => 1,
+        Variant::Rfc9562 => 2,
+        Variant::Microsoft => 3,
+        Variant::Future => 4,
+    })
+}
+
+/// Whether a UUID held in `layout`'s byte order is an RFC 9562 UUID of `version`. `hyperuuid`
+/// answers `False` itself for a version past the nibble, so one never reaches here.
+#[pyfunction]
+#[pyo3(signature = (uuid_value, version, layout = 1))]
+fn is_rfc(uuid_value: Bound<'_, PyAny>, version: u8, layout: u32) -> PyResult<bool> {
+    let layout = layout_of(layout)?;
+    Ok(Uuid::from_bytes(uuid_bytes(&uuid_value)?).is_rfc_in(version, layout))
+}
+
+#[pyfunction]
+fn v6_unix_millis_in(uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<u64> {
+    let layout = layout_of(layout)?;
+    Ok(v6::unix_millis_in(
+        &Uuid::from_bytes(uuid_bytes(&uuid_value)?),
+        layout,
+    ))
+}
+
+#[pyfunction]
+fn v7_unix_millis_in(uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<u64> {
+    let layout = layout_of(layout)?;
+    Ok(v7::unix_millis_in(
+        &Uuid::from_bytes(uuid_bytes(&uuid_value)?),
+        layout,
+    ))
+}
+
+#[pyfunction]
+#[pyo3(signature = (uuid_value, layout = 1))]
+fn v6_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<Py<PyAny>> {
+    let layout = layout_of(layout)?;
     millis_datetime(
         py,
-        v6::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)),
+        v6::unix_millis_in(&Uuid::from_bytes(uuid_bytes(&uuid_value)?), layout),
     )
 }
 
 #[pyfunction]
-fn v7_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+#[pyo3(signature = (uuid_value, layout = 1))]
+fn v7_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<Py<PyAny>> {
+    let layout = layout_of(layout)?;
     millis_datetime(
         py,
-        v7::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)),
+        v7::unix_millis_in(&Uuid::from_bytes(uuid_bytes(&uuid_value)?), layout),
     )
+}
+
+/// The version-agnostic timestamp: the embedded UTC `datetime` of an RFC 9562 version 6 or 7
+/// UUID held in `layout`'s byte order, or `None` for anything else — another version, or a 6
+/// or 7 nibble under a variant that isn't RFC 9562's. One core call, which checks the variant
+/// and version and reads the timestamp together.
+#[pyfunction]
+#[pyo3(signature = (uuid_value, layout = 1))]
+fn get_timestamp(
+    py: Python<'_>,
+    uuid_value: Bound<'_, PyAny>,
+    layout: u32,
+) -> PyResult<Option<Py<PyAny>>> {
+    let layout = layout_of(layout)?;
+    crate::get_timestamp_in(&Uuid::from_bytes(uuid_bytes(&uuid_value)?), layout)
+        .map(|timestamp| millis_datetime(py, timestamp.to_unix_millis()))
+        .transpose()
 }
 
 macro_rules! order_fns {
@@ -481,7 +574,9 @@ fn fill_bytes_impl(
             Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
                 "unix_millis must be non-negative and fit within 48 bits",
             )),
-            Err(e @ v7::NewV7Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
+            Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
+                Err(PyValueError::new_err(e.to_string()))
+            }
             Err(_) => Err(PyRuntimeError::new_err(
                 "uuid_new_v7_batch: random source failure",
             )),
@@ -530,11 +625,18 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(v7_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(v6_unix_millis, m)?)?;
     m.add_function(wrap_pyfunction!(v7_unix_millis, m)?)?;
+    m.add_function(wrap_pyfunction!(v6_unix_millis_in, m)?)?;
+    m.add_function(wrap_pyfunction!(v7_unix_millis_in, m)?)?;
+    m.add_function(wrap_pyfunction!(version, m)?)?;
+    m.add_function(wrap_pyfunction!(variant, m)?)?;
+    m.add_function(wrap_pyfunction!(is_rfc, m)?)?;
+    m.add_function(wrap_pyfunction!(get_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(v6_to_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v6_from_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_to_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_from_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(native_version, m)?)?;
     m.add_function(wrap_pyfunction!(_bind, m)?)?;
+    m.add("MAX_V7_BATCH", v7::MAX_BATCH)?;
     Ok(())
 }

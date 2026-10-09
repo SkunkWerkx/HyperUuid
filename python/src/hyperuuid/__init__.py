@@ -15,6 +15,7 @@ compiler needed to install. The package is typed:
 from __future__ import annotations
 
 import datetime
+import enum
 import uuid as _uuid
 
 from operator import index as _index
@@ -29,6 +30,9 @@ _native._bind()
 
 __all__ = [
     "BACKEND",
+    "Layout",
+    "Variant",
+    "MAX_V7_BATCH",
     "native_version",
     "new_v4",
     "new_v5",
@@ -43,6 +47,9 @@ __all__ = [
     "v6_unix_millis",
     "v7_unix_millis",
     "get_timestamp",
+    "version",
+    "variant",
+    "is_rfc",
     "v6_to_sql_order",
     "v6_from_sql_order",
     "v7_to_sql_order",
@@ -56,6 +63,69 @@ NIL = _uuid.UUID(bytes=bytes(16))
 
 #: The RFC 9562 §5.10 Max UUID — all 128 bits one.
 MAX = _uuid.UUID(bytes=b"\xff" * 16)
+
+#: The most UUIDs one version 7 batch (:func:`new_v7_batch`, :func:`fill_v7`) mints:
+#: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. A batch
+#: any larger would have to wrap that counter twice and could not stay in order, so it is
+#: refused with ``ValueError`` before anything is allocated or written. Version 6 has no
+#: counter and no such limit.
+MAX_V7_BATCH: int = _native.MAX_V7_BATCH
+
+
+class Layout(enum.IntEnum):
+    """The byte order a UUID's 16 bytes are held in, for the inspection and timestamp functions
+    that take one. The values are the native core's layout codes.
+
+    There is no "unspecified" member: every function that takes a layout defaults it to
+    :attr:`RFC9562`, the order every other function in this package takes and returns. Anything
+    that is not one of these two — an unknown code, or a value that is not an integer at all —
+    is refused (``ValueError``, ``TypeError``) rather than guessed at.
+    """
+
+    #: RFC 9562 network order: a ``uuid.UUID`` as the standard library and every other
+    #: function here hold it.
+    RFC9562 = 1
+    #: The order :func:`v7_to_sql_order` and :func:`v6_to_sql_order` return, which SQL Server's
+    #: ``uniqueidentifier`` sorts by creation order. Defined for versions 6 and 7 only.
+    SQL_SERVER = 2
+
+
+class Variant(enum.IntEnum):
+    """The variant field of a UUID (RFC 9562 §4.1), which says how the rest of its bits are laid
+    out; see :func:`variant`. Only :attr:`RFC9562` has versions. The values are the native
+    core's variant codes.
+    """
+
+    #: ``0xxx``: reserved, Network Computing System backward compatibility. Includes Nil.
+    NCS = 1
+    #: ``10xx``: the variant RFC 9562 (and RFC 4122 before it) specifies.
+    RFC9562 = 2
+    #: ``110x``: reserved, Microsoft Corporation backward compatibility.
+    MICROSOFT = 3
+    #: ``111x``: reserved for future definition. Includes Max.
+    FUTURE = 4
+
+
+# Indexed by core code - 1, cheaper than the Variant(code) lookup.
+_VARIANTS = (Variant.NCS, Variant.RFC9562, Variant.MICROSOFT, Variant.FUTURE)
+
+
+def _layout_code(layout: Layout | int) -> int:
+    """Validate ``layout`` before the extension sees it and return its core code: a
+    :class:`Layout` member, or a plain ``int`` equal to one (``Layout`` is an ``IntEnum``).
+    Anything that is not an integer is a ``TypeError``, an integer that is not a layout code a
+    ``ValueError`` — the same split the rest of the module draws, and the one ``Layout(3)``
+    itself makes.
+    """
+    if layout.__class__ is Layout:
+        return int(layout)
+    try:
+        code = _index(layout)
+    except TypeError:
+        raise TypeError(f"layout must be a hyperuuid.Layout, not {type(layout).__name__}") from None
+    if code != 1 and code != 2:
+        raise ValueError(f"layout must be Layout.RFC9562 or Layout.SQL_SERVER, not {code!r}")
+    return code
 
 
 _EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
@@ -160,17 +230,26 @@ def new_v6(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     return _native.new_v6(_unix_millis_from(unix_millis, _V6_OUT_OF_RANGE))
 
 
-def v6_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
+def v6_timestamp(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> datetime.datetime:
     """Recover the UTC timestamp embedded in a version 6 UUID's timestamp field.
 
-    Only meaningful when ``uuid_value.version == 6`` — the RFC 9562 bit layout doesn't
+    ``layout`` is the byte order ``uuid_value`` is held in: :attr:`Layout.SQL_SERVER` reads a
+    value straight from :func:`v6_to_sql_order` (or a ``uniqueidentifier`` column) in place,
+    with no conversion back first.
+
+    Only meaningful for a genuine version 6 UUID in that layout — the bit layout doesn't
     distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp", so the caller is
-    responsible for checking ``version`` first if that matters. Unlike :func:`v7_timestamp`,
-    this can't raise ``OverflowError``: v6's 60-bit tick count, offset from the 1582 UUID
-    epoch rather than 1970, tops out around the year 5236 — well short of ``datetime``'s own
-    year-9999 ceiling.
+    responsible for checking first if that matters (:func:`is_rfc`, or :func:`get_timestamp`,
+    which checks for you). Unlike :func:`v7_timestamp`, this can't raise ``OverflowError``:
+    v6's 60-bit tick count, offset from the 1582 UUID epoch rather than 1970, tops out around
+    the year 5236 — well short of ``datetime``'s own year-9999 ceiling.
+
+    :raises TypeError: if ``layout`` is not an integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
-    return _native.v6_timestamp(uuid_value)
+    if layout is Layout.RFC9562:
+        return _native.v6_timestamp(uuid_value)
+    return _native.v6_timestamp(uuid_value, _layout_code(layout))
 
 
 def new_v6_batch(
@@ -209,56 +288,139 @@ def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     return _native.new_v7(_unix_millis_from(unix_millis, _V7_OUT_OF_RANGE))
 
 
-def v7_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime:
+def v7_timestamp(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> datetime.datetime:
     """Recover the UTC timestamp embedded in a version 7 UUID's ``unix_ts_ms`` field.
 
-    Only meaningful when ``uuid_value.version == 7`` — the RFC 9562 bit layout doesn't
+    ``layout`` is the byte order ``uuid_value`` is held in: :attr:`Layout.SQL_SERVER` reads a
+    value straight from :func:`v7_to_sql_order` (or a ``uniqueidentifier`` column) in place,
+    with no conversion back first.
+
+    Only meaningful for a genuine version 7 UUID in that layout — the bit layout doesn't
     distinguish "not a v7 UUID" from "v7 UUID with a very early timestamp", so the caller is
-    responsible for checking ``version`` first if that matters.
+    responsible for checking first if that matters (:func:`is_rfc`, or :func:`get_timestamp`,
+    which checks for you).
 
-    Raises ``OverflowError`` for a (spec-valid) embedded timestamp past year 9999 — the RFC's
-    48-bit millisecond field holds values up to the year 10889, but ``datetime.datetime``
-    cannot represent a year beyond 9999.
+    :raises OverflowError: for a (spec-valid) embedded timestamp past year 9999 — the RFC's
+        48-bit millisecond field holds values up to the year 10889, but ``datetime.datetime``
+        cannot represent a year beyond 9999. :func:`v7_unix_millis` reads those.
+    :raises TypeError: if ``layout`` is not an integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
-    return _native.v7_timestamp(uuid_value)
+    if layout is Layout.RFC9562:
+        return _native.v7_timestamp(uuid_value)
+    return _native.v7_timestamp(uuid_value, _layout_code(layout))
 
 
-def v6_unix_millis(uuid_value: _uuid.UUID) -> int:
+def v6_unix_millis(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> int:
     """The timestamp embedded in a version 6 UUID as Unix-epoch milliseconds — the integer
     :func:`v6_timestamp` builds its ``datetime`` from, without building it. For a value that
     is going to be stored, compared or forwarded as a number, this is the cheaper call.
 
-    Only meaningful when ``uuid_value.version == 6``, exactly as :func:`v6_timestamp`.
+    Only meaningful for a genuine version 6 UUID in ``layout``, exactly as
+    :func:`v6_timestamp`, which takes ``layout`` the same way.
+
+    :raises TypeError: if ``layout`` is not an integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
-    return _native.v6_unix_millis(uuid_value)
+    if layout is Layout.RFC9562:
+        return _native.v6_unix_millis(uuid_value)
+    return _native.v6_unix_millis_in(uuid_value, _layout_code(layout))
 
 
-def v7_unix_millis(uuid_value: _uuid.UUID) -> int:
+def v7_unix_millis(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> int:
     """The timestamp embedded in a version 7 UUID as Unix-epoch milliseconds — the integer
     :func:`v7_timestamp` builds its ``datetime`` from, without building it. For a value that
     is going to be stored, compared or forwarded as a number, this is the cheaper call, and
-    unlike :func:`v7_timestamp` it cannot raise: the whole 48-bit field fits an ``int``,
-    past the year 9999 included.
+    unlike :func:`v7_timestamp` it cannot raise for the timestamp: the whole 48-bit field
+    fits an ``int``, past the year 9999 included.
 
-    Only meaningful when ``uuid_value.version == 7``, exactly as :func:`v7_timestamp`.
+    Only meaningful for a genuine version 7 UUID in ``layout``, exactly as
+    :func:`v7_timestamp`, which takes ``layout`` the same way.
+
+    :raises TypeError: if ``layout`` is not an integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
-    return _native.v7_unix_millis(uuid_value)
+    if layout is Layout.RFC9562:
+        return _native.v7_unix_millis(uuid_value)
+    return _native.v7_unix_millis_in(uuid_value, _layout_code(layout))
 
 
-def get_timestamp(uuid_value: _uuid.UUID) -> datetime.datetime | None:
-    """Recover the UTC timestamp embedded in ``uuid_value``, or ``None`` if it isn't a
-    version 6 or 7 UUID.
+def get_timestamp(
+    uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562
+) -> datetime.datetime | None:
+    """Recover the UTC timestamp embedded in ``uuid_value``, or ``None`` if it isn't an
+    RFC 9562 version 6 or 7 UUID in ``layout``.
 
-    Unlike :func:`v6_timestamp`/:func:`v7_timestamp`, this checks ``uuid_value.version``
-    itself first, so a caller doesn't need to already know (or separately check) which
-    version ``uuid_value`` is before asking — delegates straight to whichever of those two
-    functions applies, no bit-layout logic duplicated here.
+    Unlike :func:`v6_timestamp`/:func:`v7_timestamp`, this checks the value itself first, so a
+    caller doesn't need to already know which version ``uuid_value`` is before asking. The
+    variant is part of the check: a 6 or 7 in the version nibble under a variant that isn't
+    RFC 9562's (as stdlib's ``uuid_value.version`` reads it, ``None``) carries no timestamp.
+    The check and the read are one call into the native core. In :attr:`Layout.SQL_SERVER`
+    the value is read in place; which layout ``uuid_value`` is in is the caller's to know
+    (see :func:`version`).
+
+    :raises OverflowError: for a version 7 timestamp past year 9999, as :func:`v7_timestamp`.
+    :raises TypeError: if ``layout`` is not an integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
-    if uuid_value.version == 6:
-        return v6_timestamp(uuid_value)
-    if uuid_value.version == 7:
-        return v7_timestamp(uuid_value)
-    return None
+    return _native.get_timestamp(uuid_value, _layout_code(layout))
+
+
+def version(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> int:
+    """The version of ``uuid_value``, held in ``layout``'s byte order.
+
+    In :attr:`Layout.RFC9562` this is the version nibble, 0 through 15 — Nil reads as 0 and Max
+    as 15 — and says nothing about the variant (stdlib's ``uuid_value.version`` is ``None``
+    for a non-RFC variant; this is not). Use :func:`is_rfc` when the answer has to mean "an
+    RFC 9562 UUID of version N".
+
+    In :attr:`Layout.SQL_SERVER` only versions 6 and 7 have an order, so this is 6 or 7 for
+    bytes that form a SQL-ordered version 6 or 7 RFC 9562 UUID, and 0 for bytes that don't.
+    The two versions put their version nibble at different octets, and the native core checks
+    the variant where each puts it too, so a SQL-ordered v6 never reads as a v7 or the other
+    way round. The bytes alone cannot say which layout a value is in, so the caller must keep
+    track of that: an RFC-ordered value read as :attr:`Layout.SQL_SERVER` can happen to form a
+    valid SQL-ordered v7 (a random v4 does one time in 16).
+
+    :raises TypeError: if ``uuid_value`` is not a ``uuid.UUID``, or ``layout`` is not an
+        integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
+    """
+    return _native.version(uuid_value, _layout_code(layout))
+
+
+def variant(uuid_value: _uuid.UUID) -> Variant:
+    """The variant field of ``uuid_value`` (RFC 9562 §4.1), read in RFC 9562 order. Nil reads
+    as :attr:`Variant.NCS` and Max as :attr:`Variant.FUTURE`, which is how the RFC classifies
+    them.
+
+    :raises TypeError: if ``uuid_value`` is not a ``uuid.UUID``.
+    """
+    return _VARIANTS[_native.variant(uuid_value) - 1]
+
+
+def is_rfc(uuid_value: _uuid.UUID, version: int, layout: Layout = Layout.RFC9562) -> bool:
+    """Whether ``uuid_value``, held in ``layout``'s byte order, is an RFC 9562 UUID of version
+    ``version``: the RFC variant and that version, in one call. The guard to run before
+    trusting a value's version-specific fields, such as a version 7's timestamp.
+
+    In :attr:`Layout.SQL_SERVER` only versions 6 and 7 can be true; see :func:`version`. A
+    ``version`` outside 0 to 15 is simply ``False``.
+
+    :raises TypeError: if ``uuid_value`` is not a ``uuid.UUID``, or ``version`` or ``layout``
+        is not an integer.
+    :raises ValueError: if ``layout`` is not a :class:`Layout`.
+    """
+    code = _layout_code(layout)
+    try:
+        version = _index(version)
+    except TypeError:
+        raise TypeError(f"version must be an int, not {type(version).__name__}") from None
+    if not 0 <= version <= 15:
+        # Still a uuid.UUID check, so a wrong-typed value is the same TypeError either way.
+        _native.version(uuid_value, code)
+        return False
+    return _native.is_rfc(uuid_value, version, code)
 
 
 def new_v7_batch(
@@ -271,10 +433,17 @@ def new_v7_batch(
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
     millisecond timestamp to embed a specific time instead.
 
+    The batch is always in strictly increasing order. The counter is one process-wide sequence
+    that wraps every 2**26 values, so a batch can straddle the wrap; the UUIDs from the wrap on
+    carry ``unix_millis + 1`` rather than sorting before the ones ahead of them, so an embedded
+    timestamp can be one millisecond past the one supplied, never more. That is also why a
+    batch holds at most :data:`MAX_V7_BATCH` UUIDs.
+
     :raises TypeError: if ``count`` is not an int, or ``unix_millis`` is not an int, a
         ``datetime.datetime`` or ``None``.
-    :raises ValueError: if ``count`` is outside 0 to 4294967295, or ``unix_millis`` is
-        negative or does not fit the 48-bit ``unix_ts_ms`` field.
+    :raises ValueError: if ``count`` is outside 0 to :data:`MAX_V7_BATCH` (checked before
+        anything is allocated), or ``unix_millis`` is negative or does not fit the 48-bit
+        ``unix_ts_ms`` field — including a batch that would roll forward past it.
     :raises MemoryError: if a batch of ``count`` UUIDs cannot be allocated.
     """
     return _native.new_v7_batch(
@@ -359,10 +528,13 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     builds them through a much faster path inside the extension. Reach for this only when the
     bytes are the destination, not a step on the way to objects.
 
-    ``len(buffer)`` must be a multiple of 16 — one whole UUID per 16 bytes. A zero-length
-    buffer writes nothing (the timestamp is still checked, as it is for a batch of zero).
-    Defaults to the current time; pass a ``datetime.datetime`` or a Unix-epoch millisecond
-    timestamp to embed a specific time instead.
+    ``len(buffer)`` must be a multiple of 16 — one whole UUID per 16 bytes — and hold at most
+    :data:`MAX_V7_BATCH` UUIDs; a larger buffer is refused before a byte of it is written. A
+    zero-length buffer writes nothing (the timestamp is still checked, as it is for a batch of
+    zero). Defaults to the current time; pass a ``datetime.datetime`` or a Unix-epoch
+    millisecond timestamp to embed a specific time instead. The UUIDs are in strictly
+    increasing order, with the same possible one-millisecond roll-forward as
+    :func:`new_v7_batch`.
 
     ``bytearray`` specifically, not ``memoryview`` or NumPy arrays, for now: the general
     writable buffer protocol needs ``Py_buffer``, which entered CPython's stable ABI in 3.11.
@@ -371,8 +543,9 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
 
     :raises TypeError: if ``buffer`` is not a ``bytearray``, or ``unix_millis`` is not an int,
         a ``datetime.datetime`` or ``None``.
-    :raises ValueError: if ``len(buffer)`` is not a multiple of 16, or ``unix_millis`` is
-        negative or does not fit the 48-bit ``unix_ts_ms`` field.
+    :raises ValueError: if ``len(buffer)`` is not a multiple of 16 or holds more than
+        :data:`MAX_V7_BATCH` UUIDs, or ``unix_millis`` is negative or does not fit the 48-bit
+        ``unix_ts_ms`` field.
     """
     _native.fill_v7_bytes(buffer, _unix_millis_from(unix_millis, _V7_OUT_OF_RANGE))
 
