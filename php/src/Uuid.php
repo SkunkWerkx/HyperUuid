@@ -8,7 +8,9 @@ namespace HyperUuid;
  * A parsed 16-byte RFC 9562 UUID value. Minimal by design — this package has no runtime
  * dependency on ramsey/uuid, the same "no extra dependency" positioning as the Go binding's
  * lone google/uuid requirement and the Python binding's dependency-free PyO3 wheels.
- * Casts to, and JSON-encodes as, the hyphenated hex string.
+ * Casts to, and JSON-encodes as, the hyphenated hex string. Holds its 16 bytes exactly as
+ * given: RFC 9562 order, or SQL Server order for a value from {@see toSqlOrder()}, which the
+ * methods taking a {@see UuidLayout} read in place.
  */
 final class Uuid implements \JsonSerializable, \Stringable
 {
@@ -58,23 +60,53 @@ final class Uuid implements \JsonSerializable, \Stringable
     }
 
     /**
-     * The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6).
+     * The version of this UUID, read in `$layout`'s byte order by the native core.
      *
-     * @return int the version nibble
+     * In RFC 9562 order (the default) this is the version nibble, 0 through 15: 0 for
+     * {@see nil()}, 15 for {@see max()}. It says nothing about the variant; use
+     * {@see isRfc()} when the question is "an RFC 9562 UUID of version N".
+     *
+     * {@see UuidLayout::SqlServer} is defined only for the two versions that have a SQL Server
+     * order, and answers 6, 7, or 0 for anything that isn't a SQL-ordered version 6 or 7 RFC
+     * 9562 UUID (a value straight from {@see toSqlOrder()}). The version nibble lands at a
+     * different byte for each, and the other version's random bits can mimic it there, so the
+     * core checks the variant bits too, where each version puts them, and the answer never
+     * confuses the two.
+     *
+     * @param UuidLayout $layout the byte order this UUID is held in
+     * @return int the version
      */
-    public function version(): int
+    public function version(UuidLayout $layout = UuidLayout::Rfc9562): int
     {
-        return (\ord($this->bytes[6]) >> 4) & 0x0F;
+        return Runtime::version($this->bytes, $layout->value);
     }
 
     /**
-     * The RFC 9562 variant bits (top two bits of octet 8). `0b10` means RFC 9562/4122.
+     * The variant field of this RFC 9562-ordered UUID (RFC 9562 §4.1):
+     * {@see UuidVariant::Ncs} for {@see nil()}, {@see UuidVariant::Future} for {@see max()},
+     * and {@see UuidVariant::Rfc9562} for anything this library mints.
      *
-     * @return int the variant bits
+     * @return UuidVariant the variant
      */
-    public function variant(): int
+    public function variant(): UuidVariant
     {
-        return (\ord($this->bytes[8]) >> 6) & 0b11;
+        return UuidVariant::from(Runtime::variant($this->bytes));
+    }
+
+    /**
+     * Whether this is an RFC 9562 UUID of version `$version`, held in `$layout`'s byte order:
+     * the RFC variant and that version, in one native call. The guard to run before trusting
+     * a value's version-specific fields, such as a version 7's timestamp. In
+     * {@see UuidLayout::SqlServer} only versions 6 and 7 can match (see {@see version()}). A
+     * `$version` outside 0-15 is simply never matched.
+     *
+     * @param int $version the version to test for
+     * @param UuidLayout $layout the byte order this UUID is held in
+     * @return bool true if this is an RFC 9562 UUID of that version
+     */
+    public function isRfc(int $version, UuidLayout $layout = UuidLayout::Rfc9562): bool
+    {
+        return Runtime::isRfc($this->bytes, $version, $layout->value);
     }
 
     /**
@@ -118,30 +150,56 @@ final class Uuid implements \JsonSerializable, \Stringable
     }
 
     /**
-     * The UTC timestamp embedded in a version 6 or 7 UUID's timestamp field. Only meaningful
-     * when `version()` is 6 or 7 — the RFC 9562 bit layout doesn't distinguish "not a
-     * time-based UUID" from "time-based UUID with a very early timestamp", so the caller is
-     * responsible for checking `version()` first if that matters.
+     * The Unix-epoch millisecond timestamp embedded in an RFC 9562 version 6 or 7 UUID held
+     * in `$layout`'s byte order, or null for anything else: another version, or a 6 or 7
+     * nibble under another variant (NCS, Microsoft, Future), which has no RFC version and so
+     * no timestamp. One native call, which checks the variant and version and reads the
+     * timestamp together. In {@see UuidLayout::SqlServer} this reads a value straight from
+     * {@see toSqlOrder()} (or a `uniqueidentifier` column) from its permuted bytes, with no
+     * conversion back first.
      *
-     * Throws by default for any other version; pass `throwOnMismatch: false` to get `null`
+     * @param UuidLayout $layout the byte order this UUID is held in
+     * @return int|null the embedded Unix-epoch milliseconds, or null if this isn't an RFC
+     *     9562 version 6 or 7 UUID in that layout
+     */
+    public function unixMillis(UuidLayout $layout = UuidLayout::Rfc9562): ?int
+    {
+        return Runtime::getTimestamp($this->bytes, $layout->value);
+    }
+
+    /**
+     * The UTC timestamp embedded in an RFC 9562 version 6 or 7 UUID's timestamp field, held
+     * in `$layout`'s byte order — {@see unixMillis()} as a DateTimeImmutable, with the same
+     * variant check. A version 6
+     * timestamp before 1970 reads back as the Unix epoch.
+     *
+     * Throws by default for anything else; pass `throwOnMismatch: false` to get `null`
      * back instead — for a caller that doesn't already know (or want to separately check)
      * whether this UUID is time-based.
      *
      * @param bool $throwOnMismatch whether to throw (the default) or return null when
-     *     `version()` isn't 6 or 7
+     *     this isn't an RFC 9562 version 6 or 7 UUID in that layout
+     * @param UuidLayout $layout the byte order this UUID is held in
      * @return \DateTimeImmutable|null the embedded UTC timestamp, or null if $throwOnMismatch
-     *     is false and this isn't a version 6 or 7 UUID
+     *     is false and this isn't an RFC 9562 version 6 or 7 UUID in that layout
+     * @throws \InvalidArgumentException If `$throwOnMismatch` is true and this isn't an
+     *     RFC 9562 version 6 or 7 UUID in that layout.
      */
-    public function timestamp(bool $throwOnMismatch = true): ?\DateTimeImmutable
-    {
-        $millis = match ($this->version()) {
-            6 => Runtime::v6UnixMillis($this->bytes),
-            7 => Runtime::v7UnixMillis($this->bytes),
-            default => $throwOnMismatch ? throw new \InvalidArgumentException(
-                "timestamp() is only defined for version 6 or 7 UUIDs, got version {$this->version()}"
-            ) : null,
-        };
+    public function timestamp(
+        bool $throwOnMismatch = true,
+        UuidLayout $layout = UuidLayout::Rfc9562
+    ): ?\DateTimeImmutable {
+        $millis = $this->unixMillis($layout);
         if ($millis === null) {
+            if ($throwOnMismatch) {
+                $version = $this->version($layout);
+                $where = $layout === UuidLayout::Rfc9562 ? '' : " in {$layout->name} order";
+                $variant = $version === 6 || $version === 7 ? ' with a non-RFC 9562 variant' : '';
+                throw new \InvalidArgumentException(
+                    'timestamp() is only defined for RFC 9562 version 6 or 7 UUIDs, got version '
+                    . "{$version}{$variant}{$where}"
+                );
+            }
             return null;
         }
         // PHP 8.4+: build from exact integers instead of a date-string format parse (the
@@ -216,47 +274,36 @@ final class Uuid implements \JsonSerializable, \Stringable
      * Inverse of {@see toSqlOrder()} — converts a SQL-Server-ordered UUID back to RFC 9562
      * order.
      *
-     * Unlike `version()`/`timestamp()`, a SQL-ordered blob's version nibble doesn't sit at a
-     * fixed byte offset — it's octet 7 for a v7 value, octet 8 for a v6 one — so which inverse
-     * to apply can't always be read off the bytes with certainty the way it can for an
-     * RFC-ordered UUID (`GuidByteOrder`'s own documented "not detectable from the bits alone
-     * by design" caveat, ported here). Pass `$version` explicitly (6 or 7) when you already
-     * know it — the common case, since you typically just called {@see toSqlOrder()} on a
-     * value whose version you knew. Left null, this tries the v7 inverse first and accepts it
-     * if the result's own RFC-order version/variant bits actually read back as 7/RFC-4122,
-     * then falls back to the v6 inverse under the same check — correct for any value this
-     * binding's own `toSqlOrder()` produced, but not a cryptographic guarantee against
-     * adversarial input, so prefer the explicit form where correctness matters most.
+     * Pass `$version` explicitly (6 or 7) when you already know it — the common case, since
+     * you typically just called {@see toSqlOrder()} on a value whose version you knew. Left
+     * null, the native core reads it in place, as {@see version()} with
+     * {@see UuidLayout::SqlServer} does: a SQL-ordered blob's version nibble sits at octet 7
+     * for a v7 value and octet 8 for a v6 one, and the core checks the variant bits where each
+     * version puts them too, so the two are never confused.
      *
-     * @param int|null $version 6 or 7, or null to auto-detect
+     * @param int|null $version 6 or 7, or null to read it from the bytes
      * @return self this UUID reordered into RFC 9562 order
-     * @throws \InvalidArgumentException If `$version` isn't 6 or 7, or (when null)
-     *     neither inverse's result decodes to a valid version 6 or 7 UUID.
+     * @throws \InvalidArgumentException If `$version` isn't 6 or 7, or (when null) these
+     *     bytes aren't a SQL-ordered version 6 or 7 UUID.
      */
     public function fromSqlOrder(?int $version = null): self
     {
-        if ($version !== null) {
-            return new self(match ($version) {
-                6 => Runtime::v6ToRfcOrder($this->bytes),
-                7 => Runtime::v7ToRfcOrder($this->bytes),
-                default => throw new \InvalidArgumentException(
-                    "fromSqlOrder() only supports version 6 or 7, got {$version}"
-                ),
-            });
+        if ($version === null) {
+            $version = Runtime::version($this->bytes, UuidLayout::SqlServer->value);
+            if ($version === 0) {
+                throw new \InvalidArgumentException(
+                    'fromSqlOrder(): these bytes are not a SQL-ordered version 6 or 7 UUID; pass '
+                    . '$version explicitly to convert them anyway'
+                );
+            }
         }
-
-        $asV7 = new self(Runtime::v7ToRfcOrder($this->bytes));
-        if ($asV7->version() === 7 && $asV7->variant() === 0b10) {
-            return $asV7;
-        }
-        $asV6 = new self(Runtime::v6ToRfcOrder($this->bytes));
-        if ($asV6->version() === 6 && $asV6->variant() === 0b10) {
-            return $asV6;
-        }
-        throw new \InvalidArgumentException(
-            'fromSqlOrder(): could not determine whether these bytes are version 6 or 7 SQL '
-            . 'order; pass $version explicitly'
-        );
+        return new self(match ($version) {
+            6 => Runtime::v6ToRfcOrder($this->bytes),
+            7 => Runtime::v7ToRfcOrder($this->bytes),
+            default => throw new \InvalidArgumentException(
+                "fromSqlOrder() only supports version 6 or 7, got {$version}"
+            ),
+        });
     }
 
     /**

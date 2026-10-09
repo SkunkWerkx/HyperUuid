@@ -14,6 +14,9 @@
 //! - [`get_timestamp`] / [`v6::new_v6_at`] / [`v7::new_v7_at`] — [`Timestamp`]-based
 //!   convenience wrappers matching the `uuid` crate's own `get_timestamp`/`Timestamp` shape,
 //!   for callers who'd rather not pass a raw millisecond count around
+//! - [`Uuid::version`] / [`Uuid::variant`] / [`Uuid::is_rfc`] — inspection, and
+//!   [`Uuid::version_in`] / [`Uuid::is_rfc_in`] / [`get_timestamp_in`] for a value still in
+//!   SQL Server order ([`Layout`])
 
 #![deny(missing_docs)]
 // The crate publishes the `no-std` and `no-std::no-alloc` categories, and this is what makes
@@ -137,21 +140,41 @@ mod ruby_ext;
 
 pub use ffi::hyperuuid_version;
 pub use timestamp::Timestamp;
-pub use uuid::{ParseUuidError, Uuid};
+pub use uuid::{Layout, ParseUuidError, Uuid, Variant};
 
-/// Returns the Unix-epoch [`Timestamp`] embedded in `uuid`, or `None` if it isn't a version 6
-/// or 7 UUID — the same `Option`-returning shape as the `uuid` crate's own
+/// Returns the Unix-epoch [`Timestamp`] embedded in `uuid`, or `None` if it isn't an RFC 9562
+/// version 6 or 7 UUID — the same `Option`-returning shape as the `uuid` crate's own
 /// `Uuid::get_timestamp`, so a caller doesn't need to already know (or separately check) the
-/// version before asking. Delegates straight to [`v6::unix_millis`]/[`v7::unix_millis`], the
-/// same extraction every binding's own timestamp getter already uses — no bit-layout logic
-/// duplicated here.
+/// version before asking. "RFC 9562" is part of the check: a value whose variant isn't
+/// [`Variant::Rfc9562`] has no version, so a 6 or 7 in its version nibble carries no
+/// timestamp either ([`Uuid::is_rfc`]). Delegates straight to
+/// [`v6::unix_millis`]/[`v7::unix_millis`], with no bit-layout logic duplicated here.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn get_timestamp(uuid: &Uuid) -> Option<Timestamp> {
-    match uuid.version() {
-        6 => Some(Timestamp::from_unix_millis(v6::unix_millis(uuid))),
-        7 => Some(Timestamp::from_unix_millis(v7::unix_millis(uuid))),
-        _ => None,
+    get_timestamp_in(uuid, Layout::Rfc9562)
+}
+
+/// The version and Unix-epoch milliseconds [`get_timestamp_in`] answers with: `(6 | 7, millis)`
+/// for an RFC 9562 version 6 or 7 UUID held in `layout`'s byte order, `None` for anything
+/// else. One read for both, so the C ABI can hand back the pair in one call.
+#[inline]
+pub(crate) fn timestamp_in(uuid: &Uuid, layout: Layout) -> Option<(u8, u64)> {
+    if uuid.is_rfc_in(7, layout) {
+        Some((7, v7::unix_millis_in(uuid, layout)))
+    } else if uuid.is_rfc_in(6, layout) {
+        Some((6, v6::unix_millis_in(uuid, layout)))
+    } else {
+        None
     }
+}
+
+/// [`get_timestamp`] for a UUID held in `layout`'s byte order: in [`Layout::SqlServer`], the
+/// timestamp of a SQL-ordered version 6 or 7, read straight from its permuted octets with no
+/// conversion back to RFC order first, or `None` for anything else ([`Uuid::version_in`] has
+/// how the two are told apart).
+#[cfg_attr(feature = "no-panic", no_panic::no_panic)]
+pub fn get_timestamp_in(uuid: &Uuid, layout: Layout) -> Option<Timestamp> {
+    timestamp_in(uuid, layout).map(|(_, millis)| Timestamp::from_unix_millis(millis))
 }
 
 #[cfg(test)]
@@ -768,5 +791,210 @@ mod tests {
             sql, sorted,
             "SqlGuid-order comparison of SQL-ordered bytes must match creation order"
         );
+    }
+
+    // The two layout files pin field placement through the deterministic half of each
+    // generator, which the public API (rightly) never exposes; rust/tests/conformance.rs
+    // replays the rest of the corpus through the public API.
+    fn corpus(name: &str) -> Vec<serde_json::Value> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../corpus")
+            .join(name);
+        let text =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        serde_json::from_str(&text).unwrap()
+    }
+
+    fn hex16(text: &str) -> [u8; 16] {
+        core::array::from_fn(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap())
+    }
+
+    fn hex6(text: &str) -> [u8; 6] {
+        core::array::from_fn(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).unwrap())
+    }
+
+    #[test]
+    fn corpus_v7_layout() {
+        for vector in corpus("v7_layout.json") {
+            let mut bytes = [0u8; 16];
+            bytes[10..].copy_from_slice(&hex6(vector["entropy"].as_str().unwrap()));
+            let millis = vector["unix_millis"].as_u64().unwrap();
+            v7::write_fields(
+                &mut bytes,
+                millis,
+                vector["counter"].as_u64().unwrap() as u32,
+            );
+            assert_eq!(bytes, hex16(vector["expect"].as_str().unwrap()), "{vector}");
+            assert_eq!(
+                v7::unix_millis(&Uuid::from_bytes(bytes)),
+                millis,
+                "{vector}"
+            );
+        }
+    }
+
+    #[test]
+    fn corpus_v6_layout() {
+        for vector in corpus("v6_layout.json") {
+            let mut bytes = [0u8; 16];
+            let clock_seq = vector["clock_seq"].as_u64().unwrap() as u16;
+            bytes[8..10].copy_from_slice(&clock_seq.to_be_bytes());
+            bytes[10..].copy_from_slice(&hex6(vector["node"].as_str().unwrap()));
+            let millis = vector["unix_millis"].as_u64().unwrap();
+            v6::write_fields(&mut bytes, millis * 10_000 + 0x01B2_1DD2_1381_4000);
+            assert_eq!(bytes, hex16(vector["expect"].as_str().unwrap()), "{vector}");
+            assert_eq!(
+                v6::unix_millis(&Uuid::from_bytes(bytes)),
+                millis,
+                "{vector}"
+            );
+        }
+    }
+
+    // The batch paths assemble their items with wider stores than the single-item writers
+    // the layout corpus pins, so tie every batch item back to those writers: re-running the
+    // writer over an item's own random tail and counter must reproduce the item exactly.
+    #[test]
+    fn batch_items_match_the_pinned_single_item_layout() {
+        let mut out = vec![0u8; 64 * 16];
+        v7::new_v7_batch(RFC_TEST_VECTOR_MS, 64, &mut out).unwrap();
+        for item in out.chunks_exact(16) {
+            let item: [u8; 16] = item.try_into().unwrap();
+            let counter = ((item[6] as u32 & 0x0F) << 22)
+                | ((item[7] as u32) << 14)
+                | ((item[8] as u32 & 0x3F) << 8)
+                | item[9] as u32;
+            let mut rebuilt = [0u8; 16];
+            rebuilt[10..].copy_from_slice(&item[10..]);
+            v7::write_fields(&mut rebuilt, RFC_TEST_VECTOR_MS, counter);
+            assert_eq!(rebuilt, item);
+        }
+
+        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 64, &mut out).unwrap();
+        for item in out.chunks_exact(16) {
+            let item: [u8; 16] = item.try_into().unwrap();
+            let mut rebuilt = [0u8; 16];
+            rebuilt[8..].copy_from_slice(&item[8..]);
+            v6::write_fields(
+                &mut rebuilt,
+                RFC_TEST_VECTOR_MS * 10_000 + 0x01B2_1DD2_1381_4000,
+            );
+            assert_eq!(rebuilt, item);
+        }
+    }
+
+    #[test]
+    fn inspection_of_the_special_values_and_every_variant_class() {
+        assert_eq!(
+            (Uuid::NIL.version(), Uuid::NIL.variant()),
+            (0, Variant::Ncs)
+        );
+        assert_eq!(
+            (Uuid::MAX.version(), Uuid::MAX.variant()),
+            (15, Variant::Future)
+        );
+        let mut b = [0u8; 16];
+        for (top, variant) in [
+            (0x00, Variant::Ncs),
+            (0x70, Variant::Ncs),
+            (0x80, Variant::Rfc9562),
+            (0xBF, Variant::Rfc9562),
+            (0xC0, Variant::Microsoft),
+            (0xDF, Variant::Microsoft),
+            (0xE0, Variant::Future),
+            (0xFF, Variant::Future),
+        ] {
+            b[8] = top;
+            assert_eq!(Uuid::from_bytes(b).variant(), variant, "{top:#x}");
+        }
+        for version in 1..=8u8 {
+            b[6] = version << 4;
+            b[8] = 0x80;
+            let id = Uuid::from_bytes(b);
+            assert_eq!(id.version(), version);
+            assert!(id.is_rfc(version));
+            assert!(!id.is_rfc(version + 1));
+            b[8] = 0xC0;
+            assert!(!Uuid::from_bytes(b).is_rfc(version));
+        }
+    }
+
+    // In SQL order a v6's octet 7 is random clock_seq and reads as a v7 nibble one time in 16;
+    // the layout-aware read must never take it for one, nor a v7 for a v6.
+    #[test]
+    fn sql_ordered_v6_and_v7_are_never_confused() {
+        for _ in 0..4096 {
+            let six = v6::to_sql_order(&v6::new_v6(RFC_TEST_VECTOR_MS).unwrap());
+            let seven = v7::to_sql_order(&v7::new_v7(RFC_TEST_VECTOR_MS).unwrap());
+            assert_eq!(six.version_in(Layout::SqlServer), 6, "{six}");
+            assert_eq!(seven.version_in(Layout::SqlServer), 7, "{seven}");
+            assert!(!six.is_rfc_in(7, Layout::SqlServer));
+            assert!(!seven.is_rfc_in(6, Layout::SqlServer));
+            let ms =
+                |id: &Uuid| get_timestamp_in(id, Layout::SqlServer).map(|t| t.to_unix_millis());
+            assert_eq!(ms(&six), Some(RFC_TEST_VECTOR_MS));
+            assert_eq!(ms(&seven), Some(RFC_TEST_VECTOR_MS));
+        }
+    }
+
+    // The C ABI's codes, layout and variant alike, including the unknown-code answers.
+    #[test]
+    fn inspection_exports_speak_the_documented_codes() {
+        let seven = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let sql = v7::to_sql_order(&seven);
+        let p = seven.as_bytes().as_ptr();
+        let q = sql.as_bytes().as_ptr();
+        assert_eq!(ffi::uuid_version(p, 1), 7);
+        assert_eq!(ffi::uuid_version(q, 2), 7);
+        assert_eq!(ffi::uuid_version(p, 0), 0);
+        assert_eq!(ffi::uuid_version(p, 3), 0);
+        assert_eq!(ffi::uuid_variant(p), 2);
+        assert_eq!(ffi::uuid_variant(Uuid::NIL.as_bytes().as_ptr()), 1);
+        assert_eq!(ffi::uuid_variant(Uuid::MAX.as_bytes().as_ptr()), 4);
+        assert_eq!(ffi::uuid_variant([0xC0; 16].as_ptr()), 3);
+        assert_eq!(ffi::uuid_is_rfc(p, 7, 1), 1);
+        assert_eq!(ffi::uuid_is_rfc(q, 7, 2), 1);
+        assert_eq!(ffi::uuid_is_rfc(p, 6, 1), 0);
+        assert_eq!(ffi::uuid_is_rfc(p, 7, 0), 0);
+        assert_eq!(ffi::uuid_is_rfc(p, 7 + 256, 1), 0);
+        assert_eq!(ffi::uuid_v7_unix_millis_in(q, 2), RFC_TEST_VECTOR_MS);
+        assert_eq!(ffi::uuid_v7_unix_millis_in(p, 1), RFC_TEST_VECTOR_MS);
+        assert_eq!(ffi::uuid_v7_unix_millis_in(p, 9), 0);
+        let six = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
+        let six_sql = v6::to_sql_order(&six);
+        assert_eq!(
+            ffi::uuid_v6_unix_millis_in(six_sql.as_bytes().as_ptr(), 2),
+            RFC_TEST_VECTOR_MS
+        );
+        assert_eq!(
+            ffi::uuid_v6_unix_millis_in(six.as_bytes().as_ptr(), 1),
+            RFC_TEST_VECTOR_MS
+        );
+        let mut out = [0u8; 16];
+        assert_eq!(
+            ffi::uuid_new_v7_batch(1, v7::MAX_BATCH + 1, out.as_mut_ptr()),
+            4
+        );
+        let mut millis = 0u64;
+        assert_eq!(ffi::uuid_get_timestamp(q, 2, &mut millis), 7);
+        assert_eq!(millis, RFC_TEST_VECTOR_MS);
+        millis = 0;
+        assert_eq!(
+            ffi::uuid_get_timestamp(six_sql.as_bytes().as_ptr(), 2, &mut millis),
+            6
+        );
+        assert_eq!(millis, RFC_TEST_VECTOR_MS);
+        millis = 42;
+        assert_eq!(ffi::uuid_get_timestamp(p, 0, &mut millis), 0);
+        assert_eq!(
+            ffi::uuid_get_timestamp(Uuid::NIL.as_bytes().as_ptr(), 1, &mut millis),
+            0
+        );
+        // A 7 in the nibble but the NCS variant: no RFC version, so no timestamp.
+        let mut ncs = *seven.as_bytes();
+        ncs[8] &= 0x3F;
+        assert_eq!(ffi::uuid_get_timestamp(ncs.as_ptr(), 1, &mut millis), 0);
+        assert_eq!(millis, 42, "untouched on 0");
+        assert_eq!(get_timestamp(&Uuid::from_bytes(ncs)), None);
     }
 }

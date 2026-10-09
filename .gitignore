@@ -113,3 +113,7 @@ ruby/lib/hyperuuid_native.bundle
 # swallow a real lib/hyperuuid/*.rb source file if a minor-version-shaped one ever appears.
 ruby/lib/hyperuuid/*/hyperuuid_native.so
 ruby/lib/hyperuuid/*/hyperuuid_native.bundle
+
+# The corpus copy test-apple-mobile stages for the Go suite in the iOS simulator
+# (go_ios_exec carries only the module's testdata), if made by hand.
+go/testdata/corpus/

@@ -18,12 +18,18 @@ require_relative "hyperuuid/runtime"
 module HyperUuid
   # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v6/v7) the
   # rest of this module generates.
-  VERSION = "0.7.0"
+  VERSION = "0.8.0"
 
   # The widest batch count, and the longest v5 name in bytes, the native ABI carries (a u32).
   # (The millisecond count is a u64; unix_millis_from refuses anything wider.)
   U32_MAX = 0xFFFF_FFFF
   private_constant :U32_MAX
+
+  # The most UUIDs one version 7 batch (#new_v7_batch, #new_v7_batch_bytes) mints:
+  # 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. A larger
+  # count is refused with ArgumentError before anything is allocated. Version 6 has no counter
+  # and no such limit.
+  MAX_V7_BATCH = Runtime::MAX_V7_BATCH
 
   # Creates a random UUID version 4 (RFC 9562 §5.4).
   def self.new_v4
@@ -125,7 +131,12 @@ module HyperUuid
   # instead of `count` of each. Defaults to the current time; pass an explicit `Time` or
   # Unix-epoch millisecond integer to embed a specific time instead.
   #
-  # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and 2**32 - 1.
+  # Every batch is in strictly increasing order. The counter is one process-wide sequence, so
+  # a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a
+  # timestamp one millisecond later than the one supplied rather than sorting before the ones
+  # ahead of them. That is also why one batch takes at most MAX_V7_BATCH.
+  #
+  # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
   def self.new_v7_batch(count, unix_millis = nil)
     bytes = new_v7_batch_bytes(count, unix_millis)
@@ -145,11 +156,15 @@ module HyperUuid
   # format, a bulk COPY. If you need Uuid objects, keep using #new_v7_batch — slicing this
   # String into them yourself just moves the same allocations into your own code.
   #
-  # Slice it with `bytes[i * 16, 16]`, which is what #new_v7_batch does internally.
+  # Slice it with `bytes[i * 16, 16]`, which is what #new_v7_batch does internally. The
+  # order, the possible extra millisecond and the MAX_V7_BATCH limit are #new_v7_batch's.
   #
-  # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and 2**32 - 1.
+  # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
   def self.new_v7_batch_bytes(count, unix_millis = nil)
+    # First, so any count past the limit (2**32 and beyond included) names the limit itself.
+    raise ArgumentError, Runtime::V7_BATCH_TOO_LARGE if count.is_a?(Integer) && count > MAX_V7_BATCH
+
     count = batch_count(count)
     Runtime.new_v7_batch(count, unix_millis_from(unix_millis, Runtime::V7_TIMESTAMP_OUT_OF_RANGE))
   end

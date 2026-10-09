@@ -15,7 +15,7 @@ namespace HyperUuid;
 /// <see cref="Guid"/>, which this binding cannot modify.
 /// </para>
 /// <para>
-/// Deliberately additive, not a replacement: <see cref="UuidGenerator.GetTimestamp"/> stays
+/// Deliberately additive, not a replacement: <see cref="UuidGenerator.GetTimestamp(Guid)"/> stays
 /// the primary entry point and holds the actual logic. This block only re-spells it, so
 /// there is exactly one implementation to keep correct, and a caller who prefers the static
 /// call — or who wants it without importing this namespace — loses nothing by ignoring
@@ -32,8 +32,9 @@ public static class GuidExtensions
 	extension(Guid uuid)
 	{
 		/// <summary>
-		/// The UTC timestamp embedded in this UUID, or <see langword="null"/> when it isn't a
-		/// version 6 or version 7 UUID and therefore carries no timestamp at all.
+		/// The UTC timestamp embedded in this UUID, or <see langword="null"/> when it isn't an
+		/// RFC 9562 version 6 or version 7 UUID and therefore carries no timestamp at all — the
+		/// variant is checked as well as the version nibble.
 		/// </summary>
 		/// <value>
 		/// The creation time recovered from the UUID's own bits, or <see langword="null"/> for
@@ -45,8 +46,8 @@ public static class GuidExtensions
 		/// Nullable rather than throwing, because "this Guid isn't time-based" is an ordinary,
 		/// expected answer for a type that is far more often not a v6/v7 UUID than it is.
 		/// Callers typically already have a <see cref="Guid"/> of unknown provenance, which is
-		/// exactly the case <see cref="UuidGenerator.V6Timestamp"/> and
-		/// <see cref="UuidGenerator.V7Timestamp"/> deliberately do not serve: those assume the
+		/// exactly the case <see cref="UuidGenerator.V6Timestamp(Guid)"/> and
+		/// <see cref="UuidGenerator.V7Timestamp(Guid)"/> deliberately do not serve: those assume the
 		/// caller already knows the version and read the timestamp field unconditionally.
 		/// </para>
 		/// <para>
@@ -57,7 +58,7 @@ public static class GuidExtensions
 		/// This can still throw <see cref="ArgumentOutOfRangeException"/> for a spec-valid v7
 		/// UUID whose embedded timestamp lands past year 9999, which
 		/// <see cref="DateTimeOffset"/> cannot represent. That is inherited from
-		/// <see cref="UuidGenerator.V7Timestamp"/> and is deliberately not swallowed into
+		/// <see cref="UuidGenerator.V7Timestamp(Guid)"/> and is deliberately not swallowed into
 		/// <see langword="null"/>: a v7 UUID from the year 10500 genuinely does carry a
 		/// timestamp, so reporting "no timestamp" would be a lie about the value rather than a
 		/// description of it.
@@ -66,7 +67,7 @@ public static class GuidExtensions
 		/// The opposite edge is quiet rather than loud: a v6 UUID whose embedded timestamp
 		/// predates 1970 — legitimate, since the v6 field counts from 1582, but only another
 		/// generator can have minted it — reads back as the Unix epoch, inherited from
-		/// <see cref="UuidGenerator.V6UnixMillis"/>.
+		/// <see cref="UuidGenerator.V6UnixMillis(Guid)"/>.
 		/// </para>
 		/// </remarks>
 		/// <example>

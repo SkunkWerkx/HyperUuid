@@ -13,6 +13,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	hyperuuid "github.com/SkunkWerkx/HyperUuid/go"
@@ -66,6 +67,29 @@ func main() {
 	sql, err := hyperuuid.V7ToSqlOrder(v7)
 	back, err2 := hyperuuid.V7FromSqlOrder(sql)
 	check(err == nil && err2 == nil && sql != v7 && back == v7, "v7 SQL-order round trip")
+
+	sqlVersion, err := hyperuuid.VersionIn(sql, hyperuuid.LayoutSqlServer)
+	sqlRfc, err2 := hyperuuid.IsRfcIn(sql, 7, hyperuuid.LayoutSqlServer)
+	check(err == nil && err2 == nil && sqlVersion == 7 && sqlRfc && hyperuuid.Version(v7) == 7 &&
+		hyperuuid.Variant(v7) == hyperuuid.VariantRfc9562 && hyperuuid.IsRfc(v7, 7), "version, variant and IsRfc")
+
+	sqlMillis, err := hyperuuid.V7UnixMillisIn(sql, hyperuuid.LayoutSqlServer)
+	millis, err2 := hyperuuid.V7UnixMillis(v7)
+	sql6, err3 := hyperuuid.V6ToSqlOrder(v6)
+	sql6Millis, err4 := hyperuuid.V6UnixMillisIn(sql6, hyperuuid.LayoutSqlServer)
+	millis6, _ := hyperuuid.V6UnixMillis(v6)
+	check(err == nil && err2 == nil && err3 == nil && err4 == nil && sqlMillis == millis && sql6Millis == millis6,
+		"timestamps read in SQL order")
+
+	stamped, err := hyperuuid.GetTimestampIn(sql, hyperuuid.LayoutSqlServer)
+	notRfc := v7
+	notRfc[8] &^= 0xC0 // the NCS variant: a 7 nibble, but no RFC version and so no timestamp
+	_, err2 = hyperuuid.GetTimestamp(notRfc)
+	check(err == nil && stamped.Equal(created) && errors.Is(err2, hyperuuid.ErrNotTimeBased),
+		"GetTimestamp reads RFC 9562 v6/v7 only")
+
+	_, err = hyperuuid.NewV7Batch(hyperuuid.MaxV7Batch + 1)
+	check(errors.Is(err, hyperuuid.ErrBatchTooLarge), "v7 batch past MaxV7Batch refused")
 
 	fmt.Println("DONE")
 }

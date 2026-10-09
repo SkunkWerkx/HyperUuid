@@ -15,6 +15,19 @@ namespace HyperUuid;
  */
 final class HyperUuid
 {
+    /**
+     * The most UUIDs one version 7 batch ({@see newV7Batch()}, {@see newV7BatchBytes()})
+     * mints: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond.
+     *
+     * Every batch up to this size is in strictly increasing order. The counter is one
+     * process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
+     * UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
+     * than sorting before the ones ahead of them. A larger batch would have to reuse counter
+     * values within one millisecond, so it is refused with an InvalidArgumentException before
+     * anything is allocated. Version 6 has no counter and no such limit.
+     */
+    public const MAX_V7_BATCH = 1 << 26;
+
     private static ?bool $available = null;
 
     /** Non-instantiable — static factory methods only. */
@@ -130,7 +143,8 @@ final class HyperUuid
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return list<Uuid> `count` new version 6 UUIDs
-     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
+     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits, or the
+     *     batch is too large to address on this platform.
      */
     public static function newV6Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
@@ -161,11 +175,15 @@ final class HyperUuid
      * contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
      * instead of `count` of each. Defaults to the current time.
      *
-     * @param int $count how many UUIDs to create, 0 to 4294967295
+     * The batch is in strictly increasing order. If it crosses the point where the 26-bit
+     * counter wraps, the UUIDs from there on carry the supplied timestamp plus one millisecond
+     * (see {@see MAX_V7_BATCH}).
+     *
+     * @param int $count how many UUIDs to create, 0 to {@see MAX_V7_BATCH}
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return list<Uuid> `count` new version 7 UUIDs
-     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
+     * @throws \InvalidArgumentException If `$count` is negative or above {@see MAX_V7_BATCH}.
      */
     public static function newV7Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
@@ -191,12 +209,13 @@ final class HyperUuid
      * string yourself only moves the same allocations into your own code.
      *
      * Slice it with `substr($bytes, $i * 16, 16)`, which is what newV7Batch does internally.
+     * Same ordering guarantee and limit as {@see newV7Batch}.
      *
-     * @param int $count how many UUIDs to create, 0 to 4294967295
+     * @param int $count how many UUIDs to create, 0 to {@see MAX_V7_BATCH}
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return string `$count * 16` bytes: `$count` version 7 UUIDs in RFC 9562 order
-     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
+     * @throws \InvalidArgumentException If `$count` is negative or above {@see MAX_V7_BATCH}.
      */
     public static function newV7BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {
@@ -216,7 +235,8 @@ final class HyperUuid
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return string `$count * 16` bytes: `$count` version 6 UUIDs in RFC 9562 order
-     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits.
+     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits, or the
+     *     batch is too large to address on this platform.
      */
     public static function newV6BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {

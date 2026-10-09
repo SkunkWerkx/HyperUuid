@@ -28,9 +28,10 @@ ios     arm64 iossimulator       staticlib/iossimulator_arm64
 ios     arm64 macos,maccatalyst  staticlib/maccatalyst_arm64
 ios     amd64 macos,maccatalyst  staticlib/maccatalyst_amd64
 ios     amd64 -                  unsupported
-android arm64 -                  unsupported
-android amd64 -                  unsupported
+android arm64 -                  staticlib/android_arm64
+android amd64 -                  staticlib/android_amd64
 linux   arm64 hyperuuid_local    ../rust/target/local-core/go/staticlib/linux_arm64
+android amd64 hyperuuid_local    ../rust/target/local-core/go/staticlib/android_amd64
 darwin  arm64 hyperuuid_local    ../rust/target/local-core/go/staticlib/darwin_arm64
 "
 

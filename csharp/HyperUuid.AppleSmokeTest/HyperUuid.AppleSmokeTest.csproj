@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The package on iOS and Mac Catalyst, as an app: the same Program.cs the Native AOT smoke
+  <!-- The package on iOS and Mac Catalyst, as an app: the same SmokeTest.Run() the Native AOT smoke
        test runs, crossing every native entry point, built for the two platforms where the
        core is linked into the app's executable and reached as "__Internal". It needs a Mac
        with Xcode and the ios and maccatalyst workloads, so it is not in HyperUuid.slnx,
@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <Compile Include="../HyperUuid.AotSmokeTest/Program.cs" Link="Program.cs" />
+    <Compile Include="../HyperUuid.AotSmokeTest/SmokeTest.cs" Link="SmokeTest.cs" />
     <ProjectReference Include="../HyperUuid/HyperUuid.csproj" />
   </ItemGroup>
 

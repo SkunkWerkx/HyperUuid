@@ -4,7 +4,7 @@
 [![RubyGems](https://img.shields.io/gem/v/hyperuuid.svg)](https://rubygems.org/gems/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
-**Ruby's own stdlib stops at `SecureRandom.uuid` — random v4, full stop. No v5, no v6, no v7. This gem is the whole RFC, with zero gem dependency beyond `Fiddle` (which ships with every Ruby install) — and it's faster than `SecureRandom.uuid` too.**
+**Ruby's own stdlib stops at `SecureRandom.uuid` and `SecureRandom.uuid_v7` — random v4 and v7, one at a time. No v5, no v6, no batches, no SQL Server order. This gem is the whole RFC, with zero gem dependency beyond `Fiddle` (which ships with every Ruby install) — and it's faster than `SecureRandom.uuid` too.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
 two backends sharing one public surface. Ruby 3.3 is the floor. The fast path is a native
@@ -26,8 +26,10 @@ id3 = HyperUuid.new_v6
 id4 = HyperUuid.new_v7
 
 id4.timestamp # recover the embedded UTC Time
-id4.timestamp(raise_on_mismatch: false) # nil instead of raising if id4 isn't v6/v7
-id4.to_sql_order # byte order SQL Server's uniqueidentifier needs to sort by creation order
+id4.timestamp(raise_on_mismatch: false) # nil instead of raising if id4 isn't an RFC 9562 v6/v7
+id4.rfc?(7) # the RFC 9562 variant and version 7, the guard before trusting its fields
+sql = id4.to_sql_order # byte order SQL Server's uniqueidentifier needs to sort by creation order
+sql.timestamp(layout: :sql_server) # read straight from SQL order, no round trip
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
 batch = HyperUuid.new_v7_batch(1000)
@@ -40,7 +42,7 @@ batch = HyperUuid.new_v7_batch(1000)
 | `new_v4` | `Uuid` | — |
 | `new_v5(namespace, name)` | `Uuid`, the same one for the same pair | a `Uuid` namespace (`Namespaces::DNS`/`URL`/`OID`/`X500`, or your own) and a `String` name — text is hashed as UTF-8, a binary String as its bytes, and it may be empty |
 | `new_v6(time = nil)` `new_v7(time = nil)` | `Uuid` | nothing (now), a `Time`, or an Integer of Unix-epoch milliseconds |
-| `new_v6_batch(count, time = nil)` `new_v7_batch(count, time = nil)` | `Array` of `Uuid` | a count, and the same time forms |
+| `new_v6_batch(count, time = nil)` `new_v7_batch(count, time = nil)` | `Array` of `Uuid` | a count (at most `MAX_V7_BATCH` for v7), and the same time forms |
 | `new_v6_batch_bytes(count, time = nil)` `new_v7_batch_bytes(count, time = nil)` | one binary `String`, 16 bytes per UUID | as the batch doors — see [Bulk generation into bytes](#bulk-generation-into-bytes) |
 | `native_version` | the loaded core's `"major.minor.patch"` | — |
 | `available?` | `true`/`false`, never raising | — |
@@ -53,8 +55,11 @@ runtime dependency on the `uuid` gem:
 | `Uuid.parse(text)` | the 8-4-4-4-12 hyphenated form `#to_s` produces, either case, and nothing else — an `ArgumentError` otherwise |
 | `Uuid.new(bytes)` | wraps 16 raw RFC 9562-ordered bytes |
 | `Uuid::NIL` `Uuid::MAX` | the RFC 9562 §5.9/§5.10 special values |
-| `#bytes` `#to_s` `#version` `#variant` | the frozen binary String, the hyphenated text, the version nibble, the variant bits |
-| `#timestamp(raise_on_mismatch: true)` | the UTC `Time` embedded in a version 6 or 7 UUID; `nil` instead of an `ArgumentError` for any other version when passed `false` |
+| `#bytes` `#to_s` | the frozen binary String, the hyphenated text |
+| `#version(layout: :rfc9562)` | the version in that layout: the nibble, 0-15, in RFC order; 6 or 7 for a SQL-ordered v6/v7 in `:sql_server`, 0 when the bytes don't form one |
+| `#variant` | the RFC 9562 §4.1 variant, as a Symbol: `:rfc9562` (every UUID this gem mints, and the only variant with versions), `:ncs` (Nil among them), `:microsoft`, `:future` (Max among them) |
+| `#rfc?(version, layout: :rfc9562)` | whether it is an RFC 9562 UUID of that version: the variant and the version together. A version outside 0-15 is `false` |
+| `#timestamp(raise_on_mismatch: true, layout: :rfc9562)` | the UTC `Time` embedded in an RFC 9562 version 6 or 7 UUID held in that layout, in one native call that checks the variant as well as the version (a 6 or 7 nibble under another variant has no timestamp); `nil` instead of an `ArgumentError` for anything that isn't one when passed `false` |
 | `#to_sql_order` `#from_sql_order` | to and from the byte order SQL Server's `uniqueidentifier` sorts by |
 | `==` `eql?` `hash` `<=>` | value equality and byte-order comparison (`Comparable`) |
 
@@ -65,9 +70,38 @@ the native Rust core rather than reimplemented in Ruby, and verified there (and 
 against the real `System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite).
 Same-millisecond v6 UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter,
 so `clock_seq`/`node` (not the timestamp) decide ties, the same pre-existing RFC 9562 v6
-limitation plain order already has. `#from_sql_order` figures out which version to invert by
-checking a byte position that's provably collision-free between the two (see the method's own
-doc comment).
+limitation plain order already has. `#from_sql_order` asks the core which version it holds
+(`#version(layout: :sql_server)`, which checks each version's nibble together with its variant
+bits, so a v6 whose random `clock_seq` byte reads as a v7 nibble is still a v6).
+
+### Layouts
+
+`#version`, `#rfc?` and `#timestamp` take the byte order the value is held in as `layout:`, a
+Symbol: `:rfc9562` (the default, what every other method takes and returns) or `:sql_server`
+(what `#to_sql_order` returns, defined for versions 6 and 7 only). `Uuid::LAYOUTS` lists them.
+Anything else is an `ArgumentError`, never a guess. `#variant` has no layout form: the variant
+is an RFC-order field.
+
+```ruby
+sql = HyperUuid.new_v6.to_sql_order
+sql.version(layout: :sql_server)   # => 6
+sql.rfc?(6, layout: :sql_server)   # => true
+sql.timestamp(layout: :sql_server) # the same Time as sql.from_sql_order.timestamp
+```
+
+The bytes alone cannot say which order they are in, so the layout is yours to know: an
+RFC-ordered value can happen to form a SQL-ordered one (a random v4 reads as a SQL-ordered v7
+one time in 16), and `#from_sql_order` then converts it rather than refusing it.
+
+### The version 7 batch limit
+
+`HyperUuid::MAX_V7_BATCH` is 67,108,864 (2²⁶), the size of the counter that orders version 7
+UUIDs within a millisecond, and the most one `new_v7_batch` or `new_v7_batch_bytes` call
+mints. A larger count is an `ArgumentError` naming the limit, raised before anything is
+allocated. Every batch is in strictly increasing order: the counter is one process-wide
+sequence, so a batch can straddle the point where it wraps back to 0, and the UUIDs from there
+on carry a timestamp one millisecond later than the one supplied rather than sorting before the
+ones ahead of them. Version 6 has no counter and no such limit.
 
 ### Errors
 
@@ -84,8 +118,10 @@ Through 0.3.0 these were reachable only as `HyperUuid::Runtime::TimestampOutOfRa
 Everything else is a caller bug and raises Ruby's own error for it, checked once in the shared
 doors rather than left to whichever backend is live: a `TypeError` for a time that is not a
 `Time`, an Integer or `nil`, for a count that is not an Integer, for a namespace that is not a
-`Uuid` or a name that is not a `String`; an `ArgumentError` for a count outside
-0..2³² − 1.
+`Uuid` or a name that is not a `String`, for a version passed to `#rfc?` that is not an
+Integer; an `ArgumentError` for a count outside 0..2³² − 1 (0..`MAX_V7_BATCH` for version 7),
+for a layout other than `:rfc9562`/`:sql_server`, and for a batch too large for the platform to
+address (a 32-bit target such as ruby.wasm).
 
 ### Is the native core there?
 
@@ -105,14 +141,14 @@ looked for, or `HyperUuid::NativePlatform::UnsupportedPlatformError` naming the 
 
 ## Why not `SecureRandom.uuid`?
 
-`SecureRandom.uuid` only ever gives you a random v4 UUID — Ruby's stdlib has no built-in v5, v6, or v7 at all. If you need more than that, the choice is really "which gem":
+`SecureRandom.uuid` gives you a random v4 UUID and `SecureRandom.uuid_v7` a v7 (Ruby 3.3 and later, so every Ruby this gem supports). Ruby's stdlib has no v5 or v6, nothing to read a timestamp back out, no batch form, and no SQL Server ordering. If you need more than that, the choice is really "which gem":
 
 1. **Full RFC 9562 coverage, one gem, zero extra dependency.** v4/v5/v6/v7 plus batch generation plus `Nil`/`Max`, and nothing added to your `Gemfile.lock` beyond `Fiddle` — Ruby's own bundled FFI layer, not a third-party C extension to compile — and on the precompiled platform gems not even that.
 2. **No native-extension compile step.** Third-party UUID gems that go beyond v4 are typically pure Ruby or wrap a C extension compiled at install time; this gem ships its fast path as a prebuilt platform-gem extension and its fallback as a `dlopen`ed prebuilt library — either way, the gem itself compiles nothing at install time ([Install](#install) has the one caveat, which is Fiddle's own).
 3. **Batch generation.** `new_v7_batch(1000)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch instead of paying per-item overhead a thousand times over.
 4. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't Ruby-only, no Ruby-only gem can offer that.
 
-The honest trade-off: this gem is native code, not pure Ruby — a precompiled extension in each platform gem, and on the universal gem a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` loaded through Fiddle — so it runs only where one of those was built. If plain v4 randomness is all you need, `SecureRandom.uuid` is simpler and already in stdlib — that's a completely reasonable choice.
+The honest trade-off: this gem is native code, not pure Ruby — a precompiled extension in each platform gem, and on the universal gem a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` loaded through Fiddle — so it runs only where one of those was built. If one v4 or v7 at a time is all you need, `SecureRandom.uuid` and `SecureRandom.uuid_v7` are simpler and already in stdlib — that's a completely reasonable choice.
 
 ## Bulk generation into bytes
 
@@ -366,6 +402,7 @@ bundle install
 bundle exec rake native:dev          # build the Magnus extension for this Ruby and stage it
 bundle exec rspec                    # BACKEND == :native
 HYPERUUID_PURE=1 bundle exec rspec   # BACKEND == :fiddle
+HYPERUUID_BIG_BATCH=1 bundle exec rspec spec/inspection_spec.rb  # adds the 1 GiB MAX_V7_BATCH batch
 bundle exec rake docs:check          # every public object carries a doc comment
 ruby benchmark/uuid_benchmark.rb     # prints the backend it measured
 ```
@@ -392,11 +429,12 @@ flags in the forge's `build-magnus.sh`, which is also what CI uses on every plat
 
 The musl build has no host to run on outside a container. With the core built for musl at
 `rust/target/musl/linux-musl-x64/libhyperuuid.so`, this runs the Fiddle suite against it on
-Alpine, with the checkout mounted read-only:
+Alpine, with the checkout mounted read-only (`corpus/` comes along: `spec/corpus_spec.rb` finds
+it by walking up from the spec):
 
 ```sh
 docker run --rm -v "$PWD/..":/src:ro ruby:4.0-alpine sh -euc '
-  mkdir /work && cp -r /src/ruby /work/ruby
+  mkdir /work && cp -r /src/ruby /src/corpus /work/
   mkdir -p /work/ruby/lib/hyperuuid/native/linux-musl-x64
   cp /src/rust/target/musl/linux-musl-x64/libhyperuuid.so /work/ruby/lib/hyperuuid/native/linux-musl-x64/
   cd /work/ruby && rm -f Gemfile.lock
@@ -410,7 +448,7 @@ Fiddle that Ruby 3.3 ships:
 
 ```sh
 docker run --rm -v "$PWD/..":/src:ro ruby:3.3-alpine sh -euc '
-  mkdir /work && cp -r /src/ruby /work/ruby
+  mkdir /work && cp -r /src/ruby /src/corpus /work/
   mkdir -p /work/ruby/lib/hyperuuid/native/linux-musl-x64
   cp /src/rust/target/musl/linux-musl-x64/libhyperuuid.so /work/ruby/lib/hyperuuid/native/linux-musl-x64/
   cd /work/ruby && rm -f Gemfile Gemfile.lock

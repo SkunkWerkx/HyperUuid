@@ -1,12 +1,12 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 
-// Program.cs reports on the console and through its exit code, and an app launched in the iOS
-// simulator hands neither back to the shell that launched it. So everything it writes also
+// The smoke test reports on the console and through its exit code, and an app launched in the
+// iOS simulator hands neither back to the shell that launched it. So everything it writes also
 // goes to a file in the app's temporary directory, which is inside the app's container in the
 // simulator, where CI reads it, and the user's temporary directory on Mac Catalyst. A module
-// initializer, because Program.cs is top-level statements shared with the Native AOT smoke
-// test and has nowhere to put this.
+// initializer, because Program.cs and SmokeTest.cs are shared with the Native AOT smoke test
+// and have nowhere to put this.
 internal static class SmokeLog
 {
 	internal const string FileName = "hyperuuid-smoke.log";

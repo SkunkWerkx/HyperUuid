@@ -24,7 +24,8 @@ $id3 = HyperUuid::newV6();
 $id4 = HyperUuid::newV7();
 
 $id4->timestamp(); // recover the embedded UTC DateTimeImmutable
-$id4->timestamp(throwOnMismatch: false); // null instead of throwing if $id4 isn't v6/v7
+$id4->timestamp(throwOnMismatch: false); // null instead of throwing if $id4 isn't an RFC 9562 v6/v7
+$id4->isRfc(7); // true: the RFC 9562 variant and version 7, in one native call
 $id4->toSqlOrder(); // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
@@ -32,13 +33,14 @@ $batch = HyperUuid::newV7Batch(1000);
 ```
 
 Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
-`->version()`, `->variant()`, `->equals()`) — this package has no runtime dependency on
+`->version()`, `->variant()`, `->isRfc()`, `->equals()`; see
+[Inspecting a UUID](#inspecting-a-uuid)) — this package has no runtime dependency on
 `ramsey/uuid`. It casts to the hyphenated string and `json_encode`s as that same string;
 `Uuid::parse()` reads the 8-4-4-4-12 hyphenated form in either letter case and nothing
 else, the same rule the Rust core applies. `Namespaces::dns()`/`url()`/`oid()`/`x500()` are RFC 9562 Section 6.6's
-well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from a
-version 6 or 7 UUID; pass `throwOnMismatch: false` to get `null` back for any other version
-instead of throwing. `newV6()`/`newV7()` also accept a `DateTimeInterface` directly in place
+well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from an
+RFC 9562 version 6 or 7 UUID; pass `throwOnMismatch: false` to get `null` back for anything
+else instead of throwing. `newV6()`/`newV7()` also accept a `DateTimeInterface` directly in place
 of a raw millisecond count. `->toSqlOrder()`/`->fromSqlOrder()` convert a version 6 or 7 UUID to and
 from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation
 order (`toSqlOrder()` dispatches on the UUID's own version, matching `timestamp()`'s
@@ -46,12 +48,50 @@ convention) — computed once in the native Rust core rather than reimplemented 
 verified there (and independently against the real `System.Data.SqlTypes.SqlGuid` comparator
 in the C# binding's test suite). Same-millisecond v6 UUIDs aren't guaranteed to sort correctly
 afterward — v6 has no counter, so `clock_seq`/`node` (not the timestamp) decide ties, the same
-pre-existing RFC 9562 v6 limitation plain order already has. `fromSqlOrder()` auto-detects
-which version to invert (checking a field that's provably collision-free between the two), or
-takes an explicit `$version` argument when you already know it. `Uuid::nil()`/`Uuid::max()`
+pre-existing RFC 9562 v6 limitation plain order already has. `fromSqlOrder()` reads
+which version to invert from the SQL-ordered bytes in the native core (the same check as
+`->version(UuidLayout::SqlServer)`, which never confuses the two), or takes an explicit
+`$version` argument when you already know it. `Uuid::nil()`/`Uuid::max()`
 are the RFC 9562 §5.9/§5.10 special-value UUIDs.
 `HyperUuid::newV6Batch(count)`/`newV7Batch(count)` generate `count` UUIDs sharing one
 timestamp capture and one native call, instead of `count` of each.
+
+## Inspecting a UUID
+
+Every read below is one call into the native core; the binding does no bit-reading of its own.
+
+```php
+use HyperUuid\UuidLayout;
+use HyperUuid\UuidVariant;
+
+$id->version();                  // the RFC 9562 version nibble, 0-15 (0 for Uuid::nil(), 15 for Uuid::max())
+$id->variant();                  // UuidVariant::Rfc9562 for anything this package or ramsey/uuid mints
+$id->isRfc(7);                   // the RFC 9562 variant and version 7: the guard before trusting v7 fields
+$id->unixMillis();               // the embedded Unix-epoch milliseconds of an RFC 9562 v6/v7, or null
+
+$sql = $id->toSqlOrder();
+$sql->version(UuidLayout::SqlServer);           // 7, read in place from the SQL Server bytes
+$sql->isRfc(7, UuidLayout::SqlServer);          // true
+$sql->unixMillis(UuidLayout::SqlServer);        // the same milliseconds, no conversion back first
+$sql->timestamp(layout: UuidLayout::SqlServer); // the same DateTimeImmutable
+```
+
+`UuidVariant` is an int-backed enum of RFC 9562 §4.1's four variants, `Ncs` (1, includes
+Nil), `Rfc9562` (2), `Microsoft` (3) and `Future` (4, includes Max); the values are the native
+core's codes, so `Rfc9562`'s is the `0b10` the field's top two bits hold. `version()` says
+nothing about the variant, which is what `isRfc($version)` adds. `unixMillis()` and
+`timestamp()` check it too, in the same native call that reads the timestamp: a 6 or 7 nibble
+under another variant has no RFC version, so it has no timestamp (`null`, or the throw). A `$version` outside 0-15 is
+never matched; it's `false`, not an error.
+
+`UuidLayout` says which byte order a `Uuid` holds: `Rfc9562` (1, the default everywhere) or
+`SqlServer` (2, what `toSqlOrder()` returns and a `uniqueidentifier` column stores).
+`version()`, `isRfc()`, `unixMillis()` and `timestamp()` all take one. SQL Server order is
+defined for versions 6 and 7 only: there `version()` answers 6, 7, or 0 for anything that
+isn't a SQL-ordered RFC 9562 v6 or v7, `unixMillis()` answers null, and `timestamp()` throws
+(or returns null with `throwOnMismatch: false`). The version nibble lands at a different byte for
+each, and the other version's random bits can mimic it there, so the core checks the variant
+bits too, where each version puts them, and never confuses the two.
 
 ## Requirements
 
@@ -154,8 +194,14 @@ The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `
 
 Slice it with `substr($bytes, $i * 16, 16)` — which is exactly what `newV7Batch` does internally.
 
-A batch count below 0 or above 4294967295 is an `InvalidArgumentException` on all four batch
-methods; 0 returns an empty array or an empty string.
+A batch count below 0 is an `InvalidArgumentException` on all four batch methods; 0 returns
+an empty array or an empty string. Version 6 takes up to 4294967295. A version 7 batch takes
+at most `HyperUuid::MAX_V7_BATCH` (67,108,864, the 26-bit counter that orders UUIDs within a
+millisecond); a larger count is an `InvalidArgumentException` naming the limit, thrown before
+anything is allocated. Every version 7 batch is in strictly increasing order: the counter is
+one process-wide sequence, so a batch can straddle the point where it wraps back to 0, and
+the UUIDs from there on carry the supplied timestamp plus one millisecond rather than sorting
+before the ones ahead of them.
 
 ## Why not `ramsey/uuid`?
 

@@ -37,7 +37,7 @@ let appleCoreTargets: [Target] =
 let coreDependencies: [Target.Dependency] =
     linksAppleCore
     ? [
-        .target(name: "HyperUuidCore", condition: .when(platforms: [.macOS, .linux, .windows, .wasi])),
+        .target(name: "HyperUuidCore", condition: .when(platforms: [.macOS, .linux, .windows, .wasi, .android])),
         .target(name: "HyperUuidCoreApple", condition: .when(platforms: [.iOS, .macCatalyst])),
     ] : ["HyperUuidCore"]
 

@@ -61,6 +61,10 @@ jobs:
       # Four more static libraries in the static-libs artifact: iOS, the iOS simulator and
       # Mac Catalyst (test-apple-mobile, below, is what links and runs them).
       apple_mobile: true
+      # Android: the shared library for android-arm64 and android-x64 (what a C# app on
+      # CoreCLR loads out of its APK), and in static-libs their archives for C#'s Native AOT,
+      # Go's go/staticlib and Swift's bundle. test-android, below, is what runs them.
+      android: true
       # Turns the package's Native AOT claim into a per-platform receipt: publish on all five
       # legs, fail on any ILxxxx/AOTxxxx trim diagnostic, then actually run the produced
       # binary and require exit 0. The log uploads as aot-report-{rid}. The smoke test
@@ -261,13 +265,25 @@ jobs:
           python-version: "3.14"
       - run: python .github/scripts/check_exports.py
 
+  # The conformance corpus re-derived from an oracle that shares no code with the core
+  # (corpus/oracle.py): a hand edit to a vector fails here even if someone "fixed" a replay
+  # to match it, since every suite would otherwise just agree with the edited file.
+  check-corpus:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: python -I corpus/oracle.py
+
   # The shared library every binding loads is built without std (`cargo cdylib`; the
   # `cdylib` feature in rust/Cargo.toml has why), which leaves it carrying what std used to
   # bring by itself: the C runtime it links, and a hidden `rust_eh_personality` for core's
   # unwind tables should one ever be linked in. Both are per-platform — `.hidden` on ELF,
   # `.private_extern` on Mach-O, msvcrt on Windows — and a gap in either is a library that
   # links but will not load, so every platform the forge ships is built and loaded here
-  # rather than assumed. Each leg checks the export surface is the 13 C ABI symbols and
+  # rather than assumed. Each leg checks the export surface is the C ABI symbols ffi.rs defines and
   # nothing else where the platform's nm can list it, then loads it through Python's ctypes
   # and calls every export (.github/scripts/cdylib_smoke.py), so the library is dlopen'd and
   # called exactly as a host would. The musl legs build in Alpine and also hold the library
@@ -300,7 +316,7 @@ jobs:
         working-directory: rust
         run: cargo cdylib
 
-      - name: Exports are the 13 C ABI symbols, and nothing else
+      - name: Exports are the C ABI symbols ffi.rs defines, and nothing else
         if: ${{ !matrix.musl && runner.os != 'Windows' }}
         working-directory: rust
         run: |
@@ -313,9 +329,10 @@ jobs:
           fi
           echo "$exports"
           count=$(echo "$exports" | wc -l | tr -d ' ')
+          want=$(grep -c 'pub extern "C" fn' src/ffi.rs)
           extra=$(echo "$exports" | grep -v -E '^(uuid_[a-z0-9_]+|hyperuuid_version)$' || true)
-          if [ "$count" != 13 ] || [ -n "$extra" ]; then
-            echo "::error::expected the 13 C ABI exports and nothing else, found $count${extra:+ (unexpected: $extra)}"
+          if [ "$count" != "$want" ] || [ -n "$extra" ]; then
+            echo "::error::expected the $want C ABI exports and nothing else, found $count${extra:+ (unexpected: $extra)}"
             exit 1
           fi
 
@@ -362,7 +379,7 @@ jobs:
   #    first, which is the package a macOS consumer resolves from a tag and the one shape of
   #    it build-native's macOS leg, whose tree has no XCFramework yet, never sees.
   #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/HyperUuid.targets.
-  #    HyperUuid.AppleSmokeTest is the Native AOT smoke test's Program.cs as an app: run as a
+  #    HyperUuid.AppleSmokeTest is the Native AOT smoke test's SmokeTest.Run() as an app: run as a
   #    Mac Catalyst process, installed and launched in the simulator, and built for an iOS
   #    device with signing off. No runner has a device, so that last one is proved as far as
   #    a link goes: the app's executable must define the core's symbols.
@@ -371,7 +388,8 @@ jobs:
   #    for every platform). The suite runs in the simulator through Go's own wrapper,
   #    misc/ios/go_ios_exec.go, which is how the Go project tests its iOS port; the test that
   #    reads rust/Cargo.toml is skipped there, since the wrapper carries the module into the
-  #    simulator and that file is outside it. A device build is linked and inspected. Mac
+  #    simulator and that file is outside it, and the corpus is staged as go/testdata/corpus
+  #    (corpus_test.go looks there too) for the same reason. A device build is linked and inspected. Mac
   #    Catalyst is not linked from Go here: the same archive is linked and run by Swift and
   #    C# above, and Go's part of it is the selection.
   #
@@ -467,7 +485,8 @@ jobs:
           # modules: it copies the package into the app by its path under GOROOT or GOPATH and
           # stops if it is under neither, so it alone runs with the workspace as its GOPATH
           # (go test keeps the real one, and its module cache).
-          mkdir -p "$RUNNER_TEMP/go-ios/bin"
+          mkdir -p "$RUNNER_TEMP/go-ios/bin" testdata
+          cp -R ../corpus testdata/corpus
           go build -o "$RUNNER_TEMP/go-ios/go_ios_exec" "$(go env GOROOT)/misc/ios/go_ios_exec.go"
           printf '#!/bin/sh\nGOPATH=%q exec %q "$@"\n' "$GITHUB_WORKSPACE" "$RUNNER_TEMP/go-ios/go_ios_exec" \
             > "$RUNNER_TEMP/go-ios/bin/go_ios_arm64_exec"
@@ -550,6 +569,175 @@ jobs:
               || { echo "::error::the iOS device app does not define $symbol; the core was not linked in"; exit 1; }
           done
           echo "the iOS device app defines the core's exports"
+
+  # Android, in an emulator, for the three bindings that reach it: C#, Go and Swift.
+  #
+  # C#: HyperUuid.AndroidSmokeTest, which runs the Native
+  # AOT smoke test's Program.cs from an Activity, against the package as a MAUI app would
+  # take it — packed here from build-native's Android libraries and static-libs archives, and
+  # restored from a local folder, so that what is proven is the .nupkg's own layout (NuGet's
+  # runtimes/{rid}/native/ into the APK's lib/{abi}/, and build/net11.0/HyperUuid.targets
+  # handing a Native AOT publish its archive), not a project reference's.
+  #
+  # Four APKs: CoreCLR (.NET 11's Android runtime; Mono is no longer supported there) and
+  # Native AOT, each for android-x64 and android-arm64. The x64 pair runs in an x86_64
+  # emulator whose image uses 16 KB pages, as Android 15 devices may, so a library aligned
+  # for 4 KB would fail to load there; nothing hosted runs arm64 Android, so the arm64 pair is
+  # inspected instead, the same way test-apple-mobile treats an iOS device build. Each
+  # CoreCLR APK must carry libhyperuuid.so for its ABI and pass zipalign -P 16 (the check
+  # Google Play applies), and each Native AOT APK must not carry it at all, because the core
+  # is linked into the app; the x64 one then passing in the emulator is the proof that it was.
+  #
+  # Go and Swift: each binding's whole suite, corpus replay included, cross-compiled for
+  # Android against this run's archives (the static-libs artifact lands them in go/staticlib
+  # and the Swift bundle) and run on the same emulator through adb, by the two scripts that
+  # also run it against a local one: android_build_suite.sh and android_device_test.sh. Go
+  # runs with -test.short and Swift skips them on Android: the two 1 GiB v7 batch tests,
+  # which an emulator's memory is no place for (every other leg runs them). The aarch64
+  # builds are linked, not run. Swift's SDK for Android needs Swift 6.3 or later.
+  test-android:
+    needs: build-native
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      SMOKE_PROJECT: csharp/HyperUuid.AndroidSmokeTest/HyperUuid.AndroidSmokeTest.csproj
+      SMOKE_DIR: csharp/HyperUuid.AndroidSmokeTest
+      APP_ID: io.github.skunkwerkx.hyperuuid.androidsmoketest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-android-*
+          path: artifacts
+
+      # Over the checkout, laid out by repository path: the Android archives land in
+      # csharp/HyperUuid/staticlibs/android-{rid}/.
+      - uses: actions/download-artifact@v8
+        with:
+          name: static-libs
+          path: .
+
+      - name: Stage runtimes/android-{rid}/native/
+        run: |
+          set -euo pipefail
+          for rid in android-arm64 android-x64; do
+            mkdir -p "csharp/HyperUuid/runtimes/$rid/native"
+            cp "artifacts/native-$rid/libhyperuuid.so" "csharp/HyperUuid/runtimes/$rid/native/"
+            [ -f "csharp/HyperUuid/staticlibs/$rid/libhyperuuid.a" ] \
+              || { echo "::error::static-libs has no csharp/HyperUuid/staticlibs/$rid/libhyperuuid.a"; exit 1; }
+          done
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "11.0.x"
+          dotnet-quality: "preview"
+
+      # The android workload's build tasks run on a JDK.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the .NET android workload
+        run: dotnet workload install android
+
+      # The restore also reads the .NET 11 daily feed: the android workload this SDK resolves
+      # (37.0.0-rc.1) was built against runtime 11.0.0-rc.1.26428.117, a build newer than the
+      # RC1 on nuget.org, and a Native AOT publish restores that runtime's NativeAOT and
+      # ILCompiler packs by exact version. Drop it once the workload and the SDK agree again
+      # (by .NET 11 GA at the latest).
+      - name: Pack HyperUuid into a local feed
+        run: |
+          set -euo pipefail
+          version="0.0.0-android.${{ github.run_id }}"
+          echo "HYPERUUID_VERSION=$version" >> "$GITHUB_ENV"
+          echo "HYPERUUID_FEED=$RUNNER_TEMP/feed%3Bhttps://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet11/nuget/v3/index.json" >> "$GITHUB_ENV"
+          dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o "$RUNNER_TEMP/feed" -p:Version="$version"
+          unzip -l "$RUNNER_TEMP/feed/HyperUuid.$version.nupkg" | tee "$RUNNER_TEMP/nupkg.txt"
+          for path in runtimes/android-arm64/native/libhyperuuid.so runtimes/android-x64/native/libhyperuuid.so \
+                      staticlibs/android-arm64/libhyperuuid.a staticlibs/android-x64/libhyperuuid.a; do
+            grep -q " $path\$" "$RUNNER_TEMP/nupkg.txt" || { echo "::error::the package has no $path"; exit 1; }
+          done
+
+      # Each build from a clean tree, since the CoreCLR and Native AOT builds of one RID share
+      # bin/ and obj/; the signed APK is copied out under a name that says which it is.
+      - name: Build the four APKs
+        run: |
+          set -euo pipefail
+          mkdir -p apks
+          for rid in android-x64 android-arm64; do
+            for runtime in coreclr aot; do
+              rm -rf "${SMOKE_DIR:?}/bin" "${SMOKE_DIR:?}/obj"
+              aot=false
+              [ "$runtime" = aot ] && aot=true
+              dotnet publish "$SMOKE_PROJECT" -c Release -r "$rid" -p:PublishAot="$aot" \
+                -p:HyperUuidVersion="$HYPERUUID_VERSION" -p:RestoreAdditionalProjectSources="$HYPERUUID_FEED"
+              apk="$(find "$SMOKE_DIR/bin" -name "$APP_ID-Signed.apk" | head -1)"
+              [ -n "$apk" ] || { echo "::error::no signed APK for $runtime $rid"; exit 1; }
+              cp "$apk" "apks/$runtime-$rid.apk"
+            done
+          done
+          ls -l apks
+
+      - name: Inspect the APKs
+        run: |
+          set -euo pipefail
+          zipalign="$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -name zipalign | sort -V | tail -1)"
+          for rid in android-x64 android-arm64; do
+            case "$rid" in android-x64) abi=x86_64 ;; android-arm64) abi=arm64-v8a ;; esac
+            unzip -l "apks/coreclr-$rid.apk" | grep -q " lib/$abi/libhyperuuid.so\$" \
+              || { echo "::error::the CoreCLR $rid APK has no lib/$abi/libhyperuuid.so"; exit 1; }
+            "$zipalign" -c -P 16 -v 4 "apks/coreclr-$rid.apk" | grep "libhyperuuid.so"
+            for runtime in coreclr aot; do
+              "$zipalign" -c -P 16 4 "apks/$runtime-$rid.apk" \
+                || { echo "::error::the $runtime $rid APK fails zipalign -P 16"; exit 1; }
+            done
+            if unzip -l "apks/aot-$rid.apk" | grep -q "/libhyperuuid.so\$"; then
+              echo "::error::the Native AOT $rid APK carries libhyperuuid.so; the core should be linked into the app"
+              exit 1
+            fi
+            echo "$rid: the CoreCLR APK carries lib/$abi/libhyperuuid.so; the Native AOT APK links the core in; both pass zipalign -P 16"
+          done
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+
+      # After the APKs: setup-swift puts its toolchain's clang first on PATH.
+      - uses: SwiftyLab/setup-swift@v1.14.1
+        with:
+          swift-version: "6.4"
+
+      - name: Go and Swift — cross-build the suites for Android
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          for arch in x86_64 aarch64; do
+            .github/scripts/android_build_suite.sh go "$arch" "stage/go-$arch"
+            .github/scripts/android_build_suite.sh swift "$arch" "stage/swift-$arch"
+          done
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the x64 APKs and the Go and Swift suites in an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis_ps16k
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          # One command per line: the action runs each on its own and fails on the first that does.
+          script: |
+            .github/scripts/android_smoke.sh "$APP_ID" "$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)" apks/coreclr-android-x64.apk apks/aot-android-x64.apk
+            .github/scripts/android_device_test.sh stage/go-x86_64 ./hyperuuid.test -test.v -test.short
+            .github/scripts/android_device_test.sh stage/swift-x86_64 ./HyperUuidPackageTests.xctest
+
 
   # Formatting and lints for the crate, every PR. clippy runs over each configuration that
   # compiles different code — the default (with tests, benches and the example), the

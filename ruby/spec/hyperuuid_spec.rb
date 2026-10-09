@@ -21,7 +21,7 @@ RSpec.describe HyperUuid do
     it "has version and variant bits set" do
       id = described_class.new_v4
       expect(id.version).to eq(4)
-      expect(id.variant).to eq(0b10)
+      expect(id.variant).to eq(:rfc9562)
     end
 
     it "is non-deterministic" do
@@ -92,7 +92,7 @@ RSpec.describe HyperUuid do
     it "has version and variant bits set" do
       id = described_class.new_v6(RFC_TEST_VECTOR_MS)
       expect(id.version).to eq(6)
-      expect(id.variant).to eq(0b10)
+      expect(id.variant).to eq(:rfc9562)
     end
 
     it "sets the node ID multicast bit" do
@@ -149,7 +149,7 @@ RSpec.describe HyperUuid do
     it "has version and variant bits set" do
       id = described_class.new_v7(RFC_TEST_VECTOR_MS)
       expect(id.version).to eq(7)
-      expect(id.variant).to eq(0b10)
+      expect(id.variant).to eq(:rfc9562)
     end
 
     it "raises on an out-of-range timestamp" do
@@ -403,10 +403,22 @@ RSpec.describe HyperUuid do
     end
 
     %i[new_v6_batch new_v7_batch new_v6_batch_bytes new_v7_batch_bytes].each do |door|
-      it "#{door} raises ArgumentError for a count outside 0..2**32 - 1" do
-        [-1, 2**32].each do |count|
-          expect { described_class.public_send(door, count, RFC_TEST_VECTOR_MS) }
-            .to raise_error(ArgumentError, /count must be between 0 and 4294967295; got #{count}/)
+      it "#{door} raises ArgumentError for a negative count" do
+        expect { described_class.public_send(door, -1, RFC_TEST_VECTOR_MS) }
+          .to raise_error(ArgumentError, /count must be between 0 and 4294967295; got -1/)
+      end
+
+      if door.to_s.start_with?("new_v6")
+        it "#{door} raises ArgumentError for a count past 2**32 - 1" do
+          expect { described_class.public_send(door, 2**32, RFC_TEST_VECTOR_MS) }
+            .to raise_error(ArgumentError, /count must be between 0 and 4294967295; got #{2**32}/)
+        end
+      else
+        it "#{door} raises ArgumentError naming the limit for a count past MAX_V7_BATCH" do
+          [HyperUuid::MAX_V7_BATCH + 1, 2**32 - 1, 2**32].each do |count|
+            expect { described_class.public_send(door, count, RFC_TEST_VECTOR_MS) }
+              .to raise_error(ArgumentError, HyperUuid::Runtime::V7_BATCH_TOO_LARGE)
+          end
         end
       end
 
@@ -529,7 +541,7 @@ RSpec.describe HyperUuid do
       expect(ids.size).to eq(8 * 100 * 10)
       expect(ids.uniq.size).to eq(ids.size)
       expect(ids.map(&:version).tally).to eq(7 => 8 * 100 * 9, 4 => 8 * 100)
-      expect(ids).to all(satisfy { |id| id.variant == 0b10 })
+      expect(ids).to all(satisfy { |id| id.variant == :rfc9562 })
     end
   end
 end

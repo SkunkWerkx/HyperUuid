@@ -31,14 +31,70 @@ impl Uuid {
         self.0
     }
 
-    /// The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6).
+    /// The RFC 9562 version nibble (bits 48-51, the high nibble of octet 6), 0 through 15.
+    /// Nil reads as 0 and Max as 15. Says nothing about the variant: a value whose variant
+    /// isn't [`Variant::Rfc9562`] has no RFC version, whatever this nibble holds, so check
+    /// [`is_rfc`](Self::is_rfc) instead when the answer has to mean "an RFC 9562 UUID of
+    /// version N".
     pub const fn version(&self) -> u8 {
         self.0[6] >> 4
+    }
+
+    /// The version of a UUID held in `layout`'s byte order.
+    ///
+    /// [`Layout::Rfc9562`] is [`version`](Self::version). [`Layout::SqlServer`] is defined only
+    /// for the two versions that have a SQL Server order, and answers 6, 7, or 0 for anything
+    /// that isn't a SQL-ordered version 6 or 7 RFC 9562 UUID. The version nibble lands at a
+    /// different octet for each (octet 7 for v7, octet 8 for v6), and the other version's
+    /// random bits can mimic it there, so this checks the variant too, where each version
+    /// puts it: a v7's variant shares octet 8 with the v6 nibble's slot and can never read 6
+    /// there, and a v6's version byte sits where a v7's variant would be and never reads as
+    /// one. Either way the answer can't confuse the two.
+    ///
+    /// What it can't know is whether the bytes are in SQL Server order at all: that is the
+    /// caller's to track. Bytes in RFC order can happen to form a valid SQL-ordered v7 (a
+    /// random v4 does one time in 16), and then this answers 7.
+    pub const fn version_in(&self, layout: Layout) -> u8 {
+        let b = &self.0;
+        match layout {
+            Layout::Rfc9562 => self.version(),
+            Layout::SqlServer if b[7] >> 4 == 7 && b[8] & 0xC0 == 0x80 => 7,
+            Layout::SqlServer if b[8] >> 4 == 6 && b[6] & 0xC0 == 0x80 => 6,
+            Layout::SqlServer => 0,
+        }
+    }
+
+    /// The variant field (RFC 9562 §4.1, the top bits of octet 8). Nil reads as
+    /// [`Variant::Ncs`] and Max as [`Variant::Future`], which is how the RFC classifies them.
+    pub const fn variant(&self) -> Variant {
+        match self.0[8] >> 5 {
+            0..=3 => Variant::Ncs,
+            4 | 5 => Variant::Rfc9562,
+            6 => Variant::Microsoft,
+            _ => Variant::Future,
+        }
     }
 
     /// Whether the variant bits (top two bits of octet 8) match RFC 9562 (`10`).
     pub const fn is_rfc9562_variant(&self) -> bool {
         (self.0[8] & 0xC0) == 0x80
+    }
+
+    /// Whether this is an RFC 9562 UUID of version `version`: the RFC variant and that
+    /// version nibble, in one call. The guard to run before trusting a value's
+    /// version-specific fields, such as a version 7's timestamp.
+    pub const fn is_rfc(&self, version: u8) -> bool {
+        self.is_rfc9562_variant() && self.version() == version
+    }
+
+    /// [`is_rfc`](Self::is_rfc) for a UUID held in `layout`'s byte order. In
+    /// [`Layout::SqlServer`] only versions 6 and 7 can be true, the two that have a SQL Server
+    /// order; see [`version_in`](Self::version_in).
+    pub const fn is_rfc_in(&self, version: u8, layout: Layout) -> bool {
+        match layout {
+            Layout::Rfc9562 => self.is_rfc(version),
+            Layout::SqlServer => version != 0 && self.version_in(layout) == version,
+        }
     }
 
     pub(crate) fn set_version(&mut self, version: u8) {
@@ -48,6 +104,33 @@ impl Uuid {
     pub(crate) fn set_variant(&mut self) {
         self.0[8] = (self.0[8] & 0x3F) | 0x80;
     }
+}
+
+/// The variant field of a UUID (RFC 9562 §4.1), which says how the rest of its bits are laid
+/// out. Only [`Rfc9562`](Self::Rfc9562) has versions; the RFC defines no others, so the set is
+/// complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Variant {
+    /// `0xxx`: reserved, Network Computing System backward compatibility. Includes Nil.
+    Ncs,
+    /// `10xx`: the variant RFC 9562 (and RFC 4122 before it) specifies.
+    Rfc9562,
+    /// `110x`: reserved, Microsoft Corporation backward compatibility.
+    Microsoft,
+    /// `111x`: reserved for future definition. Includes Max.
+    Future,
+}
+
+/// The byte order a UUID's 16 bytes are held in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Layout {
+    /// RFC 9562 network order, what every function in this crate takes unless it says
+    /// otherwise.
+    Rfc9562,
+    /// The order [`v6::to_sql_order`](crate::v6::to_sql_order) and
+    /// [`v7::to_sql_order`](crate::v7::to_sql_order) write, which SQL Server's
+    /// `uniqueidentifier` sorts by creation order. Defined for versions 6 and 7 only.
+    SqlServer,
 }
 
 impl From<[u8; 16]> for Uuid {

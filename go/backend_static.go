@@ -1,4 +1,4 @@
-//go:build cgo && !tinygo && !android && (darwin || linux || windows) && (amd64 || arm64) && !(ios && amd64 && !maccatalyst)
+//go:build cgo && !tinygo && (darwin || linux || windows) && (amd64 || arm64) && !(ios && amd64 && !maccatalyst)
 
 // The native backend: libhyperuuid linked into the binary. The core is a static library under
 // staticlib/{goos}_{goarch}/, named on the cgo link line below, and every call is an
@@ -29,11 +29,17 @@
 //
 // iOS and Mac Catalyst link an archive of their own, since Go builds for both as GOOS=ios
 // and every Mach-O object says which platform it was built for. GOOS=ios also satisfies the
-// darwin constraint (as android satisfies linux), so the macOS lines below say !ios, and the
-// constraint above turns Android away rather than hand it the Linux archive. The three
-// that share ios/arm64 are told apart by build tag: `maccatalyst`, which gomobile sets for
-// that target; `iossimulator`, which nothing sets, so a simulator build passes it by hand;
-// and neither, for a device. There is no archive for the simulator on amd64.
+// darwin constraint, so the macOS lines below say !ios. The three that share ios/arm64 are
+// told apart by build tag: `maccatalyst`, which gomobile sets for that target;
+// `iossimulator`, which nothing sets, so a simulator build passes it by hand; and neither,
+// for a device. There is no archive for the simulator on amd64.
+//
+// Android links an archive of its own too, for arm64 and amd64: the core built for the
+// Android targets, which asks Bionic for what it asks musl for (getrandom's syscall among
+// it). GOOS=android satisfies the linux constraint, so the Linux lines below say !android.
+// Building for it takes the NDK's clang as CC
+// (CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+// GOOS=android GOARCH=arm64 CGO_ENABLED=1), as any cgo package on Android does.
 //
 // The archives are committed (staticlib/README.md): a Go module is whatever is in the tree at
 // the resolved version, with no packing step to stage them in. The hyperuuid_local build tag
@@ -42,8 +48,8 @@
 package hyperuuid
 
 /*
-#cgo linux,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_amd64/libhyperuuid.a
-#cgo linux,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_arm64/libhyperuuid.a
+#cgo linux,!android,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_amd64/libhyperuuid.a
+#cgo linux,!android,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/linux_arm64/libhyperuuid.a
 #cgo darwin,!ios,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_amd64/libhyperuuid.a
 #cgo darwin,!ios,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/darwin_arm64/libhyperuuid.a
 #cgo ios,arm64,!iossimulator,!maccatalyst LDFLAGS: ${SRCDIR}/staticlib/ios_arm64/libhyperuuid.a
@@ -52,15 +58,19 @@ package hyperuuid
 #cgo ios,amd64,maccatalyst LDFLAGS: ${SRCDIR}/staticlib/maccatalyst_amd64/libhyperuuid.a
 #cgo windows,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/windows_amd64/libhyperuuid.a
 #cgo windows,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/windows_arm64/libhyperuuid.a
-#cgo linux,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_amd64/libhyperuuid.a
-#cgo linux,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_arm64/libhyperuuid.a
+#cgo android,amd64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/android_amd64/libhyperuuid.a
+#cgo android,arm64,!hyperuuid_local LDFLAGS: ${SRCDIR}/staticlib/android_arm64/libhyperuuid.a
+#cgo linux,!android,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_amd64/libhyperuuid.a
+#cgo linux,!android,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/linux_arm64/libhyperuuid.a
 #cgo darwin,!ios,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_amd64/libhyperuuid.a
 #cgo darwin,!ios,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/darwin_arm64/libhyperuuid.a
 #cgo windows,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/windows_amd64/libhyperuuid.a
 #cgo windows,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/windows_arm64/libhyperuuid.a
+#cgo android,amd64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/android_amd64/libhyperuuid.a
+#cgo android,arm64,hyperuuid_local LDFLAGS: ${SRCDIR}/../rust/target/local-core/go/staticlib/android_arm64/libhyperuuid.a
 #include <stdint.h>
 
-// The core's C ABI — rust/src/ffi.rs, the thirteen exports every binding calls.
+// The core's C ABI — rust/src/ffi.rs, the nineteen exports every binding calls.
 uint32_t hyperuuid_version(void);
 int32_t uuid_new_v4(uint8_t *out_ptr);
 int32_t uuid_new_v5(const uint8_t *ns_ptr, const uint8_t *name_ptr, uint32_t name_len, uint8_t *out_ptr);
@@ -74,6 +84,12 @@ int32_t uuid_new_v7_batch(uint64_t unix_millis, uint32_t count, uint8_t *out_ptr
 uint64_t uuid_v7_unix_millis(const uint8_t *uuid_ptr);
 void uuid_v7_to_sql_order(uint8_t *uuid_ptr);
 void uuid_v7_to_rfc_order(uint8_t *uuid_ptr);
+uint32_t uuid_version(const uint8_t *uuid_ptr, uint32_t layout_code);
+uint32_t uuid_variant(const uint8_t *uuid_ptr);
+uint32_t uuid_is_rfc(const uint8_t *uuid_ptr, uint32_t version, uint32_t layout_code);
+uint64_t uuid_v6_unix_millis_in(const uint8_t *uuid_ptr, uint32_t layout_code);
+uint64_t uuid_v7_unix_millis_in(const uint8_t *uuid_ptr, uint32_t layout_code);
+uint32_t uuid_get_timestamp(const uint8_t *uuid_ptr, uint32_t layout_code, uint64_t *millis_out);
 
 // A UUID crosses BY VALUE in both directions. Any Go pointer passed to a cgo call escapes
 // to the heap, so handing the core `&out[0]` of a Go local costs one allocation per
@@ -109,6 +125,17 @@ static hu_uuid call_v6_to_sql_order(hu_uuid uuid) { uuid_v6_to_sql_order(uuid.b)
 static hu_uuid call_v6_to_rfc_order(hu_uuid uuid) { uuid_v6_to_rfc_order(uuid.b); return uuid; }
 static hu_uuid call_v7_to_sql_order(hu_uuid uuid) { uuid_v7_to_sql_order(uuid.b); return uuid; }
 static hu_uuid call_v7_to_rfc_order(hu_uuid uuid) { uuid_v7_to_rfc_order(uuid.b); return uuid; }
+static uint32_t call_version(hu_uuid uuid, uint32_t layout) { return uuid_version(uuid.b, layout); }
+static uint32_t call_variant(hu_uuid uuid) { return uuid_variant(uuid.b); }
+static uint32_t call_is_rfc(hu_uuid uuid, uint32_t version, uint32_t layout) { return uuid_is_rfc(uuid.b, version, layout); }
+static uint64_t call_v6_unix_millis_in(hu_uuid uuid, uint32_t layout) { return uuid_v6_unix_millis_in(uuid.b, layout); }
+static uint64_t call_v7_unix_millis_in(hu_uuid uuid, uint32_t layout) { return uuid_v7_unix_millis_in(uuid.b, layout); }
+typedef struct { uint64_t millis; uint32_t version; } hu_timestamp;
+static hu_timestamp call_get_timestamp(hu_uuid uuid, uint32_t layout) {
+	hu_timestamp r = {0, 0};
+	r.version = uuid_get_timestamp(uuid.b, layout, &r.millis);
+	return r;
+}
 */
 import "C"
 
@@ -172,3 +199,25 @@ func v7ToSqlOrderBytes(p unsafe.Pointer) { C.uuid_v7_to_sql_order((*C.uint8_t)(p
 func v7ToRfcOrderBytes(p unsafe.Pointer) { C.uuid_v7_to_rfc_order((*C.uint8_t)(p)) }
 func v6ToSqlOrderBytes(p unsafe.Pointer) { C.uuid_v6_to_sql_order((*C.uint8_t)(p)) }
 func v6ToRfcOrderBytes(p unsafe.Pointer) { C.uuid_v6_to_rfc_order((*C.uint8_t)(p)) }
+
+func version(id uuid.UUID, layout uint32) uint32 {
+	return uint32(C.call_version(toC(id), C.uint32_t(layout)))
+}
+func variant(id uuid.UUID) uint32 { return uint32(C.call_variant(toC(id))) }
+func isRfc(id uuid.UUID, version, layout uint32) bool {
+	return C.call_is_rfc(toC(id), C.uint32_t(version), C.uint32_t(layout)) != 0
+}
+func v6UnixMillisIn(id uuid.UUID, layout uint32) uint64 {
+	return uint64(C.call_v6_unix_millis_in(toC(id), C.uint32_t(layout)))
+}
+func v7UnixMillisIn(id uuid.UUID, layout uint32) uint64 {
+	return uint64(C.call_v7_unix_millis_in(toC(id), C.uint32_t(layout)))
+}
+
+// getTimestamp returns the version (6 or 7, or 0 for no RFC 9562 timestamp in this layout)
+// and the Unix milliseconds the core read, in one call. The out parameter stays on the C
+// stack, the way the by-value shims above keep the UUID there.
+func getTimestamp(id uuid.UUID, layout uint32) (uint32, uint64) {
+	r := C.call_get_timestamp(toC(id), C.uint32_t(layout))
+	return uint32(r.version), uint64(r.millis)
+}

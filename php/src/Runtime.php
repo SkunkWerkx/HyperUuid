@@ -30,8 +30,12 @@ final class Runtime
     /** The widest count or length the C ABI's `uint32_t` parameters can carry. */
     private const UINT32_MAX = 0xFFFFFFFF;
 
+    /** Batch return code 3's meaning: `count * 16` overflows the platform's address space. */
+    private const UNADDRESSABLE_BATCH = 'the batch is too large to address on this platform';
+
     private static ?FFI $ffi = null;
     private static ?FFI\CData $out16 = null;
+    private static ?FFI\CData $millis = null;
 
     /** Non-instantiable — static calls only. */
     private function __construct()
@@ -93,12 +97,6 @@ final class Runtime
         return FFI::string(self::$out16, 16);
     }
 
-    public static function v6UnixMillis(string $bytes): int
-    {
-        $ffi = self::$ffi ?? self::load();
-        return $ffi->uuid_v6_unix_millis($bytes);
-    }
-
     public static function newV6Batch(int $count, int $unixMillis): string
     {
         self::checkCount($count);
@@ -112,6 +110,9 @@ final class Runtime
             throw new TimestampOutOfRangeException(
                 'unix_millis does not fit the 60-bit v6 timestamp field'
             );
+        }
+        if ($rc === 3) {
+            throw new \InvalidArgumentException(self::UNADDRESSABLE_BATCH);
         }
         if ($rc !== 0) {
             throw new RandomSourceException("uuid_new_v6_batch failed with code {$rc}");
@@ -134,15 +135,56 @@ final class Runtime
         return FFI::string(self::$out16, 16);
     }
 
-    public static function v7UnixMillis(string $bytes): int
+    /**
+     * The Unix-epoch milliseconds of `$bytes`, held in the order of the core layout code
+     * `$layout`, when it is an RFC 9562 version 6 or 7 UUID there (variant checked); null
+     * for anything else. One native call.
+     */
+    public static function getTimestamp(string $bytes, int $layout): ?int
     {
         $ffi = self::$ffi ?? self::load();
-        return $ffi->uuid_v7_unix_millis($bytes);
+        return $ffi->uuid_get_timestamp($bytes, $layout, FFI::addr(self::$millis)) === 0
+            ? null
+            : self::$millis->cdata;
+    }
+
+    /**
+     * The version of `$bytes` held in the order of the core layout code `$layout`: the RFC
+     * nibble (0-15) in RFC 9562 order; 6, 7, or 0 for "not a SQL-ordered v6/v7" in SQL Server
+     * order.
+     */
+    public static function version(string $bytes, int $layout): int
+    {
+        $ffi = self::$ffi ?? self::load();
+        return $ffi->uuid_version($bytes, $layout);
+    }
+
+    /** The core's variant code for RFC-ordered `$bytes`: 1 Ncs, 2 Rfc9562, 3 Microsoft, 4 Future. */
+    public static function variant(string $bytes): int
+    {
+        $ffi = self::$ffi ?? self::load();
+        return $ffi->uuid_variant($bytes);
+    }
+
+    /** Whether `$bytes`, held in layout `$layout`, is an RFC 9562 UUID of version `$version`. */
+    public static function isRfc(string $bytes, int $version, int $layout): bool
+    {
+        if ($version < 0 || $version > self::UINT32_MAX) {
+            // version is a uint32_t; ext-ffi would wrap a negative or over-wide one into
+            // range, possibly onto a real version. The core answers false past 15 itself.
+            return false;
+        }
+        $ffi = self::$ffi ?? self::load();
+        return $ffi->uuid_is_rfc($bytes, $version, $layout) !== 0;
     }
 
     public static function newV7Batch(int $count, int $unixMillis): string
     {
-        self::checkCount($count);
+        if ($count < 0 || $count > HyperUuid::MAX_V7_BATCH) {
+            // Checked before the buffer is allocated: the core would refuse it (code 4)
+            // without writing anything, but only after a pointless allocation here.
+            throw new \InvalidArgumentException(self::v7BatchLimitMessage($count));
+        }
         if ($count === 0) {
             return '';
         }
@@ -153,6 +195,12 @@ final class Runtime
             throw new TimestampOutOfRangeException(
                 'unix_millis must fit within the RFC 9562 48-bit field'
             );
+        }
+        if ($rc === 3) {
+            throw new \InvalidArgumentException(self::UNADDRESSABLE_BATCH);
+        }
+        if ($rc === 4) {
+            throw new \InvalidArgumentException(self::v7BatchLimitMessage($count));
         }
         if ($rc !== 0) {
             throw new RandomSourceException("uuid_new_v7_batch failed with code {$rc}");
@@ -218,6 +266,12 @@ final class Runtime
         }
     }
 
+    private static function v7BatchLimitMessage(int $count): string
+    {
+        return 'count must be between 0 and ' . HyperUuid::MAX_V7_BATCH
+            . " (a single version 7 batch takes at most the 26-bit counter space), got {$count}";
+    }
+
     /**
      * Loaded lazily, once per request: PHP's statics reset between requests, so under a web
      * SAPI the declarations are bound again on each request's first call (the OS keeps the
@@ -263,10 +317,17 @@ final class Runtime
             . 'void uuid_v7_to_sql_order(void *uuid_ptr);'
             . 'void uuid_v7_to_rfc_order(void *uuid_ptr);'
             . 'void uuid_v6_to_sql_order(void *uuid_ptr);'
-            . 'void uuid_v6_to_rfc_order(void *uuid_ptr);',
+            . 'void uuid_v6_to_rfc_order(void *uuid_ptr);'
+            . 'uint32_t uuid_version(const char *uuid_ptr, uint32_t layout);'
+            . 'uint32_t uuid_variant(const char *uuid_ptr);'
+            . 'uint32_t uuid_is_rfc(const char *uuid_ptr, uint32_t version, uint32_t layout);'
+            . 'uint64_t uuid_v6_unix_millis_in(const char *uuid_ptr, uint32_t layout);'
+            . 'uint64_t uuid_v7_unix_millis_in(const char *uuid_ptr, uint32_t layout);'
+            . 'uint32_t uuid_get_timestamp(const char *uuid_ptr, uint32_t layout, uint64_t *millis_out);',
             $path
         );
         self::$out16 = self::$ffi->new('uint8_t[16]');
+        self::$millis = self::$ffi->new('uint64_t');
         return self::$ffi;
     }
 }

@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteOrder;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
@@ -13,7 +15,7 @@ import org.graalvm.polyglot.io.ByteSequence;
 /**
  * The Rust core as a {@code wasm32-wasip1} module, run inside the JVM by
  * <a href="https://www.graalvm.org/webassembly/">GraalWasm</a>. No native binary, no
- * {@code java.lang.foreign} downcall: the twelve {@code uuid_*} functions and
+ * {@code java.lang.foreign} downcall: the eighteen {@code uuid_*} functions and
  * {@code hyperuuid_version} that {@link UuidGenerator} downcalls into natively are called
  * through the polyglot API instead, on the module bundled at
  * {@code /native/wasm32-wasip1/hyperuuid.wasm}.
@@ -79,6 +81,12 @@ final class WasmBackend implements Backend {
     private final Value v6ToSqlOrderFn;
     private final Value v6ToRfcOrderFn;
     private final Value versionFn;
+    private final Value uuidVersionFn;
+    private final Value uuidVariantFn;
+    private final Value uuidIsRfcFn;
+    private final Value getTimestampFn;
+    private final Value v6UnixMillisInFn;
+    private final Value v7UnixMillisInFn;
 
     // Sixteen bytes read back from the guest per single-UUID door; guarded by the same
     // monitor as every call, so one array serves the process.
@@ -132,6 +140,12 @@ final class WasmBackend implements Backend {
         v6ToSqlOrderFn = export("uuid_v6_to_sql_order");
         v6ToRfcOrderFn = export("uuid_v6_to_rfc_order");
         versionFn = export("hyperuuid_version");
+        uuidVersionFn = export("uuid_version");
+        uuidVariantFn = export("uuid_variant");
+        uuidIsRfcFn = export("uuid_is_rfc");
+        getTimestampFn = export("uuid_get_timestamp");
+        v6UnixMillisInFn = export("uuid_v6_unix_millis_in");
+        v7UnixMillisInFn = export("uuid_v7_unix_millis_in");
         scratchIn = malloc(16);
         scratchOut = malloc(16);
     }
@@ -203,7 +217,7 @@ final class WasmBackend implements Backend {
         return fn.execute(args).asInt();
     }
 
-    // ---- the version probe, and the twelve exports with UuidGenerator's exact error contract
+    // ---- the version probe, and the eighteen exports with UuidGenerator's exact error contract
 
     @Override
     public synchronized int version() {
@@ -377,6 +391,64 @@ final class WasmBackend implements Backend {
         rewrite(v6ToRfcOrderFn, uuid);
     }
 
+    @Override
+    public synchronized int uuidVersion(UUID uuid, int layout) {
+        writeUuid(scratchIn, uuid);
+        return call(uuidVersionFn, scratchIn, layout);
+    }
+
+    @Override
+    public synchronized int uuidVersion(byte[] uuid, int layout) {
+        writeBytes(scratchIn, uuid);
+        return call(uuidVersionFn, scratchIn, layout);
+    }
+
+    @Override
+    public synchronized int uuidVariant(UUID uuid) {
+        writeUuid(scratchIn, uuid);
+        return call(uuidVariantFn, scratchIn);
+    }
+
+    @Override
+    public synchronized int uuidVariant(byte[] uuid) {
+        writeBytes(scratchIn, uuid);
+        return call(uuidVariantFn, scratchIn);
+    }
+
+    @Override
+    public synchronized boolean isRfc(UUID uuid, int version, int layout) {
+        writeUuid(scratchIn, uuid);
+        return call(uuidIsRfcFn, scratchIn, version, layout) != 0;
+    }
+
+    @Override
+    public synchronized boolean isRfc(byte[] uuid, int version, int layout) {
+        writeBytes(scratchIn, uuid);
+        return call(uuidIsRfcFn, scratchIn, version, layout) != 0;
+    }
+
+    @Override
+    public synchronized Optional<Instant> getTimestamp(UUID uuid, int layout) {
+        writeUuid(scratchIn, uuid);
+        // The u64 lands in the out scratch, in the guest's own (little-endian) byte order.
+        if (call(getTimestampFn, scratchIn, layout, scratchOut) == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(Instant.ofEpochMilli(memory.readBufferLong(ByteOrder.LITTLE_ENDIAN, scratchOut)));
+    }
+
+    @Override
+    public synchronized long v6UnixMillisIn(UUID uuid, int layout) {
+        writeUuid(scratchIn, uuid);
+        return v6UnixMillisInFn.execute(scratchIn, layout).asLong();
+    }
+
+    @Override
+    public synchronized long v7UnixMillisIn(UUID uuid, int layout) {
+        writeUuid(scratchIn, uuid);
+        return v7UnixMillisInFn.execute(scratchIn, layout).asLong();
+    }
+
     // ---- shared shapes ------------------------------------------------------------------
 
     /** Runs a batch export into the bulk buffer and returns its guest address. */
@@ -387,11 +459,8 @@ final class WasmBackend implements Backend {
         UuidGenerator.requireBatchCount(count);
         int out = bulk(count * 16);
         int rc = call(fn, unixMillis, count, out);
-        if (rc == 2) {
-            throw new IllegalArgumentException(outOfRangeMessage);
-        }
         if (rc != 0) {
-            throw new IllegalStateException(name + " failed with code " + rc + " (random source failure)");
+            throw UuidGenerator.batchFailure(rc, name, count, outOfRangeMessage);
         }
         return out;
     }

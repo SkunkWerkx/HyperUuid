@@ -49,6 +49,31 @@ do {
     check(v7Batch == v7Batch.sorted { $0.uuidString < $1.uuidString }, "v7 batch is in order")
     check(try UuidGenerator.v7FromSqlOrder(try UuidGenerator.v7ToSqlOrder(v7)) == v7, "v7 SQL order round-trip")
 
+    // Inspection and the layout-aware doors: a SQL-ordered value is read in place.
+    check(try UuidGenerator.version(v7) == 7, "version of a v7")
+    check(try UuidGenerator.variant(v7) == .rfc9562, "variant of a v7")
+    check(try UuidGenerator.isRfc(v6, version: 6) && !(try UuidGenerator.isRfc(v6, version: 7)), "isRfc of a v6")
+    let sql6 = try UuidGenerator.v6ToSqlOrder(v6)
+    let sql7 = try UuidGenerator.v7ToSqlOrder(v7)
+    check(try UuidGenerator.version(sql6, layout: .sqlServer) == 6, "SQL-ordered v6 version")
+    check(try UuidGenerator.isRfc(sql7, version: 7, layout: .sqlServer), "SQL-ordered v7 isRfc")
+    check(try UuidGenerator.v6UnixMillis(sql6, layout: .sqlServer) == millis, "SQL-ordered v6 timestamp")
+    check(try UuidGenerator.v7UnixMillis(sql7, layout: .sqlServer) == millis, "SQL-ordered v7 timestamp")
+    let sqlDate = try UuidGenerator.getTimestamp(sql7, layout: .sqlServer)
+    check(sqlDate == Date(timeIntervalSince1970: Double(millis) / 1000), "SQL-ordered getTimestamp")
+    check(try UuidGenerator.getTimestamp(v7) == Date(timeIntervalSince1970: Double(millis) / 1000), "getTimestamp")
+    // A 7 nibble under the NCS variant is not an RFC 9562 v7, so it has no timestamp.
+    var ncs = v7.uuid
+    ncs.8 &= 0x7F
+    check(try UuidGenerator.getTimestamp(UUID(uuid: ncs)) == nil, "getTimestamp of a non-RFC variant")
+
+    // The v7 batch limit is refused before anything is allocated.
+    do {
+        _ = try UuidGenerator.newV7Batch(count: UuidGenerator.maxV7Batch + 1, unixMillis: millis)
+        check(false, "a v7 batch past maxV7Batch was accepted")
+    } catch UuidGenerator.Error.batchTooLarge {
+    }
+
     // An out-of-range timestamp is the native core's refusal, surfaced as this binding's error.
     do {
         _ = try UuidGenerator.newV7(unixMillis: 1 << 48)

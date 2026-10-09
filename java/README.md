@@ -29,7 +29,7 @@ UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id4);
 UUID[] batch = UuidGenerator.newV7Batch(1000);
 ```
 
-Returns plain `java.util.UUID` — no wrapper type, so it works everywhere a `UUID` already does (equality, hashing, `Comparable`, JPA/Hibernate entity IDs, `toString()`). `UuidGenerator.Namespaces.DNS`/`URL`/`OID`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.NIL`/`MAX` are the §5.9/§5.10 special values. `newV6`/`newV7` also accept an `Instant` directly (`newV6(Instant)`), not just a raw millisecond count; `getTimestamp` is the version-agnostic counterpart to `v6Timestamp`/`v7Timestamp` — it checks `uuid.version()` itself and returns `Optional.empty()` for anything but a genuine v6/v7 `UUID`, instead of assuming the caller already knows.
+Returns plain `java.util.UUID` — no wrapper type, so it works everywhere a `UUID` already does (equality, hashing, `Comparable`, JPA/Hibernate entity IDs, `toString()`). `UuidGenerator.Namespaces.DNS`/`URL`/`OID`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.NIL`/`MAX` are the §5.9/§5.10 special values. `newV6`/`newV7` also accept an `Instant` directly (`newV6(Instant)`), not just a raw millisecond count; `getTimestamp` is the version-agnostic counterpart to `v6Timestamp`/`v7Timestamp`: it checks first, in one call into the core, and returns `Optional.empty()` for anything that isn't an RFC 9562 version 6 or 7 UUID, instead of assuming the caller already knows. The variant is checked as well as the version, so a 6 or 7 nibble under the NCS, Microsoft or future variant has no timestamp. It also reads SQL-ordered values in place; see [Inspection and layouts](#inspection-and-layouts).
 
 ## Gating on the core
 
@@ -39,7 +39,7 @@ Nothing loads until the first call that needs the core — `UuidGenerator.NIL`/`
 UUID id = UuidGenerator.isAvailable() ? UuidGenerator.newV7() : UUID.randomUUID();
 ```
 
-A batch is bounded by its own output: `count * 16` bytes has to be an array, so `newV6Batch`/`newV7Batch` and the `UUID[]` fills take at most `Integer.MAX_VALUE / 16` (134,217,727) UUIDs per call and throw `IllegalArgumentException` for more, or for a negative count.
+A batch is bounded by its own output: `count * 16` bytes has to be an array, so `newV6Batch` and the `fillV6(UUID[])` fill take at most `Integer.MAX_VALUE / 16` (134,217,727) UUIDs per call and throw `IllegalArgumentException` for more, or for a negative count. A version 7 batch is bounded tighter, by its counter: `UuidGenerator.MAX_V7_BATCH` (`1 << 26`, 67,108,864) per call across `newV7Batch` and both `fillV7` forms. Every v7 batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0, and the UUIDs from there on carry a timestamp 1 ms later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it throws `IllegalArgumentException` naming the limit, before anything is allocated or written. Every batch failure that is the caller's (a timestamp out of range, a batch too large) is an `IllegalArgumentException`. Only a random-source failure is an `IllegalStateException`.
 
 ## Native access
 
@@ -96,6 +96,27 @@ A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`
 
 `v6/v7ToSqlOrder(byte[])` and `v6/v7FromSqlOrder(byte[])` apply the same native permutation in place on a caller's 16 bytes. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same cross-check every binding here now makes against the one native implementation.
 
+## Inspection and layouts
+
+The core answers what a UUID is, so nothing here reads bits in Java:
+
+```java
+UuidGenerator.version(id);                 // the version nibble, 0-15 (agrees with id.version())
+UuidGenerator.variant(id);                 // UuidVariant.NCS / RFC_9562 / MICROSOFT / FUTURE
+UuidGenerator.isRfc(id, 7);                // the RFC variant and version 7, in one call
+
+UUID sql = UuidGenerator.v7ToSqlOrder(id);
+UuidGenerator.version(sql, UuidLayout.SQL_SERVER);        // 7
+UuidGenerator.isRfc(sql, 7, UuidLayout.SQL_SERVER);       // true
+UuidGenerator.getTimestamp(sql, UuidLayout.SQL_SERVER);   // read in place, no conversion back; variant checked
+```
+
+`isRfc` is the guard to run before trusting a value's version-specific fields, such as `v7UnixMillis`. A version outside 0-15 (or negative) is simply `false`. `UuidVariant` covers the four RFC 9562 §4.1 variants. `variant` never returns its `UNSPECIFIED`, which is there only so each constant's `code()` matches the core's.
+
+`UuidLayout` says which byte order a value is held in: `RFC_9562`, what every other method takes and returns, or `SQL_SERVER`, what `v6ToSqlOrder`/`v7ToSqlOrder` return. A SQL-ordered value is still a `java.util.UUID` whose two longs are the SQL Server wire bytes, most significant first. `version`, `isRfc`, `v6UnixMillis`, `v7UnixMillis`, `v6Timestamp`, `v7Timestamp` and `getTimestamp` each take a layout. Without one they mean RFC 9562. In `SQL_SERVER`, `version` answers 6 or 7 for a SQL-ordered v6/v7, and 0 for bytes that don't form one. Each version's nibble lands at a different byte there, and the core checks the variant bits where each version puts them too, so a v6 and a v7 are never confused. RFC-ordered bytes can still happen to form a valid SQL-ordered v7 (about one random v4 in 16 does), so the layout is the caller's to track; it can't be inferred from the value. `UuidLayout.UNSPECIFIED` throws `IllegalArgumentException` and a `null` layout throws `NullPointerException`. Neither guesses.
+
+`version`, `variant` and `isRfc` also take 16 raw bytes (`byte[]`), already in the layout's order: for `SQL_SERVER`, the bytes SQL Server stores, as `v7ToSqlOrder(byte[])` writes them. Any other length throws `IllegalArgumentException`.
+
 ## Benchmarks
 
 Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`), linux-x64 (an Intel Core i9-11900H), JDK 25, 3 warmup + 5 measurement iterations, average time mode, `-prof gc` for the allocation column:
@@ -125,13 +146,13 @@ Reproduce: `./gradlew :benchmarks:jmh`.
 
 ## AOT
 
-Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, and the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime; the version probe's `()int`, the one downcall not linked critical, is a seventh entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: about 80 ns per `newV7` there ([the numbers](#webassembly-graalwasm)).
+Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — four of this binding's methods share one signature `(ADDRESS)void`, and missing that one entry alone was enough to build clean and crash at runtime; the inspection and timestamp exports add four more, and the version probe's `()int`, the one downcall not linked critical, is an eleventh entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: about 80 ns per `newV7` there ([the numbers](#webassembly-graalwasm)).
 
 A native image still loads the core's shared library at startup, extracted from the jar as on the JVM, rather than linking the static archive into the executable the way C# Native AOT and Go do. Linking it in works on Linux, but only through GraalVM's internal builder API, with separate linker handling for each OS, so it is deliberately not done; the forge's [levers not pulled](https://github.com/SkunkWerkx/.github#levers-deliberately-not-pulled) table has the full reasoning, the proven recipe, and what would change the answer.
 
 ## WebAssembly (GraalWasm)
 
-The jar carries the Rust core a second time, as `native/wasm32-wasip1/hyperuuid.wasm` — the twelve `uuid_*` functions and `hyperuuid_version`, compiled for WASI preview 1 instead of an OS. [GraalWasm](https://www.graalvm.org/webassembly/) runs that module inside the JVM, so `UuidGenerator` has a second interop path that needs no platform-specific binary and no FFM downcall: the polyglot API calls the exports, and the guest's own exported `malloc` supplies the buffers the core fills. Every public method, exception and message is identical between the two paths — the full test suite runs twice on every build (`./gradlew test testWasm`), once through each.
+The jar carries the Rust core a second time, as `native/wasm32-wasip1/hyperuuid.wasm` — the eighteen `uuid_*` functions and `hyperuuid_version`, compiled for WASI preview 1 instead of an OS. [GraalWasm](https://www.graalvm.org/webassembly/) runs that module inside the JVM, so `UuidGenerator` has a second interop path that needs no platform-specific binary and no FFM downcall: the polyglot API calls the exports, and the guest's own exported `malloc` supplies the buffers the core fills. Every public method, exception and message is identical between the two paths — the full test suite runs twice on every build (`./gradlew test testWasm`), once through each.
 
 This is not the Java binding compiled *to* WebAssembly (the root README's WebAssembly table still says why that path is blocked). It is the opposite direction: the Rust core running *as* WebAssembly inside an ordinary JVM.
 

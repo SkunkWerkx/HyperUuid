@@ -9,7 +9,7 @@
          that keeps every binding's manifest in lockstep with rust/Cargo.toml. Packed as-is,
          no CI-side override; UuidGenerator.NativeVersion reports the core's own, so a test
          pins the two together. -->
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by

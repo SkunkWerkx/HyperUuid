@@ -9,7 +9,125 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-08
+
+### Added
+
+- **Version and variant inspection, from the core.** `Uuid::variant()` (a new `Variant`
+  enum: `Ncs`, `Rfc9562`, `Microsoft`, `Future`) and `Uuid::is_rfc(version)` join
+  `Uuid::version()`; the C ABI gains `uuid_version`, `uuid_variant` and `uuid_is_rfc`; and
+  every binding exposes `Version`, `Variant` and `IsRfc` in its own spelling. `IsRfc(id, 7)` is
+  the one-call guard a wrap constructor or deserializer runs on every value: the RFC variant
+  and version nibble 7, which a platform's own nibble-only `Version` property does not check.
+  Swift had no version or variant accessor before. Requested by Norse Architecture, which is
+  replacing its own `GuidVersionBits` with these (#29). *(all packages)*
+- **Inspection and timestamps straight from SQL Server order.** A new `Layout` (`Rfc9562`,
+  `SqlServer`) is taken by `Uuid::version_in`, `Uuid::is_rfc_in`, `v6::unix_millis_in`,
+  `v7::unix_millis_in` and `get_timestamp_in`, by the C exports `uuid_version`, `uuid_is_rfc`,
+  `uuid_v6_unix_millis_in`, `uuid_v7_unix_millis_in` and `uuid_get_timestamp`, and by every binding's
+  `Version`/`IsRfc`/`V6UnixMillis`/`V7UnixMillis`/`V6Timestamp`/`V7Timestamp`/`GetTimestamp`.
+  A value read back from a `uniqueidentifier` column is validated and dated in one native call
+  from its permuted bytes, instead of a permute back and then a read. In SQL Server layout only
+  versions 6 and 7 exist, and the core tells them apart by the variant bits as well as the
+  version nibble. A SQL-ordered v6 shows a v7 nibble one time in 16, and the core still never
+  confuses the two. Ruby's `#from_sql_order` and PHP's `->fromSqlOrder()` now detect the
+  version with this read, replacing two different in-binding detectors (#30). *(all packages)*
+- **C# — Android, for .NET MAUI.** The package carries the core for `android-arm64` and
+  `android-x64`, so a MAUI app has it on every platform MAUI targets (Windows, macOS
+  through Mac Catalyst, iOS and Android) with nothing but the package reference. On
+  CoreCLR, .NET 11's Android runtime, the SDK puts
+  `runtimes/android-{rid}/native/libhyperuuid.so` in the APK and the ordinary import opens
+  it. The libraries are NDK-built for API level 21 and 16 KB-aligned, as Android 15 devices
+  and Google Play require. A Native AOT publish links the core in from
+  `staticlibs/android-{rid}/libhyperuuid.a` instead. CI builds `HyperUuid.AndroidSmokeTest`
+  both ways for both RIDs from a package packed in the same run, runs the x64 pair in a
+  16 KB-page emulator and checks the arm64 APKs' contents and alignment. The Native AOT
+  smoke test's body moved into `SmokeTest.Run()` so the Android Activity (and the Apple
+  app) can call it. *(NuGet)*
+- **Go and Swift — Android.** The same arm64 and x86_64 archives the C# Native AOT publish
+  links. Go links `go/staticlib/android_{arm64,amd64}` under `GOOS=android`, with the
+  NDK's clang as `CC`; Swift links the artifact bundle's `*-unknown-linux-android` variants
+  with the Swift SDK for Android (Swift 6.3+, API 28+). CI cross-builds both suites and runs
+  them, corpus included, in the same 16 KB-page emulator, through
+  `.github/scripts/android_build_suite.sh` and `android_device_test.sh`; both also run
+  against a local emulator (`ANDROID=1 .github/scripts/local-core.sh` builds the archives).
+  The suites' 1 GiB batch tests are left to the other platforms there. *(`go get`, SwiftPM)*
+- **`MaxV7Batch`**, and its spelling in each binding (`v7::MAX_BATCH` in Rust): 67,108,864,
+  the 26-bit counter space, the most UUIDs one v7 batch takes (#32). *(all packages)*
+- **A shared conformance corpus.** `corpus/*.json` pins v5 derivation, the v6 and v7 field
+  layouts, both SQL Server permutations in both directions, timestamp extraction in both
+  layouts, and inspection. The Rust suite replays all of it (the layout files inside the
+  crate, since they pin the deterministic half of generation), and every binding's suite
+  replays the rest through its public API. The vectors come from `corpus/oracle.py`, which
+  shares no code with the core: SHA-1 from `hashlib`, and the v7 SQL Server permutation
+  ported line for line from Norse Svartálfheim's `SequentialGuidBytes`, which derives it from
+  .NET's mixed-endian `Guid` layout. The core matches it byte for byte. CI's new
+  `check-corpus` job re-derives every file, so an edited vector fails even if a replay was
+  changed to agree with it (#31). *(repository)*
+
+### Changed
+
+- **Breaking (PHP): `Uuid::variant()` returns a `UuidVariant` enum instead of an int.** The int
+  was the top two bits of octet 8, which cannot tell the Microsoft variant (`110`) from
+  Future (`111`) and gives NCS two values. The enum comes from the core like every other
+  binding's. `UuidVariant::Rfc9562->value` is `0b10`, so `$id->variant()->value === 0b10` is
+  the drop-in replacement for the old comparison, which now quietly compares an enum with an
+  int and is always false. *(Packagist)*
+- **Breaking (Swift, source): `UuidGenerator.Error` gains `batchTooLarge(count:)` and
+  `batchNotAddressable(count:)`.** The first is a v7 batch past `maxV7Batch`. The second
+  replaces a trap: a v6 count past `UInt32.max` crashed the process converting it, and code 3
+  was reported as `randomSourceFailure`. A `switch` over the enum with no `default` needs the
+  two cases. *(SwiftPM)*
+- **Breaking (Ruby): `Uuid#variant` returns a Symbol.** It returned the top two bits of octet
+  8, an Integer that gave NCS two values and Microsoft and Future the same one. It now returns
+  `:ncs`, `:rfc9562`, `:microsoft` or `:future`, from the core, matching the Symbols the new
+  `layout:` keyword takes. `variant == 0b10` becomes `variant == :rfc9562`; the old
+  comparison is now always false rather than an error. *(RubyGems)*
+- **A v7 batch is strictly increasing however it lands on the counter.** The counter is one
+  process-wide sequence that wraps every 2^26 values, so a batch could straddle the wrap and
+  its second half sort before its first, at any batch size once a process had minted about
+  67 million v7 UUIDs. A batch that crosses the wrap now stamps the UUIDs from there on with
+  the supplied timestamp plus one millisecond, as RFC 9562 §6.2 allows on counter overflow,
+  so no embedded timestamp is more than a millisecond ahead. A batch larger than `MaxV7Batch`,
+  which would have to reuse counter values within a millisecond, is refused with an argument
+  error in every binding before anything is allocated, and with the new code 4 at the C ABI
+  (`NewV7Error::BatchTooLarge` in Rust). Individual `new_v7` calls keep their documented wrap
+  behavior. The README's new [v7 ordering, precisely](README.md#v7-ordering-precisely) section
+  sets out all of it, including that the core trusts the caller's clock. In C#,
+  `FillV7(Span<Guid>)` past the limit now throws `ArgumentOutOfRangeException` (an
+  `ArgumentException`, as before) instead of renting a scratch buffer of up to 2 GiB first
+  (#32). *(all packages)*
+- **The version-agnostic timestamp read requires an RFC 9562 version 6 or 7.** `get_timestamp`
+  in Rust, and `GetTimestamp` and its spellings in every binding, read the version nibble
+  alone. So a value with a 6 or 7 nibble under the NCS, Microsoft or Future variant, which has
+  no RFC version at all, came back with a "timestamp" decoded from whatever its bits held. It
+  now gets `None`/`null`, the answer the SQL Server layout gives too. Python already
+  answered that way, through the standard library's variant-aware `UUID.version`; every
+  binding now gets it from the core instead, through the new `uuid_get_timestamp` export,
+  which returns the version and writes the milliseconds in one call. The per-version doors
+  (`V7UnixMillis` and the rest) are unchanged: they read the field for a caller who already
+  knows. *(all packages except PyPI, whose behavior is unchanged)*
+- **CI derives the expected export count from `rust/src/ffi.rs`** instead of hard-coding 13,
+  and `cdylib_smoke.py` calls all nineteen exports. *(repository)*
+
 ### Fixed
+
+- **C-ABI bindings reported an unaddressable batch as a random-source failure.** Return code
+  3 (`count * 16` overflows `usize`, reachable only on a 32-bit target) fell through to each
+  binding's RNG error in C#, Go, Java, PHP, Ruby's Fiddle backend and Swift; it is now an
+  argument error, as Python and Ruby's Magnus backend already reported it. *(all bindings
+  except Python)*
+- **The corpus replay where a runner carries only the binding's tests.** Go's `go_ios_exec`
+  carries only the module into the iOS simulator, so `test-apple-mobile` stages the corpus
+  as `go/testdata/corpus`, which the test also reads. The Pyodide pass copies `python/tests/`
+  alone into the interpreter's filesystem, so `python/tests/corpus` is a committed symlink to
+  the root `corpus/` (HyperCast's arrangement), and the vectors travel with it. *(repository)*
+- **C# Blazor smoke test: rebuilds from clean.** `check.sh` now clears the project's
+  `obj`/`bin` first. The .NET wasm SDK recompiles `runtime.c` only when that file changes, not
+  when the interop signature header it includes gains an entry. So after a P/Invoke with a new
+  signature shape (here `ulong f(byte*, uint)`), a rerun in a used checkout linked a stale
+  `runtime.o`, and the first such call aborted the runtime. CI's fresh checkouts never hit
+  this. *(repository)*
 
 - **Ruby — the Magnus extension survives a compacting garbage collection.** It kept
   `RandomSourceError` and `TimestampOutOfRangeError` in a Rust static, which a compacting
@@ -1122,7 +1240,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.5.0...v0.6.0

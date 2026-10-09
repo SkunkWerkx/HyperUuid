@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The package on Android, as an app: the same SmokeTest.Run() the Native AOT smoke test
+       runs, crossing every native entry point, started from an Activity (SmokeActivity.cs),
+       since an Android app has no Main of its own. It needs the android workload, so it is not in
+       HyperUuid.slnx, which every other leg builds; CI's test-android job builds it on CoreCLR
+       and under Native AOT, for both RIDs, and runs the x64 builds in an emulator.
+
+       Unlike the other smoke tests, this one takes HyperUuid as a package, not a project
+       reference. What Android needs proving is the package's own layout: that the .NET for
+       Android SDK finds runtimes/{rid}/native/libhyperuuid.so in the .nupkg and puts it in
+       the APK under lib/{abi}/, and that build/HyperUuid.targets, imported by NuGet
+       and not by hand, hands a Native AOT publish staticlibs/{rid}/libhyperuuid.a. A project
+       reference would take neither path. CI packs the package from the staged native
+       binaries into a local folder and passes it in:
+
+         dotnet build -p:HyperUuidVersion=<version> -p:RestoreAdditionalProjectSources=<folder> -->
+  <PropertyGroup>
+    <TargetFramework>net11.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <ApplicationId>io.github.skunkwerkx.hyperuuid.androidsmoketest</ApplicationId>
+    <ApplicationTitle>HyperUuid smoke test</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- An .apk, which installs with a plain `adb install`; an .aab needs bundletool. -->
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../HyperUuid.AotSmokeTest/SmokeTest.cs" Link="SmokeTest.cs" />
+    <PackageReference Include="HyperUuid" Version="$(HyperUuidVersion)" />
+  </ItemGroup>
+
+  <Target Name="_RequireHyperUuidVersion" BeforeTargets="CollectPackageReferences" Condition="'$(HyperUuidVersion)' == ''">
+    <Error Text="Pass -p:HyperUuidVersion=... and -p:RestoreAdditionalProjectSources=... naming a locally packed HyperUuid (see this project's header)." />
+  </Target>
+
+</Project>
