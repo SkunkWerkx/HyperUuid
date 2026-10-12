@@ -76,6 +76,42 @@ public sealed class InspectionTests
 		}
 	}
 
+	// What the overloads without a layout make of a SQL-ordered Guid. The big-endian read
+	// swaps a Guid's octets 6 and 7 back, which puts a SQL-ordered v7's version nibble (sql[7])
+	// and variant (sql[8]) exactly where an RFC read looks, so its version checks pass by
+	// coincidence of the layout while its timestamp is read from random bytes. A SQL-ordered
+	// v6 holds its version and timestamp bits at byte 8, which reads as the NCS variant.
+	[Fact]
+	void The_rfc_overloads_on_a_sql_ordered_value_check_v7_by_coincidence_and_misread_the_rest()
+	{
+		var expected = DateTimeOffset.FromUnixTimeMilliseconds(Ms);
+		for (var i = 0; i < 2048; i++)
+		{
+			var seven = UuidGenerator.V7ToSqlOrder(UuidGenerator.NewV7(Ms));
+			UuidGenerator.Version(seven).ShouldBe(7);
+			UuidGenerator.Variant(seven).ShouldBe(UuidVariant.Rfc9562);
+			UuidGenerator.IsRfc(seven, 7).ShouldBeTrue();
+			UuidGenerator.V7UnixMillis(seven).ShouldNotBe(Ms);
+			try
+			{
+				UuidGenerator.GetTimestamp(seven).ShouldNotBeNull().ShouldNotBe(expected);
+			}
+			catch (ArgumentOutOfRangeException)
+			{
+				// Random bytes past year 9999, about one draw in ten.
+			}
+
+			var six = UuidGenerator.V6ToSqlOrder(UuidGenerator.NewV6(Ms));
+			UuidGenerator.Variant(six).ShouldBe(UuidVariant.Ncs);
+			UuidGenerator.IsRfc(six, 6).ShouldBeFalse();
+			UuidGenerator.GetTimestamp(six).ShouldBeNull();
+
+			// The raw bytes carry no Guid swap: a v7's version is read from sql[6], counter bits.
+			var raw = seven.ToByteArray();
+			UuidGenerator.IsRfc(raw, 7).ShouldBe(raw[6] >> 4 == 7);
+		}
+	}
+
 	[Fact]
 	void Non_sql_values_have_no_sql_version()
 	{

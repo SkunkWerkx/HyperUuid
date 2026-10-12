@@ -13,6 +13,14 @@ Consumer feedback from Norse Architecture's Blazor WebAssembly integration.
 
 ### Fixed
 
+- **C# — the browser-wasm archive carries build provenance, and the package checks it.** Every
+  native in the 0.8.0 package verified with `gh attestation verify` except
+  `runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a`, the archive a Blazor
+  WebAssembly app links: the forge's `hyper-build-wasm.yml` never attested it, and nothing
+  checked natives before packing, so the gap went unnoticed. The archive is now attested
+  where it is built, and `hyper-pack-nuget.yml` verifies every native it packs, failing
+  the release on one without provenance. Verify it like the other natives, with
+  `--signer-repo SkunkWerkx/.github`. Closes #34. *(C#)*
 - **C# — `uuid_variant` is no longer exported from a Blazor WebAssembly runtime.** Emscripten
   ships a libuuid compatibility library with a JavaScript `uuid_variant`, a stub that always
   returns 1. A name listed in `EXPORTED_FUNCTIONS` that the JavaScript library also defines is
@@ -32,6 +40,17 @@ Consumer feedback from Norse Architecture's Blazor WebAssembly integration.
     LTO alone still fails the link for the generators.
   - PHP: the inspection example converted a v4 to SQL order, which throws. It now mints a v7.
   *(Go, Java, Ruby, Rust, PHP)*
+- **C# — the remarks on reading a SQL-ordered `Guid` without a layout were wrong for v7.**
+  They said `Version(Guid)` and `IsRfc(Guid, int)` read the wrong bytes there. For a
+  SQL-ordered v7 they answer 7 and `true`: reading a `Guid` in RFC order swaps octets 6 and 7
+  back, which happens to leave the version nibble and variant where the read looks. The rest is
+  still permuted, so `V7UnixMillis(Guid)` and `GetTimestamp(Guid)` read random bits after
+  that check passes, and `GetTimestamp` throws when they land past year 9999. A SQL-ordered v6
+  reads as the NCS variant and fails the check. The remarks on `Version`, `Variant`, `IsRfc`,
+  `V7UnixMillis` and `GetTimestamp`, and the README, now say so, and a test pins the
+  behaviour. The advice is unchanged: pass `UuidLayout.SqlServer`. The other bindings hand
+  the core raw bytes, where a SQL-ordered v7's version is read from counter bits, so their
+  wording was already right. Closes #36. *(C#)*
 
 ### Added
 

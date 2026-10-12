@@ -796,6 +796,8 @@ public static partial class UuidGenerator
 	/// <c>unix_ts_ms</c> field. Only meaningful when <paramref name="uuid"/>'s version nibble
 	/// is 7 — the RFC 9562 bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a
 	/// very early timestamp", so the caller is responsible for checking that first if it matters.
+	/// That check doesn't catch a value from <see cref="V7ToSqlOrder(Guid)"/>: see
+	/// <see cref="IsRfc(Guid, int)"/>, and use <see cref="V7UnixMillis(Guid, UuidLayout)"/> for one.
 	/// </summary>
 	public static unsafe long V7UnixMillis(Guid uuid)
 	{
@@ -829,6 +831,13 @@ public static partial class UuidGenerator
 	/// Both of their edges come with it: a v6 timestamp before 1970 reads back as the Unix
 	/// epoch, and a v7 timestamp past year 9999 throws <see cref="ArgumentOutOfRangeException"/>.
 	/// </summary>
+	/// <remarks>
+	/// Reads <paramref name="uuid"/> as RFC 9562 order. A SQL-ordered version 7 still passes the
+	/// version check here (see <see cref="IsRfc(Guid, int)"/>), so it gets a timestamp read from
+	/// its random bits, or an <see cref="ArgumentOutOfRangeException"/> when those land past year
+	/// 9999, not <see langword="null"/>. Pass <see cref="UuidLayout.SqlServer"/> to
+	/// <see cref="GetTimestamp(Guid, UuidLayout)"/> for a SQL-ordered value.
+	/// </remarks>
 	public static DateTimeOffset? GetTimestamp(Guid uuid) => GetTimestamp(uuid, UuidLayout.Rfc9562);
 
 	/// <summary>
@@ -959,7 +968,9 @@ public static partial class UuidGenerator
 	/// Reads <paramref name="uuid"/> as RFC 9562 order. For a value from
 	/// <see cref="V7ToSqlOrder(Guid)"/> or <see cref="V6ToSqlOrder(Guid)"/>, or read back from a
 	/// <c>uniqueidentifier</c> column, pass <see cref="UuidLayout.SqlServer"/> to
-	/// <see cref="Version(Guid, UuidLayout)"/>: this overload reads the wrong bytes there.
+	/// <see cref="Version(Guid, UuidLayout)"/>. This overload answers 7 for a SQL-ordered
+	/// version 7 only by coincidence of the layout (see <see cref="IsRfc(Guid, int)"/>), and
+	/// reads a SQL-ordered version 6's timestamp bits as its version.
 	/// </remarks>
 	public static int Version(Guid uuid) => Version(uuid, UuidLayout.Rfc9562);
 
@@ -1017,7 +1028,10 @@ public static partial class UuidGenerator
 	/// sits at a different byte for each version. Don't feed it a <c>uniqueidentifier</c>
 	/// read-back or a <see cref="V7ToSqlOrder(Guid)"/> result; to validate one of those, use
 	/// <see cref="IsRfc(Guid, int, UuidLayout)"/> with <see cref="UuidLayout.SqlServer"/>, which
-	/// checks the variant where that version puts it.
+	/// checks the variant where that version puts it. A SQL-ordered version 7 reads as
+	/// <see cref="UuidVariant.Rfc9562"/> here only by coincidence of the layout (see
+	/// <see cref="IsRfc(Guid, int)"/>), and a SQL-ordered version 6 reads as
+	/// <see cref="UuidVariant.Ncs"/>.
 	/// </remarks>
 	public static unsafe UuidVariant Variant(Guid uuid)
 	{
@@ -1049,8 +1063,14 @@ public static partial class UuidGenerator
 	/// <remarks>
 	/// Reads <paramref name="uuid"/> as RFC 9562 order. A SQL-ordered value — from
 	/// <see cref="V7ToSqlOrder(Guid)"/>, or read back from a <c>uniqueidentifier</c> column —
-	/// needs <see cref="IsRfc(Guid, int, UuidLayout)"/> with <see cref="UuidLayout.SqlServer"/>:
-	/// this overload reads the wrong bytes there and answers for whatever they happen to hold.
+	/// needs <see cref="IsRfc(Guid, int, UuidLayout)"/> with <see cref="UuidLayout.SqlServer"/>.
+	/// For a SQL-ordered version 6 this overload answers <see langword="false"/>, since it
+	/// reads that value's timestamp bits as the variant. For a SQL-ordered version 7 it answers
+	/// <see langword="true"/> by coincidence of the layout, not by design: reading a
+	/// <see cref="Guid"/> in RFC order swaps its octets 6 and 7 back, and the SQL permutation
+	/// happens to leave a version 7's version nibble and variant exactly where that read looks.
+	/// The rest of the value is still permuted, so a <see langword="true"/> here doesn't make
+	/// <see cref="V7UnixMillis(Guid)"/> or <see cref="GetTimestamp(Guid)"/> right for it.
 	/// There is deliberately no layout-agnostic form: the caller holding the value knows its
 	/// order, and only the layout it names says which bytes to read.
 	/// </remarks>
