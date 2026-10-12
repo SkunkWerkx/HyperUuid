@@ -39,6 +39,22 @@ v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 
 `v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v6 or v7 — the variant is checked too), and [`v6::new_v6_at`]/[`v7::new_v7_at`] accept one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v6`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed once here and verified against the real `System.Data.SqlTypes.SqlGuid` comparator. `v6::to_sql_order`/`v6::to_rfc_order` do the same for version 6 — a much simpler whole-byte-group relocation, since v6 has no counter to repack at the bit level, just its 60-bit timestamp; note that same-millisecond v6 UUIDs aren't guaranteed to sort in creation order even after this conversion, since `clock_seq`/`node` are random per call rather than a counter (a pre-existing RFC 9562 v6 limitation, not something this introduces). This crate's own test suite verifies that sort behavior against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v6::unix_millis_in`/`v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there only versions 6 and 7 exist, and the two are never confused, because each check includes the variant bits where that version puts them. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 v7 or 24 v6 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.5x faster on glibc and 3.5x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
 
+## Binding to SQL Server
+
+Bind `to_sql_order`'s result as bytes, not as a `uuid::Uuid`. tiberius 0.13 sends a `Uuid`, and a
+string, in SQL Server's mixed-endian text order, which stores the first three groups
+byte-reversed and loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). A `&[u8]` goes in as binary and
+lands byte for byte:
+
+```rust
+let stored = v7::to_sql_order(&id4);
+client.execute("INSERT INTO orders (id) VALUES (@P1)", &[&&stored.as_bytes()[..]]).await?;
+```
+
+Reading has the same trap: tiberius returns a `uniqueidentifier` as a `Uuid` with those groups
+reversed. Select `CAST(id AS binary(16))` and rebuild the value with `Uuid::from_bytes` before
+handing it to the `Layout::SqlServer` reads.
+
 ## Why not the `uuid` crate?
 
 [`uuid`](https://docs.rs/uuid) is the de facto standard and it's a good crate — v4/v5/v6/v7 are all real, all correct, all there under feature flags. This isn't a "the standard crate is bad" pitch. The real differences, measured head-to-head on the same machine in the same benchmark run (`cargo bench` — see below):
@@ -194,11 +210,11 @@ cargo build --release --example no_panic --features no-panic
 The proof needs optimization, so build it with `--release`. A debug build fails the link for
 most of the functions, because the checks the optimizer would have proven dead are still in.
 
-To run the same proof from your own crate, turn on fat LTO in its release profile. Cargo
-ignores a dependency's profile, so a consumer's stock `--release` build compiles this crate,
-`getrandom` and `sha1` (and `chacha20` on Linux and Android) separately, leaves the panic
-paths across those boundaries in, and fails the link for the generators; thin LTO and
-`codegen-units = 1` are not enough:
+To run the same proof from your own crate, turn on fat LTO and a single codegen unit in its
+release profile. Cargo ignores a dependency's profile, so a consumer's stock `--release` build
+compiles this crate, `getrandom` and `sha1` (and `chacha20` on Linux and Android) separately,
+leaves the panic paths across those boundaries in, and fails the link for the generators. It
+takes both settings: fat LTO alone, thin LTO, or `codegen-units = 1` alone still fails:
 
 ```toml
 [dependencies]
@@ -206,6 +222,7 @@ hyperuuid = { version = "0.8", features = ["no-panic"] }
 
 [profile.release]
 lto = true
+codegen-units = 1
 ```
 
 `v7::now_v7` reads the clock with `clock_gettime` on Unix rather than through std, whose

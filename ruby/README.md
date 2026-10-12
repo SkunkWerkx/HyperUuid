@@ -101,6 +101,24 @@ The bytes alone cannot say which order they are in, so the layout is yours to kn
 RFC-ordered value can happen to form a SQL-ordered one (a random v4 reads as a SQL-ordered v7
 one time in 16), and `#from_sql_order` then converts it rather than refusing it.
 
+### Binding to SQL Server
+
+Send `#to_sql_order`'s result as its raw `#bytes`, not as UUID text. SQL Server stores a UUID
+string's first three groups byte-reversed, which loses the creation order
+([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)); tiny_tds 3.4 and an ActiveRecord `:uuid` attribute both send text. A binary
+literal lands byte for byte:
+
+```ruby
+sql = HyperUuid.new_v7.to_sql_order
+client.execute("INSERT INTO orders (id) VALUES (0x#{sql.bytes.unpack1('H*')})").do
+
+row = client.execute("SELECT CAST(id AS binary(16)) AS id FROM orders").first
+sql = HyperUuid::Uuid.new(row["id"])  # read with layout: :sql_server
+```
+
+In ActiveRecord, map the column as `:binary`, which quotes as `0x…`. Reading needs the `CAST`
+too: tiny_tds returns a `uniqueidentifier` as text with those groups reversed.
+
 ### The version 7 batch limit
 
 `HyperUuid::MAX_V7_BATCH` is 67,108,864 (2²⁶), the size of the counter that orders version 7
@@ -143,6 +161,8 @@ address (a 32-bit target such as ruby.wasm).
 raising — for a consumer with a fallback of its own:
 
 ```ruby
+require "securerandom"
+
 id = HyperUuid.available? ? HyperUuid.new_v7.to_s : SecureRandom.uuid
 ```
 

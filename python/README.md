@@ -189,6 +189,24 @@ raw-bytes form; wrap 16 bytes in `uuid.UUID(bytes=...)` first, exactly as they a
 from the same packed `hyperuuid_version` export every other binding probes.
 `hyperuuid.BACKEND` is always `"native"`, the PyO3 extension.
 
+## Binding to SQL Server
+
+Bind `v7_to_sql_order`'s result as its `.bytes`, not as the `uuid.UUID`. pyodbc 5.3,
+mssql-python 1.15 and pymssql 2.4 all send a `uuid.UUID`, and a `str`, in SQL Server's
+mixed-endian text order, which stores the first three groups byte-reversed and loses the
+creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). `bytes` go in as binary and land byte for byte:
+
+```python
+stored = hyperuuid.v7_to_sql_order(id4)
+cursor.execute("INSERT INTO orders (id) VALUES (?)", stored.bytes)
+
+cursor.execute("SELECT CAST(id AS binary(16)) FROM orders")
+stored = uuid.UUID(bytes=cursor.fetchone()[0])  # ready for Layout.SQL_SERVER
+```
+
+pymssql takes `%s` placeholders where the other two take `?`. Reading needs the `CAST` for the
+same reason: all three drivers return a `uniqueidentifier` with those groups reversed.
+
 ## In the browser (Pyodide)
 
 The same PyO3 extension, compiled for Pyodide's Emscripten target, is published to PyPI as

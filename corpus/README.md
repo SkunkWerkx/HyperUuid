@@ -11,7 +11,7 @@ The core matches the oracle byte for byte, and the RFC 9562 Appendix A vectors a
 
 ## Conventions
 
-- Every UUID, and every other byte string, is 32 (or 12) lowercase hex digits of the bytes in memory order, with no dashes. For an `rfc` value that is RFC 9562 network order. For a `sql` value it is the bytes `to_sql_order` writes, which are SQL Server's `uniqueidentifier` wire bytes. A binding whose platform UUID type is mixed-endian (.NET `Guid`) reads `sql` hex exactly the way its own `V7FromSqlOrder(Guid)` reads a `Guid`, not as RFC text.
+- Every UUID, and every other byte string, is 32 (or 12) lowercase hex digits of the bytes in memory order, with no dashes. For an `rfc` value that is RFC 9562 network order. For a `sql` value it is the bytes `to_sql_order` writes, which are SQL Server's `uniqueidentifier` wire bytes. A binding whose platform UUID type is mixed-endian (.NET `Guid`) reads `sql` hex exactly the way its own `V7FromSqlOrder(Guid)` reads a `Guid`, not as RFC text. In C#, a `sql` value is `Convert.ToHexStringLower(guid.ToByteArray())` of the `Guid` that `V7ToSqlOrder`/`V6ToSqlOrder` returns, not that `Guid`'s `ToString()` with the dashes removed.
 - `layout` is `"rfc9562"` or `"sql_server"`.
 - `unix_millis` is milliseconds since the Unix epoch. `null` means "no timestamp".
 

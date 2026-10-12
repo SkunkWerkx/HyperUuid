@@ -15,7 +15,7 @@ a C compiler at build time is the one requirement (see [Requirements](#requireme
 
 ```go
 import (
-	"github.com/google/uuid"
+	"time"
 
 	hyperuuid "github.com/SkunkWerkx/HyperUuid/go"
 )
@@ -24,6 +24,7 @@ id, err := hyperuuid.NewV4()
 id, err = hyperuuid.NewV5String(hyperuuid.NamespaceDNS, "example.com")
 id, err = hyperuuid.NewV6()
 id, err = hyperuuid.NewV7()
+unixMillis := uint64(time.Now().UnixMilli())
 batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
 sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
@@ -181,6 +182,26 @@ value, `LayoutUnspecified`, and any undefined layout return `ErrInvalidLayout`; 
 never guessed. `VersionBytes`, `VariantBytes` and `IsRfcBytes` take 16 raw bytes already in
 the given layout's order (`VariantBytes` is RFC order only). Every one of these is
 allocation-free.
+
+### Binding to SQL Server
+
+Bind `V7ToSqlOrder`'s result as a `[]byte`. go-mssqldb 1.11 sends an `mssql.UniqueIdentifier`,
+and a string, in SQL Server's mixed-endian text order by default, which stores the first three
+groups byte-reversed and loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). A `[]byte` goes in as
+binary and lands byte for byte, and scanning the column into a `[]byte` reads it back
+untouched:
+
+```go
+sqlOrdered, err := hyperuuid.V7ToSqlOrder(id)
+_, err = db.Exec("INSERT INTO orders (id) VALUES (@p1)", sqlOrdered[:])
+
+var raw []byte
+err = db.QueryRow("SELECT id FROM orders").Scan(&raw)
+stored, err := uuid.FromBytes(raw) // ready for LayoutSqlServer
+```
+
+With `guid conversion=true` in the connection string, `mssql.UniqueIdentifier` passes its bytes
+through unchanged in both directions too, though `[]byte` then reads back reversed.
 
 ### Errors
 

@@ -10,6 +10,8 @@ RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generat
 
 ```java
 import io.github.skunkwerkx.hyperuuid.UuidGenerator;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 UUID id = UuidGenerator.newV4();
@@ -61,7 +63,7 @@ The honest answer for versions v6/v7 is that there's no comparison to make — t
 3. **A real monotonic counter for v7.** A process-global counter (RFC 9562 §6.2 Method 1) guarantees strict creation order under concurrency, across both individual and batch calls.
 4. **Batch generation.** `newV7Batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch, instead of paying per-item native-call overhead N times. `java.util.UUID` has no bulk generation API at all.
 5. **Cross-language consistency.** The same Rust core mints v5/v6/v7 UUIDs for every other binding in this repo — a Java service and a Python or Go service produce byte-identical v5 UUIDs for the same `(namespace, name)`, which no per-language reimplementation can structurally guarantee.
-6. **SQL Server byte ordering.** `UuidGenerator.v7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`v6ToSqlOrder` does the same for version 6, though same-millisecond v6 UUIDs aren't guaranteed to sort correctly since v6 has no counter), computed once in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. One caveat worth being direct about: this is verified at the raw-byte level against .NET's own `Guid` wire format, which ADO.NET passes through unchanged — it has *not* been checked against any specific JDBC driver's own `uniqueidentifier` parameter binding, which may or may not apply a further transform of its own. Verify against your driver, or bind the returned bytes directly, before relying on it in a JDBC-facing query.
+6. **SQL Server byte ordering.** `UuidGenerator.v7ToSqlOrder(id4)` converts a version 7 UUID to the byte order `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — needs to sort by creation order (`v6ToSqlOrder` does the same for version 6, though same-millisecond v6 UUIDs aren't guaranteed to sort correctly since v6 has no counter), computed once in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. Bind the result as bytes, never with `setObject(UUID)`: [Binding to SQL Server](#binding-to-sql-server) has why and how.
 
 The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar, or the wasm module below on a platform without one) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
 
@@ -116,6 +118,28 @@ UuidGenerator.getTimestamp(sql, UuidLayout.SQL_SERVER);   // read in place, no c
 `UuidLayout` says which byte order a value is held in: `RFC_9562`, what every other method takes and returns, or `SQL_SERVER`, what `v6ToSqlOrder`/`v7ToSqlOrder` return. A SQL-ordered value is still a `java.util.UUID` whose two longs are the SQL Server wire bytes, most significant first. `version`, `isRfc`, `v6UnixMillis`, `v7UnixMillis`, `v6Timestamp`, `v7Timestamp` and `getTimestamp` each take a layout. Without one they mean RFC 9562. In `SQL_SERVER`, `version` answers 6 or 7 for a SQL-ordered v6/v7, and 0 for bytes that don't form one. Each version's nibble lands at a different byte there, and the core checks the variant bits where each version puts them too, so a v6 and a v7 are never confused. RFC-ordered bytes can still happen to form a valid SQL-ordered v7 (about one random v4 in 16 does), so the layout is the caller's to track; it can't be inferred from the value. Carry it with the value, and pass it at every call site that can see a SQL-ordered value. The forms without a layout read RFC order, so `isRfc(sqlOrdered, 7)` reads the wrong bytes; there is deliberately no layout-agnostic check. `UuidLayout.UNSPECIFIED` throws `IllegalArgumentException` and a `null` layout throws `NullPointerException`. Neither guesses.
 
 `version`, `variant` and `isRfc` also take 16 raw bytes (`byte[]`), already in the layout's order: for `SQL_SERVER`, the bytes SQL Server stores, as `v7ToSqlOrder(byte[])` writes them. Any other length throws `IllegalArgumentException`.
+
+## Binding to SQL Server
+
+Bind `v7ToSqlOrder`'s result with `setBytes`, never `setObject(UUID)`. mssql-jdbc 13.6 sends a
+`UUID`, with or without `microsoft.sql.Types.GUID`, and a `String`, in SQL Server's mixed-endian
+text order, which stores the first three groups byte-reversed and loses the creation order
+([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). It has no connection property that changes that. Bytes go in as binary and
+land byte for byte, and `getBytes` on the column reads them back untouched:
+
+```java
+UUID stored = UuidGenerator.v7ToSqlOrder(id4);
+byte[] bytes = ByteBuffer.allocate(16)
+        .putLong(stored.getMostSignificantBits())
+        .putLong(stored.getLeastSignificantBits())
+        .array();
+insert.setBytes(1, bytes);
+
+byte[] raw = rows.getBytes("id");                          // the uniqueidentifier's own bytes
+UuidGenerator.version(raw, UuidLayout.SQL_SERVER);         // 7
+```
+
+`getObject(…, UUID.class)` and `getString` both return the value with those groups reversed.
 
 ## Benchmarks
 

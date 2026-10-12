@@ -23,13 +23,13 @@
   </ItemGroup>
 
   <!-- What a NuGet consumer gets for free and a ProjectReference does not: the package's
-       build/{tfm}/HyperUuid.targets is only auto-imported from a restored package. Importing
+       build/HyperUuid.targets is only auto-imported from a restored package. Importing
        it by hand means this app links through the shipped NativeFileReference,
        EmccExportedFunction and exception-handling wiring rather than a copy of it, so a
        missing export fails here at runtime exactly as it would for a real Blazor consumer.
 
        Needs the wasm32-unknown-emscripten staticlib staged where the targets file looks for
-       it, csharp/HyperUuid/runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a, which
+       it, csharp/HyperUuid/runtimes/browser-wasm/nativeassets/net11.0/libhyperuuid.a, which
        is gitignored like every other runtimes/ asset. check.sh stages it. -->
   <Import Project="../HyperUuid/build/HyperUuid.targets" />
 

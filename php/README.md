@@ -61,9 +61,11 @@ timestamp capture and one native call, instead of `count` of each.
 Every read below is one call into the native core; the binding does no bit-reading of its own.
 
 ```php
+use HyperUuid\HyperUuid;
 use HyperUuid\UuidLayout;
 use HyperUuid\UuidVariant;
 
+$id = HyperUuid::newV7();
 $id->version();                  // the RFC 9562 version nibble, 0-15 (0 for Uuid::nil(), 15 for Uuid::max())
 $id->variant();                  // UuidVariant::Rfc9562 for anything this package or ramsey/uuid mints
 $id->isRfc(7);                   // the RFC 9562 variant and version 7: the guard before trusting v7 fields
@@ -101,6 +103,28 @@ value. Without a layout argument, `version()` and `isRfc()` read RFC order, so
 variant sits at a different byte for each version: don't feed it a `toSqlOrder()` result or a
 `uniqueidentifier` read-back. `isRfc($version, UuidLayout::SqlServer)` is the guard for those;
 it checks the variant where that version puts it.
+
+## Binding to SQL Server
+
+Bind `->toSqlOrder()`'s result as its raw `->bytes()`, as binary. pdo_sqlsrv 5.13 sends a string
+in SQL Server's mixed-endian text order, which stores the first three groups byte-reversed and
+loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). Binary lands byte for byte:
+
+```php
+$sql = HyperUuid::newV7()->toSqlOrder();
+$insert = $pdo->prepare('INSERT INTO orders (id) VALUES (?)');
+$bytes = $sql->bytes();
+$insert->bindParam(1, $bytes, PDO::PARAM_LOB, 0, PDO::SQLSRV_ENCODING_BINARY);
+$insert->execute();
+
+$row = $pdo->query('SELECT CAST(id AS binary(16)) AS id FROM orders')->fetch();
+$sql = new Uuid($row['id']); // read with UuidLayout::SqlServer
+```
+
+The binary encoding is what makes it binary: without it pdo_sqlsrv translates the parameter as
+UTF-8 text and throws, since the bytes are never valid UTF-8. `bindValue` takes no encoding, so
+use `bindParam`. Reading needs the `CAST` too: pdo_sqlsrv returns a `uniqueidentifier` as text
+with those groups reversed, while a plain `fetch()` of the `binary(16)` hands back the raw bytes.
 
 ## Requirements
 

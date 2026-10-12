@@ -103,6 +103,19 @@ reserves 0 for "no layout", which a Swift enum cannot hold, so there is no inval
 pass and no error for one. Every 48-bit v7 timestamp has a `Date`, up to 2⁴⁸ − 1 ms in year
 10889.
 
+### Binding to SQL Server
+
+Bind `v7ToSqlOrder`'s result to SQL Server as its 16 raw bytes, not as a UUID or its text.
+SQL Server stores a UUID string's first three groups byte-reversed, which loses the creation
+order, and every driver tested in the other languages sends its UUID type the same way
+([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). Binary lands byte for byte. Read the column back with
+`CAST(id AS binary(16))` for the same reason.
+
+```swift
+let stored = try UuidGenerator.v7ToSqlOrder(id4)
+let bytes = withUnsafeBytes(of: stored.uuid) { Data($0) }  // bind this as varbinary(16)
+```
+
 ## Why not Foundation's `UUID()`?
 
 There's no real comparison to make for v5/v6/v7 — Foundation's `UUID` type has never generated anything but random v4:

@@ -9,6 +9,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Consumer feedback from Norse Architecture's Blazor WebAssembly integration.
+
+### Fixed
+
+- **C# — `uuid_variant` is no longer exported from a Blazor WebAssembly runtime.** Emscripten
+  ships a libuuid compatibility library with a JavaScript `uuid_variant`, a stub that always
+  returns 1. A name listed in `EXPORTED_FUNCTIONS` that the JavaScript library also defines is
+  filled from the library, so the export put that stub in the glue as `Module._uuid_variant`,
+  and the wasm export was dropped. `UuidGenerator.Variant` was never affected: the runtime's
+  P/Invoke table calls the Rust function inside the module, and the smoke test checks the
+  answer in the browser. JavaScript calling the export got the stub. The export is now left
+  off the list, which keeps the stub out of the glue. No other export collides with an
+  Emscripten JavaScript library. *(C#)*
+- **README examples that did not run as written.** Every README example in both repos was
+  compiled and run against the local build. Five needed fixing:
+  - Go: the intro imported `github.com/google/uuid` without using it, which does not compile.
+    It now declares the `unixMillis` it passes, as the `uint64` `NewV7BatchAt` takes.
+  - Java: the intro used `Instant` and `Optional` without importing them.
+  - Ruby: the fallback example called `SecureRandom.uuid` without `require "securerandom"`.
+  - Rust: a consumer running the `no-panic` proof needs `codegen-units = 1` beside fat LTO. Fat
+    LTO alone still fails the link for the generators.
+  - PHP: the inspection example converted a v4 to SQL order, which throws. It now mints a v7.
+  *(Go, Java, Ruby, Rust, PHP)*
+
+### Added
+
+- **C# — error `HYPERUUID002` when the `wasm-tools` workload is missing.** Without the workload
+  a Blazor WebAssembly publish skipped linking the native core with nothing louder than the
+  SDK's own warning, and shipped a runtime with no `uuid_*` symbols; `NETSDK1147` never fires
+  for this. The package's targets now stop the build instead. An app that gates on
+  `UuidGenerator.IsAvailable` and keeps a managed fallback can set
+  `HyperUuidRequireWasmWorkload` to `false`. *(C#)*
+
+### Changed
+
+- **Docs — how to bind a SQL-ordered UUID outside .NET, measured.** SQL Server stores a UUID
+  string's first three groups byte-reversed. Against SQL Server 2022, every driver tested
+  outside .NET sends its UUID type the same way it sends text: mssql-jdbc 13.6, go-mssqldb 1.11
+  (by default), pyodbc 5.3, mssql-python 1.15, pymssql 2.4, tiberius 0.13, pdo_sqlsrv 5.13 and
+  tiny_tds 3.4. Binding `to_sql_order`'s result as a UUID therefore stored other bytes than it
+  produced, and the column did not sort by creation. Binary keeps the bytes. Each binding's
+  README now has a "Binding to SQL Server" section with its driver's binary form and the
+  `CAST(id AS binary(16))` read-back, and the root README explains why. This replaces the Java
+  README's caveat that JDBC was unverified. *(Rust, Python, Ruby, Java, Go, Swift, PHP)*
+
+- **C# — the browser-wasm archive moves to `runtimes/browser-wasm/nativeassets/net11.0/`**
+  from `net10.0/`, matching the only framework that links it. The package's targets name the
+  path directly, so nothing a consumer sets changes. The archive was already linked by the
+  .NET 11 toolchain (Emscripten 6.0.2). The folder name had only made that look like a
+  mismatch. *(C#)*
+- **Docs.** The C# README now shows the SQL Server wire bytes as
+  `Convert.ToHexStringLower(guid.ToByteArray())`, which is the hex `corpus/sql_order.json`
+  holds, and the corpus README says so too. The C# README also notes that the Blazor WebAssembly
+  link happens even when the trimmer removes `HyperUuid.Managed`. *(C#, corpus)*
+
 ## [0.8.0] — 2026-10-08
 
 ### Added
