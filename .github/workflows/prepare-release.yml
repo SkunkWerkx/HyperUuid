@@ -43,6 +43,8 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: master
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -91,21 +93,18 @@ jobs:
             java/build.gradle.kts ruby/hyperuuid.gemspec ruby/lib/hyperuuid.rb
           if git diff --cached --quiet; then
             echo "::notice::Every manifest already says $VERSION — nothing to commit."
-            exit 0
+          else
+            git commit -m "chore: prepare v$VERSION"
+            git push origin HEAD:master
           fi
-          git commit -m "chore: prepare v$VERSION"
-          git push origin HEAD:master
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # workflow_dispatch is one of the two events a GITHUB_TOKEN is allowed to raise, so
       # this needs no PAT. ci.yml has no push trigger on purpose; this is the one push that
       # must be built, because it is the first commit whose native libraries will report
       # the new version. stage-native-binaries.yml picks the run up when it completes.
-      - name: Run ci.yml against the bump commit
-        if: steps.push.outputs.pushed == 'true'
+      - name: Run ci.yml against the preparation source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref master
-          echo "::notice::ci.yml dispatched on master. When it is green, stage-native-binaries.yml commits its libraries; tag THAT commit."
+          SOURCE_SHA: ${{ steps.push.outputs.source_sha }}
+        run: python3 .github/scripts/dispatch_preparation.py

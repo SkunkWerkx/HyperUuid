@@ -4,7 +4,7 @@ name: Stage native binaries for release
 # tagged commit is what a consumer gets (php/src/native/README.md has the full story). So
 # the binaries under php/src/native/, swift/HyperUuidCore.artifactbundle/,
 # swift/HyperUuidCoreApple.xcframework/ and go/staticlib/ are committed, and the commit that
-# is tagged has to carry the ones built from its own source.
+# is tagged (B) carries the bytes built from its preparation parent (A).
 #
 # Those are staged once per release, not once per merge. A PR's ci.yml run is in `pr` mode
 # and attests nothing, so it has nothing this workflow would accept; master's binaries are
@@ -45,33 +45,36 @@ jobs:
       contents: write
       # gh attestation verify reads this repo's attestations before any binary is committed.
       attestations: read
+      actions: read
     steps:
-      - name: Resolve the source commit
-        id: source
-        run: |
-          case "${{ github.event_name }}" in
-            workflow_dispatch) echo "sha=${{ inputs.head_sha }}" >> "$GITHUB_OUTPUT" ;;
-            workflow_run)      echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT" ;;
-          esac
-
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref }}
+          ref: master
 
-      - name: Find that commit's own ci.yml run
+      - name: Resolve and validate the exact preparation run
         id: find
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.head_sha }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --commit "${{ steps.source.outputs.sha }}" --status success --json databaseId,event \
-              --jq 'map(select(.event != "pull_request"))[0].databaseId // empty')
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful ci.yml run found for ${{ steps.source.outputs.sha }} — nothing to stage from." >&2
-            exit 1
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected a full preparation SHA"; exit 1; }
+          git fetch origin master
+          python3 .github/scripts/release_guard.py master
+          [ "$(git rev-parse HEAD)" = "$SOURCE_SHA" ] || { echo "::error::Checkout is not preparation source A"; exit 1; }
+          if [ -n "$EVENT_RUN_ID" ]; then
+            RUN_ID="$EVENT_RUN_ID"
+          else
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --commit "$SOURCE_SHA" --branch master --status success --json databaseId,event \
+              --jq 'map(select(.event == "workflow_dispatch" or .event == "schedule"))[0].databaseId // empty')
           fi
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::No successful release-mode ci.yml run for A"; exit 1; }
+          export RUN_ID
+          python3 .github/scripts/release_guard.py run
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v8
         with:
@@ -94,6 +97,15 @@ jobs:
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
+      - name: Install object-format-capable symbol readers
+        run: sudo apt-get update && sudo apt-get install -y llvm
+
+      - name: Validate downloaded symbols, version and conversion return codes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
+        run: python3 .github/scripts/release_guard.py payloads
+
       # Committed binaries are the weakest provenance story in this repo: a reviewer can't
       # diff them, and "trust me, CI built it" is exactly what a downstream consumer inside a
       # trust boundary can't accept. So each artifact's SLSA attestation is verified BEFORE it
@@ -110,6 +122,7 @@ jobs:
       - name: Verify attestations, then stage into php/, swift/, go/
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
         run: |
           set -euo pipefail
           declare -A LIB_NAMES=(
@@ -137,7 +150,8 @@ jobs:
             # this gate rejects six perfectly good binaries. Confirmed against all six
             # artifacts of run 33518617482: FAIL with --repo alone, PASS with both.
             if ! gh attestation verify "$src" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
+                   --source-digest "$SOURCE_SHA"; then
               echo "::error::No valid build provenance for $rid — refusing to commit it."
               exit 1
             fi
@@ -210,7 +224,8 @@ jobs:
               dest="${archive#artifacts/static-libs/}"
               echo "::group::verify $dest"
               if ! gh attestation verify "$archive" \
-                   --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+                   --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
+                   --source-digest "$SOURCE_SHA"; then
                 echo "::error::No valid build provenance for $dest — refusing to commit it."
                 exit 1
               fi
@@ -243,10 +258,12 @@ jobs:
 
       - name: Commit and push if anything actually changed
         env:
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
           RUN_ID: ${{ steps.find.outputs.run_id }}
         run: |
           set -euo pipefail
+          git fetch origin master
+          python3 .github/scripts/release_guard.py master
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add php/src/native swift/HyperUuidCore.artifactbundle swift/HyperUuidCoreApple.xcframework
@@ -254,11 +271,12 @@ jobs:
           # thing that ever adds one — a developer's own build of them stays out of a commit.
           git add -f go/staticlib
           if git diff --cached --quiet; then
-            echo "::notice::Staged binaries are byte-identical to what's already committed — nothing to push."
-            exit 0
+            echo "::notice::Bytes are unchanged; recording the verified source/run relationship."
           fi
-          git commit \
+          git commit --allow-empty \
             -m "chore: stage native binaries from ci.yml run $RUN_ID ($SOURCE_SHA)" \
             -m "Build provenance verified with \`gh attestation verify\` before staging." \
-            -m "sha256:" -m "$(cat digests.txt)"
-          git push origin HEAD:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref_name }}
+            -m "sha256:" -m "$(cat digests.txt)" \
+            -m "Release-Source-SHA: $SOURCE_SHA
+          Release-CI-Run-ID: $RUN_ID"
+          git push origin HEAD:master

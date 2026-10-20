@@ -265,6 +265,10 @@ jobs:
         with:
           python-version: "3.14"
       - run: python .github/scripts/check_exports.py
+      - name: Install release-check toolchain
+        run: sudo apt-get update && sudo apt-get install -y llvm clang lld
+      - name: Check release preparation and artifact rejection paths
+        run: python -m unittest discover -s .github/scripts/tests -v
 
   # The conformance corpus re-derived from an oracle that shares no code with the core
   # (corpus/oracle.py): a hand edit to a vector fails here even if someone "fixed" a replay

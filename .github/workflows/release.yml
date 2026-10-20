@@ -16,11 +16,8 @@ on:
     inputs:
       ci_run_id:
         description: >-
-          Skip the ci.yml lookup and use this already-green run's artifacts directly. For a
-          workflow_dispatch-only fix that never touches anything ci.yml itself builds/tests
-          (a publish-job YAML typo, an action version pin, etc.) — re-running the full ~80min
-          matrix to re-prove code that didn't change is real waste, not real verification.
-          Never used for an actual tag push (tags always go through the real lookup below).
+          Optional assertion of the staging commit's recorded CI run ID.
+          Must equal Release-CI-Run-ID; cannot override the source/run relationship.
         required: false
         type: string
 
@@ -31,120 +28,52 @@ jobs:
   # it. The .nupkg and the gems are still packed fresh, later in this same file, around the
   # libraries that run built; the wheels are published as they are.
   #
-  # The run it finds has to be one that built the native libraries AT THIS VERSION. Each
-  # library embeds its own version (`hyperuuid_version()`, which every binding's native-version
-  # probe reports), so a native library stopped being version-agnostic the day that export
-  # landed, and a release now runs in this order:
-  #
-  #   1. prepare-release.yml bumps every manifest and dispatches ci.yml against that bump
-  #      commit — the first commit whose libraries will say the new version.
-  #   2. When that run goes green, stage-native-binaries.yml commits its libraries for the
-  #      Go, Swift and PHP consumers, one commit on top of the bump.
-  #   3. A human tags that staging commit.
-  #
-  # So the tagged commit is normally the staging commit, its parent is the bump commit
-  # ci.yml ran against, and walking back a bounded number of ancestors finds that run. What
-  # this job refuses to do is what it did through v0.3.0: walk past the bump to a run from
-  # before it. That is how HyperCast 0.3.0 shipped a NuGet package, a jar, gems and
-  # committed libraries that all report 0.2.0, with every run green — the libraries were
-  # built a minute before the version changed. The checks below are that failure, named.
+  # A is the preparation source, B its staging child. Reused bytes retain provenance
+  # naming A; this entry gate checks B's record and every staged byte against that run.
   find-ci-run:
     runs-on: ubuntu-26.04
     outputs:
       run_id: ${{ steps.find.outputs.run_id }}
+      source_sha: ${{ steps.find.outputs.source_sha }}
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 10
+          fetch-depth: 2
 
-      - name: Find ci.yml's run for this commit or a recent ancestor
+      - name: Verify the staging commit and its exact preparation run
         id: find
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID_OVERRIDE: ${{ inputs.ci_run_id }}
-        run: |
-          set -euo pipefail
-          version_at() { git show "$1:rust/Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
+        run: python3 .github/scripts/release_guard.py record
 
-          want=$(version_at "$GITHUB_SHA")
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$want" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match rust/Cargo.toml's version ($want) at the tagged commit — every registry leg would publish $want. Run prepare-release.yml for the version you mean to tag." >&2
-            exit 1
-          fi
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: artifacts/native
+          merge-multiple: false
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ github.token }}
 
-          # $1: a ci.yml run id, $2: the commit it built.
-          accept() {
-            git cat-file -e "$2^{commit}" 2>/dev/null || git fetch --quiet --depth=1 origin "$2"
-            built=$(version_at "$2")
-            if [ "$built" != "$want" ]; then
-              echo "::error::ci.yml run $1 built the native libraries at $2, where the crate version was $built; this release is $want. The libraries embed their version, so they would report $built from inside a $want package. Dispatch ci.yml against the version-bump commit (prepare-release.yml does), let stage-native-binaries.yml commit its output, and tag that commit." >&2
-              exit 1
-            fi
-            echo "run_id=$1" >> "$GITHUB_OUTPUT"
-          }
+      - uses: actions/download-artifact@v8
+        with:
+          name: static-libs
+          path: artifacts/static-libs
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ github.token }}
 
-          if [ -n "$CI_RUN_ID_OVERRIDE" ]; then
-            sha=$(gh run view "$CI_RUN_ID_OVERRIDE" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
-            echo "::notice::Using explicit ci_run_id override ($CI_RUN_ID_OVERRIDE, built at $sha) — skipping the ci.yml lookup for this commit." >&2
-            accept "$CI_RUN_ID_OVERRIDE" "$sha"
-            exit 0
-          fi
-          for sha in $(git log --format=%H -n 10 "$GITHUB_SHA"); do
-            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --commit "$sha" --status success --json databaseId,event \
-              --jq 'map(select(.event != "pull_request"))[0].databaseId // empty')
-            if [ -n "$run_id" ]; then
-              if [ "$sha" = "$GITHUB_SHA" ]; then
-                echo "::notice::Using ci.yml run $run_id from the tagged commit itself." >&2
-              else
-                echo "::notice::Using ci.yml run $run_id from $sha, an ancestor of the tagged commit." >&2
-              fi
-              accept "$run_id" "$sha"
-              exit 0
-            fi
-          done
-          echo "::error::No successful ci.yml run found for $GITHUB_SHA or its last 10 ancestors — dispatch ci.yml by hand against the ref you're tagging (gh workflow run ci.yml --ref <branch-or-sha>) and let it go green before tagging." >&2
-          exit 1
+      - name: Install object-format-capable symbol readers
+        run: sudo apt-get update && sudo apt-get install -y llvm
 
-      # Go, Swift and PHP have no packing step: what is committed at the tag is what a
-      # consumer loads or links. Each tree holds one set of bytes per RID, staged from one
-      # ci.yml run, so asking this runner's own RID from each tree is the whole check.
-      - name: Committed native libraries report this version
-        run: |
-          set -euo pipefail
-          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          python3 - "$want" <<'PY'
-          import ctypes, sys
-          want, failed = sys.argv[1], False
-          for path in ("php/src/native/linux-x64/libhyperuuid.so",):
-              try:
-                  packed = ctypes.CDLL("./" + path).hyperuuid_version()
-                  got = f"{packed >> 16}.{(packed >> 8) & 0xFF}.{packed & 0xFF}"
-              except (OSError, AttributeError) as error:
-                  got = f"nothing ({error})"
-              print(f"{path}: {got}")
-              if got != want:
-                  print(f"::error::{path} reports {got}; this release is {want}. "
-                        "stage-native-binaries.yml has not staged the version-bump commit's ci.yml run.")
-                  failed = True
-          sys.exit(1 if failed else 0)
-          PY
-
-          # Swift and Go link the core in rather than loading it, so a
-          # committed archive has to be linked into something before it can be asked. Each
-          # tree's archives come from one build, so this runner's own platform answers for
-          # the tree.
-          printf '#include <stdio.h>\n#include "hyperuuid.h"\nint main(void) { unsigned v = hyperuuid_version(); printf("%%u.%%u.%%u", v >> 16, (v >> 8) & 255, v & 255); return 0; }\n' > static-version.c
-          for archive in swift/HyperUuidCore.artifactbundle/x86_64-unknown-linux-gnu/libhyperuuid.a \
-                         go/staticlib/linux_amd64/libhyperuuid.a; do
-            cc -I swift/HyperUuidCore.artifactbundle/include static-version.c "$archive" -o static-version
-            got=$(./static-version)
-            echo "$archive: $got"
-            if [ "$got" != "$want" ]; then
-              echo "::error::$archive reports $got; this release is $want. stage-native-binaries.yml has not staged the version-bump commit's ci.yml run."
-              exit 1
-            fi
-          done
+      - name: Compare every staged payload with the verified preparation artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
+        run: python3 .github/scripts/release_guard.py compare
 
   # Packs the .nupkg fresh, right now — deliberately not in ci.yml. A .nupkg bakes its
   # version into its own filename/metadata at pack time, and ci.yml runs before any tag
@@ -395,7 +324,8 @@ jobs:
                    artifacts/ruby-wasm/ruby-wasm-*/*; do
             echo "::group::verify $f"
             if ! gh attestation verify "$f" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
+                 --source-digest "${{ needs.find-ci-run.outputs.source_sha }}"; then
               echo "::error::No valid build provenance for $f — refusing to publish a gem containing it."
               exit 1
             fi
@@ -654,7 +584,8 @@ jobs:
             esac
             echo "::group::verify $wheel"
             if ! gh attestation verify "$wheel" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github; then
+                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
+                 --source-digest "${{ needs.find-ci-run.outputs.source_sha }}"; then
               echo "::error::No valid build provenance for $wheel — refusing to publish it."
               exit 1
             fi
