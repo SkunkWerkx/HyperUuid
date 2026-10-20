@@ -9,7 +9,7 @@
        Unlike the other smoke tests, this one takes HyperUuid as a package, not a project
        reference. What Android needs proving is the package's own layout: that the .NET for
        Android SDK finds runtimes/{rid}/native/libhyperuuid.so in the .nupkg and puts it in
-       the APK under lib/{abi}/, and that build/HyperUuid.targets, imported by NuGet
+       the APK under lib/{abi}/, and that build/net11.0/HyperUuid.targets, imported by NuGet
        and not by hand, hands a Native AOT publish staticlibs/{rid}/libhyperuuid.a. A project
        reference would take neither path. CI packs the package from the staged native
        binaries into a local folder and passes it in:

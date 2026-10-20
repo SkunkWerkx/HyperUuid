@@ -1,6 +1,6 @@
 <Project>
-  <!-- Auto-imported into every consuming project via NuGet's build/{PackageId}.targets
-       convention (and, through buildTransitive/, into projects that reach this package
+  <!-- Auto-imported into every consuming project via NuGet's build/{tfm}/{PackageId}.targets
+       convention (and, through buildTransitive/{tfm}/, into projects that reach this package
        through another project's reference) — a .targets file (not .props) specifically because it needs
        $(RuntimeIdentifier) already resolved, which for a Blazor WebAssembly project only
        happens after that project's own Sdk.targets import; a .props file (imported before the
@@ -27,26 +27,18 @@
        P/Invokes has to be listed explicitly here too, Emscripten-style with a leading
        underscore, or it links in but stays invisible to "*" resolution.
 
-       Two floors, and they are different on purpose. The package targets net10.0, which is
-       what every native platform needs. This file sits directly under build/, with no
-       target-framework folder, because it does its own gating below: a folder would only
-       repeat a decision the conditions already make. (The staticlib's directory is spelled
-       nativeassets/net11.0/ to match the only framework that links it; the path below names
-       it directly, so the spelling is a folder name, not something NuGet selects by.)
-       WebAssembly is .NET 11 and later only: the exception-handling translation further down
-       is .NET 11 toolchain behavior, and the browser proof (HyperUuid.WasmSmokeTest) targets
-       net11.0 and nothing older. NuGet imports this file into a net10.0 Blazor WebAssembly
-       project all the same, since a targets file in build/ applies to every framework, so the
-       wiring is gated on the consuming project's own target framework rather than left to
-       apply everywhere: below .NET 11 nothing here is linked or exported, and the target at
-       the bottom of this file says so in the build output instead of leaving a consumer to
-       find out in the browser.
-
-       The gate reads $(TargetFramework), not $(TargetFrameworkVersion): the former is the
-       project's own property and is set wherever this file is imported from, while the
-       latter is only derived once Sdk.targets runs. A restored package is imported after
-       that, but HyperUuid.WasmSmokeTest imports this file by hand from its project body,
-       before it, and has to take the same branch a real consumer does.
+       One floor. The package targets net11.0 and nothing older, and this file sits under
+       build/net11.0/ (with buildTransitive/net11.0/'s copy beside it) like the assembly
+       under lib/net11.0/. With every framework-specific asset in a net11.0 folder, NuGet
+       refuses the package to an older project at restore (NU1202, "not compatible with
+       net10.0") instead of restoring it and leaving the build to fail later, so nothing here
+       needs a target-framework gate of its own: the wiring below never meets a toolchain
+       older than the .NET 11 one the exception-handling translation further down depends
+       on. (The staticlib's directory is spelled nativeassets/net11.0/ to match; the path
+       below names it directly, so the spelling is a folder name, not something NuGet selects
+       by.) The package used to carry a net10.0 floor with the WebAssembly wiring gated on the
+       consumer's framework, and HYPERUUID001 was the warning for a consumer below it; both
+       went with the floor, and HyperCast's copy of this file has never needed them.
 
        uuid_variant is P/Invoked like every other entry point but deliberately not in the
        export list. Emscripten ships a libuuid compatibility library (src/lib/libuuid.js)
@@ -57,13 +49,8 @@
        Rust function directly inside the module, but anything reaching the export from
        JavaScript got the stub. Leaving it out keeps the stub out of the glue too. No other
        name here collides with an Emscripten JavaScript library. -->
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
-    <_HyperUuidWasmSupported>false</_HyperUuidWasmSupported>
-    <_HyperUuidWasmSupported Condition="'$(TargetFramework)' != '' And $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">true</_HyperUuidWasmSupported>
-  </PropertyGroup>
-
-  <ItemGroup Condition="'$(_HyperUuidWasmSupported)' == 'true'">
-    <NativeFileReference Include="$(MSBuildThisFileDirectory)../runtimes/browser-wasm/nativeassets/net11.0/libhyperuuid.a" />
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <NativeFileReference Include="$(MSBuildThisFileDirectory)../../runtimes/browser-wasm/nativeassets/net11.0/libhyperuuid.a" />
     <EmccExportedFunction Include="_hyperuuid_version" />
     <EmccExportedFunction Include="_uuid_new_v4" />
     <EmccExportedFunction Include="_uuid_new_v5" />
@@ -90,7 +77,7 @@
        the same check. -->
   <Target Name="_HyperUuidErrorWasmWorkloadMissing"
           BeforeTargets="BeforeBuild"
-          Condition="'$(_HyperUuidWasmSupported)' == 'true' And '$(WasmNativeWorkloadAvailable)' != 'true' And '$(HyperUuidRequireWasmWorkload)' != 'false'">
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(WasmNativeWorkloadAvailable)' != 'true' And '$(HyperUuidRequireWasmWorkload)' != 'false'">
     <Error Code="HYPERUUID002"
            Text="HyperUuid's WebAssembly support links its native core into the runtime, which needs the wasm-tools workload, and it is not installed. Without it the publish succeeds but the app has no uuid_* symbols, UuidGenerator.IsAvailable is false in the browser and every generator call throws. Run 'dotnet workload install wasm-tools', or set HyperUuidRequireWasmWorkload to false if the app keeps a managed fallback." />
   </Target>
@@ -103,13 +90,11 @@
        legacy and new exception handling instructions". Binaryen's translate-to-exnref pass
        rewrites the legacy instructions into the new encoding so the module is uniform.
        Appended to the SDK's own post-link wasm-opt step through @(WasmOptConfigurationFlags).
-       Under the same gate as the link itself: an older toolchain links the legacy encoding
-       throughout and has nothing to translate.
 
        Exclude names the item list itself, so the flag is added once however many packages
        ask for it: an app that references both HyperUuid and HyperCast imports both files,
        and without this wasm-opt was handed the pass twice. -->
-  <ItemGroup Condition="'$(_HyperUuidWasmSupported)' == 'true'">
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <WasmOptConfigurationFlags Include="--translate-to-exnref" Exclude="@(WasmOptConfigurationFlags)" />
   </ItemGroup>
 
@@ -117,8 +102,7 @@
        restore resolves runtimes/browser-wasm/nativeassets/ as a copy-local native asset for
        this RID, so without this the 3 MB archive was copied into bin/ and the publish root of
        every Blazor WebAssembly consumer, never served and never read. Taken back out of
-       @(NativeCopyLocalItems), which is where restore puts it, before anything copies it.
-       Ungated by target framework: below .NET 11 it is not linked either. -->
+       @(NativeCopyLocalItems), which is where restore puts it, before anything copies it. -->
   <Target Name="_HyperUuidDropWasmArchiveFromCopyLocal"
           AfterTargets="ResolvePackageAssets"
           Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
@@ -126,23 +110,6 @@
       <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
                             Condition="'%(NativeCopyLocalItems.NuGetPackageId)' == 'HyperUuid' And '%(NativeCopyLocalItems.Filename)%(NativeCopyLocalItems.Extension)' == 'libhyperuuid.a'" />
     </ItemGroup>
-  </Target>
-
-  <!-- The other half of the gate above. A browser-wasm project below .NET 11 still restores
-       against this package, but the native core is deliberately not linked into it. What
-       happens next depends on the consumer's own toolchain, which is why this says it out
-       loud first: where the wasm-tools workload relinks the runtime, the P/Invoke table
-       still names every "*" entry point and wasm-ld stops on undefined uuid_* symbols (seen
-       for real, by forcing this branch on a net11.0 publish); where nothing relinks, the app
-       builds, UuidGenerator.IsAvailable is false in the browser and every generator call
-       throws. A warning rather than an error, because that second shape is a legitimate one
-       for an app that gates on IsAvailable and keeps a managed fallback, and because a code
-       is something NoWarn and WarningsAsErrors both understand. -->
-  <Target Name="_HyperUuidWarnWasmNeedsNet11"
-          BeforeTargets="BeforeBuild"
-          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(TargetFramework)' != '' And '$(_HyperUuidWasmSupported)' != 'true'">
-    <Warning Code="HYPERUUID001"
-             Text="HyperUuid's WebAssembly support needs .NET 11 or later, and this project targets $(TargetFramework), so the native core is not linked into this build. Where the wasm-tools workload relinks the runtime, the link fails on undefined uuid_* symbols; otherwise UuidGenerator.IsAvailable is false in the browser and every generator call throws. Target net11.0 or later." />
   </Target>
 
   <!-- iOS and Mac Catalyst: link the core in, always.
@@ -166,7 +133,7 @@
        its native link on the undefined uuid_* symbols: at build time, not at run time. -->
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
     <_HyperUuidAppleMobile Condition="$(RuntimeIdentifier.StartsWith('ios-')) Or $(RuntimeIdentifier.StartsWith('iossimulator-')) Or $(RuntimeIdentifier.StartsWith('maccatalyst-'))">true</_HyperUuidAppleMobile>
-    <_HyperUuidAppleMobileLibrary Condition="'$(_HyperUuidAppleMobile)' == 'true'">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidAppleMobileLibrary>
+    <_HyperUuidAppleMobileLibrary Condition="'$(_HyperUuidAppleMobile)' == 'true'">$(MSBuildThisFileDirectory)../../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidAppleMobileLibrary>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(_HyperUuidAppleMobile)' == 'true' And Exists('$(_HyperUuidAppleMobileLibrary)')">
@@ -196,8 +163,8 @@
        and not for anything but an AOT publish: a JIT process cannot link an archive, so it
        still loads the shared library. -->
   <PropertyGroup Condition="'$(PublishAot)' == 'true' And '$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'browser-wasm' And '$(_HyperUuidAppleMobile)' != 'true' And '$(HyperUuidStaticLink)' != 'false'">
-    <_HyperUuidStaticLibrary Condition="$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/hyperuuid.lib</_HyperUuidStaticLibrary>
-    <_HyperUuidStaticLibrary Condition="!$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidStaticLibrary>
+    <_HyperUuidStaticLibrary Condition="$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../../staticlibs/$(RuntimeIdentifier)/hyperuuid.lib</_HyperUuidStaticLibrary>
+    <_HyperUuidStaticLibrary Condition="!$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidStaticLibrary>
     <_HyperUuidStaticLibrary Condition="!Exists('$(_HyperUuidStaticLibrary)')"></_HyperUuidStaticLibrary>
   </PropertyGroup>
 

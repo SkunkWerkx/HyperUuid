@@ -9,7 +9,7 @@
        linked and inspected, since no runner has one). -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFrameworks>net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+    <TargetFrameworks>net11.0-ios;net11.0-maccatalyst</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationId>io.github.skunkwerkx.hyperuuid.applesmoketest</ApplicationId>
@@ -29,6 +29,6 @@
        a NuGet package's build/ imports, and this is the project that proves the branch of
        that file a .NET iOS or Mac Catalyst consumer takes. The archive it links is
        csharp/HyperUuid/staticlibs/{rid}/, staged from the static-libs artifact. -->
-  <Import Project="../HyperUuid/build/HyperUuid.targets" />
+  <Import Project="../HyperUuid/build/net11.0/HyperUuid.targets" />
 
 </Project>

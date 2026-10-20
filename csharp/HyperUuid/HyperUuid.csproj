@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
@@ -77,7 +77,7 @@
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
          .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time.
          No runtimes/browser-wasm/lib/ asset needed anymore: one compiled assembly now covers
-         every platform (see UuidGenerator.cs's own remarks), so NuGet's plain lib/net10.0/
+         every platform (see UuidGenerator.cs's own remarks), so NuGet's plain lib/net11.0/
          fallback already is the browser-wasm build. Only
          runtimes/browser-wasm/nativeassets/net11.0/ (the Rust core's wasm32-unknown-emscripten
          staticlib) is RID-specific here, placed there before packing — see
@@ -109,9 +109,9 @@
     <None Include="runtimes/**/native/*"
           Condition="!Exists('runtimes/$(NETCoreSdkRuntimeIdentifier)/native')"
           Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <!-- Auto-imported into every consuming project via NuGet's build/{PackageId}.targets
+    <!-- Auto-imported into every consuming project via NuGet's build/{tfm}/{PackageId}.targets
          convention, and into projects that reach the package through another project via
-         buildTransitive/ — see the file itself for why this is required at all (NuGet's
+         buildTransitive/{tfm}/ — see the file itself for why this is required at all (NuGet's
          runtimes/{rid}/nativeassets/ package convention is real, and the WASM SDK really does
          auto-promote @(NativeLibrary) into @(NativeFileReference), but restore doesn't
          populate @(NativeLibrary) from a plain PackageReference's nativeassets folder the way
@@ -122,7 +122,7 @@
     <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive" />
     <!-- The core as a static library, one per RID: for a Native AOT publish to link in
          instead of loading the shared library, and for an iOS or Mac Catalyst app, which
-         can only link it. build/HyperUuid.targets has the wiring and the reasons. Staged
+         can only link it. build/net11.0/HyperUuid.targets has the wiring and the reasons. Staged
          here before packing, like runtimes/, and not committed. -->
     <None Include="staticlibs/**" Pack="true" PackagePath="staticlibs" />
     <!-- Local dev loop, the same one HyperCast's csproj carries: when the Rust core has been

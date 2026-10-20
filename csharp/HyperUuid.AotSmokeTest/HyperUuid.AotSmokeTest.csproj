@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
@@ -19,6 +19,6 @@
        archive it links is csharp/HyperUuid/staticlibs/{rid}/, which is not committed —
        the forge's static-libs/build-static-libs.sh stages it, in CI and by hand. Where it
        is absent the publish loads the shared library, as it did before these existed. -->
-  <Import Project="../HyperUuid/build/HyperUuid.targets" />
+  <Import Project="../HyperUuid/build/net11.0/HyperUuid.targets" />
 
 </Project>

@@ -139,7 +139,7 @@ All three reach past the table that way. **iOS and Mac Catalyst** load no librar
 
 The musl libraries are built so that they depend on musl's libc and nothing else — the unwinder is linked statically — which is what lets them load on a bare `alpine` or `python:alpine` image with no `libgcc` installed. The glibc libraries need glibc 2.34 or newer.
 
-**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is .NET 10, JDK 25, Go 1.26, Python 3.11, Ruby 3.3 and PHP 8.2, and the musl job runs the PHP, Ruby and Python suites on those oldest versions as well as the newest. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4.
+**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is .NET 11, JDK 25, Go 1.26, Python 3.11, Ruby 3.3 and PHP 8.2, and the musl job runs the PHP, Ruby and Python suites on those oldest versions as well as the newest. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4.
 
 Every leg also builds the core as a `wasm32-wasip1` module and runs the Java suite a second time through its in-process GraalWasm backend — see [WebAssembly](#webassembly).
 
@@ -347,7 +347,7 @@ That also explains why Go, C# and Swift barely move: they are already at or near
 ```
 rust/       the core: twelve uuid_* exports plus hyperuuid_version, allocation-free and no_std; a cdylib (and two for Android) and fifteen static archives (four for iOS and Mac Catalyst, two for Android)
 corpus/     the conformance vectors every suite replays, and the independent oracle that derives them
-csharp/     the .NET 10 binding: UuidGenerator over LibraryImport, AOT smoke test, Blazor wasm on .NET 11+
+csharp/     the .NET 11 binding: UuidGenerator over LibraryImport, AOT smoke test, Blazor wasm
 java/       the JDK 25+ binding: FFM + GraalWasm backends, Native Image smoke test
 python/     the 3.11+ binding: PyO3 native extension (abi3 and free-threaded wheels, Pyodide in the browser)
 swift/      the SwiftPM binding: the core linked in as a static library on every platform

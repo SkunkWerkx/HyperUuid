@@ -85,10 +85,11 @@ jobs:
       # rustc build and a runner's differ in hash and size), so rebuild-and-compare isn't a
       # check a consumer can actually perform. The permissions block above is what makes it
       # work; without those scopes the step fails rather than silently skipping.
-      # HyperForge's own default (8.0.x) stays put for other repos. HyperUuid's package floor
-      # is net10.0, the current LTS; Blazor WebAssembly is supported on .NET 11 and later only
-      # (HyperUuid.targets has the reason).
-      dotnet_version: "10.0.x"
+      # .NET 11 is HyperUuid's floor, on every platform including Blazor WebAssembly; preview
+      # quality until the pinned SDK in global.json goes GA (HyperForge's own default stays
+      # 8.0/ga for other repos).
+      dotnet_version: "11.0.x"
+      dotnet_quality: "preview"
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
       # A jar has no per-platform package selection like NuGet's RID folders, and the
       # csproj's runtimes/**/native wildcard stages at pack time — so both bindings take
@@ -405,7 +406,10 @@ jobs:
     needs: build-native
     # 28 minutes of simulators, behind the slowest build-native leg: release mode only.
     if: github.event_name != 'pull_request'
-    runs-on: macos-latest
+    # Each .NET for iOS release refuses an Xcode older than its own, and from workload set
+    # 10.0.401.1 that is Xcode 27, which macos-latest (macOS 26) does not carry: 26.6 is its
+    # newest. The xcode-27 image is macOS 27 with Xcode 27.0 as its default.
+    runs-on: xcode-27
     env:
       APP_ID: io.github.skunkwerkx.hyperuuid.applesmoketest
       SMOKE_PROJECT: csharp/HyperUuid.AppleSmokeTest/HyperUuid.AppleSmokeTest.csproj
@@ -515,26 +519,25 @@ jobs:
             || { echo "::error::the iOS device test binary does not define uuid_new_v7; the core was not linked in"; exit 1; }
           echo "the iOS device test binary defines the core's exports"
 
+      # .NET 11, as build-native's legs take it: HyperUuid's floor, preview until the pinned
+      # SDK in global.json goes GA.
       - uses: actions/setup-dotnet@v6
         if: ${{ !cancelled() }}
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
+          dotnet-quality: "preview"
 
-      # Pinned to a workload set whose iOS and Mac Catalyst SDKs are 26.5: each .NET for iOS
-      # release refuses an Xcode older than its own, and from 10.0.401.1 that is Xcode 27,
-      # which the macos-latest image does not carry yet (26.6 is its newest). An Xcode newer
-      # than the workload's is accepted, so lift the pin once the image has Xcode 27.
       - name: Install the .NET iOS and Mac Catalyst workloads
         if: ${{ !cancelled() }}
-        run: dotnet workload install ios maccatalyst --version 10.0.401
+        run: dotnet workload install ios maccatalyst
 
       - name: C# — a Mac Catalyst app, built and run
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          dotnet build "$SMOKE_PROJECT" -c Release -f net10.0-maccatalyst -r maccatalyst-arm64
-          app=$(find "$SMOKE_BIN/net10.0-maccatalyst/maccatalyst-arm64" -maxdepth 1 -name '*.app')
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-maccatalyst -r maccatalyst-arm64
+          app=$(find "$SMOKE_BIN/net11.0-maccatalyst/maccatalyst-arm64" -maxdepth 1 -name '*.app')
           log="$TMPDIR/hyperuuid-smoke.log"
           rm -f "$log"
           "$app/Contents/MacOS/HyperUuid.AppleSmokeTest"
@@ -548,8 +551,8 @@ jobs:
           set -euo pipefail
           want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
           udid="${{ steps.sim.outputs.udid }}"
-          dotnet build "$SMOKE_PROJECT" -c Release -f net10.0-ios -r iossimulator-arm64
-          app=$(find "$SMOKE_BIN/net10.0-ios/iossimulator-arm64" -maxdepth 1 -name '*.app')
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r iossimulator-arm64
+          app=$(find "$SMOKE_BIN/net11.0-ios/iossimulator-arm64" -maxdepth 1 -name '*.app')
           xcrun simctl install "$udid" "$app"
           xcrun simctl launch "$udid" "$APP_ID"
           log="$(xcrun simctl get_app_container "$udid" "$APP_ID" data)/tmp/hyperuuid-smoke.log"
@@ -566,8 +569,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          dotnet build "$SMOKE_PROJECT" -c Release -f net10.0-ios -r ios-arm64 -p:EnableCodeSigning=false
-          app=$(find "$SMOKE_BIN/net10.0-ios/ios-arm64" -maxdepth 1 -name '*.app')
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r ios-arm64 -p:EnableCodeSigning=false
+          app=$(find "$SMOKE_BIN/net11.0-ios/ios-arm64" -maxdepth 1 -name '*.app')
           nm -g "$app/HyperUuid.AppleSmokeTest" > device-symbols.txt
           for symbol in hyperuuid_version uuid_new_v4 uuid_new_v7 uuid_new_v7_batch; do
             grep -q " T _$symbol\$" device-symbols.txt \

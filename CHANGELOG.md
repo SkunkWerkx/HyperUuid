@@ -9,6 +9,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **C# — .NET 11 is the floor.** The package targets `net11.0` and nothing older, on every
+  platform: the native ones, which took net10.0 until now, as well as Blazor WebAssembly,
+  which was .NET 11 and later already. `HyperUuid.targets` moves from `build/` to
+  `build/net11.0/` (and `buildTransitive/net11.0/`), so NuGet refuses the package to an
+  older project at restore (NU1202) instead of restoring it and gating the WebAssembly
+  wiring on the consumer's framework; that gate, and its `HYPERUUID001` warning, are gone.
+  The smoke tests follow (`net11.0-ios`, `net11.0-maccatalyst`), and CI's Apple job runs on
+  the `xcode-27` image, which the .NET 11 iOS and Mac Catalyst workloads require. .NET 11
+  reaches GA in November 2026. *(C#)*
+
 ## [0.9.0] — 2026-10-20
 
 Consumer feedback from Norse Architecture's Blazor WebAssembly integration, and two breaking
