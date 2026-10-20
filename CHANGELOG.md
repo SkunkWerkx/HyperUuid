@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-20
+
 Consumer feedback from Norse Architecture's Blazor WebAssembly integration, and two breaking
 changes that make this a minor release: SQL Server order is now an RFC 9562 version 8, the
 version the RFC gives any byte order but its own, and version 6 is gone. HyperUuid now covers
@@ -1395,7 +1397,8 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.0...v0.6.1
