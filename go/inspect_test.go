@@ -17,6 +17,19 @@ import (
 
 const inspectMs uint64 = 1_645_557_742_000
 
+// rfcV6 is RFC 9562 Appendix A.5's version 6: a version this package neither mints nor
+// converts, and so a fixed wrong-version input and a value with no timestamp.
+var rfcV6 = uuid.MustParse("1ec9414c-232a-6b00-b3c8-9f6bdeced846")
+
+// rfcV7 is RFC 9562 Appendix A.6's version 7 and rfcV7Sql its SQL Server order, which
+// V7ToSqlOrder refuses to convert again. A random SQL-ordered value can't be used for that:
+// about one in 16 carries a 7 and the RFC variant where RFC order has them, and so is
+// accepted as a version 7.
+var (
+	rfcV7    = uuid.MustParse("017f22e2-79b0-7cc3-98c4-dc0c0c07398f")
+	rfcV7Sql = uuid.MustParse("0c07398f-dc0c-8c84-b30d-017f22e279b0")
+)
+
 // must unwraps a generator's result; a generator failing here is a broken core, not a case
 // under test.
 func must(id uuid.UUID, err error) uuid.UUID {
@@ -36,12 +49,11 @@ func TestGoogleAndLibraryValuesReportTheirVersionAndTheRfcVariant(t *testing.T) 
 		t.Fatal(err)
 	}
 	v5, _ := NewV5String(NamespaceDNS, "x")
-	v6 := must(NewV6At(inspectMs))
 	v7 := must(NewV7At(inspectMs))
 	for _, c := range []struct {
 		id      uuid.UUID
 		version int
-	}{{googleV7, 7}, {uuid.New(), 4}, {ours4, 4}, {v5, 5}, {v6, 6}, {v7, 7}} {
+	}{{googleV7, 7}, {uuid.New(), 4}, {ours4, 4}, {v5, 5}, {rfcV6, 6}, {v7, 7}} {
 		if got := Version(c.id); got != c.version || got != int(c.id.Version()) {
 			t.Errorf("%v: Version = %d, want %d (google/uuid says %d)", c.id, got, c.version, c.id.Version())
 		}
@@ -86,44 +98,31 @@ func TestAVersionOutsideTheNibbleNeverMatches(t *testing.T) {
 	}
 }
 
-// In SQL order a v6's random clock_seq sits where a v7's version nibble does and reads as 7
-// one time in 16; enough draws that a confusion would surface.
-func TestSqlOrderedV6AndV7AreValidatedAndReadInPlaceWithoutConfusion(t *testing.T) {
+// A SQL-ordered value is validated and read in place; enough draws that a misread would
+// surface.
+func TestSqlOrderedV7IsValidatedAndReadInPlace(t *testing.T) {
 	want := time.UnixMilli(int64(inspectMs)).UTC()
 	for i := 0; i < 2048; i++ {
-		six := must(V6ToSqlOrder(must(NewV6At(inspectMs))))
 		seven := must(V7ToSqlOrder(must(NewV7At(inspectMs))))
 
-		if got, err := VersionIn(six, LayoutSqlServer); err != nil || got != 6 {
-			t.Fatalf("%x: VersionIn = %d, %v", six, got, err)
-		}
 		if got, err := VersionIn(seven, LayoutSqlServer); err != nil || got != 7 {
 			t.Fatalf("%x: VersionIn = %d, %v", seven, got, err)
 		}
-		for _, c := range []struct {
-			id      uuid.UUID
-			version int
-			want    bool
-		}{{six, 6, true}, {six, 7, false}, {seven, 7, true}, {seven, 6, false}} {
-			if got, err := IsRfcIn(c.id, c.version, LayoutSqlServer); err != nil || got != c.want {
-				t.Fatalf("%x: IsRfcIn(%d) = %v, %v", c.id, c.version, got, err)
+		for version, want := range map[int]bool{7: true, 6: false, 8: false} {
+			if got, err := IsRfcIn(seven, version, LayoutSqlServer); err != nil || got != want {
+				t.Fatalf("%x: IsRfcIn(%d) = %v, %v", seven, version, got, err)
 			}
-		}
-		if got, err := V6UnixMillisIn(six, LayoutSqlServer); err != nil || got != inspectMs {
-			t.Fatalf("%x: V6UnixMillisIn = %d, %v", six, got, err)
 		}
 		if got, err := V7UnixMillisIn(seven, LayoutSqlServer); err != nil || got != inspectMs {
 			t.Fatalf("%x: V7UnixMillisIn = %d, %v", seven, got, err)
 		}
-		for _, id := range []uuid.UUID{six, seven} {
-			if got, err := GetTimestampIn(id, LayoutSqlServer); err != nil || !got.Equal(want) {
-				t.Fatalf("%x: GetTimestampIn = %v, %v", id, got, err)
-			}
+		if got, err := GetTimestampIn(seven, LayoutSqlServer); err != nil || !got.Equal(want) {
+			t.Fatalf("%x: GetTimestampIn = %v, %v", seven, got, err)
 		}
-		// Read straight from SQL order matches permuting back first.
+		// Read straight from SQL order matches converting back first.
 		back, _ := V7FromSqlOrder(seven)
 		if in, _ := V7UnixMillisIn(seven, LayoutSqlServer); in != v7UnixMillis(back) {
-			t.Fatalf("%x: in place %d, permuted back %d", seven, in, v7UnixMillis(back))
+			t.Fatalf("%x: in place %d, converted back %d", seven, in, v7UnixMillis(back))
 		}
 		// The raw form takes the bytes SQL Server stores, which are the value's own.
 		if got, err := VersionBytes(seven[:], LayoutSqlServer); err != nil || got != 7 {
@@ -132,11 +131,44 @@ func TestSqlOrderedV6AndV7AreValidatedAndReadInPlaceWithoutConfusion(t *testing.
 	}
 }
 
+// The same layout with a 7 where the 8 goes is no SQL-ordered value: no version, no
+// timestamp, and no conversion back.
+func TestASevenInTheSqlVersionNibbleIsNotSqlOrdered(t *testing.T) {
+	old := must(V7ToSqlOrder(must(NewV7At(inspectMs))))
+	old[7] = old[7]&0x0F | 0x70
+	if got, err := VersionIn(old, LayoutSqlServer); err != nil || got != 0 {
+		t.Errorf("%x: VersionIn = %d, %v", old, got, err)
+	}
+	if got, err := IsRfcIn(old, 7, LayoutSqlServer); err != nil || got {
+		t.Errorf("%x: IsRfcIn(7) = %v, %v", old, got, err)
+	}
+	if _, err := GetTimestampIn(old, LayoutSqlServer); !errors.Is(err, ErrNotTimeBased) {
+		t.Errorf("%x: GetTimestampIn err = %v, want ErrNotTimeBased", old, err)
+	}
+	if got, err := V7FromSqlOrder(old); !errors.Is(err, ErrWrongVersion) || got != Nil {
+		t.Errorf("%x: V7FromSqlOrder = %x, %v, want ErrWrongVersion", old, got, err)
+	}
+}
+
+// A version 6 is an RFC 9562 UUID with a version this package reads no timestamp from.
+func TestAVersion6HasNoTimestamp(t *testing.T) {
+	if Version(rfcV6) != 6 || !IsRfc(rfcV6, 6) {
+		t.Fatalf("%v: version %d, IsRfc(6) %v", rfcV6, Version(rfcV6), IsRfc(rfcV6, 6))
+	}
+	if _, err := GetTimestamp(rfcV6); !errors.Is(err, ErrNotTimeBased) {
+		t.Errorf("GetTimestamp err = %v, want ErrNotTimeBased", err)
+	}
+	for _, layout := range []UuidLayout{LayoutRfc9562, LayoutSqlServer} {
+		if _, err := GetTimestampIn(rfcV6, layout); !errors.Is(err, ErrNotTimeBased) {
+			t.Errorf("%v: GetTimestampIn err = %v, want ErrNotTimeBased", layout, err)
+		}
+	}
+}
+
 func TestNonSqlValuesHaveNoSqlVersion(t *testing.T) {
-	// Fixed values, not a fresh v4: an RFC v4's random octet 7 reads as a SQL-ordered v7's
-	// version nibble one time in 16, beside octet 8's RFC variant bits, and the core rightly
-	// cannot tell those 16 bytes from a SQL-ordered v7. (.NET's mixed-endian Guid puts the v4
-	// nibble in octet 7, which is why C#'s version of this test can use Guid.NewGuid.)
+	// Fixed values, not a fresh v4: an RFC v4's random octet 7 reads as the SQL layout's
+	// version 8 one time in 16, beside octet 8's RFC variant bits, and the core rightly
+	// cannot tell those 16 bytes from a SQL-ordered value.
 	v4 := uuid.MustParse("919108f7-52d1-4320-9bac-f847db4148a8") // RFC 9562 A.3
 	v5, _ := NewV5String(NamespaceDNS, "x")
 	for _, id := range []uuid.UUID{v4, Nil, Max, v5} {
@@ -156,15 +188,13 @@ func TestAnUnspecifiedOrUndefinedLayoutIsRefused(t *testing.T) {
 		_, e1 := VersionIn(id, layout)
 		_, e2 := IsRfcIn(id, 7, layout)
 		_, e3 := V7UnixMillisIn(id, layout)
-		_, e4 := V6UnixMillisIn(id, layout)
-		_, e5 := V7TimestampIn(id, layout)
-		_, e6 := V6TimestampIn(id, layout)
-		_, e7 := GetTimestampIn(id, layout)
-		_, e8 := VersionBytes(raw, layout)
-		_, e9 := IsRfcBytes(raw, 7, layout)
+		_, e4 := V7TimestampIn(id, layout)
+		_, e5 := GetTimestampIn(id, layout)
+		_, e6 := VersionBytes(raw, layout)
+		_, e7 := IsRfcBytes(raw, 7, layout)
 		// The layout is checked before the buffer, as C#'s doors do.
-		_, e10 := VersionBytes(raw[:15], layout)
-		for i, err := range []error{e1, e2, e3, e4, e5, e6, e7, e8, e9, e10} {
+		_, e8 := VersionBytes(raw[:15], layout)
+		for i, err := range []error{e1, e2, e3, e4, e5, e6, e7, e8} {
 			if !errors.Is(err, ErrInvalidLayout) {
 				t.Errorf("%v: door %d err = %v, want ErrInvalidLayout", layout, i+1, err)
 			}

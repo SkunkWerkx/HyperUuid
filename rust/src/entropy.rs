@@ -1,7 +1,7 @@
 //! Entropy for every generator: [`fill`] is `getrandom::fill`, except on Linux, where it is
 //! ChaCha20 run in user space in one of two shapes, and on Android, which has the first.
 //!
-//! **Large requests (a batch of 32 v7 or 24 v6 UUIDs and up), Linux and Android:** one 32-byte
+//! **Large requests (a batch of 32 v7 UUIDs and up), Linux and Android:** one 32-byte
 //! `getrandom` draw keys a ChaCha20 keystream that fills the whole request. That is the
 //! construction the kernel itself uses behind `getrandom` (a ChaCha20 key per request, fresh
 //! from the entropy pool), run here with AVX2/SSE2/NEON instead of the kernel's
@@ -32,7 +32,7 @@ pub(crate) fn fill(buf: &mut [u8]) -> Result<(), getrandom::Error> {
     fill_with(buf, None)
 }
 
-/// [`fill`] for a caller that already holds a time, as v6 and v7 do: `unix_millis` is the
+/// [`fill`] for a caller that already holds a time, as v7 does: `unix_millis` is the
 /// timestamp going into the UUIDs being made. On Linux a timestamp within a second of the
 /// slot's key spares the pool its own clock read; any other sends it to the clock, which alone
 /// retires a key (see [`pool`]).
@@ -106,7 +106,7 @@ fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom:
 /// What is left is a snapshot taken within a second of a key being drawn and restored onto a
 /// clock that has not been moved on: the copies then share bytes until that second runs out.
 ///
-/// The clock is `CLOCK_REALTIME_COARSE`, a few nanoseconds through the vDSO. v6 and v7 arrive
+/// The clock is `CLOCK_REALTIME_COARSE`, a few nanoseconds through the vDSO. v7 arrives
 /// holding a timestamp, and when that timestamp is within the second the slot is taken to be
 /// fresh without the clock being read. A timestamp can only save the read: one that disagrees
 /// (a backfill minting UUIDs for old rows, a fixed test value) sends the question to the clock,

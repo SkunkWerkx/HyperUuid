@@ -6,7 +6,8 @@
 
 **PHP core has no built-in UUID generation at all — nothing beyond the optional PECL `uuid` extension. This package needs zero Composer dependency, not even `ramsey/uuid` — just PHP's own built-in `FFI` extension.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling
+RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
+version 8 SQL Server order for v7, calling
 directly into the native `libhyperuuid` shared library via PHP's built-in
 [`FFI`](https://www.php.net/manual/en/book.ffi.php) extension — dlopen/dlsym plus a raw C-ABI
 call, no runtime bridge, no Composer dependency beyond `ext-ffi` itself. PHP 8.2 is the
@@ -20,13 +21,12 @@ use HyperUuid\Namespaces;
 
 $id = HyperUuid::newV4();
 $id2 = HyperUuid::newV5(Namespaces::dns(), 'example.com');
-$id3 = HyperUuid::newV6();
-$id4 = HyperUuid::newV7();
+$id3 = HyperUuid::newV7();
 
-$id4->timestamp(); // recover the embedded UTC DateTimeImmutable
-$id4->timestamp(throwOnMismatch: false); // null instead of throwing if $id4 isn't an RFC 9562 v6/v7
-$id4->isRfc(7); // true: the RFC 9562 variant and version 7, in one native call
-$id4->toSqlOrder(); // byte order SQL Server's uniqueidentifier needs to sort by creation order
+$id3->timestamp(); // recover the embedded UTC DateTimeImmutable
+$id3->timestamp(throwOnMismatch: false); // null instead of throwing if $id3 isn't an RFC 9562 v7
+$id3->isRfc(7); // true: the RFC 9562 variant and version 7, in one native call
+$id3->toSqlOrder(); // byte order SQL Server's uniqueidentifier needs to sort by creation order
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
 $batch = HyperUuid::newV7Batch(1000);
@@ -39,22 +39,21 @@ Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
 `Uuid::parse()` reads the 8-4-4-4-12 hyphenated form in either letter case and nothing
 else, the same rule the Rust core applies. `Namespaces::dns()`/`url()`/`oid()`/`x500()` are RFC 9562 Section 6.6's
 well-known namespaces. `->timestamp()` recovers the embedded UTC `DateTimeImmutable` from an
-RFC 9562 version 6 or 7 UUID; pass `throwOnMismatch: false` to get `null` back for anything
-else instead of throwing. `newV6()`/`newV7()` also accept a `DateTimeInterface` directly in place
-of a raw millisecond count. `->toSqlOrder()`/`->fromSqlOrder()` convert a version 6 or 7 UUID to and
-from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation
-order (`toSqlOrder()` dispatches on the UUID's own version, matching `timestamp()`'s
-convention) — computed once in the native Rust core rather than reimplemented in PHP, and
-verified there (and independently against the real `System.Data.SqlTypes.SqlGuid` comparator
-in the C# binding's test suite). Same-millisecond v6 UUIDs aren't guaranteed to sort correctly
-afterward — v6 has no counter, so `clock_seq`/`node` (not the timestamp) decide ties, the same
-pre-existing RFC 9562 v6 limitation plain order already has. `fromSqlOrder()` reads
-which version to invert from the SQL-ordered bytes in the native core (the same check as
-`->version(UuidLayout::SqlServer)`, which never confuses the two), or takes an explicit
-`$version` argument when you already know it. `Uuid::nil()`/`Uuid::max()`
-are the RFC 9562 §5.9/§5.10 special-value UUIDs.
-`HyperUuid::newV6Batch(count)`/`newV7Batch(count)` generate `count` UUIDs sharing one
-timestamp capture and one native call, instead of `count` of each.
+RFC 9562 version 7 UUID; pass `throwOnMismatch: false` to get `null` back for anything else
+instead of throwing — a version 6 or 1 from another generator included, since this package
+reads no Gregorian timestamp. `newV7()` also accepts a `DateTimeInterface` directly in place of
+a raw millisecond count. `->toSqlOrder()`/`->fromSqlOrder()` convert a version 7 UUID to and
+from SQL Server order, the byte order a `uniqueidentifier` sorts by creation — computed in the
+native Rust core rather than reimplemented in PHP, and verified there (and against the real
+`System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite). A SQL-ordered value
+is an RFC 9562 version 8 UUID: the 8 and the variant sit where SQL Server's text form shows
+them, and the version 7's other 122 bits fill the compare order around them, timestamp and
+counter first. Every version 7 converts, and both conversions are exact inverses. Each refuses
+a value of the wrong version with `\InvalidArgumentException`: `toSqlOrder()` anything but an
+RFC 9562 version 7, `fromSqlOrder()` anything without the SQL layout's version 8 and variant
+(the same check as `->version(UuidLayout::SqlServer)`). `Uuid::nil()`/`Uuid::max()` are the
+RFC 9562 §5.9/§5.10 special-value UUIDs. `HyperUuid::newV7Batch(count)` generates `count`
+UUIDs sharing one timestamp capture and one native call, instead of `count` of each.
 
 ## Inspecting a UUID
 
@@ -69,7 +68,7 @@ $id = HyperUuid::newV7();
 $id->version();                  // the RFC 9562 version nibble, 0-15 (0 for Uuid::nil(), 15 for Uuid::max())
 $id->variant();                  // UuidVariant::Rfc9562 for anything this package or ramsey/uuid mints
 $id->isRfc(7);                   // the RFC 9562 variant and version 7: the guard before trusting v7 fields
-$id->unixMillis();               // the embedded Unix-epoch milliseconds of an RFC 9562 v6/v7, or null
+$id->unixMillis();               // the embedded Unix-epoch milliseconds of an RFC 9562 v7, or null
 
 $sql = $id->toSqlOrder();
 $sql->version(UuidLayout::SqlServer);           // 7, read in place from the SQL Server bytes
@@ -82,27 +81,26 @@ $sql->timestamp(layout: UuidLayout::SqlServer); // the same DateTimeImmutable
 Nil), `Rfc9562` (2), `Microsoft` (3) and `Future` (4, includes Max); the values are the native
 core's codes, so `Rfc9562`'s is the `0b10` the field's top two bits hold. `version()` says
 nothing about the variant, which is what `isRfc($version)` adds. `unixMillis()` and
-`timestamp()` check it too, in the same native call that reads the timestamp: a 6 or 7 nibble
-under another variant has no RFC version, so it has no timestamp (`null`, or the throw). A `$version` outside 0-15 is
-never matched; it's `false`, not an error.
+`timestamp()` check it too, in the same native call that reads the timestamp: a 7 nibble under
+another variant has no RFC version, so it has no timestamp (`null`, or the throw). A `$version`
+outside 0-15 is never matched; it's `false`, not an error.
 
 `UuidLayout` says which byte order a `Uuid` holds: `Rfc9562` (1, the default everywhere) or
 `SqlServer` (2, what `toSqlOrder()` returns and a `uniqueidentifier` column stores).
-`version()`, `isRfc()`, `unixMillis()` and `timestamp()` all take one. SQL Server order is
-defined for versions 6 and 7 only: there `version()` answers 6, 7, or 0 for anything that
-isn't a SQL-ordered RFC 9562 v6 or v7, `unixMillis()` answers null, and `timestamp()` throws
-(or returns null with `throwOnMismatch: false`). The version nibble lands at a different byte for
-each, and the other version's random bits can mimic it there, so the core checks the variant
-bits too, where each version puts them, and never confuses the two.
+`version()`, `isRfc()`, `unixMillis()` and `timestamp()` all take one. SQL Server order holds
+converted version 7s only, and reads them as their source version: there `version()` answers
+7, or 0 for anything that isn't a SQL-ordered value, `unixMillis()` answers null for the
+latter, and `timestamp()` throws (or returns null with `throwOnMismatch: false`). The core
+checks the version 8 marker and the variant.
 
 The layout is the caller's to know, not something a value reveals: carry it with the value,
 as a column type already does, and pass it at every call site that can see a SQL-ordered
 value. Without a layout argument, `version()` and `isRfc()` read RFC order, so
 `$sqlOrdered->isRfc(7)` reads the wrong bytes; there is deliberately no layout-agnostic check.
-`variant()` is RFC order only, with no layout parameter, because in SQL Server order the
-variant sits at a different byte for each version: don't feed it a `toSqlOrder()` result or a
-`uniqueidentifier` read-back. `isRfc($version, UuidLayout::SqlServer)` is the guard for those;
-it checks the variant where that version puts it.
+`variant()` is RFC order only, with no layout parameter: a `toSqlOrder()` result or a
+`uniqueidentifier` read-back carries the RFC variant at octet 8 too, so it answers `Rfc9562`
+there without saying whether it is a SQL-ordered value. `isRfc(7, UuidLayout::SqlServer)` is
+the guard for those.
 
 ## Binding to SQL Server
 
@@ -214,7 +212,7 @@ prints the command), and `nativeVersion()` reports whichever library answered.
 
 ## Bulk generation into bytes
 
-`newV6BatchBytes` and `newV7BatchBytes` return the batch as one binary string of raw RFC 9562-ordered bytes — 16 per UUID — instead of an array of `Uuid` objects:
+`newV7BatchBytes` returns the batch as one binary string of raw RFC 9562-ordered bytes — 16 per UUID — instead of an array of `Uuid` objects:
 
 ```php
 $bytes = HyperUuid::newV7BatchBytes(1000);
@@ -227,11 +225,10 @@ The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `
 
 Slice it with `substr($bytes, $i * 16, 16)` — which is exactly what `newV7Batch` does internally.
 
-A batch count below 0 is an `InvalidArgumentException` on all four batch methods; 0 returns
-an empty array or an empty string. Version 6 takes up to 4294967295. A version 7 batch takes
-at most `HyperUuid::MAX_V7_BATCH` (67,108,864, the 26-bit counter that orders UUIDs within a
+A batch count below 0 is an `InvalidArgumentException` on both batch methods; 0 returns
+an empty array or an empty string. A batch takes at most `HyperUuid::MAX_V7_BATCH` (67,108,864, the 26-bit counter that orders UUIDs within a
 millisecond); a larger count is an `InvalidArgumentException` naming the limit, thrown before
-anything is allocated. Every version 7 batch is in strictly increasing order: the counter is
+anything is allocated. Every batch is in strictly increasing order: the counter is
 one process-wide sequence, so a batch can straddle the point where it wraps back to 0, and
 the UUIDs from there on carry the supplied timestamp plus one millisecond rather than sorting
 before the ones ahead of them. That orders one batch, not the stream: the next batch or
@@ -242,12 +239,12 @@ the same way. It happens at most once per 67,108,864 UUIDs the process mints.
 
 ## Why not `ramsey/uuid`?
 
-`ramsey/uuid` is the de facto PHP standard, and it's genuinely a solid library — it supports v6 and v7 with its own monotonic-generation story too. This package isn't claiming to out-generate it; the real differentiators are elsewhere:
+`ramsey/uuid` is the de facto PHP standard, and it's genuinely a solid library — it supports v7 with its own monotonic-generation story too. This package isn't claiming to out-generate it; the real differentiators are elsewhere:
 
 1. **Zero Composer dependency.** This package needs nothing beyond PHP's own built-in `FFI` extension — no `ramsey/uuid`, no `composer require` at all beyond this package itself. If you're already pulling in `ramsey/uuid` for something else, that's a fine reason to stick with it; if not, this avoids adding it just for ID generation.
-2. **Batch generation.** `newV6Batch(count)`/`newV7Batch(count)` share one timestamp capture, one random-bytes fetch, and (v7) one counter reservation across the whole batch — one native call instead of `count` separate ones.
+2. **Batch generation.** `newV7Batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch — one native call instead of `count` separate ones.
 3. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, Ruby, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. A pure-PHP library, however good, can't structurally guarantee that against a codebase written in a different language.
-4. **`timestamp()` isn't tied to how the UUID was minted.** It's a plain RFC 9562 bit-layout read, verified (in this package's own test suite) to correctly extract from a `ramsey/uuid`-generated v6 or v7 value too, not just this package's own — so you can keep `ramsey/uuid` for generation and still get this package's (faster, see below) extraction on its output.
+4. **`timestamp()` isn't tied to how the UUID was minted.** It's a plain RFC 9562 bit-layout read, verified (in this package's own test suite) to correctly extract from a `ramsey/uuid`-generated v7 value too, not just this package's own — so you can keep `ramsey/uuid` for generation and still get this package's (faster, see below) extraction on its output.
 
 ## Benchmarks
 
@@ -264,14 +261,12 @@ actually costs:
 | --- | --- | --- |
 | Naive inline v4 (`random_bytes`, no RFC validation) | 308ns | — |
 | `newV4()` | 224ns | **1.4x faster** |
-| `newV6()` | 255ns | **1.2x faster** |
 | `newV7()` | 265ns | **1.2x faster** |
 | `newV5()` | 502ns | 1.6x slower — a SHA-1 the baseline has no equivalent of |
 
 Read that top row again: the full RFC-complete v4 — real entropy, correct version and
 variant bits, crossing into native code and back — costs **less than the naive pure-PHP
-three-liner that doesn't even validate anything**, and the time-ordered versions beat it
-too. How far ahead depends on the machine, because most of the naive version is
+three-liner that doesn't even validate anything**, and v7 beats it too. How far ahead depends on the machine, because most of the naive version is
 `random_bytes` and the operating system prices that: where the system random source is
 slow the gap is wider. The calls are this cheap because there is no wrapper left around
 the boundary: a single static out-buffer and zero-copy `const char *` string passes
@@ -283,21 +278,17 @@ which is most of what is left:
 
 | Call | Individual × 1000 | Batch → `Uuid[]` | Batch → bytes |
 | --- | ---: | ---: | ---: |
-| v6 | 280.9µs | 67.5µs (**4.2x**) | 4.5µs (**62x**) |
 | v7 | 267.0µs | 67.1µs (**4.0x**) | 4.2µs (**64x**) |
 
 ### Timestamp extraction vs. `ramsey/uuid`'s `getDateTime()`
 
-`ramsey/uuid` has real extraction logic of its own (`UuidInterface::getDateTime()`, works for
-both `UuidV6` and `UuidV7`), so this is a genuine head-to-head, not a strawman — each call
+`ramsey/uuid` has real extraction logic of its own (`UuidInterface::getDateTime()`), so this is a genuine head-to-head, not a strawman — each call
 measured against a UUID generated once outside the timed loop, so only the extraction itself
 is timed. Unlike generation, where PHP's `FFI` boundary was the honest cost, extraction
 flips the result:
 
 | Call | Time | vs. `ramsey/uuid` |
 | --- | ---: | ---: |
-| `->timestamp()` (v6) | 274ns | **88x faster** |
-| `ramsey/uuid`'s `->getDateTime()` (v6) | 24.0µs | baseline |
 | `->timestamp()` (v7) | 293ns | **45x faster** |
 | `ramsey/uuid`'s `->getDateTime()` (v7) | 13.2µs | baseline |
 
@@ -355,12 +346,11 @@ to build and load it yourself:
    $bytes = hyperuuid_native_new_v4();   // 16 raw RFC-9562-ordered bytes
    $id = new \HyperUuid\Uuid($bytes);    // wrap it to get the Uuid API back
 
-   // v6 and v7 take the timestamp; there is no "now" default, as there is none at the C ABI
+   // v7 takes the timestamp; there is no "now" default, as there is none at the C ABI
    $v7 = hyperuuid_native_new_v7((int) floor(microtime(true) * 1000));
    ```
    See [`rust/src/php_ext.rs`](../rust/src/php_ext.rs) for the full function list —
-   `hyperuuid_native_new_v5`/`_new_v6`(`_batch`)/`_new_v7`(`_batch`)/`_v6_unix_millis`/
-   `_v7_unix_millis`, same signatures as `Runtime.php`'s own internal FFI calls, plus
+   `hyperuuid_native_new_v5`/`_new_v7`(`_batch`)/`_v7_unix_millis`, same signatures as `Runtime.php`'s own internal FFI calls, plus
    `hyperuuid_native_version`, which returns the packed integer (`major << 16 | minor << 8 |
    patch`) rather than `nativeVersion()`'s string. The SQL-order conversions are not part of
    the spike.
@@ -375,14 +365,12 @@ you can currently re-run from this repo as-is:
 | --- | ---: | ---: | ---: |
 | `newV4` | 223ns | 135ns | **1.65x** |
 | `newV5` | 244ns | 175ns | 1.40x |
-| `newV6` | 207ns | 113ns | **1.83x** |
 | `newV7` | 210ns | 107ns | **1.98x** |
-| `newV6Batch(1000)` | 19.6µs | 19.3µs | 1.02x |
 | `newV7Batch(1000)` | 16.0µs | 15.8µs | 1.02x |
 
 Worth it for single-item calls (the ~105ns FFI floor is real, but so is a further ~100ns of
 PHP-level `Runtime::` call overhead around it that a native extension skips entirely — nearly
-2x on `newV6`/`newV7`); not worth it for batch calls, where 1000 UUIDs' worth of native
+2x on `newV7`); not worth it for batch calls, where 1000 UUIDs' worth of native
 computation dwarfs the one-time crossing cost either way — which, with the per-PHP-version
 packaging cost above, is why this stays a spike rather than a second shipped backend. See
 [`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning.

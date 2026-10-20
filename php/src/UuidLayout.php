@@ -16,7 +16,8 @@ enum UuidLayout: int
 
     /**
      * The order {@see Uuid::toSqlOrder()} returns, which SQL Server's `uniqueidentifier` sorts
-     * by creation order. Defined for versions 6 and 7 only.
+     * by creation order: an RFC 9562 version 8 layout holding a converted version 7, which the
+     * methods taking a layout read as that source version.
      */
     case SqlServer = 2;
 }

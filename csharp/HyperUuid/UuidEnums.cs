@@ -37,9 +37,9 @@ public enum UuidLayout : uint
 	/// <summary>RFC 9562 order, what every other method in this library takes and returns.</summary>
 	Rfc9562 = 1,
 	/// <summary>
-	/// The order <see cref="UuidGenerator.V7ToSqlOrder(Guid)"/> and
-	/// <see cref="UuidGenerator.V6ToSqlOrder(Guid)"/> return, which SQL Server's
-	/// <c>uniqueidentifier</c> sorts by creation order. Defined for versions 6 and 7 only.
+	/// The RFC 9562 version 8 layout <see cref="UuidGenerator.V7ToSqlOrder(Guid)"/> returns,
+	/// which SQL Server's <c>uniqueidentifier</c> sorts by creation order. Defined for values
+	/// converted from version 7 only: the methods taking it answer for the source version.
 	/// </summary>
 	SqlServer = 2,
 }

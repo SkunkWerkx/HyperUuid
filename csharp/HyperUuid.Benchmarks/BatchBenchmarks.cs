@@ -47,20 +47,4 @@ public class BatchBenchmarks
 
 	[Benchmark(Description = "FillV7(Span<byte>) into existing buffer")]
 	public void V7FillBytes() => UuidGenerator.FillV7(_byteDestination, RfcTestVectorMs);
-
-	[Benchmark(Description = "NewV6 x1000 individually")]
-	public void V6Individual()
-	{
-		for (var i = 0; i < Count; i++)
-			UuidGenerator.NewV6(RfcTestVectorMs);
-	}
-
-	[Benchmark(Description = "NewV6Batch(1000) -> new Guid[]")]
-	public Guid[] V6Batch() => UuidGenerator.NewV6Batch(Count, RfcTestVectorMs);
-
-	[Benchmark(Description = "FillV6(Span<Guid>) into existing array")]
-	public void V6Fill() => UuidGenerator.FillV6(_guidDestination, RfcTestVectorMs);
-
-	[Benchmark(Description = "FillV6(Span<byte>) into existing buffer")]
-	public void V6FillBytes() => UuidGenerator.FillV6(_byteDestination, RfcTestVectorMs);
 }

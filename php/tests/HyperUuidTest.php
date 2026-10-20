@@ -8,6 +8,7 @@ use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
 use HyperUuid\TimestampOutOfRangeException;
 use HyperUuid\Uuid;
+use HyperUuid\UuidLayout;
 use HyperUuid\UuidVariant;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -16,9 +17,10 @@ final class HyperUuidTest extends TestCase
 {
     private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
 
-    // Same constant as rust/src/v6.rs's GREGORIAN_OFFSET_100NS: 100ns ticks between the UUID
-    // Gregorian epoch (1582-10-15) and the Unix epoch (1970-01-01).
-    private const GREGORIAN_OFFSET_100NS = 0x01B2_1DD2_1381_4000;
+    private const WRONG_VERSION = 'the value is not a UUID of the version this conversion takes';
+
+    /** RFC 9562 Appendix A.5's version 6 test vector. */
+    private const RFC_V6_TEST_VECTOR = '1ec9414c-232a-6b00-b3c8-9f6bdeced846';
 
     public function testV4HasVersionAndVariantBits(): void
     {
@@ -73,83 +75,6 @@ final class HyperUuidTest extends TestCase
     {
         $id = HyperUuid::newV5(Namespaces::dns(), '');
         self::assertSame(5, $id->version());
-    }
-
-    public function testV6EmbedsTheTimestamp(): void
-    {
-        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-        $expected = \DateTimeImmutable::createFromFormat(
-            'U.v',
-            sprintf('%d.%03d', intdiv(self::RFC_TEST_VECTOR_MS, 1000), self::RFC_TEST_VECTOR_MS % 1000),
-            new \DateTimeZone('UTC')
-        );
-        self::assertEquals($expected, $id->timestamp());
-    }
-
-    public function testV6HasVersionAndVariantBits(): void
-    {
-        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-        self::assertSame(6, $id->version());
-        self::assertSame(UuidVariant::Rfc9562, $id->variant());
-    }
-
-    public function testV6SetsTheNodeIdMulticastBit(): void
-    {
-        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-        self::assertSame(1, \ord($id->bytes()[10]) & 0x01);
-    }
-
-    public function testV6IsNonDeterministicWithinTheSameMillisecond(): void
-    {
-        $seen = [];
-        for ($i = 0; $i < 100; $i++) {
-            $seen[(string) HyperUuid::newV6(self::RFC_TEST_VECTOR_MS)] = true;
-        }
-        self::assertCount(100, $seen);
-    }
-
-    public function testV6CurrentTimestampIsEmbedded(): void
-    {
-        $before = (int) round(microtime(true) * 1000);
-        $id = HyperUuid::newV6();
-        $after = (int) round(microtime(true) * 1000);
-
-        $embedded = $id->timestamp()->getTimestamp() * 1000 + (int) $id->timestamp()->format('v');
-        self::assertGreaterThanOrEqual($before, $embedded);
-        self::assertLessThanOrEqual($after, $embedded);
-    }
-
-    public function testV6BatchReturnsCountUuidsSharingTheTimestamp(): void
-    {
-        $ids = HyperUuid::newV6Batch(10, self::RFC_TEST_VECTOR_MS);
-        self::assertCount(10, $ids);
-        $expected = \DateTimeImmutable::createFromFormat(
-            'U.v',
-            sprintf('%d.%03d', intdiv(self::RFC_TEST_VECTOR_MS, 1000), self::RFC_TEST_VECTOR_MS % 1000),
-            new \DateTimeZone('UTC')
-        );
-        foreach ($ids as $id) {
-            self::assertSame(6, $id->version());
-            self::assertEquals($expected, $id->timestamp());
-        }
-    }
-
-    public function testV6BatchProducesPairwiseDistinctUuids(): void
-    {
-        $ids = HyperUuid::newV6Batch(100, self::RFC_TEST_VECTOR_MS);
-        $seen = array_unique(array_map(fn ($id) => (string) $id, $ids));
-        self::assertCount(100, $seen);
-    }
-
-    public function testV6BatchCountZeroReturnsEmptyArray(): void
-    {
-        self::assertSame([], HyperUuid::newV6Batch(0, self::RFC_TEST_VECTOR_MS));
-    }
-
-    public function testV6BatchOverflowTimestampThrows(): void
-    {
-        $this->expectException(TimestampOutOfRangeException::class);
-        HyperUuid::newV6Batch(1, PHP_INT_MAX);
     }
 
     public function testV7EmbedsTheTimestamp(): void
@@ -262,15 +187,8 @@ final class HyperUuidTest extends TestCase
 
     public function testTimestampStillReturnsTheRealTimestampWhenThrowOnMismatchIsFalse(): void
     {
-        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
+        $id = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
         self::assertEquals($id->timestamp(), $id->timestamp(throwOnMismatch: false));
-    }
-
-    public function testNewV6AcceptsADateTimeInterfaceInPlaceOfAMillisecondInt(): void
-    {
-        $dt = \DateTimeImmutable::createFromFormat('U', (string) intdiv(self::RFC_TEST_VECTOR_MS, 1000));
-        $id = HyperUuid::newV6($dt);
-        self::assertSame(intdiv(self::RFC_TEST_VECTOR_MS, 1000) * 1000, self::millis($id->timestamp()));
     }
 
     public function testNewV7AcceptsADateTimeInterfaceInPlaceOfAMillisecondInt(): void
@@ -286,51 +204,43 @@ final class HyperUuidTest extends TestCase
         $sqlOrdered = $id->toSqlOrder();
         self::assertFalse($id->equals($sqlOrdered));
         self::assertTrue($id->equals($sqlOrdered->fromSqlOrder()));
-        // Explicit $version should agree with auto-detection.
-        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder(7)));
     }
 
-    public function testV7ToSqlOrderPreservesVersionAndVariantAtOctets7And8(): void
+    public function testV7ToSqlOrderWritesTheVersion8MarkerAtOctet7AndTheVariantAtOctet8(): void
     {
-        $sqlOrdered = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
-        $bytes = $sqlOrdered->bytes();
-        self::assertSame(0x70, \ord($bytes[7]) & 0xF0);
+        $bytes = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS)->toSqlOrder()->bytes();
+        self::assertSame(0x80, \ord($bytes[7]) & 0xF0);
         self::assertSame(0x80, \ord($bytes[8]) & 0xC0);
-    }
-
-    public function testV6ToSqlOrderRoundTripsThroughFromSqlOrder(): void
-    {
-        $id = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-        $sqlOrdered = $id->toSqlOrder();
-        self::assertFalse($id->equals($sqlOrdered));
-        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder()));
-        self::assertTrue($id->equals($sqlOrdered->fromSqlOrder(6)));
-    }
-
-    public function testV6ToSqlOrderPreservesVersionAndVariantAtOctets8And6(): void
-    {
-        // Different offsets than v7's sql order — see Uuid::toSqlOrder()'s doc comment for why.
-        $sqlOrdered = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
-        $bytes = $sqlOrdered->bytes();
-        self::assertSame(0x60, \ord($bytes[8]) & 0xF0);
-        self::assertSame(0x80, \ord($bytes[6]) & 0xC0);
-    }
-
-    public function testFromSqlOrderAutoDetectsV6AndV7Independently(): void
-    {
-        $v6 = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-        $v7 = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
-
-        self::assertSame(6, $v6->toSqlOrder()->fromSqlOrder()->version());
-        self::assertSame(7, $v7->toSqlOrder()->fromSqlOrder()->version());
-        self::assertTrue($v6->equals($v6->toSqlOrder()->fromSqlOrder()));
-        self::assertTrue($v7->equals($v7->toSqlOrder()->fromSqlOrder()));
     }
 
     public function testToSqlOrderThrowsForUnsupportedVersion(): void
     {
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(self::WRONG_VERSION);
         HyperUuid::newV4()->toSqlOrder();
+    }
+
+    public function testEveryV7ConvertsToSqlOrderUpToTheLargestTimestamp(): void
+    {
+        // The layout holds all 122 free bits of a version 7, so no timestamp is out of range.
+        foreach ([0, (1 << 47) - 1, 1 << 47, 0x0000_FFFF_FFFF_FFFF] as $millis) {
+            $id = HyperUuid::newV7($millis);
+            $sql = $id->toSqlOrder();
+            self::assertSame($millis, $sql->unixMillis(UuidLayout::SqlServer), (string) $id);
+            self::assertTrue($id->equals($sql->fromSqlOrder()), (string) $id);
+        }
+    }
+
+    public function testToSqlOrderRefusesAVersion6(): void
+    {
+        $id = Uuid::parse(self::RFC_V6_TEST_VECTOR);
+        try {
+            $id->toSqlOrder();
+            self::fail('toSqlOrder() accepted a version 6');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame(self::WRONG_VERSION, $e->getMessage());
+        }
+        self::assertSame(self::RFC_V6_TEST_VECTOR, (string) $id);
     }
 
     /**
@@ -344,33 +254,33 @@ final class HyperUuidTest extends TestCase
         $ours = new Uuid($ramsey->getBytes());
 
         self::assertSame(7, $ours->version());
-        // Millisecond precision only — ramsey's getDateTime() carries microseconds for v7/v6,
+        // Millisecond precision only — ramsey's getDateTime() carries microseconds for v7,
         // but the RFC 9562 field itself (and this binding's timestamp()) is millisecond-only,
         // so anything finer isn't part of what's actually embedded in the UUID to compare.
         self::assertSame(self::millis($ramsey->getDateTime()), self::millis($ours->timestamp()));
     }
 
     /**
-     * Same proof as above, for version 6 -- but compared against Ramsey's own raw parsed
-     * timestamp field, not getDateTime(). v6's field is 100ns Gregorian-epoch ticks, finer
-     * than the millisecond this binding (and the RFC's own v6 sort guarantee) cares about;
-     * getDateTime()'s `new DateTimeImmutable('@seconds.microseconds')` string construction
-     * has its own sub-millisecond precision quirks right at that boundary, independent of
-     * whether the UUID bytes themselves agree -- confirmed by intermittent 1ms mismatches
-     * even though both getDateTime() and timestamp() decode the identical fixed byte array,
-     * which neither a race nor a bug in this binding's bit-layout extraction could explain.
-     * Flooring Ramsey's raw ticks with the same integer arithmetic v6.rs uses sidesteps that
-     * entirely, so this is still a real cross-implementation byte-compatibility proof.
+     * A version 6 from another generator still reports its version nibble, but this library
+     * reads no version 6 timestamp: unixMillis() answers null and timestamp() treats it like
+     * any other version without one.
      */
-    public function testTimestampExtractsFromRamseyUuidsNativeV6Generator(): void
+    public function testAVersion6FromAnotherGeneratorHasNoTimestamp(): void
     {
-        $ramsey = \Ramsey\Uuid\Uuid::uuid6();
-        $ours = new Uuid($ramsey->getBytes());
-
-        self::assertSame(6, $ours->version());
-        $ticks = hexdec($ramsey->getFields()->getTimestamp()->toString());
-        $expectedMillis = intdiv($ticks - self::GREGORIAN_OFFSET_100NS, 10_000);
-        self::assertSame($expectedMillis, self::millis($ours->timestamp()));
+        foreach ([Uuid::parse(self::RFC_V6_TEST_VECTOR), new Uuid(\Ramsey\Uuid\Uuid::uuid6()->getBytes())] as $id) {
+            self::assertSame(6, $id->version(), (string) $id);
+            self::assertNull($id->unixMillis(), (string) $id);
+            self::assertNull($id->timestamp(throwOnMismatch: false), (string) $id);
+            try {
+                $id->timestamp();
+                self::fail("timestamp() accepted {$id}");
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame(
+                    'timestamp() is only defined for RFC 9562 version 7 UUIDs, got version 6',
+                    $e->getMessage()
+                );
+            }
+        }
     }
 
     private static function millis(\DateTimeInterface $dt): int
@@ -405,23 +315,6 @@ final class HyperUuidTest extends TestCase
         // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
         for ($i = 0; $i < 200; $i++) {
             $ids[] = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS + 1_000_000);
-        }
-
-        $sqlOrdered = array_map(static fn (Uuid $id): string => $id->toSqlOrder()->bytes(), $ids);
-        $sorted = $sqlOrdered;
-        usort($sorted, [self::class, 'sqlGuidCompare']);
-
-        self::assertSame($sqlOrdered, $sorted);
-    }
-
-    public function testV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps(): void
-    {
-        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
-        // to sort in creation order even in plain RFC order, so this only exercises strictly
-        // increasing timestamps, where the timestamp alone determines order with no tie to break.
-        $ids = [];
-        for ($i = 0; $i < 300; $i++) {
-            $ids[] = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS + $i);
         }
 
         $sqlOrdered = array_map(static fn (Uuid $id): string => $id->toSqlOrder()->bytes(), $ids);
@@ -506,15 +399,6 @@ final class HyperUuidTest extends TestCase
         self::assertGreaterThan(0, strcmp($fromObjects[0]->bytes(), $previous));
     }
 
-    public function testNewV6BatchBytesReturnsVersion6(): void
-    {
-        $bytes = HyperUuid::newV6BatchBytes(8, self::RFC_TEST_VECTOR_MS);
-        self::assertSame(8 * 16, strlen($bytes));
-        for ($i = 0; $i < 8; $i++) {
-            self::assertSame(6, (new Uuid(substr($bytes, $i * 16, 16)))->version(), "item {$i}");
-        }
-    }
-
     public function testBatchBytesDefaultsToNow(): void
     {
         $before = (int) (microtime(true) * 1000);
@@ -526,18 +410,10 @@ final class HyperUuidTest extends TestCase
         self::assertLessThanOrEqual($after + 1000, $ms);
     }
 
-    public function testV6OverflowTimestampThrows(): void
-    {
-        $this->expectException(TimestampOutOfRangeException::class);
-        HyperUuid::newV6(PHP_INT_MAX);
-    }
-
     /** @return iterable<string, array{string}> */
     public static function batchDoors(): iterable
     {
-        yield 'newV6Batch' => ['newV6Batch'];
         yield 'newV7Batch' => ['newV7Batch'];
-        yield 'newV6BatchBytes' => ['newV6BatchBytes'];
         yield 'newV7BatchBytes' => ['newV7BatchBytes'];
     }
 
@@ -545,7 +421,7 @@ final class HyperUuidTest extends TestCase
     public function testANegativeBatchCountIsACallerBug(string $door): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        // v6 names the uint32_t range, v7 its counter-space limit (HyperUuid::MAX_V7_BATCH).
+        // The message names the counter-space limit (HyperUuid::MAX_V7_BATCH).
         $this->expectExceptionMessageMatches('/^count must be between 0 and \\d+.*, got -1$/');
         HyperUuid::$door(-1, self::RFC_TEST_VECTOR_MS);
     }
@@ -560,7 +436,6 @@ final class HyperUuidTest extends TestCase
 
     public function testBatchBytesCountZeroReturnsAnEmptyString(): void
     {
-        self::assertSame('', HyperUuid::newV6BatchBytes(0, self::RFC_TEST_VECTOR_MS));
         self::assertSame('', HyperUuid::newV7BatchBytes(0, self::RFC_TEST_VECTOR_MS));
     }
 
@@ -616,26 +491,18 @@ final class HyperUuidTest extends TestCase
         self::assertInstanceOf(\Stringable::class, $id);
     }
 
-    public function testFromSqlOrderRejectsAVersionOtherThanSixOrSeven(): void
-    {
-        $sqlOrdered = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS)->toSqlOrder();
-        $this->expectException(\InvalidArgumentException::class);
-        $sqlOrdered->fromSqlOrder(4);
-    }
-
     public function testFromSqlOrderThrowsWhenNeitherInverseDecodes(): void
     {
-        // Nil decodes to version 0 under both inverses, so there is nothing to detect.
+        // Nil has no SQL layout version 8 and variant, so it is no SQL-ordered value.
         $this->expectException(\InvalidArgumentException::class);
         Uuid::nil()->fromSqlOrder();
     }
 
-    public function testNewV6AndV7EmbedADateTimesMilliseconds(): void
+    public function testNewV7EmbedsADateTimesMilliseconds(): void
     {
         // Sub-second precision survives to the millisecond, and no further.
         $dt = new \DateTimeImmutable('2022-02-22T19:22:22.123456Z');
         $expected = $dt->getTimestamp() * 1000 + 123;
-        self::assertSame($expected, self::millis(HyperUuid::newV6($dt)->timestamp()));
         self::assertSame($expected, self::embeddedMillis(HyperUuid::newV7($dt)));
     }
 

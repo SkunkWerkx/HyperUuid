@@ -9,7 +9,7 @@
          that keeps every binding's manifest in lockstep with rust/Cargo.toml. Packed as-is,
          no CI-side override; UuidGenerator.NativeVersion reports the core's own, so a test
          pins the two together. -->
-    <Version>0.8.0</Version>
+    <Version>0.9.0</Version>
     <!-- Windows filesystems are case-insensitive: the managed assembly's default filename
          (HyperUuid.dll, from the project name) and the native library's filename
          (hyperuuid.dll, from [LibraryImport("hyperuuid")]'s auto-resolution) differ only by
@@ -20,7 +20,7 @@
          RootNamespace kept explicit so this rename doesn't shift the default namespace. -->
     <AssemblyName>HyperUuid.Managed</AssemblyName>
     <RootNamespace>HyperUuid</RootNamespace>
-    <Description>RFC 9562 UUID v4/v5/v6/v7 generation — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
+    <Description>RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order for v7 — high-performance, allocation-free, AOT/trim-friendly P/Invoke bindings straight into a native Rust core (libhyperuuid). No runtime bridge, no reflection.</Description>
     <Authors>Brian Buvinghausen</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/SkunkWerkx/HyperUuid</PackageProjectUrl>

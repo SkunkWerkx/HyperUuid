@@ -6,8 +6,9 @@
 public enum UuidLayout: UInt32, Sendable, CaseIterable {
     /// RFC 9562 order, what every other method in this library takes and returns.
     case rfc9562 = 1
-    /// The order `v7ToSqlOrder` and `v6ToSqlOrder` return, which SQL Server's
-    /// `uniqueidentifier` sorts by creation order. Defined for versions 6 and 7 only.
+    /// The order `v7ToSqlOrder` returns, an RFC 9562 version 8 layout that SQL Server's
+    /// `uniqueidentifier` sorts by creation order. Read in it, a value's version is the one it
+    /// was converted from, 7.
     case sqlServer = 2
 }
 

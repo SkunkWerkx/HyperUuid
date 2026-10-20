@@ -1,6 +1,6 @@
 //! RFC 9562 Section 6.2 Method 1 — UUID version 7: time-ordered, monotonically increasing.
 
-use crate::{Layout, Timestamp, Uuid};
+use crate::{Layout, SqlOrderError, Timestamp, Uuid, sql};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// Largest Unix-epoch millisecond timestamp that fits the 48-bit `unix_ts_ms` field
@@ -335,15 +335,15 @@ pub fn unix_millis(uuid: &Uuid) -> u64 {
 }
 
 /// [`unix_millis`] for a version 7 UUID held in `layout`'s byte order, reading a SQL-ordered
-/// value's permuted octets directly rather than converting it back first. Meaningful only for
-/// a genuine version 7 UUID in that layout, the same as [`unix_millis`];
-/// [`Uuid::is_rfc_in`] is the check.
+/// value's octets directly rather than converting it back first. Meaningful only for a genuine
+/// version 7 UUID in that layout, the same as [`unix_millis`]; [`Uuid::is_rfc_in`] is the
+/// check.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn unix_millis_in(uuid: &Uuid, layout: Layout) -> u64 {
     let b = uuid.as_bytes();
     match layout {
         Layout::Rfc9562 => unix_millis(uuid),
-        // to_sql_order moves octets 0-5, the timestamp, to octets 10-15 unchanged.
+        // to_sql_order puts the timestamp first in the key, octets 10-15 unchanged.
         Layout::SqlServer => {
             ((b[10] as u64) << 40)
                 | ((b[11] as u64) << 32)
@@ -355,94 +355,67 @@ pub fn unix_millis_in(uuid: &Uuid, layout: Layout) -> u64 {
     }
 }
 
-/// Converts an RFC 9562-ordered version 7 UUID's bytes to the byte order SQL Server's
-/// `uniqueidentifier` needs on the wire to sort by creation order.
+/// Converts an RFC 9562 version 7 UUID to SQL Server order: the version 8 layout [`sql`]
+/// describes, whose `uniqueidentifier` sort is creation order.
 ///
-/// `System.Data.SqlTypes.SqlGuid` (and therefore T-SQL `ORDER BY` on a `uniqueidentifier`
-/// column) doesn't compare a GUID's 16 bytes left to right — it compares them in this fixed
-/// significance order, most-significant first: octets `10,11,12,13,14,15, 8,9, 6,7, 4,5,
-/// 0,1,2,3`. This function moves this UUID's 48-bit timestamp and 26-bit counter — the two
-/// fields that actually determine creation order — into those most-significant octets, and
-/// moves the 48 bits of trailing entropy, which carries no ordering information, into the
-/// least-significant ones as one untouched 6-byte block (its bits are relocated, not
-/// individually reshuffled). The version nibble stays at octet 7's top nibble and the variant
-/// bits at octet 8's top two, matching where they already sit once run through .NET's own
-/// `Guid.ToByteArray()` layout — the reason a value's version is readable without first
-/// knowing which of the two orders it's in.
+/// The key is the 48-bit timestamp, then the 26-bit counter, then the 48 trailing random bits
+/// as one block. So the timestamp lands in octets 10-15, the counter's top 14 bits in 8-9 and
+/// its low 12 in 6-7, both split around the version and variant, and the random block in 4-5
+/// and 0-3, relocated whole rather than reshuffled. Within a millisecond, values sort by
+/// counter, which [`new_v7_batch`] and the monotonic [`new_v7`] fill in creation order.
 ///
-/// Re-derived directly against these RFC 9562 byte offsets — see this project's own
-/// [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) and
-/// [Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) for the C# prior art this
-/// was checked against, which works in terms of .NET's internal mixed-endian `Guid` layout
-/// instead; the two are algebraically equivalent.
+/// The value is no longer a version 7: RFC 9562 defines a v7's layout, and §6.11 sends a
+/// different byte order to version 8. So SQL Server's text form, and every `Guid` built from
+/// these bytes, shows version 8. [`Uuid::version_in`] with [`Layout::SqlServer`] still
+/// answers 7, and [`to_rfc_order`] gives back the exact original: the layout holds all 122 of
+/// a v7's free bits, so every version 7 converts.
 ///
-/// Meaningful only for a genuine version 7 UUID — same convention as [`unix_millis`], the
-/// caller is responsible for checking that first if it matters.
+/// Refuses a value that isn't an RFC 9562 version 7 ([`SqlOrderError::WrongVersion`]).
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
-pub fn to_sql_order(uuid: &Uuid) -> Uuid {
+pub fn to_sql_order(uuid: &Uuid) -> Result<Uuid, SqlOrderError> {
+    if !uuid.is_rfc(7) {
+        return Err(SqlOrderError::WrongVersion);
+    }
+    let millis = unix_millis(uuid);
     let rfc = uuid.as_bytes();
-
     let counter = ((rfc[6] as u32 & 0x0F) << 22)
         | ((rfc[7] as u32) << 14)
         | ((rfc[8] as u32 & 0x3F) << 8)
         | (rfc[9] as u32);
-    let top14 = (counter >> 12) & 0x3FFF;
-    let bottom12 = counter & 0xFFF;
-    let version = rfc[6] & 0xF0;
-    let variant = rfc[8] & 0xC0;
-
-    let mut sql = [0u8; 16];
-    sql[0] = rfc[12];
-    sql[1] = rfc[13];
-    sql[2] = rfc[14];
-    sql[3] = rfc[15];
-    sql[4] = rfc[10];
-    sql[5] = rfc[11];
-    sql[6] = ((bottom12 >> 4) & 0xFF) as u8;
-    sql[7] = version | (bottom12 & 0x0F) as u8;
-    sql[8] = variant | ((top14 >> 8) & 0x3F) as u8;
-    sql[9] = (top14 & 0xFF) as u8;
-    sql[10] = rfc[0];
-    sql[11] = rfc[1];
-    sql[12] = rfc[2];
-    sql[13] = rfc[3];
-    sql[14] = rfc[4];
-    sql[15] = rfc[5];
-
-    Uuid::from_bytes(sql)
+    let random = u64::from_be_bytes([0, 0, rfc[10], rfc[11], rfc[12], rfc[13], rfc[14], rfc[15]]);
+    Ok(sql::scatter(
+        (millis as u128) << 74 | (counter as u128) << 48 | random as u128,
+    ))
 }
 
-/// Inverse of [`to_sql_order`] — converts a SQL-Server-ordered version 7 UUID's bytes back to
-/// RFC 9562 order.
+/// Inverse of [`to_sql_order`]: converts a SQL-ordered value back to the RFC 9562 version 7
+/// it came from. Refuses anything without the SQL layout's version 8 and variant
+/// ([`SqlOrderError::WrongVersion`]), including 0.8.0's form of this layout, which kept a 7
+/// where the 8 now is.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
-pub fn to_rfc_order(uuid: &Uuid) -> Uuid {
+pub fn to_rfc_order(uuid: &Uuid) -> Result<Uuid, SqlOrderError> {
     let sql = uuid.as_bytes();
-
-    let top14 = ((sql[8] as u32 & 0x3F) << 8) | (sql[9] as u32);
-    let bottom12 = ((sql[6] as u32) << 4) | (sql[7] as u32 & 0x0F);
-    let counter = (top14 << 12) | bottom12;
-    let version = sql[7] & 0xF0;
-    let variant = sql[8] & 0xC0;
+    if sql::source_version(sql) != 7 {
+        return Err(SqlOrderError::WrongVersion);
+    }
+    let key = sql::key(sql);
+    let millis = (key >> 74) as u64;
+    let counter = (key >> 48) as u32 & COUNTER_MASK;
+    let random = (key as u64).to_be_bytes();
 
     let mut rfc = [0u8; 16];
-    rfc[0] = sql[10];
-    rfc[1] = sql[11];
-    rfc[2] = sql[12];
-    rfc[3] = sql[13];
-    rfc[4] = sql[14];
-    rfc[5] = sql[15];
-    rfc[6] = version | ((counter >> 22) & 0x0F) as u8;
+    let millis = millis.to_be_bytes();
+    rfc[0..6].copy_from_slice(&[
+        millis[2], millis[3], millis[4], millis[5], millis[6], millis[7],
+    ]);
+    rfc[6] = 0x70 | ((counter >> 22) & 0x0F) as u8;
     rfc[7] = ((counter >> 14) & 0xFF) as u8;
-    rfc[8] = variant | ((counter >> 8) & 0x3F) as u8;
+    rfc[8] = 0x80 | ((counter >> 8) & 0x3F) as u8;
     rfc[9] = (counter & 0xFF) as u8;
-    rfc[10] = sql[4];
-    rfc[11] = sql[5];
-    rfc[12] = sql[0];
-    rfc[13] = sql[1];
-    rfc[14] = sql[2];
-    rfc[15] = sql[3];
-
-    Uuid::from_bytes(rfc)
+    rfc[10..16].copy_from_slice(&[
+        random[2], random[3], random[4], random[5], random[6], random[7],
+    ]);
+    Ok(Uuid::from_bytes(rfc))
 }
 
 #[cfg(test)]

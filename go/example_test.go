@@ -92,22 +92,26 @@ func ExampleFillV7BytesAt() {
 }
 
 func ExampleGetTimestamp() {
-	v6, err := hyperuuid.NewV6AtTime(appendixA6)
+	v7, err := hyperuuid.NewV7AtTime(appendixA6)
 	if err != nil {
 		log.Fatal(err)
 	}
-	created, err := hyperuuid.GetTimestamp(v6)
+	created, err := hyperuuid.GetTimestamp(v7)
 	fmt.Println(created, err)
 
-	// Version-agnostic: a UUID with no embedded timestamp is an error, not a wrong answer.
+	// It checks the version itself: a UUID with no timestamp it reads is an error, not a
+	// wrong answer — a version 4, and a version 6 from another generator alike.
 	v4, err := hyperuuid.NewV4()
 	if err != nil {
 		log.Fatal(err)
 	}
 	_, err = hyperuuid.GetTimestamp(v4)
 	fmt.Println(errors.Is(err, hyperuuid.ErrNotTimeBased))
+	_, err = hyperuuid.GetTimestamp(uuid.MustParse("1ec9414c-232a-6b00-b3c8-9f6bdeced846"))
+	fmt.Println(errors.Is(err, hyperuuid.ErrNotTimeBased))
 	// Output:
 	// 2022-02-22 19:22:22 +0000 UTC <nil>
+	// true
 	// true
 }
 
@@ -116,18 +120,28 @@ func ExampleV7ToSqlOrder() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// The byte order SQL Server's uniqueidentifier needs to sort by creation order...
+	// The version 8 layout SQL Server's uniqueidentifier sorts by creation order...
 	sqlOrdered, err := hyperuuid.V7ToSqlOrder(id)
 	if err != nil {
 		log.Fatal(err)
 	}
-	// ...and back again when the value is read.
+	// ...which still says it came from a version 7...
+	source, err := hyperuuid.VersionIn(sqlOrdered, hyperuuid.LayoutSqlServer)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// ...and converts back to exactly the original when the value is read.
 	roundTripped, err := hyperuuid.V7FromSqlOrder(sqlOrdered)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(sqlOrdered != id, roundTripped == id)
-	// Output: true true
+	fmt.Println(sqlOrdered[7]>>4, source, roundTripped == id)
+	// A version 6 is refused, not converted.
+	_, err = hyperuuid.V7ToSqlOrder(uuid.MustParse("1ec9414c-232a-6b00-b3c8-9f6bdeced846"))
+	fmt.Println(errors.Is(err, hyperuuid.ErrWrongVersion))
+	// Output:
+	// 8 7 true
+	// true
 }
 
 func ExampleNewV7At_outOfRange() {

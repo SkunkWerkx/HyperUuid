@@ -130,59 +130,6 @@ final class UuidGeneratorTests: XCTestCase {
     // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
     let rfcTestVectorMs: UInt64 = 1_645_557_742_000
 
-    func testV6EmbedsTheTimestamp() throws {
-        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
-        let timestamp = try UuidGenerator.v6Timestamp(id)
-        XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
-    }
-
-    func testV6HasVersionAndVariantBits() throws {
-        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
-        let bytes = id.rfcBytes
-        XCTAssertEqual(bytes[6] >> 4, 6)
-        XCTAssertEqual(bytes[8] >> 6, 0b10)
-    }
-
-    func testV6SetsTheNodeIdMulticastBit() throws {
-        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
-        XCTAssertEqual(id.rfcBytes[10] & 0x01, 0x01)
-    }
-
-    func testV6IsNonDeterministicWithinTheSameMillisecond() throws {
-        var seen = Set<UUID>()
-        for _ in 0..<100 {
-            seen.insert(try UuidGenerator.newV6(unixMillis: rfcTestVectorMs))
-        }
-        XCTAssertEqual(seen.count, 100)
-    }
-
-    func testV6BatchReturnsCountUuidsSharingTheTimestamp() throws {
-        let ids = try UuidGenerator.newV6Batch(count: 10, unixMillis: rfcTestVectorMs)
-        XCTAssertEqual(ids.count, 10)
-        for id in ids {
-            let timestamp = try UuidGenerator.v6Timestamp(id)
-            XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
-        }
-    }
-
-    func testV6BatchProducesPairwiseDistinctUuids() throws {
-        let ids = try UuidGenerator.newV6Batch(count: 100, unixMillis: rfcTestVectorMs)
-        XCTAssertEqual(Set(ids).count, 100)
-    }
-
-    func testV6BatchCountZeroReturnsEmptyArray() throws {
-        XCTAssertEqual(try UuidGenerator.newV6Batch(count: 0, unixMillis: rfcTestVectorMs), [])
-    }
-
-    func testV6BatchOverflowTimestampThrows() {
-        XCTAssertThrowsError(try UuidGenerator.newV6Batch(count: 1, unixMillis: UInt64.max)) { error in
-            guard case UuidGenerator.Error.timestampOutOfRange = error else {
-                XCTFail("expected timestampOutOfRange, got \(error)")
-                return
-            }
-        }
-    }
-
     func testNilAndMaxUUIDs() {
         XCTAssertEqual(WellKnownUuids.nilUUID.uuidString, "00000000-0000-0000-0000-000000000000")
         XCTAssertEqual(WellKnownUuids.maxUUID.uuidString, "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")
@@ -247,12 +194,6 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), maxMs)
     }
 
-    func testNewV6FromDateMatchesNewV6FromTheEquivalentMillis() throws {
-        let date = Date(timeIntervalSince1970: Double(rfcTestVectorMs) / 1000)
-        let id = try UuidGenerator.newV6(date)
-        XCTAssertEqual(try UuidGenerator.v6UnixMillis(id), rfcTestVectorMs)
-    }
-
     func testNewV7FromDateMatchesNewV7FromTheEquivalentMillis() throws {
         let date = Date(timeIntervalSince1970: Double(rfcTestVectorMs) / 1000)
         let id = try UuidGenerator.newV7(date)
@@ -284,12 +225,6 @@ final class UuidGeneratorTests: XCTestCase {
         }
     }
 
-    func testNewV6FromAnUnrepresentableDateThrowsInsteadOfTrapping() {
-        for (label, date) in Self.unrepresentableDates {
-            assertTimestampOutOfRange(label, try UuidGenerator.newV6(date))
-        }
-    }
-
     func testNewV7FromAnUnrepresentableDateThrowsInsteadOfTrapping() {
         for (label, date) in Self.unrepresentableDates {
             assertTimestampOutOfRange(label, try UuidGenerator.newV7(date))
@@ -306,11 +241,6 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertNil(try UuidGenerator.getTimestamp(v4))
         let v5 = try UuidGenerator.newV5(namespace: Namespaces.dns, name: "test")
         XCTAssertNil(try UuidGenerator.getTimestamp(v5))
-    }
-
-    func testGetTimestampMatchesV6Timestamp() throws {
-        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
-        XCTAssertEqual(try UuidGenerator.getTimestamp(id), try UuidGenerator.v6Timestamp(id))
     }
 
     func testGetTimestampMatchesV7Timestamp() throws {
@@ -357,11 +287,14 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertEqual(try UuidGenerator.v7FromSqlOrder(sqlOrdered), id)
     }
 
-    func testV7ToSqlOrderPreservesVersionAndVariantAtOctets7And8() throws {
-        let sqlOrdered = try UuidGenerator.v7ToSqlOrder(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs))
-        let bytes = sqlOrdered.rfcBytes
-        XCTAssertEqual(bytes[7] & 0xF0, 0x70)
+    func testV7ToSqlOrderIsAVersion8WithTheTimestampMostSignificant() throws {
+        let id = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+        let bytes = try UuidGenerator.v7ToSqlOrder(id).rfcBytes
+        // Version 8 and the RFC variant where SQL Server's text form shows them.
+        XCTAssertEqual(bytes[7] & 0xF0, 0x80)
         XCTAssertEqual(bytes[8] & 0xC0, 0x80)
+        // The 48-bit timestamp, whole, in the octets uniqueidentifier compares first.
+        XCTAssertEqual(Array(bytes[10..<16]), Array(id.rfcBytes[0..<6]))
     }
 
     /// Replicates `System.Data.SqlTypes.SqlGuid.CompareTo`'s fixed byte significance order —
@@ -395,37 +328,49 @@ final class UuidGeneratorTests: XCTestCase {
         }
     }
 
-    func testV6ToSqlOrderRoundTripsThroughV6FromSqlOrder() throws {
-        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
-        let sqlOrdered = try UuidGenerator.v6ToSqlOrder(id)
-        XCTAssertNotEqual(sqlOrdered, id)
-        XCTAssertEqual(try UuidGenerator.v6FromSqlOrder(sqlOrdered), id)
+    func testSqlOrderRefusals() throws {
+        let v4 = try UuidGenerator.newV4()
+        XCTAssertThrowsError(try UuidGenerator.v7ToSqlOrder(v4)) { error in
+            guard case UuidGenerator.Error.wrongVersion = error else { return XCTFail("\(error)") }
+        }
+        // An RFC-ordered value is not a SQL-ordered one. RFC 9562 A.6's v7, fixed: a fresh v7's
+        // octet 7 carries the SQL layout's 8 one time in 16, and is then taken for one.
+        let seven = UUID(uuidString: "017f22e2-79b0-7cc3-98c4-dc0c0c07398f")!
+        XCTAssertThrowsError(try UuidGenerator.v7FromSqlOrder(seven)) { error in
+            guard case UuidGenerator.Error.wrongVersion = error else { return XCTFail("\(error)") }
+        }
+        // A version 6 (RFC 9562 A.5) is the wrong version too, and the in-place form leaves it alone.
+        var six = UUID(uuidString: "1ec9414c-232a-6b00-b3c8-9f6bdeced846")!.rfcBytes
+        let original = six
+        XCTAssertThrowsError(try UuidGenerator.v7ToSqlOrder(UUID(rfcBytes: six))) { error in
+            guard case UuidGenerator.Error.wrongVersion = error else { return XCTFail("\(error)") }
+        }
+        try six.withUnsafeMutableBytes { raw in
+            XCTAssertThrowsError(try UuidGenerator.v7ToSqlOrder(bytes: raw)) { error in
+                guard case UuidGenerator.Error.wrongVersion = error else { return XCTFail("\(error)") }
+            }
+        }
+        XCTAssertEqual(six, original, "a refused in-place conversion leaves the bytes alone")
     }
 
-    func testV6ToSqlOrderPreservesVersionAndVariant() throws {
-        // Different offsets than v7's sql order — see v6ToSqlOrder's doc comment for why.
-        let sqlOrdered = try UuidGenerator.v6ToSqlOrder(try UuidGenerator.newV6(unixMillis: rfcTestVectorMs))
-        let bytes = sqlOrdered.rfcBytes
-        XCTAssertEqual(bytes[8] & 0xF0, 0x60)
-        XCTAssertEqual(bytes[6] & 0xC0, 0x80)
+    // The layout holds all 122 of a v7's free bits, so every timestamp converts, the 48-bit
+    // maximum included, and comes back exact.
+    func testEveryV7TimestampConvertsToSqlOrder() throws {
+        for millis: UInt64 in [0, (1 << 47) - 1, 1 << 47, (1 << 48) - 1] {
+            let id = try UuidGenerator.newV7(unixMillis: millis)
+            let sql = try UuidGenerator.v7ToSqlOrder(id)
+            XCTAssertEqual(try UuidGenerator.v7FromSqlOrder(sql), id, "\(millis)")
+            XCTAssertEqual(try UuidGenerator.v7UnixMillis(sql, layout: .sqlServer), millis, "\(millis)")
+        }
     }
 
-    func testV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps() throws {
-        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
-        // to sort in creation order even in plain RFC order, so this only exercises strictly
-        // increasing timestamps, where the timestamp alone determines order with no tie to break.
-        var ids: [UUID] = []
-        for i in UInt64(0)..<300 {
-            ids.append(try UuidGenerator.newV6(unixMillis: rfcTestVectorMs + i))
-        }
-
-        let sqlOrdered = try ids.map { try UuidGenerator.v6ToSqlOrder($0).rfcBytes }
-        let sorted = sqlOrdered.sorted(by: sqlGuidCompare)
-
-        XCTAssertEqual(sqlOrdered.count, sorted.count)
-        for (a, b) in zip(sqlOrdered, sorted) {
-            XCTAssertEqual(a, b)
-        }
+    func testSqlOrderErrorMessages() {
+        XCTAssertEqual(
+            UuidGenerator.Error.wrongVersion.description,
+            "hyperuuid: the value is not a UUID of the version this conversion takes")
+        XCTAssertEqual(
+            UuidGenerator.Error.timestampOutOfRange.description,
+            "hyperuuid: unix millisecond timestamp must be non-negative and fit within 48 bits")
     }
 
     // MARK: - Destination-buffer fills
@@ -450,28 +395,14 @@ final class UuidGeneratorTests: XCTestCase {
         }
     }
 
-    func testFillV6IntoUUIDArray() throws {
-        var dst = [UUID](repeating: UUID(), count: 32)
-        try UuidGenerator.fillV6(into: &dst, unixMillis: rfcTestVectorMs)
-        for (i, id) in dst.enumerated() {
-            XCTAssertEqual(id.rfcBytes[6] >> 4, 6, "item \(i) version")
-        }
-    }
-
     func testFillIntoUUIDArrayWithoutATimestampUsesTheCurrentTime() throws {
         let before = UInt64(Date().timeIntervalSince1970 * 1000)
         var v7 = [UUID](repeating: UUID(), count: 8)
         try UuidGenerator.fillV7(into: &v7)
-        var v6 = [UUID](repeating: UUID(), count: 8)
-        try UuidGenerator.fillV6(into: &v6)
         let after = UInt64(Date().timeIntervalSince1970 * 1000)
         for id in v7 {
             XCTAssertEqual(id.rfcBytes[6] >> 4, 7)
             XCTAssertTrue((before...after).contains(try UuidGenerator.v7UnixMillis(id)))
-        }
-        for id in v6 {
-            XCTAssertEqual(id.rfcBytes[6] >> 4, 6)
-            XCTAssertTrue((before...after).contains(try UuidGenerator.v6UnixMillis(id)))
         }
     }
 
@@ -507,14 +438,6 @@ final class UuidGeneratorTests: XCTestCase {
         let want = try UuidGenerator.v7ToSqlOrder(id).rfcBytes
         var got = id.rfcBytes
         try got.withUnsafeMutableBytes { try UuidGenerator.v7ToSqlOrder(bytes: $0) }
-        XCTAssertEqual(got, want)
-    }
-
-    func testV6ToSqlOrderBytesAgreesWithUUIDForm() throws {
-        let id = try UuidGenerator.newV6(unixMillis: rfcTestVectorMs)
-        let want = try UuidGenerator.v6ToSqlOrder(id).rfcBytes
-        var got = id.rfcBytes
-        try got.withUnsafeMutableBytes { try UuidGenerator.v6ToSqlOrder(bytes: $0) }
         XCTAssertEqual(got, want)
     }
 

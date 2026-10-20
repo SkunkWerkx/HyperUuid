@@ -79,11 +79,8 @@ def test_exception_types_are_correct():
 # field (the core's own check) or does not even fit the u64 the core takes (which PyO3 would
 # otherwise surface as OverflowError).
 _TIMESTAMP_DOORS = [
-    hyperuuid.new_v6,
     hyperuuid.new_v7,
-    lambda millis: hyperuuid.new_v6_batch(2, millis),
     lambda millis: hyperuuid.new_v7_batch(2, millis),
-    lambda millis: hyperuuid.fill_v6(bytearray(32), millis),
     lambda millis: hyperuuid.fill_v7(bytearray(32), millis),
 ]
 
@@ -111,14 +108,10 @@ def test_an_empty_batch_or_fill_still_checks_its_timestamp():
     with pytest.raises(ValueError):
         hyperuuid.new_v7_batch(0, 2**48)
     with pytest.raises(ValueError):
-        hyperuuid.new_v6_batch(0, 2**63)
-    with pytest.raises(ValueError):
         hyperuuid.fill_v7(bytearray(0), 2**48)
-    with pytest.raises(ValueError):
-        hyperuuid.fill_v6(bytearray(0), 2**63)
 
 
-@pytest.mark.parametrize("batch", [hyperuuid.new_v6_batch, hyperuuid.new_v7_batch])
+@pytest.mark.parametrize("batch", [hyperuuid.new_v7_batch])
 @pytest.mark.parametrize("count", [-1, 2**32, 2**32 + 1, 2**60 + 1, 2**64])
 def test_a_batch_count_out_of_range_is_refused_not_narrowed(batch, count):
     """The core's batch parameter is a u32. The extension used to take a usize and narrow it: 2**32
@@ -129,7 +122,7 @@ def test_a_batch_count_out_of_range_is_refused_not_narrowed(batch, count):
         batch(count, 1_645_557_742_000)
 
 
-@pytest.mark.parametrize("batch", [hyperuuid.new_v6_batch, hyperuuid.new_v7_batch])
+@pytest.mark.parametrize("batch", [hyperuuid.new_v7_batch])
 @pytest.mark.parametrize("count", [2.0, "2", None])
 def test_a_batch_count_of_the_wrong_type_is_a_type_error(batch, count):
     """A batch door raises TypeError for a count that is not an int."""
@@ -161,7 +154,6 @@ def test_a_datetime_is_truncated_to_its_millisecond_never_rounded_into_the_next(
     for micros in (0, 1, 499, 500, 999):
         asked = base + datetime.timedelta(microseconds=micros)
         assert hyperuuid.v7_timestamp(hyperuuid.new_v7(asked)) == base
-        assert hyperuuid.v6_timestamp(hyperuuid.new_v6(asked)) == base
 
 
 def test_a_naive_datetime_is_read_as_local_time():

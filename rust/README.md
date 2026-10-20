@@ -3,21 +3,19 @@
 [![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/hyperuuid.svg)](https://crates.io/crates/hyperuuid)
 
-**A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: 1.7-2.4x faster on v4, v5 and v7 generation and 1.2x on v6, 5-9x faster at reading a timestamp back out, with a real batch API `uuid` doesn't have at all.**
+**A high-performance, RFC 9562-compliant UUID generator for Rust. Benchmarked head-to-head against the `uuid` crate below: 1.7-2.4x faster on v4, v5 and v7 generation, 9x faster at reading a timestamp back out, with a real batch API `uuid` doesn't have at all.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`, and `chacha20` on Linux and Android) — zero unsafe in the public API, and empirically zero-allocation across the whole public API, batch calls included — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
+RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, plus the version 8 layout SQL Server sorts a v7 by. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`, and `chacha20` on Linux and Android) — zero unsafe in the public API, and empirically zero-allocation across the whole public API, batch calls included — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
 
 ```rust
-use hyperuuid::{v4, v5, v6, v7};
+use hyperuuid::{v4, v5, v7};
 
 let id = v4::new_v4()?;
 let id2 = v5::new_v5(v5::namespace::DNS, b"example.com");
-let id3 = v6::new_v6(unix_millis)?;
 let id4 = v7::now_v7()?;
 
 let ts = v7::unix_millis(&id4); // recover the embedded timestamp
-let sql_ordered = v7::to_sql_order(&id4); // byte order SQL Server's uniqueidentifier needs to sort by creation order
-let sql_ordered6 = v6::to_sql_order(&id3); // same, for a version 6 UUID
+let sql_ordered = v7::to_sql_order(&id4)?; // the version 8 layout SQL Server's uniqueidentifier sorts by creation order
 
 // The same Option<Timestamp> shape the `uuid` crate's own get_timestamp() returns — works on
 // any Uuid, no need to already know (or separately check) the version:
@@ -37,7 +35,7 @@ let mut out = vec![0u8; 1000 * 16];
 v7::new_v7_batch(unix_millis, 1000, &mut out)?;
 ```
 
-`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v6::unix_millis`/`v7::unix_millis` recover the embedded UTC timestamp from a version 6 or 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v6 or v7 — the variant is checked too), and [`v6::new_v6_at`]/[`v7::new_v7_at`] accept one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v6`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order — the same permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid)/[Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim) already use for C#, computed once here and verified against the real `System.Data.SqlTypes.SqlGuid` comparator. `v6::to_sql_order`/`v6::to_rfc_order` do the same for version 6 — a much simpler whole-byte-group relocation, since v6 has no counter to repack at the bit level, just its 60-bit timestamp; note that same-millisecond v6 UUIDs aren't guaranteed to sort in creation order even after this conversion, since `clock_seq`/`node` are random per call rather than a counter (a pre-existing RFC 9562 v6 limitation, not something this introduces). This crate's own test suite verifies that sort behavior against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v6::unix_millis_in`/`v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there only versions 6 and 7 exist, and the two are never confused, because each check includes the variant bits where that version puts them. `new_v6_batch`/`new_v7_batch` generate `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 v7 or 24 v6 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.5x faster on glibc and 3.5x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
+`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v7::unix_millis` recovers the embedded UTC timestamp from a version 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v7 — the variant is checked too, and a v1 or v6 from another generator gets `None` as well), and [`v7::new_v7_at`] accepts one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order. The converted value is an RFC 9562 version 8, the version §6.11 gives any byte order but network order: an 8 and the RFC variant sit where SQL Server's text form and a .NET `Guid` show them, and the other 122 bits fill the comparator's slots. That is the permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) uses for C#, with an 8 where SequentialGuid keeps the 7. A v7 and a v8 have the same 122 free bits, so every v7 converts and the conversion back is exact; [`SqlOrderError`] refuses only a value that isn't a v7 going in, or doesn't carry the layout's 8 and variant coming back. [`sql`](https://docs.rs/hyperuuid/latest/hyperuuid/sql/) has the bit layout. This crate's own test suite verifies the sort against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there `version_in` answers 7, the version the value was converted from, for the layout's 8 and variant, and 0 for anything else. `new_v7_batch` generates `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.5x faster on glibc and 3.5x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
 
 ## Binding to SQL Server
 
@@ -47,7 +45,7 @@ byte-reversed and loses the creation order ([details](https://github.com/SkunkWe
 lands byte for byte:
 
 ```rust
-let stored = v7::to_sql_order(&id4);
+let stored = v7::to_sql_order(&id4)?;
 client.execute("INSERT INTO orders (id) VALUES (@P1)", &[&&stored.as_bytes()[..]]).await?;
 ```
 
@@ -57,14 +55,13 @@ handing it to the `Layout::SqlServer` reads.
 
 ## Why not the `uuid` crate?
 
-[`uuid`](https://docs.rs/uuid) is the de facto standard and it's a good crate — v4/v5/v6/v7 are all real, all correct, all there under feature flags. This isn't a "the standard crate is bad" pitch. The real differences, measured head-to-head on the same machine in the same benchmark run (`cargo bench` — see below):
+[`uuid`](https://docs.rs/uuid) is the de facto standard and it's a good crate — v4/v5/v7 are all real, all correct, all there under feature flags, alongside v1, v3, v6 and v8. This isn't a "the standard crate is bad" pitch. The real differences, measured head-to-head on the same machine in the same benchmark run (`cargo bench` — see below):
 
-1. **No batch API.** `uuid` generates exactly one UUID per call, always. `new_v6_batch`/`new_v7_batch` here share one timestamp capture, one counter reservation and one entropy draw across the whole batch — 3.9-5.7x faster than the equivalent loop of individual calls (real numbers below).
-2. **v4, v5 and v7 generation are about twice as fast here.** v4: 23.4 ns against `uuid`'s 40.6 ns (~1.7x). v5: 49.6 ns against `uuid`'s 97.6 ns (~2.0x). v7: 30.9 ns against `uuid`'s 72.8 ns (~2.4x). On Linux, v4, v6 and v7 draw their random bits from a user-space ChaCha20 pool rather than a `getrandom` call per UUID; it is built like the kernel's own vDSO generator, with fast key erasure, and its memory is wiped in a forked child. Each slot takes a fresh OS key every megabyte, and no key is used for more than a second of wall-clock time: every draw checks the key's age first, which is what keeps a process restored from a snapshot (a cloned virtual machine, AWS Lambda SnapStart, a CRaC or CRIU checkpoint) from replaying bytes its other copies also hold. What that leaves open is a snapshot taken within a second of a key being drawn and restored onto a clock nothing has moved on, where the copies share bytes until the second runs out; the kernel's own generator, which is told about a restore, has no such window. The check is a coarse clock read, 3 to 4 ns. `new_v6` and `new_v7` skip it when the timestamp they are handed is the current time, as a `now` door's is: 27.8 ns for v7 and 18.6 ns for v6 (`single_item/v7_current_timestamp`, `v6_current_timestamp`), where the tables below, like most of this repository's benchmarks, pass a fixed timestamp from 2022 and pay for the read. Elsewhere every call still goes to `getrandom`. One caveat for fairness on v7: `uuid`'s `Uuid::now_v7` captures the current time itself (an internal clock read) inside the timed region, while this benchmark calls this crate's `new_v7` with a pre-supplied timestamp. What that read costs is a property of the machine, not of either crate: it is cheap on the x64 box these numbers come from, and on a machine with a slow clock it swamps everything else in the call — so the comparison isn't perfectly apples-to-apples and is reported that way rather than smoothed over.
-3. **v6 is 1.2x faster.** 20.6 ns here, 25.6 ns for `uuid`, though the two are doing different work to get there: `Uuid::now_v6` reads the clock and takes its node ID from the caller, with a process-wide counter for the clock sequence, while `new_v6` here takes the timestamp from the caller and draws fresh random bits for both on every call.
-4. **Verified zero-allocation, with no exceptions.** `tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v6/v7 and both batch functions, and asserts zero heap allocations for all of them. The crate doesn't so much as link `alloc`, which is why it carries the `no-std::no-alloc` category and not merely `no-std`. `uuid`'s docs don't make an allocation claim either way.
+1. **No batch API.** `uuid` generates exactly one UUID per call, always. `new_v7_batch` here shares one timestamp capture, one counter reservation and one entropy draw across the whole batch — 5.7x faster than the equivalent loop of individual calls (real numbers below).
+2. **v4, v5 and v7 generation are about twice as fast here.** v4: 23.4 ns against `uuid`'s 40.6 ns (~1.7x). v5: 49.6 ns against `uuid`'s 97.6 ns (~2.0x). v7: 30.9 ns against `uuid`'s 72.8 ns (~2.4x). On Linux, v4 and v7 draw their random bits from a user-space ChaCha20 pool rather than a `getrandom` call per UUID; it is built like the kernel's own vDSO generator, with fast key erasure, and its memory is wiped in a forked child. Each slot takes a fresh OS key every megabyte, and no key is used for more than a second of wall-clock time: every draw checks the key's age first, which is what keeps a process restored from a snapshot (a cloned virtual machine, AWS Lambda SnapStart, a CRaC or CRIU checkpoint) from replaying bytes its other copies also hold. What that leaves open is a snapshot taken within a second of a key being drawn and restored onto a clock nothing has moved on, where the copies share bytes until the second runs out; the kernel's own generator, which is told about a restore, has no such window. The check is a coarse clock read, 3 to 4 ns. `new_v7` skips it when the timestamp it is handed is the current time, as a `now` door's is: 27.8 ns (`single_item/v7_current_timestamp`), where the tables below, like most of this repository's benchmarks, pass a fixed timestamp from 2022 and pay for the read. Elsewhere every call still goes to `getrandom`. One caveat for fairness on v7: `uuid`'s `Uuid::now_v7` captures the current time itself (an internal clock read) inside the timed region, while this benchmark calls this crate's `new_v7` with a pre-supplied timestamp. What that read costs is a property of the machine, not of either crate: it is cheap on the x64 box these numbers come from, and on a machine with a slow clock it swamps everything else in the call — so the comparison isn't perfectly apples-to-apples and is reported that way rather than smoothed over.
+3. **Verified zero-allocation, with no exceptions.** `tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v7 and the batch function, and asserts zero heap allocations for all of them. The crate doesn't so much as link `alloc`, which is why it carries the `no-std::no-alloc` category and not merely `no-std`. `uuid`'s docs don't make an allocation claim either way.
 
-The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v8. If you need any of that, or you're not chasing v5/v7 throughput, timestamp extraction or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with.
+The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v6, and v8 only as the SQL Server layout. If you need any of that, or you're not chasing v5/v7 throughput, timestamp extraction or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with.
 
 ## Benchmarks
 
@@ -76,10 +73,9 @@ The honest trade-off: this crate's public surface is much narrower than `uuid`'s
 | --- | ---: | ---: | ---: |
 | v4 | 23.4 ns | 40.6 ns | **1.73x faster** |
 | v5 | 49.6 ns | 97.6 ns | **1.97x faster** |
-| v6 | 20.6 ns | 25.6 ns | **1.24x faster**¹ |
 | v7 | 30.9 ns | 72.8 ns | **2.35x faster**¹ |
 
-¹ See the methodology caveat above — `uuid`'s v6/v7 capture the clock internally; this crate's benchmarked calls take a pre-supplied timestamp.
+¹ See the methodology caveat above — `uuid`'s v7 captures the clock internally; this crate's benchmarked calls take a pre-supplied timestamp.
 
 ### Timestamp extraction vs. the `uuid` crate's `get_timestamp()`
 
@@ -87,7 +83,6 @@ The honest trade-off: this crate's public surface is much narrower than `uuid`'s
 
 | Version | This crate's `unix_millis` | `uuid`'s `get_timestamp()` | Delta |
 | --- | ---: | ---: | ---: |
-| v6 | 1.22 ns | 6.67 ns | **5.46x faster** |
 | v7 | 0.66 ns | 5.94 ns | **8.99x faster** |
 
 The two APIs used to return different shapes — this crate hands back a plain `u64` millisecond count, `uuid`'s `Option<Timestamp>` wraps 100ns Gregorian-epoch ticks — but both are doing the same underlying job (bit-shifting the embedded time back out of 16 bytes already in hand), so timing them head-to-head is fair. This crate wins here for the same reason it's competitive on generation: no allocation, no indirection beyond what the bit math itself needs. This crate now also exposes an `Option<Timestamp>`-returning [`get_timestamp`] matching `uuid`'s own shape (see the Quick start example above) — it's a thin pass-through over the exact `unix_millis` calls benchmarked here, so these numbers describe its cost too, not a separate, unmeasured path.
@@ -96,7 +91,6 @@ The two APIs used to return different shapes — this crate hands back a plain `
 
 | Version | 1000 individual calls | `*_batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v6 | 20.3 µs | 5.24 µs | **3.9x** |
 | v7 | 25.2 µs | 4.40 µs | **5.7x** |
 
 Allocation-free claim: `cargo test --release --test allocation_free`.
@@ -137,7 +131,7 @@ Unlike the native library, the module is built with std: its allocator exports c
 wasi-libc by way of std's allocator, and a `no_std` module does not link wasi-libc at all.
 
 That config adds two linker flags for this target only, `--export=malloc` and
-`--export=free`, so the module's exports are the eighteen `uuid_*` functions and
+`--export=free`, so the module's exports are the twelve `uuid_*` functions and
 `hyperuuid_version` from `ffi.rs` plus wasi-libc's allocator. A wasm host cannot hand this library a pointer into its own
 memory, so every embedder — GraalWasm inside the Java binding here — asks the guest for the
 buffer it will fill and reads the result back out of the exported `memory`. The exported allocator is what makes that safe: dlmalloc
@@ -147,7 +141,7 @@ allocation. The module imports five `wasi_snapshot_preview1` functions (`random_
 wasi-libc's `environ_*`, `fd_write` and `proc_exit`) and nothing else; there is no clock,
 because `now_v7` is compiled out on `wasm32` and every other door takes the host's
 timestamp. `ffi.rs` itself is untouched by any of this; on every native target the C ABI is
-still exactly those nineteen exports.
+still exactly those thirteen exports.
 
 The C# binding's Blazor WebAssembly support takes a second wasm build, the
 `wasm32-unknown-emscripten` static library its NuGet package links into the app:
@@ -190,7 +184,7 @@ consumer supplies anyway:
   Left on your side for the same reason the `wasm_js` backend above is.
 - **A clock, where you need one.** `v7::now_v7` is the only API that reads the system clock,
   and it's compiled out without `std` exactly as it already is on `wasm32`. Pass your own
-  timestamp to `v7::new_v7`/`v6::new_v6` instead; every other function in the crate is
+  timestamp to `v7::new_v7` instead; every other function in the crate is
   already timestamp-in, bytes-out.
 
 ## No panics

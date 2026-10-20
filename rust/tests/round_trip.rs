@@ -9,7 +9,7 @@
 //! cannot see is a parse that succeeds with the wrong bytes, or fails on a valid string —
 //! 0.5.0's stray-hyphen bug was the first kind's neighbour, and these would have caught it.
 
-use hyperuuid::{Uuid, v4, v5, v6, v7};
+use hyperuuid::{Uuid, v4, v5, v7};
 
 const HYPHENS: [usize; 4] = [8, 13, 18, 23];
 
@@ -59,7 +59,6 @@ fn samples() -> Vec<Uuid> {
         ids.push(v4::new_v4().unwrap());
     }
     ids.push(v5::new_v5(v5::namespace::DNS, b"www.example.com"));
-    ids.push(v6::new_v6(1645557742000).unwrap());
     ids.push(v7::new_v7(1645557742000).unwrap());
     ids
 }

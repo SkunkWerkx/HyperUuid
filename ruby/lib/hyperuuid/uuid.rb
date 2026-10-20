@@ -40,8 +40,8 @@ module HyperUuid
 
     # The byte orders a Uuid can hold, as the +layout:+ keyword of #version, #rfc? and
     # #timestamp takes them, mapped to the native core's layout codes. +:rfc9562+ is RFC 9562
-    # order, what every other method here takes and returns. +:sql_server+ is the order
-    # #to_sql_order returns, defined for versions 6 and 7 only.
+    # order, what every other method here takes and returns. +:sql_server+ is the layout
+    # #to_sql_order returns, a version 8 that holds a converted version 7.
     LAYOUTS = { rfc9562: 1, sql_server: 2 }.freeze
 
     # The Symbols #variant returns, indexed by the native core's variant code (1-4; 0 is
@@ -66,10 +66,11 @@ module HyperUuid
     #
     # In +:rfc9562+ (the default) it is the version nibble (bits 48-51, the high nibble of
     # octet 6), 0 through 15: Nil reads as 0 and Max as 15. It says nothing about the variant;
-    # #rfc? checks both. In +:sql_server+, the order #to_sql_order returns, it is 6 or 7 for a
-    # SQL-ordered version 6 or 7 UUID and 0 when the bytes don't form one, since no other
-    # version has a SQL Server order. It reads the bytes as given: an RFC-ordered value can
-    # happen to form a SQL-ordered v6 or v7, so the layout is the caller's to know.
+    # #rfc? checks both. In +:sql_server+, the layout #to_sql_order returns, it is the version
+    # the value was converted from, 7, when the bytes carry the layout's version 8 and RFC
+    # variant, and 0 when they don't. It reads the bytes as given: an
+    # RFC-ordered value can happen to carry them (a random v4 does one time in 16), so the
+    # layout is the caller's to know.
     #
     # With the default layout, the value is read as RFC 9562 order. A SQL-ordered value — from
     # #to_sql_order, or a +uniqueidentifier+ read back from SQL Server — needs
@@ -86,19 +87,19 @@ module HyperUuid
     # versions), +:ncs+ (+0xxx+, Nil among them), +:microsoft+ (+110x+) or +:future+ (+111x+,
     # Max among them).
     #
-    # RFC 9562 order only. There is no layout form, because in SQL Server order the variant
-    # sits at a different byte for each version, so don't hand it a SQL-ordered value or a
-    # +uniqueidentifier+ read back from SQL Server. To validate one of those, use
-    # <tt>rfc?(version, layout: :sql_server)</tt>, which checks the variant where that version
-    # puts it.
+    # RFC 9562 order only, with no layout form. The SQL Server layout keeps the variant in the
+    # same place, so a SQL-ordered value reads +:rfc9562+ here, but that says nothing about
+    # which version it holds. To validate one, or a +uniqueidentifier+ read back from SQL
+    # Server, use <tt>rfc?(7, layout: :sql_server)</tt>, which checks the layout's version 8
+    # and variant.
     def variant
       VARIANTS.fetch(Runtime.variant(bytes))
     end
 
     # Whether this is an RFC 9562 UUID of version +version+, read in +layout+'s byte order —
     # the RFC 9562 variant and that version together, the guard to run before trusting a
-    # value's version-specific fields. In +:sql_server+ only 6 and 7 can be true. A version
-    # outside 0-15 is simply false.
+    # value's version-specific fields. In +:sql_server+ +version+ is the version the value was
+    # converted from, so only 7 can be true. A version outside 0-15 is simply false.
     #
     # With the default layout, the value is read as RFC 9562 order. A SQL-ordered value — from
     # #to_sql_order, or a +uniqueidentifier+ read back from SQL Server — needs
@@ -121,17 +122,19 @@ module HyperUuid
     end
     alias_method :to_str, :to_s
 
-    # The UTC timestamp embedded in an RFC 9562 version 6 or 7 UUID, held in +layout+'s byte
-    # order: +:rfc9562+ (the default), or +:sql_server+ for a value #to_sql_order returned. One
-    # native call that checks the variant as well as the version: a 6 or 7 in the version
-    # nibble under any variant but +:rfc9562+ is not a version 6 or 7 UUID, so it has no
-    # timestamp (#rfc? is the same check on its own).
+    # The UTC timestamp embedded in an RFC 9562 version 7 UUID, held in +layout+'s byte order:
+    # +:rfc9562+ (the default), or +:sql_server+ for a value #to_sql_order returned (the
+    # timestamp of the version 7 it was converted from). One native call that checks the
+    # variant as well as the version: a 7 in the version nibble under any variant but
+    # +:rfc9562+ is not a version 7 UUID, so it has no timestamp (#rfc? is the same check on
+    # its own). Every other version has none either, a version 6 or 1 from another generator
+    # included.
     #
-    # Raises by default for anything that isn't an RFC 9562 version 6 or 7 UUID; pass
+    # Raises by default for anything that isn't an RFC 9562 version 7 UUID; pass
     # `raise_on_mismatch: false` to get `nil` back instead — for a caller that doesn't already
     # know (or want to separately check) whether this UUID is time-based.
     #
-    # @raise [ArgumentError] if this isn't an RFC 9562 version 6 or 7 UUID in +layout+ (unless
+    # @raise [ArgumentError] if this isn't an RFC 9562 version 7 UUID in +layout+ (unless
     #   +raise_on_mismatch+ is false), or +layout+ isn't one of LAYOUTS' keys.
     def timestamp(raise_on_mismatch: true, layout: :rfc9562)
       millis = Runtime.get_timestamp(bytes, layout_code(layout))
@@ -141,63 +144,39 @@ module HyperUuid
       raise ArgumentError, timestamp_mismatch(layout)
     end
 
-    # Converts an RFC 9562-ordered version 6 or 7 UUID to the byte order SQL Server's
-    # `uniqueidentifier` needs on the wire to sort by creation order. Dispatches on `version`
-    # the same way #timestamp does.
+    # Converts an RFC 9562 version 7 UUID to the layout SQL Server's `uniqueidentifier` needs
+    # on the wire to sort by creation order: an RFC 9562 version 8 UUID (§5.8, the version for
+    # custom layouts, where §6.11 sends a byte order other than the network one).
     #
     # `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a
     # `uniqueidentifier` column — doesn't compare a GUID's 16 bytes left to right; it uses a
     # fixed, non-sequential byte significance order (octets 10,11,12,13,14,15,8,9,6,7,4,5,
-    # 0,1,2,3, most significant first). Computed once in the native Rust core and verified
-    # there (and independently, against the real SqlGuid comparator, in this project's C#
-    # test suite); this binding calls the same native functions rather than reimplementing
-    # the byte math.
+    # 0,1,2,3, most significant first). The layout writes the version nibble 8 at octet 7 and
+    # the RFC variant at octet 8, where SQL Server's text form and a .NET `Guid` show them, and
+    # fills the other 122 bits in that comparison's order: the 48-bit millisecond timestamp,
+    # the 26-bit counter and the 48 random bits as one intact block. A version 7 has exactly
+    # those 122 free bits, so every one converts, and #from_sql_order gives back the exact
+    # original. Computed once in the native Rust core and verified there (and independently,
+    # against the real SqlGuid comparator, in this project's C# test suite); this binding calls
+    # the same native functions rather than reimplementing the bit math.
     #
-    # For v7, this moves the timestamp and counter — the two fields that determine creation
-    # order — into that comparison's most-significant bytes, and moves the trailing entropy,
-    # which carries no ordering information, into the least-significant ones as one intact
-    # block. For v6, which has no monotonic counter the way v7 does, the only field that
-    # determines creation order is the 60-bit timestamp itself, so that moves into the most
-    # significant bytes instead, with `clock_seq`/`node` (independently random per call, not
-    # a counter, so no ordering value either way) relocated into the rest. v6's much simpler
-    # byte layout needs no bit-level repacking to do this — just whole-octet-group
-    # relocation — unlike v7's, and its version/variant land at different sql-order offsets
-    # as a result (octet 8's top nibble / octet 6's top two bits, not 7/8).
-    #
-    # **v6-specific caveat, unlike v7:** two version 6 UUIDs minted at the same millisecond
-    # have identical timestamp bits, so they aren't guaranteed to sort in creation order any
-    # more than plain RFC order already does — a pre-existing RFC 9562 v6 limitation, not one
-    # this transform introduces.
-    #
-    # Meaningful only for a genuine version 6 or 7 UUID.
+    # @raise [ArgumentError] if this isn't an RFC 9562 version 7 UUID.
     def to_sql_order
-      case version
-      when 7 then self.class.new(Runtime.v7_to_sql_order(bytes), true)
-      when 6 then self.class.new(Runtime.v6_to_sql_order(bytes), true)
-      else raise ArgumentError, "to_sql_order is only defined for version 6 or 7 UUIDs, got version #{version}"
-      end
+      self.class.new(Runtime.v7_to_sql_order(bytes), true)
     end
 
-    # Inverse of #to_sql_order — converts a SQL-Server-ordered version 6 or 7 UUID back to
-    # RFC 9562 order.
-    #
-    # A SQL-ordered value's version sits at a different octet depending on which version
-    # produced it, so this asks the native core which one it is — `version(layout:
-    # :sql_server)`, which checks each version's nibble together with its variant bits and
-    # so never mistakes a v6 whose random `clock_seq` byte happens to read as a v7 nibble.
+    # Inverse of #to_sql_order — converts a SQL-Server-ordered value back to the RFC 9562
+    # version 7 UUID it was converted from, exactly. Refuses a value without the layout's
+    # version 8 and RFC variant, an RFC-ordered version 7 among them.
     #
     # The layout is the caller's to know: bytes alone cannot say which order they are in. A
-    # value that was never SQL-ordered can still read as one, and is then converted rather
-    # than refused (a random RFC-ordered v4 reads as a SQL-ordered v7 one time in 16, since its
+    # value that was never SQL-ordered can still carry the layout's 8 and variant, and is then
+    # converted rather than refused (a random RFC-ordered v4 does one time in 16, since its
     # octet 8 already carries the RFC variant and its octet 7 is random).
     #
-    # @raise [ArgumentError] if this isn't a SQL-ordered version 6 or 7 UUID.
+    # @raise [ArgumentError] if this isn't a SQL-ordered value converted from version 7.
     def from_sql_order
-      case Runtime.version(bytes, LAYOUTS[:sql_server])
-      when 6 then self.class.new(Runtime.v6_to_rfc_order(bytes), true)
-      when 7 then self.class.new(Runtime.v7_to_rfc_order(bytes), true)
-      else raise ArgumentError, "from_sql_order: not a recognized version 6 or 7 SQL-ordered UUID"
-      end
+      self.class.new(Runtime.v7_to_rfc_order(bytes), true)
     end
 
     # Whether +other+ wraps the same 16 raw bytes.
@@ -227,11 +206,11 @@ module HyperUuid
 
     # Why #timestamp found none: the message is worked out only once it is going to be raised.
     def timestamp_mismatch(layout)
-      return "timestamp: not a SQL-ordered version 6 or 7 UUID" if layout == :sql_server
+      return "timestamp: not a SQL-ordered version 7 UUID" if layout == :sql_server
 
       found = version
-      message = "timestamp is only defined for version 6 or 7 UUIDs, got version #{found}"
-      [6, 7].include?(found) ? "#{message} with the #{variant.inspect} variant" : message
+      message = "timestamp is only defined for version 7 UUIDs, got version #{found}"
+      found == 7 ? "#{message} with the #{variant.inspect} variant" : message
     end
 
     # The native core's code for +layout+, the one place a layout is checked: an unknown one

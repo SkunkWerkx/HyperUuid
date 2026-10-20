@@ -4,10 +4,10 @@
 [![RubyGems](https://img.shields.io/gem/v/hyperuuid.svg)](https://rubygems.org/gems/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
-**Ruby's own stdlib stops at `SecureRandom.uuid` and `SecureRandom.uuid_v7` — random v4 and v7, one at a time. No v5, no v6, no batches, no SQL Server order. This gem is the whole RFC, with zero gem dependency beyond `Fiddle` (which ships with every Ruby install) — and it's faster than `SecureRandom.uuid` too.**
+**Ruby's own stdlib stops at `SecureRandom.uuid` and `SecureRandom.uuid_v7` — random v4 and v7, one at a time. No v5, no batches, no timestamp read-back, no SQL Server order. This gem fills that in, with zero gem dependency beyond `Fiddle` (which ships with every Ruby install) — and it's faster than `SecureRandom.uuid` too.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
-two backends sharing one public surface. Ruby 3.3 is the floor. The fast path is a native
+RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
+version 8 SQL Server order for v7 and two backends sharing one public surface. Ruby 3.3 is the floor. The fast path is a native
 extension built with [Magnus](https://github.com/matsadler/magnus) — the Rust core linked
 directly into the Ruby VM, auto-selected when loadable — which redefines the low-level
 `Runtime` methods in place on require; everything above them (`Uuid`, the module doors and
@@ -22,13 +22,12 @@ require "hyperuuid"
 
 id = HyperUuid.new_v4
 id2 = HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "example.com")
-id3 = HyperUuid.new_v6
-id4 = HyperUuid.new_v7
+id3 = HyperUuid.new_v7
 
-id4.timestamp # recover the embedded UTC Time
-id4.timestamp(raise_on_mismatch: false) # nil instead of raising if id4 isn't an RFC 9562 v6/v7
-id4.rfc?(7) # the RFC 9562 variant and version 7, the guard before trusting its fields
-sql = id4.to_sql_order # byte order SQL Server's uniqueidentifier needs to sort by creation order
+id3.timestamp # recover the embedded UTC Time
+id3.timestamp(raise_on_mismatch: false) # nil instead of raising if id3 isn't an RFC 9562 v7
+id3.rfc?(7) # the RFC 9562 variant and version 7, the guard before trusting its fields
+sql = id3.to_sql_order # a version 8 laid out so SQL Server's uniqueidentifier sorts by creation order
 sql.timestamp(layout: :sql_server) # read straight from SQL order, no round trip
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
@@ -41,9 +40,9 @@ batch = HyperUuid.new_v7_batch(1000)
 |---|---|---|
 | `new_v4` | `Uuid` | — |
 | `new_v5(namespace, name)` | `Uuid`, the same one for the same pair | a `Uuid` namespace (`Namespaces::DNS`/`URL`/`OID`/`X500`, or your own) and a `String` name — text is hashed as UTF-8, a binary String as its bytes, and it may be empty |
-| `new_v6(time = nil)` `new_v7(time = nil)` | `Uuid` | nothing (now), a `Time`, or an Integer of Unix-epoch milliseconds |
-| `new_v6_batch(count, time = nil)` `new_v7_batch(count, time = nil)` | `Array` of `Uuid` | a count (at most `MAX_V7_BATCH` for v7), and the same time forms |
-| `new_v6_batch_bytes(count, time = nil)` `new_v7_batch_bytes(count, time = nil)` | one binary `String`, 16 bytes per UUID | as the batch doors — see [Bulk generation into bytes](#bulk-generation-into-bytes) |
+| `new_v7(time = nil)` | `Uuid` | nothing (now), a `Time`, or an Integer of Unix-epoch milliseconds |
+| `new_v7_batch(count, time = nil)` | `Array` of `Uuid` | a count (at most `MAX_V7_BATCH`), and the same time forms |
+| `new_v7_batch_bytes(count, time = nil)` | one binary `String`, 16 bytes per UUID | as `new_v7_batch` — see [Bulk generation into bytes](#bulk-generation-into-bytes) |
 | `native_version` | the loaded core's `"major.minor.patch"` | — |
 | `available?` | `true`/`false`, never raising | — |
 
@@ -56,50 +55,52 @@ runtime dependency on the `uuid` gem:
 | `Uuid.new(bytes)` | wraps 16 raw RFC 9562-ordered bytes |
 | `Uuid::NIL` `Uuid::MAX` | the RFC 9562 §5.9/§5.10 special values |
 | `#bytes` `#to_s` | the frozen binary String, the hyphenated text |
-| `#version(layout: :rfc9562)` | the version in that layout: the nibble, 0-15, in RFC order; 6 or 7 for a SQL-ordered v6/v7 in `:sql_server`, 0 when the bytes don't form one |
+| `#version(layout: :rfc9562)` | the version in that layout: the nibble, 0-15, in RFC order; in `:sql_server`, 7, the version a SQL-ordered value was converted from, and 0 when the bytes aren't one |
 | `#variant` | the RFC 9562 §4.1 variant, as a Symbol: `:rfc9562` (every UUID this gem mints, and the only variant with versions), `:ncs` (Nil among them), `:microsoft`, `:future` (Max among them) |
 | `#rfc?(version, layout: :rfc9562)` | whether it is an RFC 9562 UUID of that version: the variant and the version together. A version outside 0-15 is `false` |
-| `#timestamp(raise_on_mismatch: true, layout: :rfc9562)` | the UTC `Time` embedded in an RFC 9562 version 6 or 7 UUID held in that layout, in one native call that checks the variant as well as the version (a 6 or 7 nibble under another variant has no timestamp); `nil` instead of an `ArgumentError` for anything that isn't one when passed `false` |
-| `#to_sql_order` `#from_sql_order` | to and from the byte order SQL Server's `uniqueidentifier` sorts by |
+| `#timestamp(raise_on_mismatch: true, layout: :rfc9562)` | the UTC `Time` embedded in an RFC 9562 version 7 UUID held in that layout, in one native call that checks the variant as well as the version (a 7 nibble under another variant has no timestamp, and nor does a v1 or v6 minted elsewhere); `nil` instead of an `ArgumentError` for anything that isn't one when passed `false` |
+| `#to_sql_order` `#from_sql_order` | to and from the layout SQL Server's `uniqueidentifier` sorts by, refusing what doesn't fit it |
 | `==` `eql?` `hash` `<=>` | value equality and byte-order comparison (`Comparable`) |
 
-`#to_sql_order`/`#from_sql_order` convert a version 6 or 7 UUID to and from the byte order SQL
-Server's `uniqueidentifier` needs on the wire to sort by creation order (`#to_sql_order`
-dispatches on the UUID's own version, matching `#timestamp`'s convention) — computed once in
-the native Rust core rather than reimplemented in Ruby, and verified there (and independently
-against the real `System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite).
-Same-millisecond v6 UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter,
-so `clock_seq`/`node` (not the timestamp) decide ties, the same pre-existing RFC 9562 v6
-limitation plain order already has. `#from_sql_order` asks the core which version it holds
-(`#version(layout: :sql_server)`, which checks each version's nibble together with its variant
-bits, so a v6 whose random `clock_seq` byte reads as a v7 nibble is still a v6).
+`#to_sql_order`/`#from_sql_order` convert a version 7 UUID to and from the layout SQL Server's
+`uniqueidentifier` needs on the wire to sort by creation order — computed once in the native
+Rust core rather than reimplemented in Ruby, and verified there (and independently against the
+real `System.Data.SqlTypes.SqlGuid` comparator in the C# binding's test suite). The converted
+value is an RFC 9562 version 8: the 8 and the RFC variant sit where SQL Server's text form and
+a .NET `Guid` show them, and the v7's 122 other bits (timestamp, counter, random) fill the rest
+in the order SQL Server compares them. Every v7 converts, and the conversion back is exact.
+Either direction refuses a value of the wrong kind with an `ArgumentError`: anything that isn't
+an RFC 9562 v7 for `#to_sql_order`, anything without the layout's 8 and variant for
+`#from_sql_order`.
 
 ### Layouts
 
 `#version`, `#rfc?` and `#timestamp` take the byte order the value is held in as `layout:`, a
 Symbol: `:rfc9562` (the default, what every other method takes and returns) or `:sql_server`
-(what `#to_sql_order` returns, defined for versions 6 and 7 only). `Uuid::LAYOUTS` lists them.
+(what `#to_sql_order` returns, a version 8 holding a converted v7). `Uuid::LAYOUTS` lists them.
 Anything else is an `ArgumentError`, never a guess. With the default, `#version` and `#rfc?`
 read the value as RFC 9562 order, which looks at the wrong bytes of a SQL-ordered value (one
 from `#to_sql_order`, or a `uniqueidentifier` read back from SQL Server), so pass
 `layout: :sql_server` at every call site that can see one. There is deliberately no
 layout-agnostic check: whoever holds the value knows its order.
 
-`#variant` reads RFC 9562 order only and has no layout form, because in SQL Server order the
-variant sits at a different byte for each version. Don't hand it a SQL-ordered value or a
-`uniqueidentifier` read-back; to validate one, `#rfc?(version, layout: :sql_server)` checks the
-variant where that version puts it.
+`#variant` reads RFC 9562 order only and has no layout form. The SQL Server layout keeps the
+variant in the same place, so a SQL-ordered value reads `:rfc9562` there, but that says nothing
+about whether it holds a converted v7; to validate one, or a `uniqueidentifier` read-back,
+`#rfc?(7, layout: :sql_server)` checks the layout's 8 and variant.
 
 ```ruby
-sql = HyperUuid.new_v6.to_sql_order
-sql.version(layout: :sql_server)   # => 6
-sql.rfc?(6, layout: :sql_server)   # => true
+sql = HyperUuid.new_v7.to_sql_order
+sql.version(layout: :sql_server)   # => 7
+sql.rfc?(7, layout: :sql_server)   # => true
 sql.timestamp(layout: :sql_server) # the same Time as sql.from_sql_order.timestamp
 ```
 
 The bytes alone cannot say which order they are in, so the layout is yours to know: an
-RFC-ordered value can happen to form a SQL-ordered one (a random v4 reads as a SQL-ordered v7
-one time in 16), and `#from_sql_order` then converts it rather than refusing it.
+RFC-ordered value can happen to carry the layout's 8 and variant (a random v4 does one time in
+16), and `#from_sql_order` then converts it rather than refusing it. The same goes the other
+way: a value already in SQL order carries a 7 where `#to_sql_order` looks for the version about
+one time in 16, and is then converted a second time rather than refused.
 
 ### Binding to SQL Server
 
@@ -127,7 +128,7 @@ mints. A larger count is an `ArgumentError` naming the limit, raised before anyt
 allocated. Every batch is in strictly increasing order: the counter is one process-wide
 sequence, so a batch can straddle the point where it wraps back to 0, and the UUIDs from there
 on carry a timestamp one millisecond later than the one supplied rather than sorting before the
-ones ahead of them. Version 6 has no counter and no such limit.
+ones ahead of them.
 
 That roll-forward orders one batch, not the stream. The next batch or single `new_v7` in the
 same real millisecond starts its counter just past the wrap and carries the supplied timestamp,
@@ -139,9 +140,8 @@ happens at most once per 2²⁶ UUIDs the process mints.
 
 Two exceptions are this gem's own, and both carry the same message on every backend:
 
-- `HyperUuid::TimestampOutOfRangeError` — the time cannot be embedded: past version 7's
-  48-bit millisecond field, past version 6's 60-bit one, or negative (a `Time` before the Unix
-  epoch included).
+- `HyperUuid::TimestampOutOfRangeError` — the time cannot be embedded in a version 7: past
+  its 48-bit millisecond field, or negative (a `Time` before the Unix epoch included).
 - `HyperUuid::RandomSourceError` — the operating system's random source failed.
 
 Through 0.3.0 these were reachable only as `HyperUuid::Runtime::TimestampOutOfRangeError` and
@@ -151,9 +151,10 @@ Everything else is a caller bug and raises Ruby's own error for it, checked once
 doors rather than left to whichever backend is live: a `TypeError` for a time that is not a
 `Time`, an Integer or `nil`, for a count that is not an Integer, for a namespace that is not a
 `Uuid` or a name that is not a `String`, for a version passed to `#rfc?` that is not an
-Integer; an `ArgumentError` for a count outside 0..2³² − 1 (0..`MAX_V7_BATCH` for version 7),
-for a layout other than `:rfc9562`/`:sql_server`, and for a batch too large for the platform to
-address (a 32-bit target such as ruby.wasm).
+Integer; an `ArgumentError` for a count outside 0..`MAX_V7_BATCH`, for a layout other than
+`:rfc9562`/`:sql_server`, and for a batch too large for the platform to address (a 32-bit
+target such as ruby.wasm). The SQL Server conversions' one refusal (a value of the wrong
+version) comes from the core, as an `ArgumentError` worded the same on both backends.
 
 ### Is the native core there?
 
@@ -175,9 +176,9 @@ looked for, or `HyperUuid::NativePlatform::UnsupportedPlatformError` naming the 
 
 ## Why not `SecureRandom.uuid`?
 
-`SecureRandom.uuid` gives you a random v4 UUID and `SecureRandom.uuid_v7` a v7 (Ruby 3.3 and later, so every Ruby this gem supports). Ruby's stdlib has no v5 or v6, nothing to read a timestamp back out, no batch form, and no SQL Server ordering. If you need more than that, the choice is really "which gem":
+`SecureRandom.uuid` gives you a random v4 UUID and `SecureRandom.uuid_v7` a v7 (Ruby 3.3 and later, so every Ruby this gem supports). Ruby's stdlib has no v5, nothing to read a timestamp back out, no batch form, and no SQL Server ordering. If you need more than that, the choice is really "which gem":
 
-1. **Full RFC 9562 coverage, one gem, zero extra dependency.** v4/v5/v6/v7 plus batch generation plus `Nil`/`Max`, and nothing added to your `Gemfile.lock` beyond `Fiddle` — Ruby's own bundled FFI layer, not a third-party C extension to compile — and on the precompiled platform gems not even that.
+1. **The RFC 9562 versions new systems use, one gem, zero extra dependency.** v4/v5/v7 plus batch generation plus `Nil`/`Max`, and nothing added to your `Gemfile.lock` beyond `Fiddle` — Ruby's own bundled FFI layer, not a third-party C extension to compile — and on the precompiled platform gems not even that.
 2. **No native-extension compile step.** Third-party UUID gems that go beyond v4 are typically pure Ruby or wrap a C extension compiled at install time; this gem ships its fast path as a prebuilt platform-gem extension and its fallback as a `dlopen`ed prebuilt library — either way, the gem itself compiles nothing at install time ([Install](#install) has the one caveat, which is Fiddle's own).
 3. **Batch generation.** `new_v7_batch(1000)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch instead of paying per-item overhead a thousand times over.
 4. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. If your system isn't Ruby-only, no Ruby-only gem can offer that.
@@ -186,7 +187,7 @@ The honest trade-off: this gem is native code, not pure Ruby — a precompiled e
 
 ## Bulk generation into bytes
 
-`new_v6_batch_bytes` and `new_v7_batch_bytes` return the batch as one binary `String` of raw RFC 9562-ordered bytes — 16 per UUID — instead of an Array of `Uuid` objects:
+`new_v7_batch_bytes` returns the batch as one binary `String` of raw RFC 9562-ordered bytes — 16 per UUID — instead of an Array of `Uuid` objects:
 
 ```ruby
 bytes = HyperUuid.new_v7_batch_bytes(1000)
@@ -211,9 +212,7 @@ Real numbers, `benchmark-ips` on Ruby 4.0.7, linux-x64 on an Intel Core i9-11900
 |---|---:|---:|
 | `SecureRandom.uuid` | 943,917 | baseline |
 | `HyperUuid.new_v4` | 5,236,000 | **5.5x faster** |
-| `HyperUuid.new_v6` (explicit ms) | 3,811,000 | **4.0x faster** |
 | `HyperUuid.new_v7` (explicit ms) | 3,785,000 | **4.0x faster** |
-| `HyperUuid.new_v6` (current time) | 3,677,000 | **3.9x faster** |
 | `HyperUuid.new_v7` (current time) | 3,574,000 | **3.8x faster** |
 | `HyperUuid.new_v5` | 1,942,000 | 2.1x faster |
 
@@ -221,18 +220,16 @@ A `HyperUuid.new_v4` — real entropy, correct version/variant bits, minted by t
 
 The "current time" rows deserve a footnote, because they will not look like this everywhere. Here they land beside the explicit-ms rows: the only difference between the two is one `Process.clock_gettime(CLOCK_REALTIME)` wall-clock read, and on this machine that read is too cheap to see. On a machine with a slow clock it is the whole story — where a virtualized clock defeats the vDSO fast path the same read costs ~1µs, which puts both current-time rows at parity with `SecureRandom.uuid` while the explicit-ms rows stay well ahead of it. `SecureRandom.uuid` never reads a clock — random v4 is the only thing it does. If your clock is slow and you are minting many, read it once and pass the timestamp, or use the batch doors.
 
-The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.16x slower than `SecureRandom.uuid` for v4 (1.24 µs against 1.07 µs in its own run) and about 1.3x slower for v6/v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
+The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.16x slower than `SecureRandom.uuid` for v4 (1.24 µs against 1.07 µs in its own run) and about 1.3x slower for v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
 
 Batch generation still amortizes per-call cost on both backends — one native call for the whole batch:
 
 | Call | i/s (Magnus backend) |
 |---|---:|
-| `new_v6` × 1000 (individual) | 3,761 |
-| `new_v6_batch(1000)` | 4,857 (**1.3x**) |
 | `new_v7` × 1000 (individual) | 3,742 |
 | `new_v7_batch(1000)` | 4,850 (**1.3x**) |
 
-The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on is building a thousand `Uuid` objects — the byte form above does the same native work in 5 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v6/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
+The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on is building a thousand `Uuid` objects — the byte form above does the same native work in 5 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
 
 ## Backends
 
@@ -395,7 +392,7 @@ bundle exec rbwasm build --ruby-version 4.0 -o ruby.wasm
 Load `ruby.wasm` with [`@ruby/wasm-wasi`](https://www.npmjs.com/package/@ruby/wasm-wasi)
 (`DefaultRubyVM` in a browser, `RubyVM.instantiateModule` under Node), then
 `require "/bundle/setup"` and `require "hyperuuid"` as anywhere else. `HyperUuid::BACKEND` is
-`:native`: every door, the batch and raw-bytes forms, and `new_v6`/`new_v7` with no argument,
+`:native`: every door, the batch and raw-bytes forms, and `new_v7` with no argument,
 which read the clock through WASI.
 
 - **Ruby 3.4 and 4.0**, one archive each, the same minors the platform gems cover, picked by

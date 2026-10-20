@@ -23,9 +23,6 @@ public class GenerationBenchmarks
 	[Benchmark(Description = "UuidGenerator.NewV5")]
 	public Guid NewV5() => UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "www.example.com");
 
-	[Benchmark(Description = "UuidGenerator.NewV6")]
-	public Guid NewV6() => UuidGenerator.NewV6(RfcTestVectorMs);
-
 	[Benchmark(Description = "UuidGenerator.NewV7")]
 	public Guid NewV7() => UuidGenerator.NewV7(RfcTestVectorMs);
 }

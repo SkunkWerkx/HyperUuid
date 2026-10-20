@@ -9,7 +9,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Consumer feedback from Norse Architecture's Blazor WebAssembly integration.
+Consumer feedback from Norse Architecture's Blazor WebAssembly integration, and two breaking
+changes that make this a minor release: SQL Server order is now an RFC 9562 version 8, the
+version the RFC gives any byte order but its own, and version 6 is gone. HyperUuid now covers
+v4, v5, v7, and v8 as the SQL Server order of a v7. Python gains free-threaded wheels.
+
+### Upgrade note
+
+A v7 converted to SQL Server order by 0.8.x is not one 0.9.0 reads. `FromSqlOrder` refuses it,
+and the SQL Server layout reads answer version 0 with no timestamp. A stored column needs a
+one-off rewrite of one nibble per value: the wire octet 7's top nibble goes from 7 to 8, and the
+other 15 bytes stay as they are. In T-SQL, where that octet is the 8th byte of the
+`uniqueidentifier`'s binary form:
+
+```sql
+UPDATE t SET id = CAST(
+    SUBSTRING(CAST(id AS binary(16)), 1, 7)
+    + CAST((CAST(SUBSTRING(CAST(id AS binary(16)), 8, 1) AS tinyint) & 0x0F) | 0x80 AS binary(1))
+    + SUBSTRING(CAST(id AS binary(16)), 9, 8) AS uniqueidentifier);
+```
+
+Code calling the conversions gains an error path: they now refuse a value of the wrong version
+(the entry under Changed has each binding's error). The two C-ABI conversion exports return
+`int32_t` where they returned `void`. Code calling a v6 API has no 0.9.0 replacement for it;
+new IDs come from v7 (see Removed).
+
+### Removed
+
+- **Breaking — UUID version 6.** Every v6 API is gone from every binding: generation (single,
+  batch, at a timestamp, byte fills), the v6 timestamp readers, and the v6 SQL Server
+  conversions, along with their six C-ABI exports and `corpus/v6_layout.json`. RFC 9562 keeps v6
+  for systems that already speak v1, and says "Systems that do not involve legacy UUIDv1 SHOULD
+  use UUIDv7 (Section 5.7) instead" (§5.6); v7 sorts the same way and carries a counter v6
+  lacks. A v6 minted elsewhere still reports version 6, and now has no timestamp:
+  `GetTimestamp` and its spellings return null for it, as they do for v1. *(all packages)*
 
 ### Fixed
 
@@ -40,20 +73,24 @@ Consumer feedback from Norse Architecture's Blazor WebAssembly integration.
     LTO alone still fails the link for the generators.
   - PHP: the inspection example converted a v4 to SQL order, which throws. It now mints a v7.
   *(Go, Java, Ruby, Rust, PHP)*
-- **C# — the remarks on reading a SQL-ordered `Guid` without a layout were wrong for v7.**
-  They said `Version(Guid)` and `IsRfc(Guid, int)` read the wrong bytes there. For a
-  SQL-ordered v7 they answer 7 and `true`: reading a `Guid` in RFC order swaps octets 6 and 7
-  back, which happens to leave the version nibble and variant where the read looks. The rest is
-  still permuted, so `V7UnixMillis(Guid)` and `GetTimestamp(Guid)` read random bits after
-  that check passes, and `GetTimestamp` throws when they land past year 9999. A SQL-ordered v6
-  reads as the NCS variant and fails the check. The remarks on `Version`, `Variant`, `IsRfc`,
-  `V7UnixMillis` and `GetTimestamp`, and the README, now say so, and a test pins the
-  behaviour. The advice is unchanged: pass `UuidLayout.SqlServer`. The other bindings hand
-  the core raw bytes, where a SQL-ordered v7's version is read from counter bits, so their
-  wording was already right. Closes #36. *(C#)*
 
 ### Added
 
+- **Python — free-threaded CPython, with the GIL off.** Each platform now gets three wheels
+  where it had one: `cp311-abi3` for CPython 3.11+ with the GIL as before, `cp314-cp314t` for
+  free-threaded 3.14, and `cp315-abi3.abi3t`, PEP 803's stable ABI for 3.15+, which serves 3.15
+  with or without the GIL. PyO3 0.30's modules declare they need no GIL, so a free-threaded
+  interpreter keeps it off after `import hyperuuid`, and every function is safe to call from
+  many threads at once. `fill_v7` now writes through a buffer export of the `bytearray`, so
+  another thread resizing it meanwhile gets `BufferError` instead of freeing the memory being
+  written; a GIL build was kept safe by the GIL alone. PyPI gets 25 wheels per release where it
+  got 9. CI installs each wheel on its own interpreters and checks the GIL stays off, and runs
+  the whole suite on free-threaded 3.15 on every platform. A build from a checkout needs
+  maturin 1.15 or newer. *(PyPI)*
+- **`corpus/sql_order_refused.json`.** The conversions' refusals as vectors, replayed by every
+  binding: the direction and the value. *(all packages)*
+- **Rust — `SqlOrderError` and the `sql` module**, which documents the SQL Server layout bit by
+  bit. *(crates.io)*
 - **C# — error `HYPERUUID002` when the `wasm-tools` workload is missing.** Without the workload
   a Blazor WebAssembly publish skipped linking the native core with nothing louder than the
   SDK's own warning, and shipped a runtime with no `uuid_*` symbols; `NETSDK1147` never fires
@@ -63,6 +100,35 @@ Consumer feedback from Norse Architecture's Blazor WebAssembly integration.
 
 ### Changed
 
+- **Breaking — SQL Server order is an RFC 9562 version 8.** RFC 9562 defines v7's layout in
+  network byte order and sends any other byte order to version 8 (§6.11, §5.8).
+  `V7ToSqlOrder` kept the 7, though the bytes no longer had a v7's layout. So SQL Server's text
+  form, a .NET `Guid` and every driver's UUID type showed a valid v7 whose timestamp field held
+  random bits, and any tool reading it took that for the creation time. The conversion now
+  writes an 8 and the RFC variant where those readers look (the wire octet 7's top nibble and
+  octet 8's top bits), and the bytes are otherwise the ones 0.8.x wrote: the v7's timestamp,
+  counter and 48 random bits in `SqlGuid`'s compare order. So HyperUuid now differs from
+  SequentialGuid's permutation by that nibble. A v7 and a v8 both have 122 free bits, so every
+  v7 converts and the conversion back is exact, and the SQL Server layout reads (`Version`,
+  `IsRfc`, `GetTimestamp`, `V7UnixMillis`/`V7Timestamp`) still answer 7 and the timestamp. The
+  conversions now refuse a value of the wrong version, in either direction: anything but an RFC
+  9562 v7 going in, anything without the layout's 8 and variant coming back, which includes
+  0.8.x's form. Each refusal leaves the value as it was:
+  - Rust: `to_sql_order`/`to_rfc_order` return `Result<Uuid, SqlOrderError>`
+    (`WrongVersion`).
+  - C ABI: the two exports return `int32_t`: `0`, or `5` for the wrong version.
+  - C#: `ArgumentException`. Through the overloads without a layout, a SQL-ordered `Guid` is a
+    version 8 with no timestamp, so `GetTimestamp(Guid)` returns `null` for it where it read
+    random bits before. Closes #36.
+  - Java: `IllegalArgumentException`.
+  - Go: the existing signatures return the new `ErrWrongVersion`.
+  - Python: `ValueError`.
+  - Ruby: `ArgumentError`, with the core's message.
+  - PHP: `\InvalidArgumentException`.
+  - Swift: `UuidGenerator.Error.wrongVersion`.
+
+  The corpus pins the new bytes, derived by the oracle from RFC 9562's field table in bit
+  strings and checked against SequentialGuid's permutation. *(all packages)*
 - **Docs — how to bind a SQL-ordered UUID outside .NET, measured.** SQL Server stores a UUID
   string's first three groups byte-reversed. Against SQL Server 2022, every driver tested
   outside .NET sends its UUID type the same way it sends text: mssql-jdbc 13.6, go-mssqldb 1.11

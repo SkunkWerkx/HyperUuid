@@ -33,6 +33,9 @@ final class Runtime
     /** Batch return code 3's meaning: `count * 16` overflows the platform's address space. */
     private const UNADDRESSABLE_BATCH = 'the batch is too large to address on this platform';
 
+    /** SQL-order return code 5: the value isn't a UUID of the version the conversion takes. */
+    public const SQL_ORDER_WRONG_VERSION = 'the value is not a UUID of the version this conversion takes';
+
     private static ?FFI $ffi = null;
     private static ?FFI\CData $out16 = null;
     private static ?FFI\CData $millis = null;
@@ -82,44 +85,6 @@ final class Runtime
         return FFI::string(self::$out16, 16);
     }
 
-    public static function newV6(int $unixMillis): string
-    {
-        $ffi = self::$ffi ?? self::load();
-        $rc = $ffi->uuid_new_v6($unixMillis, self::$out16);
-        if ($rc === 2) {
-            throw new TimestampOutOfRangeException(
-                'unix_millis does not fit the 60-bit v6 timestamp field'
-            );
-        }
-        if ($rc !== 0) {
-            throw new RandomSourceException("uuid_new_v6 failed with code {$rc}");
-        }
-        return FFI::string(self::$out16, 16);
-    }
-
-    public static function newV6Batch(int $count, int $unixMillis): string
-    {
-        self::checkCount($count);
-        if ($count === 0) {
-            return '';
-        }
-        $ffi = self::$ffi ?? self::load();
-        $out = $ffi->new('uint8_t[' . ($count * 16) . ']');
-        $rc = $ffi->uuid_new_v6_batch($unixMillis, $count, $out);
-        if ($rc === 2) {
-            throw new TimestampOutOfRangeException(
-                'unix_millis does not fit the 60-bit v6 timestamp field'
-            );
-        }
-        if ($rc === 3) {
-            throw new \InvalidArgumentException(self::UNADDRESSABLE_BATCH);
-        }
-        if ($rc !== 0) {
-            throw new RandomSourceException("uuid_new_v6_batch failed with code {$rc}");
-        }
-        return FFI::string($out, $count * 16);
-    }
-
     public static function newV7(int $unixMillis): string
     {
         $ffi = self::$ffi ?? self::load();
@@ -137,8 +102,8 @@ final class Runtime
 
     /**
      * The Unix-epoch milliseconds of `$bytes`, held in the order of the core layout code
-     * `$layout`, when it is an RFC 9562 version 6 or 7 UUID there (variant checked); null
-     * for anything else. One native call.
+     * `$layout`, when it is an RFC 9562 version 7 UUID there (variant checked); null for
+     * anything else, a version 6 included. One native call.
      */
     public static function getTimestamp(string $bytes, int $layout): ?int
     {
@@ -150,8 +115,8 @@ final class Runtime
 
     /**
      * The version of `$bytes` held in the order of the core layout code `$layout`: the RFC
-     * nibble (0-15) in RFC 9562 order; 6, 7, or 0 for "not a SQL-ordered v6/v7" in SQL Server
-     * order.
+     * nibble (0-15) in RFC 9562 order; in SQL Server order 7 for a value converted from
+     * version 7, or 0 for anything else.
      */
     public static function version(string $bytes, int $layout): int
     {
@@ -209,61 +174,44 @@ final class Runtime
     }
 
     /**
-     * Rewrites `$bytes` from RFC 9562 order to the byte order SQL Server's `uniqueidentifier`
-     * needs on the wire to sort a version 7 UUID by creation order. Meaningful only for a
-     * genuine version 7 UUID.
+     * Rewrites `$bytes` from an RFC 9562 version 7 UUID to SQL Server order, the version 8
+     * layout `uniqueidentifier` sorts by creation.
+     *
+     * @throws \InvalidArgumentException If `$bytes` isn't an RFC 9562 version 7 UUID.
      */
     public static function v7ToSqlOrder(string $bytes): string
     {
         $ffi = self::$ffi ?? self::load();
         FFI::memcpy(self::$out16, $bytes, 16);
-        $ffi->uuid_v7_to_sql_order(self::$out16);
+        self::checkSqlOrder($ffi->uuid_v7_to_sql_order(self::$out16), 'uuid_v7_to_sql_order');
         return FFI::string(self::$out16, 16);
     }
 
-    /** Inverse of {@see v7ToSqlOrder} — rewrites `$bytes` from SQL Server order back to RFC 9562 order. */
+    /**
+     * Inverse of {@see v7ToSqlOrder} — rewrites a SQL-ordered value converted from version 7
+     * back to RFC 9562 order.
+     *
+     * @throws \InvalidArgumentException If `$bytes` isn't a SQL-ordered value from version 7.
+     */
     public static function v7ToRfcOrder(string $bytes): string
     {
         $ffi = self::$ffi ?? self::load();
         FFI::memcpy(self::$out16, $bytes, 16);
-        $ffi->uuid_v7_to_rfc_order(self::$out16);
+        self::checkSqlOrder($ffi->uuid_v7_to_rfc_order(self::$out16), 'uuid_v7_to_rfc_order');
         return FFI::string(self::$out16, 16);
     }
 
     /**
-     * Rewrites `$bytes` from RFC 9562 order to the byte order SQL Server's `uniqueidentifier`
-     * needs on the wire to sort a version 6 UUID by creation order. Meaningful only for a
-     * genuine version 6 UUID.
+     * Maps a SQL-order conversion's return code to its exception; on any refusal the core left
+     * the buffer as it was. The messages are the core's own, the same in every binding.
      */
-    public static function v6ToSqlOrder(string $bytes): string
+    private static function checkSqlOrder(int $rc, string $function): void
     {
-        $ffi = self::$ffi ?? self::load();
-        FFI::memcpy(self::$out16, $bytes, 16);
-        $ffi->uuid_v6_to_sql_order(self::$out16);
-        return FFI::string(self::$out16, 16);
-    }
-
-    /** Inverse of {@see v6ToSqlOrder} — rewrites `$bytes` from SQL Server order back to RFC 9562 order. */
-    public static function v6ToRfcOrder(string $bytes): string
-    {
-        $ffi = self::$ffi ?? self::load();
-        FFI::memcpy(self::$out16, $bytes, 16);
-        $ffi->uuid_v6_to_rfc_order(self::$out16);
-        return FFI::string(self::$out16, 16);
-    }
-
-    /**
-     * A batch count crosses the ABI as a `uint32_t`: a negative or over-wide count is a
-     * caller bug, reported as one here instead of as an FFI allocation error or a silently
-     * truncated batch.
-     */
-    private static function checkCount(int $count): void
-    {
-        if ($count < 0 || $count > self::UINT32_MAX) {
-            throw new \InvalidArgumentException(
-                "count must be between 0 and 4294967295, got {$count}"
-            );
-        }
+        match ($rc) {
+            0 => null,
+            5 => throw new \InvalidArgumentException(self::SQL_ORDER_WRONG_VERSION),
+            default => throw new \RuntimeException("{$function} failed with code {$rc}"),
+        };
     }
 
     private static function v7BatchLimitMessage(int $count): string
@@ -308,20 +256,14 @@ final class Runtime
             'uint32_t hyperuuid_version(void);'
             . 'int uuid_new_v4(void *out_ptr);'
             . 'int uuid_new_v5(const char *ns_ptr, const char *name_ptr, uint32_t name_len, void *out_ptr);'
-            . 'int uuid_new_v6(uint64_t unix_millis, void *out_ptr);'
-            . 'uint64_t uuid_v6_unix_millis(const char *uuid_ptr);'
-            . 'int uuid_new_v6_batch(uint64_t unix_millis, uint32_t count, void *out_ptr);'
             . 'int uuid_new_v7(uint64_t unix_millis, void *out_ptr);'
             . 'uint64_t uuid_v7_unix_millis(const char *uuid_ptr);'
             . 'int uuid_new_v7_batch(uint64_t unix_millis, uint32_t count, void *out_ptr);'
-            . 'void uuid_v7_to_sql_order(void *uuid_ptr);'
-            . 'void uuid_v7_to_rfc_order(void *uuid_ptr);'
-            . 'void uuid_v6_to_sql_order(void *uuid_ptr);'
-            . 'void uuid_v6_to_rfc_order(void *uuid_ptr);'
+            . 'int uuid_v7_to_sql_order(void *uuid_ptr);'
+            . 'int uuid_v7_to_rfc_order(void *uuid_ptr);'
             . 'uint32_t uuid_version(const char *uuid_ptr, uint32_t layout);'
             . 'uint32_t uuid_variant(const char *uuid_ptr);'
             . 'uint32_t uuid_is_rfc(const char *uuid_ptr, uint32_t version, uint32_t layout);'
-            . 'uint64_t uuid_v6_unix_millis_in(const char *uuid_ptr, uint32_t layout);'
             . 'uint64_t uuid_v7_unix_millis_in(const char *uuid_ptr, uint32_t layout);'
             . 'uint32_t uuid_get_timestamp(const char *uuid_ptr, uint32_t layout, uint64_t *millis_out);',
             $path

@@ -1,7 +1,7 @@
 //! [`Timestamp`] — Unix-epoch seconds plus sub-second nanoseconds, the same two-field shape
 //! the upstream [`uuid`](https://docs.rs/uuid) crate's own `Timestamp` exposes via `to_unix`.
-//! [`crate::get_timestamp`] returns one for any version 6 or 7 [`crate::Uuid`], and
-//! [`crate::v6::new_v6_at`]/[`crate::v7::new_v7_at`] accept one back — a caller already
+//! [`crate::get_timestamp`] returns one for any version 7 [`crate::Uuid`], and
+//! [`crate::v7::new_v7_at`] accepts one back — a caller already
 //! familiar with the `uuid` crate's `get_timestamp`/`Timestamp::to_unix` gets the same
 //! vocabulary here instead of passing a raw millisecond count around.
 
@@ -9,7 +9,7 @@
 /// `Timestamp::to_unix` shape.
 ///
 /// This crate's own creation and extraction functions all work in whole milliseconds — the
-/// precision RFC 9562 v6/v7 actually store — so converting to and from that unit is exact;
+/// precision RFC 9562 v7 actually stores — so converting to and from that unit is exact;
 /// constructing a [`Timestamp`] from a sub-millisecond-precision `(seconds, subsec_nanos)`
 /// pair and converting it back to milliseconds truncates, the same way `uuid`'s own
 /// `Timestamp::to_unix_millis` documents.
@@ -43,13 +43,12 @@ impl Timestamp {
         }
     }
 
-    /// Collapses this timestamp down to the millisecond count [`crate::v6::new_v6_at`]/
-    /// [`crate::v7::new_v7_at`] actually pass along to [`crate::v6::new_v6`]/
-    /// [`crate::v7::new_v7`] — truncates any sub-millisecond precision this crate doesn't
+    /// Collapses this timestamp down to the millisecond count [`crate::v7::new_v7_at`]
+    /// actually passes along to [`crate::v7::new_v7`] — truncates any sub-millisecond precision this crate doesn't
     /// track, matching [`Timestamp::from_unix_millis`]'s own rounding-down direction.
     ///
     /// Saturates at `u64::MAX` for a timestamp past what a millisecond count can hold, which
-    /// both generators reject as out of range. Plain arithmetic panicked there in a debug
+    /// the generator rejects as out of range. Plain arithmetic panicked there in a debug
     /// build and, in a release one, wrapped into a valid-looking but wrong timestamp.
     pub const fn to_unix_millis(&self) -> u64 {
         self.seconds

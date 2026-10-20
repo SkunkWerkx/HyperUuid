@@ -11,8 +11,7 @@
 //! which is exactly what keeps them provably in agreement. Exceptions stay the package's own
 //! `HyperUuid::RandomSourceError` / `HyperUuid::TimestampOutOfRangeError`, with the same
 //! messages `lib/hyperuuid/runtime.rb` gives the Fiddle backend — the texts below are that
-//! file's `V6_TIMESTAMP_OUT_OF_RANGE` / `V7_TIMESTAMP_OUT_OF_RANGE` / `V7_BATCH_TOO_LARGE` /
-//! `BATCH_TOO_LARGE_TO_ADDRESS`, and `random_source_error` is its `random_source_failure`.
+//! file's `V7_TIMESTAMP_OUT_OF_RANGE` / `V7_BATCH_TOO_LARGE` / `BATCH_TOO_LARGE_TO_ADDRESS`, and `random_source_error` is its `random_source_failure`.
 //! `HYPERUUID_PURE=1` (checked Ruby-side) keeps Fiddle.
 
 use std::sync::OnceLock;
@@ -43,7 +42,6 @@ fn exception_class(ruby: &Ruby, pick: fn(&Cached) -> Opaque<ExceptionClass>) -> 
     }
 }
 
-const V6_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis does not fit the 60-bit v6 timestamp field";
 const V7_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis must fit within the RFC 9562 48-bit field";
 const V7_BATCH_TOO_LARGE: &str =
     "a single version 7 batch takes at most 67108864 UUIDs (the 26-bit counter space)";
@@ -121,40 +119,6 @@ fn new_v5(ruby: &Ruby, namespace_bytes: RString, name_bytes: RString) -> Result<
     Ok(uuid_string(ruby, uuid))
 }
 
-fn new_v6(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
-    match core::v6::new_v6(unix_millis) {
-        Ok(uuid) => Ok(uuid_string(ruby, uuid)),
-        Err(core::v6::NewV6Error::TimestampOutOfRange) => {
-            Err(timestamp_out_of_range(ruby, V6_TIMESTAMP_OUT_OF_RANGE))
-        }
-        Err(e @ core::v6::NewV6Error::BufferTooSmall) => {
-            Err(Error::new(ruby.exception_arg_error(), e.to_string()))
-        }
-        Err(core::v6::NewV6Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v6")),
-    }
-}
-
-fn v6_unix_millis(ruby: &Ruby, bytes: RString) -> Result<u64, Error> {
-    Ok(core::v6::unix_millis(&uuid_arg(ruby, bytes)?))
-}
-
-fn new_v6_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Error> {
-    if count == 0 {
-        return Ok(ruby.str_from_slice(&[]));
-    }
-    let mut out = vec![0u8; batch_len(ruby, count)?];
-    match core::v6::new_v6_batch(unix_millis, count, &mut out) {
-        Ok(()) => Ok(ruby.str_from_slice(&out)),
-        Err(core::v6::NewV6Error::TimestampOutOfRange) => {
-            Err(timestamp_out_of_range(ruby, V6_TIMESTAMP_OUT_OF_RANGE))
-        }
-        Err(e @ core::v6::NewV6Error::BufferTooSmall) => {
-            Err(Error::new(ruby.exception_arg_error(), e.to_string()))
-        }
-        Err(core::v6::NewV6Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v6_batch")),
-    }
-}
-
 fn new_v7(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
     match core::v7::new_v7(unix_millis) {
         Ok(uuid) => Ok(uuid_string(ruby, uuid)),
@@ -218,9 +182,8 @@ fn is_rfc(ruby: &Ruby, bytes: RString, version: u32, layout_code: u32) -> Result
     })
 }
 
-/// The strict, version-agnostic read: the Unix ms of an RFC 9562 version 6 or 7 UUID held in
-/// `layout`'s order, `nil` for anything else (another version, another variant, an unknown
-/// layout code) — the C ABI's `uuid_get_timestamp`, which the Fiddle backend calls.
+/// The strict read: the Unix ms of an RFC 9562 version 7 UUID held in `layout`'s order, `nil`
+/// for anything else (another version, another variant, an unknown layout code) — the C ABI's `uuid_get_timestamp`, which the Fiddle backend calls.
 fn get_timestamp(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<Option<u64>, Error> {
     let uuid = uuid_arg(ruby, bytes)?;
     Ok(layout(layout_code)
@@ -228,42 +191,30 @@ fn get_timestamp(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<Option
         .map(|timestamp| timestamp.to_unix_millis()))
 }
 
-fn v6_unix_millis_in(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<u64, Error> {
-    let uuid = uuid_arg(ruby, bytes)?;
-    Ok(layout(layout_code).map_or(0, |layout| core::v6::unix_millis_in(&uuid, layout)))
-}
-
 fn v7_unix_millis_in(ruby: &Ruby, bytes: RString, layout_code: u32) -> Result<u64, Error> {
     let uuid = uuid_arg(ruby, bytes)?;
     Ok(layout(layout_code).map_or(0, |layout| core::v7::unix_millis_in(&uuid, layout)))
 }
 
+/// A SQL-order conversion's result as the Fiddle backend raises it: the core's own message,
+/// under `ArgumentError`, for a value that isn't of the version the conversion takes.
+fn sql_order(
+    ruby: &Ruby,
+    bytes: RString,
+    convert: fn(&core::Uuid) -> Result<core::Uuid, core::SqlOrderError>,
+) -> Result<RString, Error> {
+    match convert(&uuid_arg(ruby, bytes)?) {
+        Ok(converted) => Ok(uuid_string(ruby, converted)),
+        Err(e) => Err(Error::new(ruby.exception_arg_error(), e.to_string())),
+    }
+}
+
 fn v7_to_sql_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(
-        ruby,
-        core::v7::to_sql_order(&uuid_arg(ruby, bytes)?),
-    ))
+    sql_order(ruby, bytes, core::v7::to_sql_order)
 }
 
 fn v7_to_rfc_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(
-        ruby,
-        core::v7::to_rfc_order(&uuid_arg(ruby, bytes)?),
-    ))
-}
-
-fn v6_to_sql_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(
-        ruby,
-        core::v6::to_sql_order(&uuid_arg(ruby, bytes)?),
-    ))
-}
-
-fn v6_to_rfc_order(ruby: &Ruby, bytes: RString) -> Result<RString, Error> {
-    Ok(uuid_string(
-        ruby,
-        core::v6::to_rfc_order(&uuid_arg(ruby, bytes)?),
-    ))
+    sql_order(ruby, bytes, core::v7::to_rfc_order)
 }
 
 /// The loaded core's packed version word — the same value the C-ABI `hyperuuid_version`
@@ -290,21 +241,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     });
     runtime.define_singleton_method("new_v4", function!(new_v4, 0))?;
     runtime.define_singleton_method("new_v5", function!(new_v5, 2))?;
-    runtime.define_singleton_method("new_v6", function!(new_v6, 1))?;
-    runtime.define_singleton_method("v6_unix_millis", function!(v6_unix_millis, 1))?;
-    runtime.define_singleton_method("new_v6_batch", function!(new_v6_batch, 2))?;
     runtime.define_singleton_method("new_v7", function!(new_v7, 1))?;
     runtime.define_singleton_method("v7_unix_millis", function!(v7_unix_millis, 1))?;
     runtime.define_singleton_method("new_v7_batch", function!(new_v7_batch, 2))?;
     runtime.define_singleton_method("v7_to_sql_order", function!(v7_to_sql_order, 1))?;
     runtime.define_singleton_method("v7_to_rfc_order", function!(v7_to_rfc_order, 1))?;
-    runtime.define_singleton_method("v6_to_sql_order", function!(v6_to_sql_order, 1))?;
-    runtime.define_singleton_method("v6_to_rfc_order", function!(v6_to_rfc_order, 1))?;
     runtime.define_singleton_method("version", function!(version, 2))?;
     runtime.define_singleton_method("variant", function!(variant, 1))?;
     runtime.define_singleton_method("is_rfc", function!(is_rfc, 3))?;
     runtime.define_singleton_method("get_timestamp", function!(get_timestamp, 2))?;
-    runtime.define_singleton_method("v6_unix_millis_in", function!(v6_unix_millis_in, 2))?;
     runtime.define_singleton_method("v7_unix_millis_in", function!(v7_unix_millis_in, 2))?;
     runtime.define_singleton_method("packed_version", function!(packed_version, 0))?;
     Ok(())

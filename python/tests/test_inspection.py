@@ -24,7 +24,6 @@ _SMALL_ADDRESS_SPACE = sys.platform == "emscripten" or sys.maxsize < 2**32
 def _minted():
     yield hyperuuid.new_v4(), 4
     yield hyperuuid.new_v5(uuid.NAMESPACE_DNS, "x"), 5
-    yield hyperuuid.new_v6(MS), 6
     yield hyperuuid.new_v7(MS), 7
     yield uuid.uuid4(), 4
     yield uuid.uuid5(uuid.NAMESPACE_DNS, "x"), 5
@@ -80,25 +79,19 @@ def test_a_non_integer_version_is_a_type_error():
         hyperuuid.is_rfc(hyperuuid.new_v7(MS), "7")
 
 
-def test_sql_ordered_v6_and_v7_are_validated_and_read_in_place_without_confusion():
-    """In SQL order a v6's random clock_seq sits where a v7's version nibble does and reads as 7
-    one time in 16; enough draws that a confusion would surface."""
+def test_sql_ordered_v7_is_validated_and_read_in_place():
+    """A converted v7 reads as version 7 in the SQL layout and only 7, next to random bits;
+    enough draws that a misread would surface."""
     for _ in range(2048):
-        six = hyperuuid.v6_to_sql_order(hyperuuid.new_v6(MS))
         seven = hyperuuid.v7_to_sql_order(hyperuuid.new_v7(MS))
 
-        assert hyperuuid.version(six, Layout.SQL_SERVER) == 6
         assert hyperuuid.version(seven, Layout.SQL_SERVER) == 7
-        assert hyperuuid.is_rfc(six, 6, Layout.SQL_SERVER) is True
-        assert hyperuuid.is_rfc(six, 7, Layout.SQL_SERVER) is False
         assert hyperuuid.is_rfc(seven, 7, Layout.SQL_SERVER) is True
         assert hyperuuid.is_rfc(seven, 6, Layout.SQL_SERVER) is False
+        assert hyperuuid.is_rfc(seven, 8, Layout.SQL_SERVER) is False
 
-        assert hyperuuid.v6_unix_millis(six, Layout.SQL_SERVER) == MS
         assert hyperuuid.v7_unix_millis(seven, Layout.SQL_SERVER) == MS
-        assert hyperuuid.v6_timestamp(six, Layout.SQL_SERVER) == AT_MS
         assert hyperuuid.v7_timestamp(seven, Layout.SQL_SERVER) == AT_MS
-        assert hyperuuid.get_timestamp(six, Layout.SQL_SERVER) == AT_MS
         assert hyperuuid.get_timestamp(seven, Layout.SQL_SERVER) == AT_MS
         # Read straight from SQL order matches permuting back first.
         assert hyperuuid.v7_unix_millis(seven, Layout.SQL_SERVER) == hyperuuid.v7_unix_millis(
@@ -106,29 +99,51 @@ def test_sql_ordered_v6_and_v7_are_validated_and_read_in_place_without_confusion
         )
 
 
+def test_a_version_6_has_no_timestamp_in_either_layout():
+    """Version 6 is not supported: a v6 from another generator still reports its nibble, but
+    carries no timestamp, read in RFC 9562 order or in place as SQL Server order."""
+    a5 = uuid.UUID("1ec9414c-232a-6b00-b3c8-9f6bdeced846")  # RFC 9562 A.5
+    sixes = [a5]
+    if hasattr(uuid, "uuid6"):  # Python 3.14+
+        sixes.append(uuid.uuid6())
+    for six in sixes:
+        assert hyperuuid.version(six) == 6
+        assert hyperuuid.is_rfc(six, 6) is True
+        assert hyperuuid.get_timestamp(six) is None
+        # No SQL-layout read could answer 6, random bits or not.
+        assert hyperuuid.is_rfc(six, 6, Layout.SQL_SERVER) is False
+    # A fixed value only for the SQL-layout timestamp: random RFC-ordered bytes carry the
+    # layout's 8 and variant one time in 16 and then read as a SQL-ordered v7 (see below).
+    assert hyperuuid.get_timestamp(a5, Layout.SQL_SERVER) is None
+
+
 def test_non_sql_values_have_no_sql_version():
-    """Bytes that don't form a SQL-ordered v6/v7 read as version 0 with no timestamp there.
+    """Bytes that don't form a SQL-ordered v7 read as version 0 with no timestamp there.
 
     Fixed values only: a random v4 in RFC order carries the variant in octet 8 and a random
-    octet 7, so one in 16 genuinely forms a SQL-ordered v7. That is the core answering
-    correctly about the bytes; which layout a value is in is the caller's to know.
+    octet 7, so one in 16 carries the SQL layout's 8 there and reads as 7. That is the
+    core answering correctly about the bytes; which layout a value is in is the caller's to
+    know.
     """
     for id_ in (
         hyperuuid.NIL,
         hyperuuid.MAX,
         uuid.UUID("919108f7-52d1-4320-9bac-f847db4148a8"),  # v4, RFC 9562 A.3
-        uuid.UUID("2ed6657d-e927-568b-95e1-2665a8aea6a2"),  # v5, RFC 9562 A.4
+        uuid.UUID("1ec9414c-232a-6b00-b3c8-9f6bdeced846"),  # v6, RFC 9562 A.5
+        uuid.UUID("017f22e2-79b0-7cc3-98c4-dc0c0c07398f"),  # v7, RFC 9562 A.6
     ):
         assert hyperuuid.version(id_, Layout.SQL_SERVER) == 0
         assert hyperuuid.get_timestamp(id_, Layout.SQL_SERVER) is None
+    # The v5 of RFC 9562 A.4 is one of those one in 16: an 8 at octet 7, the variant at 8.
+    assert (
+        hyperuuid.version(uuid.UUID("2ed6657d-e927-568b-95e1-2665a8aea6a2"), Layout.SQL_SERVER) == 7
+    )
 
 
 LAYOUT_DOORS = [
     pytest.param(lambda id_, layout: hyperuuid.version(id_, layout), id="version"),
     pytest.param(lambda id_, layout: hyperuuid.is_rfc(id_, 7, layout), id="is_rfc"),
-    pytest.param(lambda id_, layout: hyperuuid.v6_unix_millis(id_, layout), id="v6_unix_millis"),
     pytest.param(lambda id_, layout: hyperuuid.v7_unix_millis(id_, layout), id="v7_unix_millis"),
-    pytest.param(lambda id_, layout: hyperuuid.v6_timestamp(id_, layout), id="v6_timestamp"),
     pytest.param(lambda id_, layout: hyperuuid.v7_timestamp(id_, layout), id="v7_timestamp"),
     pytest.param(lambda id_, layout: hyperuuid.get_timestamp(id_, layout), id="get_timestamp"),
 ]
@@ -158,9 +173,7 @@ def test_the_extension_refuses_an_unknown_layout_code_itself():
     for call in (
         lambda: _native.version(id_, 3),
         lambda: _native.is_rfc(id_, 7, 0),
-        lambda: _native.v6_unix_millis_in(id_, 3),
         lambda: _native.v7_unix_millis_in(id_, 3),
-        lambda: _native.v6_timestamp(id_, 3),
         lambda: _native.v7_timestamp(id_, 3),
     ):
         with pytest.raises(ValueError, match="layout must be 1"):
@@ -198,8 +211,7 @@ def test_a_v7_batch_past_the_counter_space_is_refused_before_allocating():
     ):
         with pytest.raises(ValueError, match=str(hyperuuid.MAX_V7_BATCH)):
             call()
-    # v6 has no counter and no such limit; a count past it is only a size, so it is not tried
-    # here, but zero still works on both.
+    # Zero still works.
     assert hyperuuid.new_v7_batch(0, MS) == []
 
 
@@ -229,7 +241,7 @@ def test_a_v7_fill_of_exactly_the_counter_space_is_strictly_increasing():
 
 
 def test_get_timestamp_requires_the_rfc_variant():
-    """A 6 or 7 nibble under another variant has no RFC version, so no timestamp; the
+    """A 7 nibble under another variant has no RFC version, so no timestamp; the
     version nibble still reads, and the per-version doors still read the field as asked."""
     seven = hyperuuid.new_v7(MS).bytes
     for top in (0x00, 0xC0, 0xE0):  # NCS, Microsoft, future

@@ -26,29 +26,9 @@ let benchmarks: @Sendable () -> Void = {
         }
     }
 
-    Benchmark("HyperUuid.newV6") { benchmark in
-        for _ in benchmark.scaledIterations {
-            blackHole(try! UuidGenerator.newV6())
-        }
-    }
-
     Benchmark("HyperUuid.newV7") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(try! UuidGenerator.newV7())
-        }
-    }
-
-    Benchmark("HyperUuid.newV6 x1000 (individual)") { benchmark in
-        for _ in benchmark.scaledIterations {
-            for _ in 0..<1000 {
-                blackHole(try! UuidGenerator.newV6())
-            }
-        }
-    }
-
-    Benchmark("HyperUuid.newV6Batch(count: 1000)") { benchmark in
-        for _ in benchmark.scaledIterations {
-            blackHole(try! UuidGenerator.newV6Batch(count: 1000))
         }
     }
 
@@ -84,14 +64,6 @@ let benchmarks: @Sendable () -> Void = {
                 try! UuidGenerator.fillV7(into: buf, unixMillis: 1_645_557_742_000)
             }
             blackHole(raw)
-        }
-    }
-
-    Benchmark("HyperUuid.fillV6(into: [UUID]) 1000") { benchmark in
-        var dst = [UUID](repeating: UUID(), count: 1000)
-        for _ in benchmark.scaledIterations {
-            try! UuidGenerator.fillV6(into: &dst, unixMillis: 1_645_557_742_000)
-            blackHole(dst)
         }
     }
 }

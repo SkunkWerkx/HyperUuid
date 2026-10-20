@@ -67,20 +67,14 @@
     <EmccExportedFunction Include="_hyperuuid_version" />
     <EmccExportedFunction Include="_uuid_new_v4" />
     <EmccExportedFunction Include="_uuid_new_v5" />
-    <EmccExportedFunction Include="_uuid_new_v6" />
-    <EmccExportedFunction Include="_uuid_v6_unix_millis" />
-    <EmccExportedFunction Include="_uuid_new_v6_batch" />
     <EmccExportedFunction Include="_uuid_new_v7" />
     <EmccExportedFunction Include="_uuid_v7_unix_millis" />
     <EmccExportedFunction Include="_uuid_new_v7_batch" />
     <EmccExportedFunction Include="_uuid_v7_to_sql_order" />
     <EmccExportedFunction Include="_uuid_v7_to_rfc_order" />
-    <EmccExportedFunction Include="_uuid_v6_to_sql_order" />
-    <EmccExportedFunction Include="_uuid_v6_to_rfc_order" />
     <EmccExportedFunction Include="_uuid_version" />
     <EmccExportedFunction Include="_uuid_is_rfc" />
     <EmccExportedFunction Include="_uuid_get_timestamp" />
-    <EmccExportedFunction Include="_uuid_v6_unix_millis_in" />
     <EmccExportedFunction Include="_uuid_v7_unix_millis_in" />
   </ItemGroup>
 

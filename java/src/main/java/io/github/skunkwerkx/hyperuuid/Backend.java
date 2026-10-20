@@ -26,12 +26,6 @@ interface Backend {
 
     UUID newV5(UUID namespace, byte[] name);
 
-    UUID newV6(long unixMillis);
-
-    long v6UnixMillis(UUID uuid);
-
-    UUID[] newV6Batch(int count, long unixMillis);
-
     UUID newV7(long unixMillis);
 
     long v7UnixMillis(UUID uuid);
@@ -42,25 +36,13 @@ interface Backend {
 
     UUID v7FromSqlOrder(UUID uuid);
 
-    UUID v6ToSqlOrder(UUID uuid);
-
-    UUID v6FromSqlOrder(UUID uuid);
-
     void fillV7(UUID[] destination, long unixMillis);
 
-    void fillV6(UUID[] destination, long unixMillis);
-
     void fillV7(byte[] destination, long unixMillis);
-
-    void fillV6(byte[] destination, long unixMillis);
 
     void v7ToSqlOrder(byte[] uuid);
 
     void v7FromSqlOrder(byte[] uuid);
-
-    void v6ToSqlOrder(byte[] uuid);
-
-    void v6FromSqlOrder(byte[] uuid);
 
     // The inspection exports. Layout codes arrive already validated (1 or 2); a byte[] is
     // already checked to be exactly 16 bytes. A UUID crosses as its two big-endian longs in
@@ -85,17 +67,14 @@ interface Backend {
     boolean isRfc(byte[] uuid, int version, int layout);
 
     /**
-     * {@code uuid_get_timestamp}: the embedded timestamp of an RFC 9562 v6 or v7 in that
+     * {@code uuid_get_timestamp}: the embedded timestamp of an RFC 9562 v7 in that
      * layout, or empty for anything else (another version, or another variant).
      */
     Optional<Instant> getTimestamp(UUID uuid, int layout);
 
-    /** {@code uuid_v6_unix_millis_in}. */
-    long v6UnixMillisIn(UUID uuid, int layout);
-
     /** {@code uuid_v7_unix_millis_in}. */
     long v7UnixMillisIn(UUID uuid, int layout);
 
-    /** The {@code hyperuuid_version} export:the core's version, packed {@code major << 16 | minor << 8 | patch}. */
+    /** The {@code hyperuuid_version} export: the core's version, packed {@code major << 16 | minor << 8 | patch}. */
     int version();
 }

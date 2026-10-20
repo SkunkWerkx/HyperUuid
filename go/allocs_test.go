@@ -22,11 +22,6 @@ func TestSingleUuidDoorsDoNotAllocate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	assertAllocs(t, "NewV6At", 0, func() {
-		if _, err := NewV6At(rfcTestVectorMs); err != nil {
-			t.Fatal(err)
-		}
-	})
 	assertAllocs(t, "NewV7At", 0, func() {
 		if _, err := NewV7At(rfcTestVectorMs); err != nil {
 			t.Fatal(err)
@@ -42,19 +37,10 @@ func TestSingleUuidDoorsDoNotAllocate(t *testing.T) {
 }
 
 func TestExtractionAndSqlOrderDoNotAllocate(t *testing.T) {
-	v6, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	v7, err := NewV7At(rfcTestVectorMs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertAllocs(t, "V6Timestamp", 0, func() {
-		if _, err := V6Timestamp(v6); err != nil {
-			t.Fatal(err)
-		}
-	})
 	assertAllocs(t, "V7Timestamp", 0, func() {
 		if _, err := V7Timestamp(v7); err != nil {
 			t.Fatal(err)
@@ -62,15 +48,6 @@ func TestExtractionAndSqlOrderDoNotAllocate(t *testing.T) {
 	})
 	assertAllocs(t, "GetTimestamp", 0, func() {
 		if _, err := GetTimestamp(v7); err != nil {
-			t.Fatal(err)
-		}
-	})
-	assertAllocs(t, "V6ToSqlOrder/V6FromSqlOrder", 0, func() {
-		sql, err := V6ToSqlOrder(v6)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := V6FromSqlOrder(sql); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -93,26 +70,27 @@ func TestExtractionAndSqlOrderDoNotAllocate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	v6raw := append([]byte(nil), rfcV6[:]...)
+	// A refusal returns a prebuilt sentinel, so it allocates nothing either. RFC 9562 A.6's
+	// v7, fixed: a fresh v7's octet 7 carries the SQL layout's 8 one time in 16.
+	assertAllocs(t, "refused V7FromSqlOrder/V7ToSqlOrderBytes", 0, func() {
+		if _, err := V7FromSqlOrder(rfcV7); err != ErrWrongVersion {
+			t.Fatal(err)
+		}
+		if err := V7ToSqlOrderBytes(v6raw); err != ErrWrongVersion {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestFillsDoNotAllocate(t *testing.T) {
 	ids := make([]uuid.UUID, 1000)
-	assertAllocs(t, "FillV6At", 0, func() {
-		if err := FillV6At(ids, rfcTestVectorMs); err != nil {
-			t.Fatal(err)
-		}
-	})
 	assertAllocs(t, "FillV7At", 0, func() {
 		if err := FillV7At(ids, rfcTestVectorMs); err != nil {
 			t.Fatal(err)
 		}
 	})
 	raw := make([]byte, 1000*16)
-	assertAllocs(t, "FillV6BytesAt", 0, func() {
-		if err := FillV6BytesAt(raw, rfcTestVectorMs); err != nil {
-			t.Fatal(err)
-		}
-	})
 	assertAllocs(t, "FillV7BytesAt", 0, func() {
 		if err := FillV7BytesAt(raw, rfcTestVectorMs); err != nil {
 			t.Fatal(err)
@@ -122,11 +100,6 @@ func TestFillsDoNotAllocate(t *testing.T) {
 
 // The slice-returning batch is exactly the one allocation it has to be — the result.
 func TestBatchAllocatesOnlyItsResult(t *testing.T) {
-	assertAllocs(t, "NewV6BatchAt", 1, func() {
-		if _, err := NewV6BatchAt(1000, rfcTestVectorMs); err != nil {
-			t.Fatal(err)
-		}
-	})
 	assertAllocs(t, "NewV7BatchAt", 1, func() {
 		if _, err := NewV7BatchAt(1000, rfcTestVectorMs); err != nil {
 			t.Fatal(err)

@@ -13,9 +13,9 @@ public enum UuidLayout {
     /** RFC 9562 order, what every other method in this library takes and returns. */
     RFC_9562(1),
     /**
-     * The order {@link UuidGenerator#v7ToSqlOrder(java.util.UUID)} and
-     * {@link UuidGenerator#v6ToSqlOrder(java.util.UUID)} return, which SQL Server's
-     * {@code uniqueidentifier} sorts by creation order. Defined for versions 6 and 7 only.
+     * The version 8 layout {@link UuidGenerator#v7ToSqlOrder(java.util.UUID)} returns, which
+     * SQL Server's {@code uniqueidentifier} sorts by creation order. Defined for values
+     * converted from version 7 only.
      */
     SQL_SERVER(2);
 

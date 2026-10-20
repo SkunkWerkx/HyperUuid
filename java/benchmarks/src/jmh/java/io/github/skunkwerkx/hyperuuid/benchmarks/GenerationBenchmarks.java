@@ -14,7 +14,7 @@ import org.openjdk.jmh.infra.Blackhole;
 /**
  * Single-item generation, including {@link UUID#randomUUID()} as the baseline this jar's FFM
  * downcall has to cross the JNI/native boundary to even compete with — {@code java.util.UUID}
- * has no v5/v6/v7 equivalent to benchmark against.
+ * has no v5/v7 equivalent to benchmark against.
  */
 @State(Scope.Thread)
 @BenchmarkMode(Mode.AverageTime)
@@ -37,11 +37,6 @@ public class GenerationBenchmarks {
     @Benchmark
     public void newV5(Blackhole bh) {
         bh.consume(UuidGenerator.newV5(NAMESPACE, "example.com"));
-    }
-
-    @Benchmark
-    public void newV6(Blackhole bh) {
-        bh.consume(UuidGenerator.newV6(TS));
     }
 
     @Benchmark

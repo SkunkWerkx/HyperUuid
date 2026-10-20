@@ -6,11 +6,9 @@
 //! the two layout files are replayed inside the crate (lib.rs), since they pin the
 //! deterministic half of generation that the public API doesn't expose.
 
-use hyperuuid::{Layout, Uuid, Variant, get_timestamp, get_timestamp_in, v5, v6, v7};
+use hyperuuid::{Layout, SqlOrderError, Uuid, Variant, get_timestamp, get_timestamp_in, v5, v7};
 use serde_json::Value;
 use std::path::PathBuf;
-
-type Permute = fn(&Uuid) -> Uuid;
 
 fn corpus(name: &str) -> Vec<Value> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -60,13 +58,24 @@ fn sql_order() {
     for vector in corpus("sql_order.json") {
         let rfc = uuid(&vector, "rfc");
         let sql = uuid(&vector, "sql");
-        let (to_sql, to_rfc): (Permute, Permute) = match vector["version"].as_u64().unwrap() {
-            6 => (v6::to_sql_order, v6::to_rfc_order),
-            7 => (v7::to_sql_order, v7::to_rfc_order),
-            other => panic!("SQL order is defined for v6/v7 only, not {other}"),
+        assert_eq!(v7::to_sql_order(&rfc), Ok(sql), "{vector}");
+        assert_eq!(v7::to_rfc_order(&sql), Ok(rfc), "{vector}");
+    }
+}
+
+#[test]
+fn sql_order_refused() {
+    for vector in corpus("sql_order_refused.json") {
+        let convert = match vector["direction"].as_str().unwrap() {
+            "to_sql" => v7::to_sql_order,
+            "from_sql" => v7::to_rfc_order,
+            other => panic!("unknown direction {other}"),
         };
-        assert_eq!(to_sql(&rfc), sql, "{vector}");
-        assert_eq!(to_rfc(&sql), rfc, "{vector}");
+        assert_eq!(
+            convert(&uuid(&vector, "uuid")),
+            Err(SqlOrderError::WrongVersion),
+            "{vector}"
+        );
     }
 }
 
@@ -99,20 +108,11 @@ fn timestamp() {
                 "{vector}"
             );
         }
-        match (version, expected) {
-            (6, Some(millis)) => {
-                assert_eq!(v6::unix_millis_in(&id, layout), millis, "{vector}");
-                if layout == Layout::Rfc9562 {
-                    assert_eq!(v6::unix_millis(&id), millis, "{vector}");
-                }
+        if let (7, Some(millis)) = (version, expected) {
+            assert_eq!(v7::unix_millis_in(&id, layout), millis, "{vector}");
+            if layout == Layout::Rfc9562 {
+                assert_eq!(v7::unix_millis(&id), millis, "{vector}");
             }
-            (7, Some(millis)) => {
-                assert_eq!(v7::unix_millis_in(&id, layout), millis, "{vector}");
-                if layout == Layout::Rfc9562 {
-                    assert_eq!(v7::unix_millis(&id), millis, "{vector}");
-                }
-            }
-            _ => {}
         }
     }
 }

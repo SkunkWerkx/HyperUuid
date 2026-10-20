@@ -1,17 +1,17 @@
 //! A Rust port of the RFC 9562 UUID generation from
 //! [SequentialGuid](https://github.com/buvinghausen/SequentialGuid), covering the standard
 //! UUID versions the RFC itself defines, plus [`v7::to_sql_order`]'s SQL Server byte-ordering
-//! (ported from this project's own [Svartalfheim](https://github.com/NorseArchitecture/Svartalfheim))
-//! — no ORM or serializer integrations.
+//! (SequentialGuid's permutation, written as an RFC 9562 version 8; see [`sql`]) — no ORM or
+//! serializer integrations.
 //!
 //! - [`v4::new_v4`] — random (RFC 9562 §5.4)
 //! - [`v5::new_v5`] — deterministic, namespace + name based, SHA-1 (RFC 9562 §5.5)
-//! - [`v6::new_v6`] — time-sortable, v1-field-compatible reordering (RFC 9562 §5.6)
 //! - [`v7::new_v7`] — time-sortable, millisecond timestamp + monotonic counter (RFC 9562 §6.2)
 //! - [`v7::to_sql_order`] / [`v7::to_rfc_order`] — the byte order SQL Server's
-//!   `uniqueidentifier` needs to sort a version 7 UUID by creation order, and back
+//!   `uniqueidentifier` needs to sort a version 7 UUID by creation order, written as an RFC
+//!   9562 version 8, and back
 //! - [`Uuid::NIL`] / [`Uuid::MAX`] — the all-zero and all-one special values (RFC 9562 §5.9/§5.10)
-//! - [`get_timestamp`] / [`v6::new_v6_at`] / [`v7::new_v7_at`] — [`Timestamp`]-based
+//! - [`get_timestamp`] / [`v7::new_v7_at`] — [`Timestamp`]-based
 //!   convenience wrappers matching the `uuid` crate's own `get_timestamp`/`Timestamp` shape,
 //!   for callers who'd rather not pass a raw millisecond count around
 //! - [`Uuid::version`] / [`Uuid::variant`] / [`Uuid::is_rfc`] — inspection, and
@@ -124,11 +124,11 @@ unsafe extern "C" {}
 
 mod entropy;
 mod ffi;
+pub mod sql;
 mod timestamp;
 mod uuid;
 pub mod v4;
 pub mod v5;
-pub mod v6;
 pub mod v7;
 
 #[cfg(feature = "php")]
@@ -139,39 +139,37 @@ mod python_ext;
 mod ruby_ext;
 
 pub use ffi::hyperuuid_version;
+pub use sql::SqlOrderError;
 pub use timestamp::Timestamp;
 pub use uuid::{Layout, ParseUuidError, Uuid, Variant};
 
 /// Returns the Unix-epoch [`Timestamp`] embedded in `uuid`, or `None` if it isn't an RFC 9562
-/// version 6 or 7 UUID — the same `Option`-returning shape as the `uuid` crate's own
+/// version 7 UUID — the same `Option`-returning shape as the `uuid` crate's own
 /// `Uuid::get_timestamp`, so a caller doesn't need to already know (or separately check) the
 /// version before asking. "RFC 9562" is part of the check: a value whose variant isn't
-/// [`Variant::Rfc9562`] has no version, so a 6 or 7 in its version nibble carries no
-/// timestamp either ([`Uuid::is_rfc`]). Delegates straight to
-/// [`v6::unix_millis`]/[`v7::unix_millis`], with no bit-layout logic duplicated here.
+/// [`Variant::Rfc9562`] has no version, so a 7 in its version nibble carries no timestamp
+/// either ([`Uuid::is_rfc`]). Version 7 is the only version this crate generates with a
+/// timestamp, so it is the only one it reads one from. Delegates straight to
+/// [`v7::unix_millis`], with no bit-layout logic duplicated here.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn get_timestamp(uuid: &Uuid) -> Option<Timestamp> {
     get_timestamp_in(uuid, Layout::Rfc9562)
 }
 
-/// The version and Unix-epoch milliseconds [`get_timestamp_in`] answers with: `(6 | 7, millis)`
-/// for an RFC 9562 version 6 or 7 UUID held in `layout`'s byte order, `None` for anything
-/// else. One read for both, so the C ABI can hand back the pair in one call.
+/// The version and Unix-epoch milliseconds [`get_timestamp_in`] answers with: `(7, millis)`
+/// for an RFC 9562 version 7 UUID held in `layout`'s byte order, `None` for anything else. One read for both, so the C ABI can hand back the pair in one call.
 #[inline]
 pub(crate) fn timestamp_in(uuid: &Uuid, layout: Layout) -> Option<(u8, u64)> {
     if uuid.is_rfc_in(7, layout) {
         Some((7, v7::unix_millis_in(uuid, layout)))
-    } else if uuid.is_rfc_in(6, layout) {
-        Some((6, v6::unix_millis_in(uuid, layout)))
     } else {
         None
     }
 }
 
 /// [`get_timestamp`] for a UUID held in `layout`'s byte order: in [`Layout::SqlServer`], the
-/// timestamp of a SQL-ordered version 6 or 7, read straight from its permuted octets with no
-/// conversion back to RFC order first, or `None` for anything else ([`Uuid::version_in`] has
-/// how the two are told apart).
+/// timestamp of a SQL-ordered version 7, read straight from its permuted octets with no
+/// conversion back to RFC order first, or `None` for anything else ([`Uuid::version_in`]).
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn get_timestamp_in(uuid: &Uuid, layout: Layout) -> Option<Timestamp> {
     timestamp_in(uuid, layout).map(|(_, millis)| Timestamp::from_unix_millis(millis))
@@ -274,6 +272,21 @@ mod tests {
     // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
     const RFC_TEST_VECTOR_MS: u64 = 1_645_557_742_000;
 
+    // RFC 9562 Appendix A.6's version 7. A freshly minted v7 can't stand in for "a value in RFC
+    // order" where a conversion from SQL order must refuse it: its random octet 7 carries the
+    // SQL layout's 8 one time in 16. This one's octet 7 is 0xC3.
+    const RFC_V7_VECTOR: Uuid = Uuid::from_bytes([
+        0x01, 0x7F, 0x22, 0xE2, 0x79, 0xB0, 0x7C, 0xC3, 0x98, 0xC4, 0xDC, 0x0C, 0x0C, 0x07, 0x39,
+        0x8F,
+    ]);
+
+    // RFC 9562 Appendix A.5's version 6, minted by another generator: a version this crate
+    // neither generates nor reads a timestamp from.
+    const RFC_V6_VECTOR: Uuid = Uuid::from_bytes([
+        0x1E, 0xC9, 0x41, 0x4C, 0x23, 0x2A, 0x6B, 0x00, 0xB3, 0xC8, 0x9F, 0x6B, 0xDE, 0xCE, 0xD8,
+        0x46,
+    ]);
+
     #[test]
     fn v7_embeds_the_timestamp() {
         let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
@@ -320,10 +333,6 @@ mod tests {
         let far = Timestamp::from_unix(u64::MAX / 1000 + 1, 0);
         assert_eq!(far.to_unix_millis(), u64::MAX);
         assert_eq!(
-            v6::new_v6_at(far).unwrap_err(),
-            v6::NewV6Error::TimestampOutOfRange
-        );
-        assert_eq!(
             v7::new_v7_at(far).unwrap_err(),
             v7::NewV7Error::TimestampOutOfRange
         );
@@ -343,47 +352,6 @@ mod tests {
         let id = v5::new_v5(v5::namespace::DNS, b"round-trip");
         let text = id.to_string();
         assert_eq!(Uuid::from_str(&text).unwrap(), id);
-    }
-
-    #[test]
-    fn v6_embeds_the_timestamp() {
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        assert_eq!(v6::unix_millis(&id), RFC_TEST_VECTOR_MS);
-    }
-
-    #[test]
-    fn v6_has_version_and_variant_bits_set() {
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        assert_eq!(id.version(), 6);
-        assert!(id.is_rfc9562_variant());
-    }
-
-    #[test]
-    fn v6_zero_timestamp_succeeds() {
-        let id = v6::new_v6(0).unwrap();
-        assert_eq!(v6::unix_millis(&id), 0);
-    }
-
-    #[test]
-    fn v6_is_non_deterministic_within_the_same_millisecond() {
-        let a = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        let b = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn v6_sets_the_node_id_multicast_bit() {
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        assert_eq!(id.as_bytes()[10] & 0x01, 0x01);
-    }
-
-    #[test]
-    fn v6_increasing_timestamps_sort_in_creation_order() {
-        const BASE_MS: u64 = 1_000_000;
-        let ids: Vec<Uuid> = (0..10).map(|i| v6::new_v6(BASE_MS + i).unwrap()).collect();
-        let mut sorted = ids.clone();
-        sorted.sort();
-        assert_eq!(ids, sorted);
     }
 
     #[test]
@@ -414,48 +382,6 @@ mod tests {
             assert_eq!(text.len(), 36);
             assert_eq!(Uuid::from_str(text), Err(ParseUuidError));
         }
-    }
-
-    #[test]
-    fn v6_batch_matches_single_call_generation() {
-        let mut out = vec![0u8; 5 * 16];
-        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 5, &mut out).unwrap();
-        for &bytes in out.as_chunks::<16>().0 {
-            let id = Uuid::from_bytes(bytes);
-            assert_eq!(id.version(), 6);
-            assert!(id.is_rfc9562_variant());
-            assert_eq!(v6::unix_millis(&id), RFC_TEST_VECTOR_MS);
-        }
-    }
-
-    #[test]
-    fn v6_batch_items_are_pairwise_distinct() {
-        let mut out = vec![0u8; 100 * 16];
-        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 100, &mut out).unwrap();
-        let ids: std::collections::HashSet<[u8; 16]> =
-            out.as_chunks::<16>().0.iter().copied().collect();
-        assert_eq!(ids.len(), 100);
-    }
-
-    #[test]
-    fn v6_batch_zero_count_is_a_no_op() {
-        let mut out: [u8; 0] = [];
-        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 0, &mut out).unwrap();
-    }
-
-    #[test]
-    fn v6_batch_short_buffer_errors_and_leaves_it_untouched() {
-        let mut out = [0xAAu8; 31];
-        let err = v6::new_v6_batch(RFC_TEST_VECTOR_MS, 2, &mut out).unwrap_err();
-        assert_eq!(err, v6::NewV6Error::BufferTooSmall);
-        assert_eq!(out, [0xAAu8; 31]);
-    }
-
-    #[test]
-    fn v6_batch_overflow_timestamp_errors() {
-        let mut out = vec![0u8; 16];
-        let err = v6::new_v6_batch(u64::MAX, 1, &mut out).unwrap_err();
-        assert_eq!(err, v6::NewV6Error::TimestampOutOfRange);
     }
 
     #[test]
@@ -529,25 +455,6 @@ mod tests {
         assert_eq!(tails.len(), COUNT, "rand_b tails repeated across the batch");
     }
 
-    /// v6's counterpart to [`v7_batch_trailing_entropy_is_distinct_per_item`]. v6 has no
-    /// counter, so `clock_seq`/`node` are the only thing separating same-millisecond items and
-    /// a botched walk would show up as outright duplicate UUIDs too — but checking the node
-    /// field directly says which invariant broke rather than just that something did.
-    #[test]
-    fn v6_batch_node_entropy_is_distinct_per_item() {
-        const COUNT: usize = 500;
-        let mut out = vec![0u8; COUNT * 16];
-        v6::new_v6_batch(RFC_TEST_VECTOR_MS, COUNT as u32, &mut out).unwrap();
-
-        let nodes: std::collections::HashSet<[u8; 6]> = out
-            .as_chunks::<16>()
-            .0
-            .iter()
-            .map(|item| item[10..16].try_into().unwrap())
-            .collect();
-        assert_eq!(nodes.len(), COUNT, "node IDs repeated across the batch");
-    }
-
     #[test]
     fn v7_batch_zero_count_is_a_no_op() {
         let mut out: [u8; 0] = [];
@@ -572,39 +479,79 @@ mod tests {
     #[test]
     fn v7_sql_order_round_trips() {
         let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
-        let sql = v7::to_sql_order(&id);
+        let sql = v7::to_sql_order(&id).unwrap();
         assert_ne!(
             sql, id,
             "a real timestamp/counter should actually move bytes around"
         );
-        assert_eq!(v7::to_rfc_order(&sql), id);
+        assert_eq!(v7::to_rfc_order(&sql), Ok(id));
     }
 
+    // The layout holds all 122 of a v7's free bits, so every timestamp v7 can carry converts
+    // and comes back exactly, up to the 48-bit ceiling.
     #[test]
-    fn v7_sql_order_zero_and_max_round_trip() {
-        for id in [
-            v7::new_v7(0).unwrap(),
-            v7::new_v7(v7::MAX_UNIX_MILLIS).unwrap(),
+    fn v7_sql_order_covers_every_timestamp() {
+        for millis in [
+            0,
+            RFC_TEST_VECTOR_MS,
+            (1 << 47) - 1,
+            1 << 47,
+            v7::MAX_UNIX_MILLIS,
         ] {
-            assert_eq!(v7::to_rfc_order(&v7::to_sql_order(&id)), id);
+            let id = v7::new_v7(millis).unwrap();
+            assert_eq!(v7::to_rfc_order(&v7::to_sql_order(&id).unwrap()), Ok(id));
+        }
+    }
+
+    // RFC 9562 §6.11 sends a byte order other than network order to version 8, so the SQL
+    // layout carries an 8 and the RFC variant where a mixed-endian GUID holds them: octet 7's
+    // top nibble and octet 8's top bits. Read as a .NET Guid or SQL Server's text, that is a
+    // version 8 RFC 9562 UUID.
+    #[test]
+    fn sql_order_writes_a_version_8_in_guid_order() {
+        let guid_view = |sql: &Uuid| {
+            let b = sql.as_bytes();
+            let mut rfc = *b;
+            rfc[0..4].copy_from_slice(&[b[3], b[2], b[1], b[0]]);
+            rfc[4..6].copy_from_slice(&[b[5], b[4]]);
+            rfc[6..8].copy_from_slice(&[b[7], b[6]]);
+            Uuid::from_bytes(rfc)
+        };
+        for _ in 0..1024 {
+            let sql = v7::to_sql_order(&v7::new_v7(RFC_TEST_VECTOR_MS).unwrap()).unwrap();
+            assert!(guid_view(&sql).is_rfc(8), "{sql}");
+            assert_eq!(get_timestamp(&guid_view(&sql)), None);
         }
     }
 
     #[test]
-    fn v7_sql_order_preserves_version_and_variant_at_octets_7_and_8() {
-        // Matches Svartalfheim's own documented invariant: version/variant sit at the same
-        // byte-and-nibble offsets in both orderings, so a value's version is readable without
-        // first knowing which order it's in.
-        let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
-        let sql = v7::to_sql_order(&id);
-        assert_eq!(sql.as_bytes()[7] & 0xF0, 0x70);
-        assert_eq!(sql.as_bytes()[8] & 0xC0, 0x80);
+    fn sql_order_refuses_a_value_of_another_version_in_both_directions() {
+        let seven = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let four = v4::new_v4().unwrap();
+        let wrong = Err(SqlOrderError::WrongVersion);
+        for id in [RFC_V6_VECTOR, four, Uuid::NIL, Uuid::MAX] {
+            assert_eq!(v7::to_sql_order(&id), wrong, "{id}");
+        }
+        let seven_sql = v7::to_sql_order(&seven).unwrap();
+        // 0.8.0 wrote this layout with a 7 where the 8 now is; such a value is not in SQL order
+        // until its nibble is changed.
+        let mut with_a_seven = *seven_sql.as_bytes();
+        with_a_seven[7] = 0x70 | (with_a_seven[7] & 0x0F);
+        assert_eq!(v7::to_rfc_order(&Uuid::from_bytes(with_a_seven)), wrong);
+        with_a_seven[7] |= 0x80;
+        with_a_seven[7] &= 0x8F;
+        assert_eq!(v7::to_rfc_order(&Uuid::from_bytes(with_a_seven)), Ok(seven));
+        // An RFC-ordered value is not in SQL order, and nor is one whose variant was cleared.
+        assert_eq!(v7::to_rfc_order(&RFC_V7_VECTOR), wrong);
+        let mut cleared = *seven_sql.as_bytes();
+        cleared[8] &= 0x3F;
+        assert_eq!(v7::to_rfc_order(&Uuid::from_bytes(cleared)), wrong);
     }
 
     #[test]
     fn v7_sql_order_extracts_the_same_timestamp_after_converting_back() {
         let id = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
-        let round_tripped = v7::to_rfc_order(&v7::to_sql_order(&id));
+        let round_tripped = v7::to_rfc_order(&v7::to_sql_order(&id).unwrap()).unwrap();
         assert_eq!(v7::unix_millis(&round_tripped), RFC_TEST_VECTOR_MS);
     }
 
@@ -612,7 +559,7 @@ mod tests {
     /// on a `uniqueidentifier` column — which compares a GUID's 16 bytes in this fixed
     /// significance order rather than left to right. This is the correctness oracle for
     /// [`v7::to_sql_order`]: no real SQL Server available in this crate's test suite, so this
-    /// stands in for it, the same role Svartalfheim's own tests use the real `SqlGuid` for.
+    /// stands in for it, the same role the C# binding's tests use the real `SqlGuid` for.
     fn sql_guid_cmp(a: &[u8; 16], b: &[u8; 16]) -> std::cmp::Ordering {
         const SIGNIFICANCE_ORDER: [usize; 16] =
             [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3];
@@ -637,7 +584,7 @@ mod tests {
 
         let sql: Vec<[u8; 16]> = ids
             .iter()
-            .map(|id| *v7::to_sql_order(id).as_bytes())
+            .map(|id| *v7::to_sql_order(id).unwrap().as_bytes())
             .collect();
         let mut sorted = sql.clone();
         sorted.sort_by(sql_guid_cmp);
@@ -675,60 +622,12 @@ mod tests {
     }
 
     #[test]
-    fn v6_sql_order_round_trips() {
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        let sql = v6::to_sql_order(&id);
-        assert_ne!(
-            sql, id,
-            "a real timestamp should actually move bytes around"
-        );
-        assert_eq!(v6::to_rfc_order(&sql), id);
-    }
-
-    #[test]
-    fn v6_sql_order_zero_and_a_large_timestamp_round_trip() {
-        // 100_000_000_000_000 ms (~year 5138) is comfortably under v6's 60-bit tick ceiling
-        // (~year 5236) without needing that exact boundary constant here.
-        for id in [
-            v6::new_v6(0).unwrap(),
-            v6::new_v6(100_000_000_000_000).unwrap(),
-        ] {
-            assert_eq!(v6::to_rfc_order(&v6::to_sql_order(&id)), id);
-        }
-    }
-
-    #[test]
-    fn v6_sql_order_preserves_version_and_variant() {
-        // Different offsets than v7's sql order (octet 8's top nibble / octet 6's top two
-        // bits here, not 7/8) — see v6::to_sql_order's doc comment for why that's fine.
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        let sql = v6::to_sql_order(&id);
-        assert_eq!(sql.as_bytes()[8] & 0xF0, 0x60);
-        assert_eq!(sql.as_bytes()[6] & 0xC0, 0x80);
-    }
-
-    #[test]
-    fn v6_sql_order_extracts_the_same_timestamp_after_converting_back() {
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        let round_tripped = v6::to_rfc_order(&v6::to_sql_order(&id));
-        assert_eq!(v6::unix_millis(&round_tripped), RFC_TEST_VECTOR_MS);
-    }
-
-    #[test]
-    fn get_timestamp_returns_none_for_non_time_based_versions() {
+    fn get_timestamp_returns_none_for_every_version_but_7() {
+        assert_eq!(get_timestamp(&RFC_V6_VECTOR), None);
         assert_eq!(get_timestamp(&v4::new_v4().unwrap()), None);
         assert_eq!(
             get_timestamp(&v5::new_v5(v5::namespace::DNS, b"test")),
             None
-        );
-    }
-
-    #[test]
-    fn get_timestamp_matches_v6_unix_millis() {
-        let id = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        assert_eq!(
-            get_timestamp(&id),
-            Some(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS))
         );
     }
 
@@ -759,38 +658,10 @@ mod tests {
     }
 
     #[test]
-    fn new_v6_at_matches_new_v6_from_the_same_timestamp() {
-        let by_millis = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        let by_timestamp = v6::new_v6_at(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)).unwrap();
-        assert_eq!(v6::unix_millis(&by_millis), v6::unix_millis(&by_timestamp));
-    }
-
-    #[test]
     fn new_v7_at_matches_new_v7_from_the_same_timestamp() {
         let by_millis = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
         let by_timestamp = v7::new_v7_at(Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS)).unwrap();
         assert_eq!(v7::unix_millis(&by_millis), v7::unix_millis(&by_timestamp));
-    }
-
-    #[test]
-    fn v6_sql_order_sorts_by_creation_order_under_sqlguid_comparison_for_distinct_timestamps() {
-        // Unlike v7, v6 has no counter — two UUIDs at the *same* millisecond aren't
-        // guaranteed to sort in creation order even in plain RFC order, so this only
-        // exercises strictly increasing timestamps, where the timestamp alone determines
-        // order with no tie to break.
-        let ids: Vec<Uuid> = (0..300)
-            .map(|i| v6::new_v6(1_000_000 + i).unwrap())
-            .collect();
-        let sql: Vec<[u8; 16]> = ids
-            .iter()
-            .map(|id| *v6::to_sql_order(id).as_bytes())
-            .collect();
-        let mut sorted = sql.clone();
-        sorted.sort_by(sql_guid_cmp);
-        assert_eq!(
-            sql, sorted,
-            "SqlGuid-order comparison of SQL-ordered bytes must match creation order"
-        );
     }
 
     // The two layout files pin field placement through the deterministic half of each
@@ -833,24 +704,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn corpus_v6_layout() {
-        for vector in corpus("v6_layout.json") {
-            let mut bytes = [0u8; 16];
-            let clock_seq = vector["clock_seq"].as_u64().unwrap() as u16;
-            bytes[8..10].copy_from_slice(&clock_seq.to_be_bytes());
-            bytes[10..].copy_from_slice(&hex6(vector["node"].as_str().unwrap()));
-            let millis = vector["unix_millis"].as_u64().unwrap();
-            v6::write_fields(&mut bytes, millis * 10_000 + 0x01B2_1DD2_1381_4000);
-            assert_eq!(bytes, hex16(vector["expect"].as_str().unwrap()), "{vector}");
-            assert_eq!(
-                v6::unix_millis(&Uuid::from_bytes(bytes)),
-                millis,
-                "{vector}"
-            );
-        }
-    }
-
     // The batch paths assemble their items with wider stores than the single-item writers
     // the layout corpus pins, so tie every batch item back to those writers: re-running the
     // writer over an item's own random tail and counter must reproduce the item exactly.
@@ -867,18 +720,6 @@ mod tests {
             let mut rebuilt = [0u8; 16];
             rebuilt[10..].copy_from_slice(&item[10..]);
             v7::write_fields(&mut rebuilt, RFC_TEST_VECTOR_MS, counter);
-            assert_eq!(rebuilt, item);
-        }
-
-        v6::new_v6_batch(RFC_TEST_VECTOR_MS, 64, &mut out).unwrap();
-        for item in out.chunks_exact(16) {
-            let item: [u8; 16] = item.try_into().unwrap();
-            let mut rebuilt = [0u8; 16];
-            rebuilt[8..].copy_from_slice(&item[8..]);
-            v6::write_fields(
-                &mut rebuilt,
-                RFC_TEST_VECTOR_MS * 10_000 + 0x01B2_1DD2_1381_4000,
-            );
             assert_eq!(rebuilt, item);
         }
     }
@@ -919,29 +760,30 @@ mod tests {
         }
     }
 
-    // In SQL order a v6's octet 7 is random clock_seq and reads as a v7 nibble one time in 16;
-    // the layout-aware read must never take it for one, nor a v7 for a v6.
+    // The conversion exports' codes, and the bytes left as they were on every refusal.
     #[test]
-    fn sql_ordered_v6_and_v7_are_never_confused() {
-        for _ in 0..4096 {
-            let six = v6::to_sql_order(&v6::new_v6(RFC_TEST_VECTOR_MS).unwrap());
-            let seven = v7::to_sql_order(&v7::new_v7(RFC_TEST_VECTOR_MS).unwrap());
-            assert_eq!(six.version_in(Layout::SqlServer), 6, "{six}");
-            assert_eq!(seven.version_in(Layout::SqlServer), 7, "{seven}");
-            assert!(!six.is_rfc_in(7, Layout::SqlServer));
-            assert!(!seven.is_rfc_in(6, Layout::SqlServer));
-            let ms =
-                |id: &Uuid| get_timestamp_in(id, Layout::SqlServer).map(|t| t.to_unix_millis());
-            assert_eq!(ms(&six), Some(RFC_TEST_VECTOR_MS));
-            assert_eq!(ms(&seven), Some(RFC_TEST_VECTOR_MS));
-        }
+    fn sql_order_exports_speak_the_documented_codes() {
+        let seven = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+        let mut bytes = *seven.as_bytes();
+        assert_eq!(ffi::uuid_v7_to_sql_order(bytes.as_mut_ptr()), 0);
+        assert_eq!(bytes, *v7::to_sql_order(&seven).unwrap().as_bytes());
+        assert_eq!(ffi::uuid_v7_to_rfc_order(bytes.as_mut_ptr()), 0);
+        assert_eq!(bytes, *seven.as_bytes());
+
+        let refused = |convert: extern "C" fn(*mut u8) -> i32, id: Uuid, code: i32| {
+            let mut bytes = *id.as_bytes();
+            assert_eq!(convert(bytes.as_mut_ptr()), code, "{id}");
+            assert_eq!(bytes, *id.as_bytes(), "untouched on {code}");
+        };
+        refused(ffi::uuid_v7_to_sql_order, RFC_V6_VECTOR, 5);
+        refused(ffi::uuid_v7_to_rfc_order, RFC_V7_VECTOR, 5);
     }
 
     // The C ABI's codes, layout and variant alike, including the unknown-code answers.
     #[test]
     fn inspection_exports_speak_the_documented_codes() {
         let seven = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
-        let sql = v7::to_sql_order(&seven);
+        let sql = v7::to_sql_order(&seven).unwrap();
         let p = seven.as_bytes().as_ptr();
         let q = sql.as_bytes().as_ptr();
         assert_eq!(ffi::uuid_version(p, 1), 7);
@@ -960,16 +802,6 @@ mod tests {
         assert_eq!(ffi::uuid_v7_unix_millis_in(q, 2), RFC_TEST_VECTOR_MS);
         assert_eq!(ffi::uuid_v7_unix_millis_in(p, 1), RFC_TEST_VECTOR_MS);
         assert_eq!(ffi::uuid_v7_unix_millis_in(p, 9), 0);
-        let six = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-        let six_sql = v6::to_sql_order(&six);
-        assert_eq!(
-            ffi::uuid_v6_unix_millis_in(six_sql.as_bytes().as_ptr(), 2),
-            RFC_TEST_VECTOR_MS
-        );
-        assert_eq!(
-            ffi::uuid_v6_unix_millis_in(six.as_bytes().as_ptr(), 1),
-            RFC_TEST_VECTOR_MS
-        );
         let mut out = [0u8; 16];
         assert_eq!(
             ffi::uuid_new_v7_batch(1, v7::MAX_BATCH + 1, out.as_mut_ptr()),
@@ -978,13 +810,11 @@ mod tests {
         let mut millis = 0u64;
         assert_eq!(ffi::uuid_get_timestamp(q, 2, &mut millis), 7);
         assert_eq!(millis, RFC_TEST_VECTOR_MS);
-        millis = 0;
-        assert_eq!(
-            ffi::uuid_get_timestamp(six_sql.as_bytes().as_ptr(), 2, &mut millis),
-            6
-        );
-        assert_eq!(millis, RFC_TEST_VECTOR_MS);
         millis = 42;
+        assert_eq!(
+            ffi::uuid_get_timestamp(RFC_V6_VECTOR.as_bytes().as_ptr(), 1, &mut millis),
+            0
+        );
         assert_eq!(ffi::uuid_get_timestamp(p, 0, &mut millis), 0);
         assert_eq!(
             ffi::uuid_get_timestamp(Uuid::NIL.as_bytes().as_ptr(), 1, &mut millis),

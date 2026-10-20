@@ -6,7 +6,7 @@
 //! rather than just in a doc comment.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use hyperuuid::{v4, v5, v6, v7};
+use hyperuuid::{v4, v5, v7};
 use std::hint::black_box;
 
 // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
@@ -18,21 +18,14 @@ fn bench_single_item(c: &mut Criterion) {
     group.bench_function("v5", |b| {
         b.iter(|| v5::new_v5(v5::namespace::DNS, black_box(b"www.example.com")))
     });
-    group.bench_function("v6", |b| {
-        b.iter(|| v6::new_v6(black_box(RFC_TEST_VECTOR_MS)).unwrap())
-    });
     group.bench_function("v7", |b| {
         b.iter(|| v7::new_v7(black_box(RFC_TEST_VECTOR_MS)).unwrap())
     });
-    // The same two calls handed the current time, as a `now` door hands it. On Linux the
+    // The same call handed the current time, as a `now` door hands it. On Linux the
     // entropy pool takes a timestamp within a second of its key's as proof the key is fresh,
     // and reads the clock itself when handed any other, which is what the rows above (and
     // every other row in this file, on a timestamp from 2022) pay for. The clock is read once
     // per Criterion sample, a few tens of milliseconds of iterations, outside the timed loop.
-    group.bench_function("v6_current_timestamp", |b| {
-        let now = now_ms();
-        b.iter(|| v6::new_v6(black_box(now)).unwrap())
-    });
     group.bench_function("v7_current_timestamp", |b| {
         let now = now_ms();
         b.iter(|| v7::new_v7(black_box(now)).unwrap())
@@ -62,12 +55,6 @@ fn bench_vs_uuid_crate(c: &mut Criterion) {
     group.bench_function("uuid_crate_v5", |b| {
         b.iter(|| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, black_box(b"www.example.com")))
     });
-    group.bench_function("hyperuuid_v6", |b| {
-        b.iter(|| v6::new_v6(black_box(RFC_TEST_VECTOR_MS)).unwrap())
-    });
-    group.bench_function("uuid_crate_v6", |b| {
-        b.iter(|| uuid::Uuid::now_v6(black_box(&[0, 0, 0, 0, 0, 0])))
-    });
     group.bench_function("hyperuuid_v7", |b| {
         b.iter(|| v7::new_v7(black_box(RFC_TEST_VECTOR_MS)).unwrap())
     });
@@ -77,20 +64,6 @@ fn bench_vs_uuid_crate(c: &mut Criterion) {
 
 fn bench_batch(c: &mut Criterion) {
     let mut group = c.benchmark_group("batch_1000");
-    group.bench_function("v6_batch", |b| {
-        b.iter_batched(
-            || vec![0u8; 1000 * 16],
-            |mut out| v6::new_v6_batch(black_box(RFC_TEST_VECTOR_MS), 1000, &mut out).unwrap(),
-            BatchSize::SmallInput,
-        )
-    });
-    group.bench_function("v6_individual_x1000", |b| {
-        b.iter(|| {
-            for _ in 0..1000 {
-                black_box(v6::new_v6(RFC_TEST_VECTOR_MS).unwrap());
-            }
-        })
-    });
     group.bench_function("v7_batch", |b| {
         b.iter_batched(
             || vec![0u8; 1000 * 16],
@@ -118,16 +91,6 @@ fn bench_batch(c: &mut Criterion) {
 // regardless of what shape that time comes back in.
 fn bench_timestamp_extraction(c: &mut Criterion) {
     let mut group = c.benchmark_group("timestamp_extraction");
-
-    let hyperuuid_v6 = v6::new_v6(RFC_TEST_VECTOR_MS).unwrap();
-    group.bench_function("hyperuuid_v6", |b| {
-        b.iter(|| v6::unix_millis(black_box(&hyperuuid_v6)))
-    });
-
-    let uuid_crate_v6 = uuid::Uuid::now_v6(&[0, 0, 0, 0, 0, 0]);
-    group.bench_function("uuid_crate_v6", |b| {
-        b.iter(|| black_box(&uuid_crate_v6).get_timestamp())
-    });
 
     let hyperuuid_v7 = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
     group.bench_function("hyperuuid_v7", |b| {

@@ -20,6 +20,7 @@
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{
     PyAttributeError, PyMemoryError, PyOverflowError, PyRuntimeError, PyTypeError, PyValueError,
 };
@@ -28,7 +29,7 @@ use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyList, PyString};
 
-use crate::{Layout, Uuid, Variant, v4, v5, v6, v7};
+use crate::{Layout, Uuid, Variant, v4, v5, v7};
 
 static UUID_CLASS: OnceLock<Py<PyAny>> = OnceLock::new();
 static IS_SAFE_UNKNOWN: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -208,21 +209,6 @@ fn millis_or_now(unix_millis: Option<u64>) -> u64 {
 
 #[pyfunction]
 #[pyo3(signature = (unix_millis = None))]
-fn new_v6(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
-    match v6::new_v6(millis_or_now(unix_millis)) {
-        Ok(id) => make_uuid(py, *id.as_bytes()),
-        Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-            "unix_millis does not fit the 60-bit v6 timestamp field",
-        )),
-        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-        Err(_) => Err(PyRuntimeError::new_err(
-            "uuid_new_v6: random source failure",
-        )),
-    }
-}
-
-#[pyfunction]
-#[pyo3(signature = (unix_millis = None))]
 fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
     match v7::new_v7(millis_or_now(unix_millis)) {
         Ok(id) => make_uuid(py, *id.as_bytes()),
@@ -263,22 +249,6 @@ fn batch_buffer(count: u32) -> PyResult<Vec<u8>> {
     raw.try_reserve_exact(len).map_err(|_| too_large())?;
     raw.resize(len, 0);
     Ok(raw)
-}
-
-#[pyfunction]
-#[pyo3(signature = (count, unix_millis = None))]
-fn new_v6_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
-    let mut raw = batch_buffer(count)?;
-    match v6::new_v6_batch(millis_or_now(unix_millis), count, &mut raw) {
-        Ok(()) => Ok(batch_list(py, &raw)?.into_any().unbind()),
-        Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-            "unix_millis does not fit the 60-bit v6 timestamp field",
-        )),
-        Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-        Err(_) => Err(PyRuntimeError::new_err(
-            "uuid_new_v6_batch: random source failure",
-        )),
-    }
 }
 
 #[pyfunction]
@@ -367,11 +337,6 @@ fn millis_datetime(py: Python<'_>, millis: u64) -> PyResult<Py<PyAny>> {
 /// The embedded timestamp as the integer the core returns — Unix-epoch milliseconds — with
 /// no `datetime` built around it.
 #[pyfunction]
-fn v6_unix_millis(uuid_value: Bound<'_, PyAny>) -> PyResult<u64> {
-    Ok(v6::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
-}
-
-#[pyfunction]
 fn v7_unix_millis(uuid_value: Bound<'_, PyAny>) -> PyResult<u64> {
     Ok(v7::unix_millis(&Uuid::from_bytes(uuid_bytes(&uuid_value)?)))
 }
@@ -390,7 +355,7 @@ fn layout_of(code: u32) -> PyResult<Layout> {
 }
 
 /// The version of a UUID held in `layout`'s byte order: the nibble, 0-15, in RFC 9562 order;
-/// in SQL Server order 6 or 7 for bytes that form a SQL-ordered v6/v7, 0 for bytes that don't.
+/// in SQL Server order 7 for bytes that form a SQL-ordered v7, 0 for bytes that don't.
 #[pyfunction]
 #[pyo3(signature = (uuid_value, layout = 1))]
 fn version(uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<u8> {
@@ -420,31 +385,12 @@ fn is_rfc(uuid_value: Bound<'_, PyAny>, version: u8, layout: u32) -> PyResult<bo
 }
 
 #[pyfunction]
-fn v6_unix_millis_in(uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<u64> {
-    let layout = layout_of(layout)?;
-    Ok(v6::unix_millis_in(
-        &Uuid::from_bytes(uuid_bytes(&uuid_value)?),
-        layout,
-    ))
-}
-
-#[pyfunction]
 fn v7_unix_millis_in(uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<u64> {
     let layout = layout_of(layout)?;
     Ok(v7::unix_millis_in(
         &Uuid::from_bytes(uuid_bytes(&uuid_value)?),
         layout,
     ))
-}
-
-#[pyfunction]
-#[pyo3(signature = (uuid_value, layout = 1))]
-fn v6_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>, layout: u32) -> PyResult<Py<PyAny>> {
-    let layout = layout_of(layout)?;
-    millis_datetime(
-        py,
-        v6::unix_millis_in(&Uuid::from_bytes(uuid_bytes(&uuid_value)?), layout),
-    )
 }
 
 #[pyfunction]
@@ -457,10 +403,10 @@ fn v7_timestamp(py: Python<'_>, uuid_value: Bound<'_, PyAny>, layout: u32) -> Py
     )
 }
 
-/// The version-agnostic timestamp: the embedded UTC `datetime` of an RFC 9562 version 6 or 7
-/// UUID held in `layout`'s byte order, or `None` for anything else — another version, or a 6
-/// or 7 nibble under a variant that isn't RFC 9562's. One core call, which checks the variant
-/// and version and reads the timestamp together.
+/// The version-agnostic timestamp: the embedded UTC `datetime` of an RFC 9562 version 7 UUID
+/// held in `layout`'s byte order, or `None` for anything else — another version (a v6 or v1
+/// included), or a 7 nibble under a variant that isn't RFC 9562's. One core call, which checks
+/// the variant and version and reads the timestamp together.
 #[pyfunction]
 #[pyo3(signature = (uuid_value, layout = 1))]
 fn get_timestamp(
@@ -478,7 +424,8 @@ macro_rules! order_fns {
     ($($door:ident => $module:ident :: $function:ident),+ $(,)?) => {$(
         #[pyfunction]
         fn $door(py: Python<'_>, uuid_value: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-            let converted = $module::$function(&Uuid::from_bytes(uuid_bytes(&uuid_value)?));
+            let converted = $module::$function(&Uuid::from_bytes(uuid_bytes(&uuid_value)?))
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
             make_uuid(py, *converted.as_bytes())
         }
     )+};
@@ -487,8 +434,6 @@ macro_rules! order_fns {
 order_fns! {
     v7_to_sql_order => v7::to_sql_order,
     v7_from_sql_order => v7::to_rfc_order,
-    v6_to_sql_order => v6::to_sql_order,
-    v6_from_sql_order => v6::to_rfc_order,
 }
 
 /// Caches `uuid.UUID` and `SafeUUID.unknown` for the pinned fast constructor, and
@@ -541,12 +486,14 @@ fn native_version() -> String {
 /// requires `Py_buffer`, which entered CPython's stable ABI in 3.11. That is this
 /// extension's floor (`abi3-py311`), so `memoryview`, `mmap` and NumPy arrays are possible
 /// here and simply not built yet.
-fn fill_bytes_impl(
-    buffer: &Bound<'_, PyByteArray>,
-    unix_millis: Option<u64>,
-    v7_not_v6: bool,
-) -> PyResult<()> {
-    let len = buffer.len();
+#[pyfunction]
+#[pyo3(signature = (buffer, unix_millis = None))]
+fn fill_v7_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> PyResult<()> {
+    // A buffer export, not the bytearray's storage directly: while it is held the bytearray
+    // refuses to resize (BufferError), so no other thread can free the bytes being written. A
+    // GIL build got that from the GIL alone; a free-threaded one has nothing else to stop it.
+    let view = PyBuffer::<u8>::get(buffer.as_any())?;
+    let len = view.len_bytes();
     if len % 16 != 0 {
         return Err(PyValueError::new_err(
             "buffer length must be a multiple of 16 (one whole UUID per 16 bytes)",
@@ -561,50 +508,28 @@ fn fill_bytes_impl(
     })?;
     let millis = millis_or_now(unix_millis);
 
-    // SAFETY: this slice aliases the bytearray's storage, so it must not be held across
-    // anything that can run arbitrary Python — which could resize the bytearray and free the
-    // buffer underneath it. Nothing below does: new_v6_batch/new_v7_batch are pure Rust over
-    // a byte slice, take no Python handle, and cannot re-enter the interpreter. The slice is
-    // dropped at the end of this call, before control returns to Python.
-    let out = unsafe { buffer.as_bytes_mut() };
-
-    if v7_not_v6 {
-        match v7::new_v7_batch(millis, count, out) {
-            Ok(()) => Ok(()),
-            Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-                "unix_millis must be non-negative and fit within 48 bits",
-            )),
-            Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
-                Err(PyValueError::new_err(e.to_string()))
-            }
-            Err(_) => Err(PyRuntimeError::new_err(
-                "uuid_new_v7_batch: random source failure",
-            )),
-        }
+    // SAFETY: a bytearray's export is writable, C-contiguous and `len` bytes long, and stays
+    // where it is until `view` is dropped at the end of this call. new_v7_batch is pure Rust
+    // over the slice and cannot re-enter the interpreter. Another thread writing the same
+    // bytearray at the same time races on its contents, as it would through any writer.
+    let out: &mut [u8] = if len == 0 {
+        &mut []
     } else {
-        match v6::new_v6_batch(millis, count, out) {
-            Ok(()) => Ok(()),
-            Err(v6::NewV6Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-                "unix_millis does not fit the 60-bit v6 timestamp field",
-            )),
-            Err(e @ v6::NewV6Error::BufferTooSmall) => Err(PyValueError::new_err(e.to_string())),
-            Err(_) => Err(PyRuntimeError::new_err(
-                "uuid_new_v6_batch: random source failure",
-            )),
+        unsafe { std::slice::from_raw_parts_mut(view.buf_ptr().cast::<u8>(), len) }
+    };
+
+    match v7::new_v7_batch(millis, count, out) {
+        Ok(()) => Ok(()),
+        Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
+            "unix_millis must be non-negative and fit within 48 bits",
+        )),
+        Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
+            Err(PyValueError::new_err(e.to_string()))
         }
+        Err(_) => Err(PyRuntimeError::new_err(
+            "uuid_new_v7_batch: random source failure",
+        )),
     }
-}
-
-#[pyfunction]
-#[pyo3(signature = (buffer, unix_millis = None))]
-fn fill_v7_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> PyResult<()> {
-    fill_bytes_impl(buffer, unix_millis, true)
-}
-
-#[pyfunction]
-#[pyo3(signature = (buffer, unix_millis = None))]
-fn fill_v6_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> PyResult<()> {
-    fill_bytes_impl(buffer, unix_millis, false)
 }
 
 // Name must match module-name's last segment in pyproject.toml ("hyperuuid._native") —
@@ -615,24 +540,16 @@ fn fill_v6_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> P
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(new_v4, m)?)?;
     m.add_function(wrap_pyfunction!(new_v5, m)?)?;
-    m.add_function(wrap_pyfunction!(new_v6, m)?)?;
     m.add_function(wrap_pyfunction!(new_v7, m)?)?;
-    m.add_function(wrap_pyfunction!(new_v6_batch, m)?)?;
     m.add_function(wrap_pyfunction!(new_v7_batch, m)?)?;
-    m.add_function(wrap_pyfunction!(fill_v6_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(fill_v7_bytes, m)?)?;
-    m.add_function(wrap_pyfunction!(v6_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(v7_timestamp, m)?)?;
-    m.add_function(wrap_pyfunction!(v6_unix_millis, m)?)?;
     m.add_function(wrap_pyfunction!(v7_unix_millis, m)?)?;
-    m.add_function(wrap_pyfunction!(v6_unix_millis_in, m)?)?;
     m.add_function(wrap_pyfunction!(v7_unix_millis_in, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(variant, m)?)?;
     m.add_function(wrap_pyfunction!(is_rfc, m)?)?;
     m.add_function(wrap_pyfunction!(get_timestamp, m)?)?;
-    m.add_function(wrap_pyfunction!(v6_to_sql_order, m)?)?;
-    m.add_function(wrap_pyfunction!(v6_from_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_to_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(v7_from_sql_order, m)?)?;
     m.add_function(wrap_pyfunction!(native_version, m)?)?;

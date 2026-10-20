@@ -33,7 +33,7 @@ def test_the_stub_and_the_loaded_backend_name_the_same_functions():
     consumed = {name for name in stubbed if callable(getattr(_native, name, None))}
     assert consumed == stubbed, "in _native.pyi but not on the extension"
     public = {name for name in hyperuuid.__all__ if callable(getattr(hyperuuid, name))}
-    assert {"native_version", "new_v4", "new_v5", "new_v6", "new_v7"} <= public & stubbed
+    assert {"native_version", "new_v4", "new_v5", "new_v7"} <= public & stubbed
 
 
 def test_the_stub_and_the_loaded_backend_agree_on_parameter_names():

@@ -11,7 +11,8 @@ namespace HyperUuid.Tests;
 /// becomes a <see cref="Guid"/> through <c>bigEndian: true</c>, a SQL-ordered one through
 /// the plain constructor, exactly as <see cref="UuidGenerator.V7ToSqlOrder(Guid)"/> returns
 /// it. A vector that fails here is a break in the cross-language contract, and for
-/// <c>sql_order.json</c> a change to data already persisted in SQL Server.
+/// <c>sql_order.json</c> a change to data already persisted in SQL Server;
+/// <c>sql_order_refused.json</c> pins what the conversions refuse, and how.
 /// </summary>
 public sealed class CorpusTests
 {
@@ -76,23 +77,55 @@ public sealed class CorpusTests
 			var sqlBytes = Hex(vector, "sql");
 			var rfc = GuidOf(rfcBytes, UuidLayout.Rfc9562);
 			var sql = GuidOf(sqlBytes, UuidLayout.SqlServer);
-			var (toSql, toRfc) = vector.GetProperty("version").GetInt32() switch
-			{
-				6 => ((Func<Guid, Guid>)UuidGenerator.V6ToSqlOrder, (Func<Guid, Guid>)UuidGenerator.V6FromSqlOrder),
-				7 => (UuidGenerator.V7ToSqlOrder, UuidGenerator.V7FromSqlOrder),
-				var other => throw new InvalidDataException($"no SQL order for version {other}"),
-			};
-			toSql(rfc).ShouldBe(sql, vector.ToString());
-			toRfc(sql).ShouldBe(rfc, vector.ToString());
+			UuidGenerator.V7ToSqlOrder(rfc).ShouldBe(sql, vector.ToString());
+			UuidGenerator.V7FromSqlOrder(sql).ShouldBe(rfc, vector.ToString());
+			// Every SQL-ordered value is a version 8 to the Guid; the layout names its source.
+			sql.Version.ShouldBe(8, vector.ToString());
+			UuidGenerator.Version(sql, UuidLayout.SqlServer).ShouldBe(7, vector.ToString());
 			// What reaches SQL Server is Guid.ToByteArray(); it must be the corpus's wire bytes.
-			toSql(rfc).ToByteArray().ShouldBe(sqlBytes, vector.ToString());
+			UuidGenerator.V7ToSqlOrder(rfc).ToByteArray().ShouldBe(sqlBytes, vector.ToString());
 
 			// The raw-byte doors, in place.
 			Span<byte> bytes = [.. rfcBytes];
-			if (vector.GetProperty("version").GetInt32() == 6) UuidGenerator.V6ToSqlOrder(bytes); else UuidGenerator.V7ToSqlOrder(bytes);
+			UuidGenerator.V7ToSqlOrder(bytes);
 			bytes.ToArray().ShouldBe(sqlBytes, vector.ToString());
-			if (vector.GetProperty("version").GetInt32() == 6) UuidGenerator.V6FromSqlOrder(bytes); else UuidGenerator.V7FromSqlOrder(bytes);
+			UuidGenerator.V7FromSqlOrder(bytes);
 			bytes.ToArray().ShouldBe(rfcBytes, vector.ToString());
+		}
+	}
+
+	delegate void InPlace(Span<byte> uuid);
+
+	// Each refused value fails its conversion with the binding's wrong-version error, an
+	// ArgumentException naming the parameter. The value is fed the way a caller holds it in the input's layout
+	// (RFC order into a To conversion, SQL order into a From one), and the in-place byte form
+	// must leave the buffer untouched.
+	[Fact]
+	void Sql_order_refused_corpus()
+	{
+		foreach (var vector in Corpus("sql_order_refused.json"))
+		{
+			var bytes = Hex(vector, "uuid");
+			var (toSql, convert, inPlace) = vector.GetProperty("direction").GetString() switch
+			{
+				"to_sql" => (true, (Func<Guid, Guid>)UuidGenerator.V7ToSqlOrder, (InPlace)UuidGenerator.V7ToSqlOrder),
+				"from_sql" => (false, (Func<Guid, Guid>)UuidGenerator.V7FromSqlOrder, (InPlace)UuidGenerator.V7FromSqlOrder),
+				var other => throw new InvalidDataException($"unknown direction {other}"),
+			};
+			const string message = "the value is not a UUID of the version this conversion takes";
+			var id = GuidOf(bytes, toSql ? UuidLayout.Rfc9562 : UuidLayout.SqlServer);
+
+			foreach (var thrown in new[]
+			{
+				Should.Throw<Exception>(() => convert(id), vector.ToString()),
+				Should.Throw<Exception>(() => inPlace(bytes.AsSpan()), vector.ToString()),
+			})
+			{
+				thrown.GetType().ShouldBe(typeof(ArgumentException), vector.ToString());
+				thrown.Message.ShouldStartWith(message, Case.Sensitive, vector.ToString());
+				((ArgumentException)thrown).ParamName.ShouldBe("uuid", vector.ToString());
+			}
+			bytes.ShouldBe(Hex(vector, "uuid"), vector.ToString());
 		}
 	}
 
@@ -124,23 +157,14 @@ public sealed class CorpusTests
 				UuidGenerator.GetTimestamp(id).ShouldBe(expected, vector.ToString());
 				id.Timestamp.ShouldBe(expected, vector.ToString());
 			}
+			// Only a version 7 carries a timestamp; a version 6 (or 1) row has none.
 			if (millis is not { } value)
 				continue;
-			switch (version)
-			{
-				case 6:
-					UuidGenerator.V6UnixMillis(id, layout).ShouldBe(value, vector.ToString());
-					UuidGenerator.V6Timestamp(id, layout).ShouldBe(expected!.Value, vector.ToString());
-					if (layout == UuidLayout.Rfc9562)
-						UuidGenerator.V6UnixMillis(id).ShouldBe(value, vector.ToString());
-					break;
-				case 7:
-					UuidGenerator.V7UnixMillis(id, layout).ShouldBe(value, vector.ToString());
-					UuidGenerator.V7Timestamp(id, layout).ShouldBe(expected!.Value, vector.ToString());
-					if (layout == UuidLayout.Rfc9562)
-						UuidGenerator.V7UnixMillis(id).ShouldBe(value, vector.ToString());
-					break;
-			}
+			version.ShouldBe(7, vector.ToString());
+			UuidGenerator.V7UnixMillis(id, layout).ShouldBe(value, vector.ToString());
+			UuidGenerator.V7Timestamp(id, layout).ShouldBe(expected!.Value, vector.ToString());
+			if (layout == UuidLayout.Rfc9562)
+				UuidGenerator.V7UnixMillis(id).ShouldBe(value, vector.ToString());
 		}
 	}
 

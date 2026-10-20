@@ -97,11 +97,17 @@ php/.phpunit.result.cache
 # harmless to keep matching in case any local checkout still has one lying around.
 python/src/hyperuuid_native.so
 python/src/hyperuuid_native.pyd
-# maturin develop's own local-dev-install output — nested at hyperuuid._native now, not a
-# top-level sibling. abi3 wheels carry one build per platform regardless of Python version
-# (hence just *.abi3.so, not a per-version-tagged glob), but .pyd covers Windows either way.
+# The staged PyO3 extension for local dev/test — nested at hyperuuid._native (the maturin
+# module-name), built from the core crate's python feature. The abi3 and abi3t builds carry
+# one file per platform regardless of Python version (the plain, .abi3 and .abi3t
+# spellings); a free-threaded 3.14 build is tagged per version (`maturin develop` names it
+# _native.cpython-314t-<platform>.so), hence the glob; .pyd covers Windows.
+python/src/hyperuuid/_native.so
 python/src/hyperuuid/_native.abi3.so
+python/src/hyperuuid/_native.abi3t.so
+python/src/hyperuuid/_native.cpython-*t-*.so
 python/src/hyperuuid/_native.pyd
+python/src/hyperuuid/_native.*.pyd
 # Staged Magnus extension for local dev/test (built from the core crate's `ruby` feature —
 # `cargo ruby` — since the satellite crate that used to live in
 # ruby/native/ was folded into it; platform gems carry the real artifact).

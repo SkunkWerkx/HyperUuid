@@ -5,7 +5,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use hyperuuid::{Uuid, hyperuuid_version, v4, v5, v6, v7};
+use hyperuuid::{Uuid, hyperuuid_version, v4, v5, v7};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -47,14 +47,12 @@ fn v5_matches_the_rfc_vector() {
 }
 
 #[wasm_bindgen_test]
-fn v6_and_v7_embed_the_time_the_browser_hands_in() {
+fn v7_embeds_the_time_the_browser_hands_in() {
     let ms = now_millis();
-    let id6 = v6::new_v6(ms).unwrap();
     let id7 = v7::new_v7(ms).unwrap();
-    assert_eq!((id6.version(), id7.version()), (6, 7));
-    assert_eq!(v6::unix_millis(&id6), ms);
+    assert_eq!(id7.version(), 7);
     assert_eq!(v7::unix_millis(&id7), ms);
-    assert_eq!(v7::to_rfc_order(&v7::to_sql_order(&id7)), id7);
+    assert_eq!(v7::to_rfc_order(&v7::to_sql_order(&id7).unwrap()), Ok(id7));
 }
 
 #[wasm_bindgen_test]
@@ -66,7 +64,6 @@ fn a_v7_batch_is_ordered_and_unique() {
         ids.windows(2).all(|w| w[0] < w[1]),
         "v7 batch not strictly increasing"
     );
-    v6::new_v6_batch(now_millis(), 1000, &mut out).unwrap();
 }
 
 #[wasm_bindgen_test]

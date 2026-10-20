@@ -2,11 +2,12 @@ Gem::Specification.new do |spec|
   spec.name = "hyperuuid"
   # Kept in lockstep with HyperUuid::VERSION (lib/hyperuuid.rb) and rust/Cargo.toml by the
   # prepare-release workflow, which rewrites all three together.
-  spec.version = "0.8.0"
-  spec.summary = "RFC 9562 UUID v4/v5/v6/v7 generation over a native Rust core, shipped prebuilt"
+  spec.version = "0.9.0"
+  spec.summary = "RFC 9562 UUID v4/v5/v7 generation over a native Rust core, shipped prebuilt"
   spec.description = <<~DESC
-    RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, with
-    batch and raw-bytes forms, from one native Rust core. Two backends behind one surface,
+    RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with
+    batch and raw-bytes forms and a version 8 SQL Server order for v7, from one native Rust
+    core. Two backends behind one surface,
     selected automatically and both shipped prebuilt: a Magnus extension where a precompiled
     platform gem matches, and stdlib Fiddle everywhere else. No runtime bridge, no
     dependencies beyond Fiddle.

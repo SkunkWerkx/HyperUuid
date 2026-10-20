@@ -1,5 +1,5 @@
 // Proves the binding under Native AOT for real: this program publishes with PublishAot and
-// crosses every native entry point the binding declares — the eighteen uuid_* functions and
+// crosses every native entry point the binding declares — the twelve uuid_* functions and
 // hyperuuid_version — against the real native library, through every call shape the public
 // surface offers (throwing, Try*, Guid, raw bytes, batch, inspection, extension property). Exit code 0 only
 // if every check lands as expected.
@@ -145,58 +145,66 @@ internal static class SmokeTest
 			return 1;
 		}
 
-		// Version 6, end to end: generation, timestamp recovery, the Try path, both SQL-order
-		// directions in both shapes, and both batch shapes.
-		var v6 = UuidGenerator.NewV6(FixedMs);
-		if (UuidGenerator.V6UnixMillis(v6) != FixedMs || v6.Timestamp != DateTimeOffset.FromUnixTimeMilliseconds(FixedMs))
+		// A version 6 minted elsewhere (RFC 9562 Appendix A.5): a version, but no timestamp here.
+		var v6 = new Guid("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+		if (UuidGenerator.Version(v6) != 6 || v6.Timestamp is not null)
 		{
-			Console.WriteLine($"FAIL: v6 timestamp mismatch for {v6}");
-			return 1;
-		}
-		if (!UuidGenerator.TryNewV6(FixedMs, out var tryV6) || tryV6 == Guid.Empty
-			|| UuidGenerator.TryNewV6(-1, out var negative) || negative != Guid.Empty)
-		{
-			Console.WriteLine("FAIL: TryNewV6 misreported a valid or an out-of-range timestamp");
-			return 1;
-		}
-		Span<byte> v6Bytes = stackalloc byte[16];
-		v6.TryWriteBytes(v6Bytes, bigEndian: true, out _);
-		UuidGenerator.V6ToSqlOrder(v6Bytes);
-		if (!v6Bytes.SequenceEqual(UuidGenerator.V6ToSqlOrder(v6).ToByteArray()))
-		{
-			Console.WriteLine("FAIL: V6ToSqlOrder byte overload disagrees with the Guid overload");
-			return 1;
-		}
-		UuidGenerator.V6FromSqlOrder(v6Bytes);
-		if (new Guid(v6Bytes, bigEndian: true) != v6 || UuidGenerator.V6FromSqlOrder(UuidGenerator.V6ToSqlOrder(v6)) != v6)
-		{
-			Console.WriteLine("FAIL: V6FromSqlOrder did not invert V6ToSqlOrder");
-			return 1;
-		}
-		var v6Batch = UuidGenerator.NewV6Batch(100, FixedMs);
-		Span<byte> v6Raw = stackalloc byte[4 * 16];
-		UuidGenerator.FillV6(v6Raw, FixedMs);
-		if (v6Batch.Distinct().Count() != 100
-			|| v6Batch.Any(id => UuidGenerator.V6UnixMillis(id) != FixedMs)
-			|| UuidGenerator.V6UnixMillis(new Guid(v6Raw.Slice(3 * 16, 16), bigEndian: true)) != FixedMs)
-		{
-			Console.WriteLine("FAIL: a v6 batch is not distinct ids at the requested timestamp");
+			Console.WriteLine($"FAIL: a v6 reported a timestamp or the wrong version: {v6}");
 			return 1;
 		}
 
 		// Inspection, and the layout-aware reads on SQL-ordered values in place: every new export.
 		var v7Sql = UuidGenerator.V7ToSqlOrder(v7);
-		var v6Sql = UuidGenerator.V6ToSqlOrder(v6);
 		if (UuidGenerator.Version(v7) != 7 || UuidGenerator.Variant(v7) != UuidVariant.Rfc9562
 			|| UuidGenerator.Variant(UuidGenerator.Max) != UuidVariant.Future
 			|| !UuidGenerator.IsRfc(v7, 7) || UuidGenerator.IsRfc(v7, 6)
-			|| UuidGenerator.Version(v7Sql, UuidLayout.SqlServer) != 7 || !UuidGenerator.IsRfc(v6Sql, 6, UuidLayout.SqlServer)
+			|| UuidGenerator.Version(v7Sql, UuidLayout.SqlServer) != 7 || !UuidGenerator.IsRfc(v7Sql, 7, UuidLayout.SqlServer)
 			|| UuidGenerator.V7UnixMillis(v7Sql, UuidLayout.SqlServer) != ms
-			|| UuidGenerator.V6UnixMillis(v6Sql, UuidLayout.SqlServer) != FixedMs
 			|| UuidGenerator.GetTimestamp(v7Sql, UuidLayout.SqlServer) != DateTimeOffset.FromUnixTimeMilliseconds(ms))
 		{
 			Console.WriteLine("FAIL: inspection or a layout-aware read disagrees");
 			return 1;
+		}
+
+		// A SQL-ordered value is an RFC 9562 version 8 to the Guid, with no timestamp there.
+		if (v7Sql.Version != 8 || !UuidGenerator.IsRfc(v7Sql, 8) || UuidGenerator.IsRfc(v7Sql, 7)
+			|| UuidGenerator.GetTimestamp(v7Sql) is not null)
+		{
+			Console.WriteLine("FAIL: a SQL-ordered value does not read as version 8");
+			return 1;
+		}
+
+		// The conversions refuse a value of the wrong version through the native return code,
+		// and convert every v7 whatever its timestamp. The in-place form leaves a refused
+		// value's bytes as they were.
+		Span<byte> refused = stackalloc byte[16];
+		v6.TryWriteBytes(refused, bigEndian: true, out _);
+		if (!Refuses<ArgumentException>(() => UuidGenerator.V7ToSqlOrder(v6))
+			|| !Refuses<ArgumentException>(() => UuidGenerator.V7FromSqlOrder(v7))
+			|| !Refuses<ArgumentException>(() => UuidGenerator.V7FromSqlOrder(v6)))
+		{
+			Console.WriteLine("FAIL: a SQL-order conversion did not refuse a value outside its domain");
+			return 1;
+		}
+		var late = UuidGenerator.NewV7((1L << 48) - 1);
+		if (UuidGenerator.V7FromSqlOrder(UuidGenerator.V7ToSqlOrder(late)) != late)
+		{
+			Console.WriteLine("FAIL: the last v7 millisecond did not round-trip through SQL order");
+			return 1;
+		}
+		try
+		{
+			UuidGenerator.V7ToSqlOrder(refused);
+			Console.WriteLine("FAIL: the in-place V7ToSqlOrder accepted a v6");
+			return 1;
+		}
+		catch (ArgumentException e) when (e.GetType() == typeof(ArgumentException))
+		{
+			if (new Guid(refused, bigEndian: true) != v6)
+			{
+				Console.WriteLine("FAIL: a refused in-place conversion changed the bytes");
+				return 1;
+			}
 		}
 		var overLimit = UuidGenerator.MaxV7Batch + 1;
 		try
@@ -211,11 +219,24 @@ internal static class SmokeTest
 
 		Console.WriteLine($"v4: {a} {b}");
 		Console.WriteLine($"v5: {v5} matches RFC 9562 Appendix A.4 vector");
-		Console.WriteLine($"v6: {v6} embeds timestamp {UuidGenerator.V6UnixMillis(v6)}");
 		Console.WriteLine($"v7: {v7} embeds timestamp {ms}");
 		Console.WriteLine();
 		Console.WriteLine("every native entry point crossed: try/span/batch/SQL-order/inspection/extension surface verified under Native AOT");
 		Console.WriteLine("ALL NATIVE AOT CHECKS PASSED");
 		return 0;
+	}
+
+	// Whether convert throws exactly TException (not a subclass) and nothing else.
+	static bool Refuses<TException>(Func<Guid> convert) where TException : Exception
+	{
+		try
+		{
+			convert();
+			return false;
+		}
+		catch (Exception e)
+		{
+			return e.GetType() == typeof(TException);
+		}
 	}
 }

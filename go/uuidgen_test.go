@@ -223,131 +223,7 @@ func TestV5EmptyNameIsValid(t *testing.T) {
 // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
 const rfcTestVectorMs uint64 = 1_645_557_742_000
 
-func TestV6EmbedsTheTimestamp(t *testing.T) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := V6Timestamp(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := time.UnixMilli(int64(rfcTestVectorMs)).UTC()
-	if !got.Equal(want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestV6HasVersionAndVariantBits(t *testing.T) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id.Version() != 6 {
-		t.Errorf("version = %d, want 6", id.Version())
-	}
-	if id.Variant() != uuid.RFC4122 {
-		t.Errorf("variant = %v, want RFC4122", id.Variant())
-	}
-}
-
-func TestV6SetsTheNodeIdMulticastBit(t *testing.T) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id[10]&0x01 != 0x01 {
-		t.Errorf("node[0] = %#x, want multicast bit set", id[10])
-	}
-}
-
-func TestV6IsNonDeterministicWithinTheSameMillisecond(t *testing.T) {
-	seen := make(map[uuid.UUID]struct{}, 100)
-	for i := 0; i < 100; i++ {
-		id, err := NewV6At(rfcTestVectorMs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		seen[id] = struct{}{}
-	}
-	if len(seen) != 100 {
-		t.Errorf("got %d distinct UUIDs, want 100", len(seen))
-	}
-}
-
-func TestV6BatchReturnsCountUuidsSharingTheTimestamp(t *testing.T) {
-	ids, err := NewV6BatchAt(10, rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ids) != 10 {
-		t.Fatalf("got %d ids, want 10", len(ids))
-	}
-	for _, id := range ids {
-		if id.Version() != 6 {
-			t.Errorf("version = %d, want 6", id.Version())
-		}
-		got, err := V6Timestamp(id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := time.UnixMilli(int64(rfcTestVectorMs)).UTC(); !got.Equal(want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	}
-}
-
-func TestV6BatchProducesPairwiseDistinctUuids(t *testing.T) {
-	ids, err := NewV6BatchAt(100, rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := make(map[uuid.UUID]struct{}, 100)
-	for _, id := range ids {
-		seen[id] = struct{}{}
-	}
-	if len(seen) != 100 {
-		t.Errorf("got %d distinct UUIDs, want 100", len(seen))
-	}
-}
-
-func TestV6BatchCountZeroReturnsNil(t *testing.T) {
-	ids, err := NewV6BatchAt(0, rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ids) != 0 {
-		t.Errorf("got %d ids, want 0", len(ids))
-	}
-}
-
-func TestV6BatchOverflowTimestampErrors(t *testing.T) {
-	_, err := NewV6BatchAt(1, 0xFFFF_FFFF_FFFF_FFFF)
-	if !errors.Is(err, ErrTimestampOutOfRange) {
-		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
-	}
-}
-
-// Version 6's ceiling is its own, and lower than version 7's: the 60-bit count of 100 ns
-// ticks since 1582-10-15 holds 103,072,857,660,684 Unix milliseconds and not one more —
-// well inside the 48 bits version 7 accepts.
-func TestV6TimestampCeilingIsItsOwn(t *testing.T) {
-	const maxV6Ms uint64 = 103_072_857_660_684
-	if _, err := NewV6At(maxV6Ms); err != nil {
-		t.Errorf("the largest version 6 timestamp was rejected: %v", err)
-	}
-	if _, err := NewV6At(maxV6Ms + 1); !errors.Is(err, ErrTimestampOutOfRange) {
-		t.Errorf("got %v, want ErrTimestampOutOfRange", err)
-	}
-	if _, err := NewV7At(maxV6Ms + 1); err != nil {
-		t.Errorf("version 7 should still accept it: %v", err)
-	}
-}
-
 func TestBatchRejectsANegativeCount(t *testing.T) {
-	if _, err := NewV6BatchAt(-1, rfcTestVectorMs); !errors.Is(err, ErrNegativeCount) {
-		t.Errorf("got %v, want ErrNegativeCount", err)
-	}
 	if _, err := NewV7BatchAt(-1, rfcTestVectorMs); !errors.Is(err, ErrNegativeCount) {
 		t.Errorf("got %v, want ErrNegativeCount", err)
 	}
@@ -461,20 +337,6 @@ func TestV7TimestampRoundTripsZeroAndTheRfc48BitMax(t *testing.T) {
 	}
 }
 
-func TestNewV6AtTimeMatchesNewV6AtFromTheEquivalentMillis(t *testing.T) {
-	byTime, err := NewV6AtTime(time.UnixMilli(int64(rfcTestVectorMs)).UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotMs, err := V6UnixMillis(byTime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotMs != rfcTestVectorMs {
-		t.Errorf("got %d ms, want %d", gotMs, rfcTestVectorMs)
-	}
-}
-
 func TestNewV7AtTimeMatchesNewV7AtFromTheEquivalentMillis(t *testing.T) {
 	byTime, err := NewV7AtTime(time.UnixMilli(int64(rfcTestVectorMs)).UTC())
 	if err != nil {
@@ -496,24 +358,6 @@ func TestGetTimestampReturnsErrNotTimeBasedForNonTimeBasedVersions(t *testing.T)
 	}
 	if _, err := GetTimestamp(id); !errors.Is(err, ErrNotTimeBased) {
 		t.Errorf("got %v, want ErrNotTimeBased", err)
-	}
-}
-
-func TestGetTimestampMatchesV6Timestamp(t *testing.T) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := V6Timestamp(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := GetTimestamp(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Equal(want) {
-		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
@@ -609,7 +453,7 @@ func TestV7ToSqlOrderRoundTripsThroughV7FromSqlOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sqlOrdered == id {
-		t.Fatal("V7ToSqlOrder returned the input unchanged, want the bytes actually permuted")
+		t.Fatal("V7ToSqlOrder returned the input unchanged, want the bytes actually converted")
 	}
 	roundTripped, err := V7FromSqlOrder(sqlOrdered)
 	if err != nil {
@@ -620,22 +464,80 @@ func TestV7ToSqlOrderRoundTripsThroughV7FromSqlOrder(t *testing.T) {
 	}
 }
 
-func TestV7ToSqlOrderPreservesVersionAndVariantAtOctets7And8(t *testing.T) {
-	id, err := NewV7At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlOrdered, err := V7ToSqlOrder(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sqlOrdered[7]&0xF0 != 0x70 {
-		t.Errorf("version nibble at octet 7 = %#x, want 0x70..0x7F", sqlOrdered[7])
-	}
-	if sqlOrdered[8]&0xC0 != 0x80 {
-		t.Errorf("variant bits at octet 8 = %#x, want top two bits 10", sqlOrdered[8])
+// The conversion writes a version 8: the 8 at octet 7's top nibble and the RFC variant at
+// octet 8's top two bits, where SQL Server's text form and a .NET Guid show them.
+func TestSqlOrderWritesVersion8WithTheRfcVariant(t *testing.T) {
+	for i := 0; i < 256; i++ {
+		sqlOrdered, err := V7ToSqlOrder(must(NewV7At(rfcTestVectorMs)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sqlOrdered[7]&0xF0 != 0x80 {
+			t.Fatalf("%x: version nibble at octet 7 = %#x, want 0x80..0x8F", sqlOrdered, sqlOrdered[7])
+		}
+		if sqlOrdered[8]&0xC0 != 0x80 {
+			t.Fatalf("%x: variant bits at octet 8 = %#x, want top two bits 10", sqlOrdered, sqlOrdered[8])
+		}
 	}
 }
+
+// Each direction takes only its own input, and the refusal is the wrong-version error with
+// nothing returned. Fixed vectors only: a fresh v7's octet 7 is counter bits, which carry the
+// SQL layout's 8 one time in 16, and its counter moves too slowly for draws in a loop to help.
+func TestSqlOrderTakesOnlyItsOwnInput(t *testing.T) {
+	if got, err := V7FromSqlOrder(rfcV7); !errors.Is(err, ErrWrongVersion) || got != Nil {
+		t.Fatalf("%v: V7FromSqlOrder of an RFC-ordered v7 = %v, %v, want ErrWrongVersion", rfcV7, got, err)
+	}
+	if got, err := V7ToSqlOrder(rfcV7); err != nil || got != rfcV7Sql {
+		t.Fatalf("V7ToSqlOrder(%v) = %v, %v, want %v", rfcV7, got, err, rfcV7Sql)
+	}
+	if got, err := V7ToSqlOrder(rfcV7Sql); !errors.Is(err, ErrWrongVersion) || got != Nil {
+		t.Errorf("%v: V7ToSqlOrder of a SQL-ordered value = %v, %v, want ErrWrongVersion", rfcV7Sql, got, err)
+	}
+	if got, err := V7ToSqlOrder(rfcV6); !errors.Is(err, ErrWrongVersion) || got != Nil {
+		t.Errorf("%x: V7ToSqlOrder of a v6 = %x, %v, want ErrWrongVersion", rfcV6, got, err)
+	}
+}
+
+// The refusal carries the exact message every binding shares.
+func TestSqlOrderRefusals(t *testing.T) {
+	for name, err := range map[string]error{
+		"a v4 to SQL as a v7": second(V7ToSqlOrder(uuid.MustParse("919108f7-52d1-4320-9bac-f847db4148a8"))),
+		"a v6 to SQL as a v7": second(V7ToSqlOrder(rfcV6)),
+	} {
+		const msg = "hyperuuid: the value is not a UUID of the version this conversion takes"
+		if !errors.Is(err, ErrWrongVersion) || err.Error() != msg {
+			t.Errorf("%s: got %v, want %q", name, err, msg)
+		}
+	}
+}
+
+// There is no timestamp limit: every version 7 converts and comes back, the latest one, at
+// 2^48 - 1 ms, included.
+func TestEveryV7TimestampConverts(t *testing.T) {
+	for _, s := range []string{
+		"00000000-0000-7000-8000-000000000000",
+		"7fffffff-ffff-7000-8000-000000000000",
+		"80000000-0000-7000-8000-000000000000",
+		"ffffffff-ffff-7fff-bfff-ffffffffffff",
+	} {
+		id := uuid.MustParse(s)
+		sql, err := V7ToSqlOrder(id)
+		if err != nil {
+			t.Errorf("%s: V7ToSqlOrder: %v", s, err)
+			continue
+		}
+		if back, err := V7FromSqlOrder(sql); err != nil || back != id {
+			t.Errorf("%s: round trip = %x, %v", s, back, err)
+		}
+		if got, err := V7UnixMillisIn(sql, LayoutSqlServer); err != nil || got != v7UnixMillis(id) {
+			t.Errorf("%s: V7UnixMillisIn = %d, %v, want %d", s, got, err, v7UnixMillis(id))
+		}
+	}
+}
+
+// second is the error of a (value, error) pair.
+func second[T any](_ T, err error) error { return err }
 
 // sqlGuidCompare replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance
 // order — the correctness oracle this project's C# test suite checks directly against the
@@ -691,78 +593,6 @@ func TestV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
 	}
 }
 
-func TestV6ToSqlOrderRoundTripsThroughV6FromSqlOrder(t *testing.T) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlOrdered, err := V6ToSqlOrder(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sqlOrdered == id {
-		t.Fatal("V6ToSqlOrder returned the input unchanged, want the bytes actually permuted")
-	}
-	roundTripped, err := V6FromSqlOrder(sqlOrdered)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if roundTripped != id {
-		t.Errorf("V6FromSqlOrder(V6ToSqlOrder(id)) = %v, want %v", roundTripped, id)
-	}
-}
-
-func TestV6ToSqlOrderPreservesVersionAndVariant(t *testing.T) {
-	// Different offsets than v7's sql order — see V6ToSqlOrder's doc comment for why.
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlOrdered, err := V6ToSqlOrder(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sqlOrdered[8]&0xF0 != 0x60 {
-		t.Errorf("version nibble at octet 8 = %#x, want 0x60..0x6F", sqlOrdered[8])
-	}
-	if sqlOrdered[6]&0xC0 != 0x80 {
-		t.Errorf("variant bits at octet 6 = %#x, want top two bits 10", sqlOrdered[6])
-	}
-}
-
-// Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed to sort
-// in creation order even in plain RFC order, so this only exercises strictly increasing
-// timestamps, where the timestamp alone determines order with no tie to break.
-func TestV6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps(t *testing.T) {
-	var ids []uuid.UUID
-	for i := uint64(0); i < 300; i++ {
-		id, err := NewV6At(rfcTestVectorMs + i)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-
-	sqlOrdered := make([][16]byte, len(ids))
-	for i, id := range ids {
-		sql, err := V6ToSqlOrder(id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sqlOrdered[i] = [16]byte(sql)
-	}
-
-	sorted := make([][16]byte, len(sqlOrdered))
-	copy(sorted, sqlOrdered)
-	sort.Slice(sorted, func(i, j int) bool { return sqlGuidCompare(sorted[i], sorted[j]) < 0 })
-
-	for i := range sqlOrdered {
-		if sqlOrdered[i] != sorted[i] {
-			t.Fatalf("SQL-ordered bytes do not sort in creation order under SqlGuid comparison at index %d", i)
-		}
-	}
-}
-
 // ---- Destination-buffer fills -------------------------------------------------------
 
 func TestFillV7AtFillsTheCallersSlice(t *testing.T) {
@@ -792,18 +622,6 @@ func TestFillV7AtIsStrictlyIncreasing(t *testing.T) {
 	for i := 1; i < len(dst); i++ {
 		if bytes.Compare(dst[i-1][:], dst[i][:]) >= 0 {
 			t.Fatalf("items %d/%d not in creation order: %s then %s", i-1, i, dst[i-1], dst[i])
-		}
-	}
-}
-
-func TestFillV6AtFillsTheCallersSlice(t *testing.T) {
-	dst := make([]uuid.UUID, 32)
-	if err := FillV6At(dst, rfcTestVectorMs); err != nil {
-		t.Fatalf("FillV6At: %v", err)
-	}
-	for i, id := range dst {
-		if id.Version() != 6 {
-			t.Fatalf("item %d: version %d, want 6", i, id.Version())
 		}
 	}
 }
@@ -853,7 +671,7 @@ func TestFillBytesRejectsAPartialUUID(t *testing.T) {
 	if err := FillV7BytesAt(make([]byte, 17), rfcTestVectorMs); !errors.Is(err, ErrBufferNotWholeUUIDs) {
 		t.Fatalf("got %v, want ErrBufferNotWholeUUIDs", err)
 	}
-	if err := FillV6BytesAt(make([]byte, 15), rfcTestVectorMs); !errors.Is(err, ErrBufferNotWholeUUIDs) {
+	if err := FillV7Bytes(make([]byte, 15)); !errors.Is(err, ErrBufferNotWholeUUIDs) {
 		t.Fatalf("got %v, want ErrBufferNotWholeUUIDs", err)
 	}
 }
@@ -873,25 +691,6 @@ func TestV7ToSqlOrderBytesAgreesWithTheUUIDForm(t *testing.T) {
 	copy(got, id[:])
 	if err := V7ToSqlOrderBytes(got); err != nil {
 		t.Fatalf("V7ToSqlOrderBytes: %v", err)
-	}
-	if !bytes.Equal(got, want[:]) {
-		t.Fatalf("byte form %x != uuid form %x", got, want[:])
-	}
-}
-
-func TestV6ToSqlOrderBytesAgreesWithTheUUIDForm(t *testing.T) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		t.Fatalf("NewV6At: %v", err)
-	}
-	want, err := V6ToSqlOrder(id)
-	if err != nil {
-		t.Fatalf("V6ToSqlOrder: %v", err)
-	}
-	got := make([]byte, 16)
-	copy(got, id[:])
-	if err := V6ToSqlOrderBytes(got); err != nil {
-		t.Fatalf("V6ToSqlOrderBytes: %v", err)
 	}
 	if !bytes.Equal(got, want[:]) {
 		t.Fatalf("byte form %x != uuid form %x", got, want[:])
@@ -921,11 +720,22 @@ func TestSqlOrderBytesRoundTrips(t *testing.T) {
 	}
 }
 
+func TestSqlOrderBytesLeavesARefusedBufferAsItWas(t *testing.T) {
+	b := append([]byte(nil), rfcV6[:]...)
+	for name, convert := range map[string]func([]byte) error{
+		"V7ToSqlOrderBytes": V7ToSqlOrderBytes, "V7FromSqlOrderBytes": V7FromSqlOrderBytes,
+	} {
+		if err := convert(b); !errors.Is(err, ErrWrongVersion) || !bytes.Equal(b, rfcV6[:]) {
+			t.Errorf("%s = %x, %v, want ErrWrongVersion and the bytes unchanged", name, b, err)
+		}
+	}
+}
+
 func TestSqlOrderBytesRejectsAWrongSizedBuffer(t *testing.T) {
 	if err := V7ToSqlOrderBytes(make([]byte, 15)); !errors.Is(err, ErrNotOneUUID) {
 		t.Fatalf("got %v, want ErrNotOneUUID", err)
 	}
-	if err := V6FromSqlOrderBytes(make([]byte, 17)); !errors.Is(err, ErrNotOneUUID) {
+	if err := V7FromSqlOrderBytes(make([]byte, 17)); !errors.Is(err, ErrNotOneUUID) {
 		t.Fatalf("got %v, want ErrNotOneUUID", err)
 	}
 }

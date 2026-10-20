@@ -1,6 +1,6 @@
 // Local-dev-only JMH benchmarks — mirrors rust/benches (Criterion), csharp/HyperUuid.Benchmarks
 // (BenchmarkDotNet), and go/uuidgen_bench_test.go (-benchmem): single-item generation for
-// v4/v5/v6/v7, plus batch-vs-1000-individual-calls, run by hand with `./gradlew :benchmarks:jmh`.
+// v4/v5/v7, plus batch-vs-1000-individual-calls, run by hand with `./gradlew :benchmarks:jmh`.
 plugins {
     java
     id("me.champeau.jmh") version "0.7.3"

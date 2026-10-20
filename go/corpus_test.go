@@ -2,7 +2,7 @@ package hyperuuid
 
 // The conformance corpus (corpus/README.md) replayed through this binding's public API. A
 // uuid.UUID is its bytes, so every vector's hex is the value as a caller holds it, in either
-// layout: a SQL-ordered value is the bytes V7ToSqlOrder/V6ToSqlOrder return.
+// layout: a SQL-ordered value is the bytes V7ToSqlOrder returns.
 
 import (
 	"bytes"
@@ -122,29 +122,46 @@ func TestCorpusV5(t *testing.T) {
 func TestCorpusSqlOrder(t *testing.T) {
 	for _, v := range corpus(t, "sql_order.json") {
 		rfc, sql := uuidField(t, v, "rfc"), uuidField(t, v, "sql")
-		toSql, fromSql := V7ToSqlOrder, V7FromSqlOrder
-		toSqlBytes, fromSqlBytes := V7ToSqlOrderBytes, V7FromSqlOrderBytes
-		switch intField(t, v, "version") {
-		case 7:
-		case 6:
-			toSql, fromSql = V6ToSqlOrder, V6FromSqlOrder
-			toSqlBytes, fromSqlBytes = V6ToSqlOrderBytes, V6FromSqlOrderBytes
-		default:
-			t.Fatalf("%v: unknown version", v)
-		}
-
-		if got, err := toSql(rfc); err != nil || got != sql {
+		if got, err := V7ToSqlOrder(rfc); err != nil || got != sql {
 			t.Errorf("%v: ToSqlOrder = %x, %v", v, got, err)
 		}
-		if got, err := fromSql(sql); err != nil || got != rfc {
+		if got, err := V7FromSqlOrder(sql); err != nil || got != rfc {
 			t.Errorf("%v: FromSqlOrder = %x, %v", v, got, err)
 		}
 		raw := hexField(t, v, "rfc")
-		if err := toSqlBytes(raw); err != nil || !bytes.Equal(raw, sql[:]) {
+		if err := V7ToSqlOrderBytes(raw); err != nil || !bytes.Equal(raw, sql[:]) {
 			t.Errorf("%v: ToSqlOrderBytes = %x, %v", v, raw, err)
 		}
-		if err := fromSqlBytes(raw); err != nil || !bytes.Equal(raw, rfc[:]) {
+		if err := V7FromSqlOrderBytes(raw); err != nil || !bytes.Equal(raw, rfc[:]) {
 			t.Errorf("%v: FromSqlOrderBytes = %x, %v", v, raw, err)
+		}
+	}
+}
+
+// Every refused conversion fails with ErrWrongVersion, from the UUID form and from the raw-byte
+// form, which leaves the buffer as it was.
+func TestCorpusSqlOrderRefused(t *testing.T) {
+	type conversion struct {
+		value func(uuid.UUID) (uuid.UUID, error)
+		bytes func([]byte) error
+	}
+	conversions := map[string]conversion{
+		"to_sql":   {V7ToSqlOrder, V7ToSqlOrderBytes},
+		"from_sql": {V7FromSqlOrder, V7FromSqlOrderBytes},
+	}
+	want := ErrWrongVersion
+	for _, v := range corpus(t, "sql_order_refused.json") {
+		convert, ok := conversions[fmt.Sprint(v["direction"])]
+		if !ok {
+			t.Fatalf("%v: unknown direction", v)
+		}
+		id := uuidField(t, v, "uuid")
+		if got, err := convert.value(id); !errors.Is(err, want) || got != Nil {
+			t.Errorf("%v: conversion = %x, %v, want %v", v, got, err, want)
+		}
+		raw := hexField(t, v, "uuid")
+		if err := convert.bytes(raw); !errors.Is(err, want) || !bytes.Equal(raw, id[:]) {
+			t.Errorf("%v: bytes conversion = %x, %v, want %v and the bytes unchanged", v, raw, err, want)
 		}
 	}
 }
@@ -160,8 +177,8 @@ func TestCorpusTimestamp(t *testing.T) {
 			t.Errorf("%s: VersionIn = %d, %v", where, got, err)
 		}
 
-		// time.Time holds every timestamp either version can carry, the v7 at 2^48-1 ms
-		// (year 10889) included, so no row is out of reach here.
+		// time.Time holds every timestamp a version 7 can carry, 2^48-1 ms (year 10889)
+		// included, so no row is out of reach here. A version 6 has none.
 		millisValue, timeBased := v["unix_millis"].(float64)
 		if !timeBased {
 			if _, err := GetTimestampIn(id, layout); !errors.Is(err, ErrNotTimeBased) {
@@ -186,18 +203,17 @@ func TestCorpusTimestamp(t *testing.T) {
 			}
 		}
 
-		millisIn, stampIn, millisRfc := V7UnixMillisIn, V7TimestampIn, V7UnixMillis
-		if ver == 6 {
-			millisIn, stampIn, millisRfc = V6UnixMillisIn, V6TimestampIn, V6UnixMillis
+		if ver != 7 {
+			t.Fatalf("%s: a timestamp on version %d", where, ver)
 		}
-		if got, err := millisIn(id, layout); err != nil || got != millis {
+		if got, err := V7UnixMillisIn(id, layout); err != nil || got != millis {
 			t.Errorf("%s: UnixMillisIn = %d, %v", where, got, err)
 		}
-		if got, err := stampIn(id, layout); err != nil || !got.Equal(want) {
+		if got, err := V7TimestampIn(id, layout); err != nil || !got.Equal(want) {
 			t.Errorf("%s: TimestampIn = %v, %v", where, got, err)
 		}
 		if layout == LayoutRfc9562 {
-			if got, err := millisRfc(id); err != nil || got != millis {
+			if got, err := V7UnixMillis(id); err != nil || got != millis {
 				t.Errorf("%s: UnixMillis = %d, %v", where, got, err)
 			}
 		}

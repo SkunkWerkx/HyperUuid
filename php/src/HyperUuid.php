@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace HyperUuid;
 
 /**
- * RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation, calling
+ * RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, calling
  * directly into the native libhyperuuid shared library via PHP's built-in FFI extension —
  * no runtime bridge, no extra Composer dependency. Bundles a native build for every
  * supported platform (see NativePlatform) and picks the right one at runtime, the same
@@ -24,7 +24,7 @@ final class HyperUuid
      * UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
      * than sorting before the ones ahead of them. A larger batch would have to reuse counter
      * values within one millisecond, so it is refused with an InvalidArgumentException before
-     * anything is allocated. Version 6 has no counter and no such limit.
+     * anything is allocated.
      *
      * The roll-forward orders one batch, not the stream. The next batch or {@see newV7()} call in
      * the same real millisecond starts its counter just past the wrap and carries the supplied
@@ -106,7 +106,7 @@ final class HyperUuid
      * Converts $value to a Unix-epoch millisecond integer: null becomes the current time, a
      * DateTimeInterface is converted exactly (whole seconds plus microseconds, no float
      * rounding), and an int (a raw millisecond count) passes through unchanged. Shared by
-     * every newV6/newV7/batch door below so a caller can pass either a DateTimeInterface or a
+     * newV7 and both batch doors below so a caller can pass either a DateTimeInterface or a
      * raw millisecond count interchangeably.
      *
      * @param \DateTimeInterface|int|null $value the timestamp to convert, or null for the
@@ -122,44 +122,6 @@ final class HyperUuid
             return $value->getTimestamp() * 1000 + intdiv((int) $value->format('u'), 1000);
         }
         return $value;
-    }
-
-    /**
-     * Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering
-     * of version 1 for better sort/index locality. Defaults to the current time; pass an
-     * explicit DateTimeInterface or Unix-epoch millisecond timestamp to embed a specific time
-     * instead. `clock_seq` and `node` are randomly generated on every call — unlike version 7,
-     * there is no monotonic counter, so calls within the same millisecond are not guaranteed
-     * to sort in creation order.
-     *
-     * @param \DateTimeInterface|int|null $unixMillis the timestamp to embed, or null for the
-     *     current time
-     * @return Uuid a new version 6 UUID
-     */
-    public static function newV6(\DateTimeInterface|int|null $unixMillis = null): Uuid
-    {
-        return new Uuid(Runtime::newV6(self::unixMillisFrom($unixMillis)));
-    }
-
-    /**
-     * Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI
-     * call and one random-bytes fetch instead of `count` of each. Defaults to the current time.
-     *
-     * @param int $count how many UUIDs to create, 0 to 4294967295
-     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
-     *     null for the current time
-     * @return list<Uuid> `count` new version 6 UUIDs
-     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits, or the
-     *     batch is too large to address on this platform.
-     */
-    public static function newV6Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
-    {
-        $bytes = Runtime::newV6Batch($count, self::unixMillisFrom($unixMillis));
-        $ids = [];
-        for ($i = 0; $i < $count; $i++) {
-            $ids[] = new Uuid(substr($bytes, $i * 16, 16));
-        }
-        return $ids;
     }
 
     /**
@@ -227,26 +189,5 @@ final class HyperUuid
     public static function newV7BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {
         return Runtime::newV7Batch($count, self::unixMillisFrom($unixMillis));
-    }
-
-    /**
-     * Returns `$count` version 6 UUIDs as one binary string of raw RFC 9562-ordered bytes,
-     * 16 per UUID. The version 6 counterpart to {@see newV7BatchBytes}, with the same
-     * rationale and the same guidance about when it is the right call.
-     *
-     * `clock_seq` and `node` are independently random per item; unlike version 7 there is no
-     * monotonic counter, so items minted in the same millisecond are not guaranteed to sort
-     * in creation order.
-     *
-     * @param int $count how many UUIDs to create, 0 to 4294967295
-     * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
-     *     null for the current time
-     * @return string `$count * 16` bytes: `$count` version 6 UUIDs in RFC 9562 order
-     * @throws \InvalidArgumentException If `$count` is negative or wider than 32 bits, or the
-     *     batch is too large to address on this platform.
-     */
-    public static function newV6BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
-    {
-        return Runtime::newV6Batch($count, self::unixMillisFrom($unixMillis));
     }
 }

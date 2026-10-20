@@ -34,21 +34,12 @@ runner.bench_func(
     lambda: uuid.uuid5(uuid.NAMESPACE_DNS, "example.com"),
 )
 
-runner.bench_func("hyperuuid.new_v6", lambda: hyperuuid.new_v6(RFC_TEST_VECTOR_MS))
-
 runner.bench_func("hyperuuid.new_v7", lambda: hyperuuid.new_v7(RFC_TEST_VECTOR_MS))
 
 if sys.version_info >= (3, 14):
     runner.bench_func("stdlib uuid.uuid7", uuid.uuid7)
-    runner.bench_func("stdlib uuid.uuid6", uuid.uuid6)
 
 # --- batch: hyperuuid batch call vs a loop of individual calls --------------
-
-
-def v6_individual_loop() -> None:
-    """Mints BATCH_SIZE v6 UUIDs one call at a time."""
-    for _ in range(BATCH_SIZE):
-        hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
 
 
 def v7_individual_loop() -> None:
@@ -56,12 +47,6 @@ def v7_individual_loop() -> None:
     for _ in range(BATCH_SIZE):
         hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
 
-
-runner.bench_func(
-    f"hyperuuid.new_v6_batch({BATCH_SIZE})",
-    lambda: hyperuuid.new_v6_batch(BATCH_SIZE, RFC_TEST_VECTOR_MS),
-)
-runner.bench_func(f"hyperuuid.new_v6 x{BATCH_SIZE} (loop)", v6_individual_loop)
 
 runner.bench_func(
     f"hyperuuid.new_v7_batch({BATCH_SIZE})",
@@ -76,27 +61,13 @@ runner.bench_func(f"hyperuuid.new_v7 x{BATCH_SIZE} (loop)", v7_individual_loop)
 # already-minted one. stdlib's uuid.UUID.time property has real version-aware
 # logic for this (confirmed by reading its actual source), not just a v1-only
 # stub, so it's a fair comparison, not a strawman. Only meaningful on 3.14+,
-# where stdlib has v6/v7 at all — same guard as the generation benchmarks
+# where stdlib has v7 at all — same guard as the generation benchmarks
 # above. The UUID being measured is pre-generated once outside the timed
 # closures in both directions, so only the extraction cost itself is timed.
 
 if sys.version_info >= (3, 14):
-    hyper_v6_for_extraction = hyperuuid.new_v6(RFC_TEST_VECTOR_MS)
     hyper_v7_for_extraction = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
-    stdlib_v6_for_extraction = uuid.uuid6()
     stdlib_v7_for_extraction = uuid.uuid7()
-
-    runner.bench_func(
-        "hyperuuid.v6_timestamp",
-        lambda: hyperuuid.v6_timestamp(hyper_v6_for_extraction),
-    )
-    # stdlib's .time for a v6 UUID returns raw Gregorian-epoch 100ns ticks, not
-    # Unix ms like hyperuuid.v6_timestamp — different units, but still a fair
-    # like-for-like timing of "the cost of pulling the embedded time out."
-    runner.bench_func(
-        "stdlib UUID.time (v6)",
-        lambda: stdlib_v6_for_extraction.time,
-    )
 
     runner.bench_func(
         "hyperuuid.v7_timestamp",
@@ -109,10 +80,6 @@ if sys.version_info >= (3, 14):
     )
 
     # The integer forms: the same embedded value, with no datetime built around it.
-    runner.bench_func(
-        "hyperuuid.v6_unix_millis",
-        lambda: hyperuuid.v6_unix_millis(hyper_v6_for_extraction),
-    )
     runner.bench_func(
         "hyperuuid.v7_unix_millis",
         lambda: hyperuuid.v7_unix_millis(hyper_v7_for_extraction),
