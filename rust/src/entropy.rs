@@ -78,19 +78,39 @@ fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom:
     getrandom::fill(buf)
 }
 
-/// Windows: `ProcessPrng` a chunk at a time into a buffer of its own, then copied out, never
-/// into `buf` directly. `ProcessPrng` fail-fasts the whole process (`0xC0000409`) when another
-/// thread writes the memory it is filling, and a batch fill's `buf` is the caller's memory: a
-/// free-threaded Python thread writing the same `bytearray` through a `memoryview`, or a .NET,
-/// Java or Go thread writing the same array, took the process down mid-fill. A race on the
-/// caller's bytes is the caller's to have, but it has to cost them the bytes, not the process.
-/// A 4 KiB chunk keeps the cost to about 0.3 ns a UUID over the direct call (1.27 against
-/// 0.96 ns for the 6 random bytes a v7 takes, measured on win-x64), against 2.4 ns for the
-/// whole batch; a 1 KiB one cost 0.8 ns, a 256-byte one 2.9.
+/// Windows: `ProcessPrng` into a buffer of its own, then copied out, never into `buf` directly.
+/// `ProcessPrng` fail-fasts the whole process (`0xC0000409`) when another thread writes the
+/// memory it is filling, and a batch fill's `buf` is the caller's memory: a free-threaded Python
+/// thread writing the same `bytearray` through a `memoryview`, or a .NET, Java or Go thread
+/// writing the same array, took the process down mid-fill. A race on the caller's bytes is the
+/// caller's to have, but it has to cost them the bytes, not the process.
+///
+/// Both buffers stay under a page, because a frame of a page or more makes LLVM emit a stack
+/// probe (`__chkstk`), which MSVC's CRT supplies and MinGW's, which Go's cgo links the MSVC
+/// archive with, does not. A single UUID's few bytes go through a small one inline; a batch
+/// goes a chunk at a time through a 3 KiB one in a frame of its own, so the single-UUID
+/// generators don't carry it. Measured on win-x64, the chunk costs about 0.4 ns a UUID over
+/// the direct call (1.33 against 0.97 ns for the 6 random bytes a v7 takes), against 2.4 ns
+/// for the whole batch; a 1 KiB chunk cost 0.7 ns, and 4 KiB no less than 3.
 #[cfg(windows)]
 #[inline(always)]
 fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
-    let mut chunk = [0u8; 4096];
+    const SMALL: usize = 64;
+    if buf.len() > SMALL {
+        return fill_chunked(buf);
+    }
+    let mut own = [0u8; SMALL];
+    let drawn = &mut own[..buf.len()];
+    getrandom::fill(drawn)?;
+    buf.copy_from_slice(drawn);
+    Ok(())
+}
+
+/// The batch half of the Windows [`fill_with`]: its 3 KiB buffer, in a frame of its own.
+#[cfg(windows)]
+#[inline(never)]
+fn fill_chunked(buf: &mut [u8]) -> Result<(), getrandom::Error> {
+    let mut chunk = [0u8; 3072];
     for out in buf.chunks_mut(chunk.len()) {
         let drawn = &mut chunk[..out.len()];
         getrandom::fill(drawn)?;

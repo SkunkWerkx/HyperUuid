@@ -52,10 +52,10 @@ new IDs come from v7 (see Removed).
   filling. C#'s `FillV7(Span<byte>)`, Java's `fillV7(byte[])` on the FFM backend and every
   binding's byte fill pass the caller's own memory, so a thread clearing the same array
   mid-fill took the process down with it, and free-threaded Python could do it from pure
-  Python through a `memoryview`. The core now draws the random bytes into a 4 KiB buffer of its
-  own and copies them out, so a race on the caller's bytes costs the bytes, not the process.
-  That adds about 0.3 ns a UUID to a Windows batch (1.27 against 0.96 ns for the random bytes,
-  measured on win-x64). Only Windows changes: elsewhere the random source is the kernel or a
+  Python through a `memoryview`. The core now draws the random bytes into a buffer of its own
+  (3 KiB a chunk, under a page so no stack probe is emitted) and copies them out, so a race on
+  the caller's bytes costs the bytes, not the process. That adds about 0.4 ns a UUID to a
+  Windows batch (1.33 against 0.97 ns for the random bytes, measured on win-x64). Only Windows changes: elsewhere the random source is the kernel or a
   ChaCha20 keystream, and a racing write there costs only bytes. CI's free-threaded Python run
   on both Windows legs caught it. *(all packages)*
 - **C# — the browser-wasm archive carries build provenance, and the package checks it.** Every
