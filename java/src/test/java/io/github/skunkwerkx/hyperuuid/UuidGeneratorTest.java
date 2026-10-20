@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -351,6 +352,37 @@ class UuidGeneratorTest {
             UUID id = RfcBytes.fromRfcBytes(one);
             assertEquals(7, id.version(), "item " + i + " version");
             assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v7UnixMillis(id), "item " + i + " timestamp");
+        }
+    }
+
+    @Test
+    void fillV7SurvivesAnotherThreadWritingTheSameArray() throws Exception {
+        // A race on the array's contents is the caller's to have, and must cost them the bytes,
+        // not the process. The FFM backend hands the core the caller's own array (critical
+        // linking), and Windows' ProcessPrng fail-fasts the process when another thread writes
+        // the memory it is filling, which the core's batch fill used to hand it directly.
+        byte[] raw = new byte[16 * 20_000];
+        AtomicBoolean done = new AtomicBoolean();
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<?>> running = new ArrayList<>();
+            for (int w = 0; w < 2; w++) {
+                running.add(writers.submit(() -> {
+                    while (!done.get()) {
+                        Arrays.fill(raw, (byte) 0);
+                    }
+                }));
+            }
+            for (int i = 0; i < 100; i++) {
+                UuidGenerator.fillV7(raw, RFC_TEST_VECTOR_MS);
+            }
+            done.set(true);
+            for (Future<?> f : running) {
+                f.get();
+            }
+        } finally {
+            done.set(true);
+            writers.shutdownNow();
         }
     }
 

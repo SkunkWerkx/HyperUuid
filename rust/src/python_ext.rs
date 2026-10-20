@@ -27,6 +27,7 @@ use pyo3::exceptions::{
 use pyo3::ffi;
 use pyo3::intern;
 use pyo3::prelude::*;
+use pyo3::sync::critical_section::with_critical_section;
 use pyo3::types::{PyByteArray, PyBytes, PyList, PyString};
 
 use crate::{Layout, Uuid, Variant, v4, v5, v7};
@@ -508,17 +509,27 @@ fn fill_v7_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> P
     })?;
     let millis = millis_or_now(unix_millis);
 
-    // SAFETY: a bytearray's export is writable, C-contiguous and `len` bytes long, and stays
-    // where it is until `view` is dropped at the end of this call. new_v7_batch is pure Rust
-    // over the slice and cannot re-enter the interpreter. Another thread writing the same
-    // bytearray at the same time races on its contents, as it would through any writer.
-    let out: &mut [u8] = if len == 0 {
-        &mut []
-    } else {
-        unsafe { std::slice::from_raw_parts_mut(view.buf_ptr().cast::<u8>(), len) }
-    };
+    // The bytearray's own lock, held for the write: two threads filling the same bytearray at
+    // once would otherwise each hold a `&mut` to the same bytes, which is undefined behavior,
+    // and on Windows the OS random source writing them aborts the process. CPython's own
+    // bytearray methods take the same lock, so they wait too. A no-op on a GIL build, where
+    // the GIL already serializes the call; real on cp314t and abi3t, which are both built
+    // with Py_GIL_DISABLED.
+    let filled = with_critical_section(buffer.as_any(), || {
+        // SAFETY: a bytearray's export is writable, C-contiguous and `len` bytes long, and
+        // stays where it is until `view` is dropped at the end of this call. The lock above
+        // keeps every other hyperuuid fill, and CPython's bytearray methods, out of it
+        // meanwhile. new_v7_batch is pure Rust over the slice and cannot re-enter the
+        // interpreter, so the lock is never suspended while the slice is alive.
+        let out: &mut [u8] = if len == 0 {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(view.buf_ptr().cast::<u8>(), len) }
+        };
+        v7::new_v7_batch(millis, count, out)
+    });
 
-    match v7::new_v7_batch(millis, count, out) {
+    match filled {
         Ok(()) => Ok(()),
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
             "unix_millis must be non-negative and fit within 48 bits",

@@ -50,10 +50,11 @@ free-threaded interpreter keeps the GIL off after `import hyperuuid` (no `Runtim
 every function is safe to call from any number of threads at once: the v7 counter is one atomic
 the threads share, so IDs from different threads stay unique and each thread's stay in order.
 The bindings are written once, for free-threading; a GIL build runs the same code. `fill_v7`
-holds a buffer export on the `bytearray` while it writes, so another thread resizing it
-meanwhile gets `BufferError` instead of freeing the memory underneath.
-Two threads filling the *same* `bytearray` at once still race on its contents, as they would
-with any writer. No call releases the GIL on a GIL build: each is nanoseconds to microseconds
+holds the `bytearray`'s own lock and a buffer export on it while it writes, so two threads
+filling the same `bytearray` take turns, and another thread resizing it meanwhile waits or
+gets `BufferError` instead of freeing the memory underneath. A thread writing it at the same
+time through a `memoryview`, which takes no lock, races on its contents and nothing more: the
+bytes are whichever write landed last. No call releases the GIL on a GIL build: each is nanoseconds to microseconds
 of pure Rust, less than the handoff would cost. CI runs the whole suite on free-threaded 3.15
 on every platform, and installs each wheel on its own interpreters before it is published.
 

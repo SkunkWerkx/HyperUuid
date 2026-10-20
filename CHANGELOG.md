@@ -46,6 +46,18 @@ new IDs come from v7 (see Removed).
 
 ### Fixed
 
+- **Windows — a thread writing a buffer while a batch fill filled it no longer aborts the
+  process.** The core handed the caller's buffer straight to Windows' `ProcessPrng`, which
+  fail-fasts the whole process (`0xC0000409`) when another thread writes the memory it is
+  filling. C#'s `FillV7(Span<byte>)`, Java's `fillV7(byte[])` on the FFM backend and every
+  binding's byte fill pass the caller's own memory, so a thread clearing the same array
+  mid-fill took the process down with it, and free-threaded Python could do it from pure
+  Python through a `memoryview`. The core now draws the random bytes into a 4 KiB buffer of its
+  own and copies them out, so a race on the caller's bytes costs the bytes, not the process.
+  That adds about 0.3 ns a UUID to a Windows batch (1.27 against 0.96 ns for the random bytes,
+  measured on win-x64). Only Windows changes: elsewhere the random source is the kernel or a
+  ChaCha20 keystream, and a racing write there costs only bytes. CI's free-threaded Python run
+  on both Windows legs caught it. *(all packages)*
 - **C# — the browser-wasm archive carries build provenance, and the package checks it.** Every
   native in the 0.8.0 package verified with `gh attestation verify` except
   `runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a`, the archive a Blazor
@@ -81,8 +93,9 @@ new IDs come from v7 (see Removed).
   free-threaded 3.14, and `cp315-abi3.abi3t`, PEP 803's stable ABI for 3.15+, which serves 3.15
   with or without the GIL. PyO3 0.30's modules declare they need no GIL, so a free-threaded
   interpreter keeps it off after `import hyperuuid`, and every function is safe to call from
-  many threads at once. `fill_v7` now writes through a buffer export of the `bytearray`, so
-  another thread resizing it meanwhile gets `BufferError` instead of freeing the memory being
+  many threads at once. `fill_v7` now holds the `bytearray`'s own lock and a buffer export of
+  it while it writes, so two threads filling the same `bytearray` take turns, and another
+  thread resizing it meanwhile waits or gets `BufferError` instead of freeing the memory being
   written; a GIL build was kept safe by the GIL alone. PyPI gets 25 wheels per release where it
   got 9. CI installs each wheel on its own interpreters and checks the GIL stays off, and runs
   the whole suite on free-threaded 3.15 on every platform. A build from a checkout needs

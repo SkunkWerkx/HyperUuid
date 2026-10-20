@@ -285,6 +285,29 @@ public sealed class UuidGeneratorTests
 	}
 
 	[Fact]
+	public async Task FillV7_SurvivesAnotherThreadWritingTheSameBuffer()
+	{
+		// A race on the buffer's contents is the caller's to have, and must cost them the bytes,
+		// not the process. Windows' ProcessPrng fail-fasts the process when another thread writes
+		// the memory it is filling, which the core's batch fill used to hand it directly.
+		var buffer = new byte[16 * 100_000];
+		using var done = new ManualResetEventSlim();
+		var writers = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+		{
+			while (!done.IsSet)
+			{
+				Array.Clear(buffer);
+			}
+		}, TestContext.Current.CancellationToken)).ToArray();
+		for (var i = 0; i < 500; i++)
+		{
+			UuidGenerator.FillV7(buffer.AsSpan(), RfcTestVectorMs);
+		}
+		done.Set();
+		await Task.WhenAll(writers);
+	}
+
+	[Fact]
 	public void V7Batch_CountZeroReturnsEmptyArray()
 	{
 		UuidGenerator.NewV7Batch(0, RfcTestVectorMs).ShouldBeEmpty();

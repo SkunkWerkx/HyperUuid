@@ -1,5 +1,6 @@
 //! Entropy for every generator: [`fill`] is `getrandom::fill`, except on Linux, where it is
-//! ChaCha20 run in user space in one of two shapes, and on Android, which has the first.
+//! ChaCha20 run in user space in one of two shapes, on Android, which has the first, and on
+//! Windows, where `getrandom` writes through a buffer of its own (see `fill_with` there).
 //!
 //! **Large requests (a batch of 32 v7 UUIDs and up), Linux and Android:** one 32-byte
 //! `getrandom` draw keys a ChaCha20 keystream that fills the whole request. That is the
@@ -71,10 +72,31 @@ fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::
         .map_err(|_| getrandom::Error::UNEXPECTED)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
 #[inline(always)]
 fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
     getrandom::fill(buf)
+}
+
+/// Windows: `ProcessPrng` a chunk at a time into a buffer of its own, then copied out, never
+/// into `buf` directly. `ProcessPrng` fail-fasts the whole process (`0xC0000409`) when another
+/// thread writes the memory it is filling, and a batch fill's `buf` is the caller's memory: a
+/// free-threaded Python thread writing the same `bytearray` through a `memoryview`, or a .NET,
+/// Java or Go thread writing the same array, took the process down mid-fill. A race on the
+/// caller's bytes is the caller's to have, but it has to cost them the bytes, not the process.
+/// A 4 KiB chunk keeps the cost to about 0.3 ns a UUID over the direct call (1.27 against
+/// 0.96 ns for the 6 random bytes a v7 takes, measured on win-x64), against 2.4 ns for the
+/// whole batch; a 1 KiB one cost 0.8 ns, a 256-byte one 2.9.
+#[cfg(windows)]
+#[inline(always)]
+fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+    let mut chunk = [0u8; 4096];
+    for out in buf.chunks_mut(chunk.len()) {
+        let drawn = &mut chunk[..out.len()];
+        getrandom::fill(drawn)?;
+        out.copy_from_slice(drawn);
+    }
+    Ok(())
 }
 
 /// The small-request generator: a fixed pool of ChaCha20 generators, each a kilobyte of
