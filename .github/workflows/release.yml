@@ -589,9 +589,9 @@ jobs:
           done
           rm -f served.gem
 
-  # PyPI leg: the nine wheels ci.yml built (hyper-build-wheels.yml in the forge — six
-  # desktop platforms, the two musl ones and Pyodide's pyemscripten one, one abi3 wheel
-  # each), downloaded from find-ci-run's run and published unchanged. Nothing is compiled
+  # PyPI leg: the 25 wheels ci.yml built (hyper-build-wheels.yml in the forge — three for
+  # each of six desktop platforms and the two musl ones, abi3, cp314t and abi3t, plus
+  # Pyodide's pyemscripten one), downloaded from find-ci-run's run and published unchanged. Nothing is compiled
   # here. Each wheel was installed and called into on its own platform in that run (the
   # Pyodide one under Node and in headless Chrome, its whole suite run in both), so a wheel that cannot be
   # installed fails a pull request rather than a release with other registries already out,
@@ -626,7 +626,7 @@ jobs:
 
       # The last moment these files can still be rejected: a PyPI upload is permanent, and
       # nothing below rebuilds what was downloaded. Three things are held, each a way a
-      # release could otherwise go out wrong with every job green: all nine wheels are
+      # release could otherwise go out wrong with every job green: all 25 wheels are
       # here (a missing artifact would publish a release with a platform silently absent),
       # every one is named for the version being released, and every one carries build
       # provenance from that ci.yml run.
@@ -643,8 +643,8 @@ jobs:
           ls -l dist
           shopt -s nullglob
           wheels=(dist/*.whl)
-          if [ "${#wheels[@]}" -ne 9 ]; then
-            echo "::error::Expected 9 wheels from ci.yml run ${{ needs.find-ci-run.outputs.run_id }}, found ${#wheels[@]}."
+          if [ "${#wheels[@]}" -ne 25 ]; then
+            echo "::error::Expected 25 wheels from ci.yml run ${{ needs.find-ci-run.outputs.run_id }}, found ${#wheels[@]}."
             exit 1
           fi
           for wheel in "${wheels[@]}"; do

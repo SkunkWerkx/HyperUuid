@@ -67,6 +67,7 @@ def _ids(vectors: list[dict]) -> list[str]:
 
 V5 = _corpus("v5.json")
 SQL_ORDER = _corpus("sql_order.json")
+SQL_ORDER_REFUSED = _corpus("sql_order_refused.json")
 TIMESTAMP = _corpus("timestamp.json")
 INSPECT = _corpus("inspect.json")
 
@@ -86,14 +87,26 @@ def test_v5_corpus(vector):
 def test_sql_order_corpus(vector):
     """Both directions of the SQL Server permutation, and the wire bytes a caller sends."""
     rfc, sql = _uuid(vector["rfc"]), _uuid(vector["sql"])
-    to_sql, from_sql = {
-        6: (hyperuuid.v6_to_sql_order, hyperuuid.v6_from_sql_order),
-        7: (hyperuuid.v7_to_sql_order, hyperuuid.v7_from_sql_order),
-    }[vector["version"]]
-    assert to_sql(rfc) == sql
-    assert from_sql(sql) == rfc
+    assert hyperuuid.v7_to_sql_order(rfc) == sql
+    assert hyperuuid.v7_from_sql_order(sql) == rfc
     # What reaches SQL Server is the UUID's bytes; they must be the corpus's wire bytes.
-    assert to_sql(rfc).bytes == bytes.fromhex(vector["sql"])
+    assert hyperuuid.v7_to_sql_order(rfc).bytes == bytes.fromhex(vector["sql"])
+
+
+# The one refusal: a ValueError, the type the package raises for an argument it can't take.
+WRONG_VERSION = "the value is not a UUID of the version this conversion takes"
+
+
+@pytest.mark.parametrize("vector", SQL_ORDER_REFUSED, ids=_ids(SQL_ORDER_REFUSED))
+def test_sql_order_refused_corpus(vector):
+    """The conversion for the vector's direction refuses the value as the wrong version."""
+    convert = {
+        "to_sql": hyperuuid.v7_to_sql_order,
+        "from_sql": hyperuuid.v7_from_sql_order,
+    }[vector["direction"]]
+    with pytest.raises(ValueError) as refused:
+        convert(_uuid(vector["uuid"]))
+    assert str(refused.value) == WRONG_VERSION
 
 
 @pytest.mark.parametrize("vector", TIMESTAMP, ids=_ids(TIMESTAMP))
@@ -128,15 +141,13 @@ def test_timestamp_corpus(vector):
         assert hyperuuid.get_timestamp(id_) == expected
     if millis is None:
         return
-    unix_millis, timestamp = {
-        6: (hyperuuid.v6_unix_millis, hyperuuid.v6_timestamp),
-        7: (hyperuuid.v7_unix_millis, hyperuuid.v7_timestamp),
-    }[version]
-    assert unix_millis(id_, layout) == millis
-    assert timestamp(id_, layout) == expected
+    # Only a version 7 carries a timestamp.
+    assert version == 7
+    assert hyperuuid.v7_unix_millis(id_, layout) == millis
+    assert hyperuuid.v7_timestamp(id_, layout) == expected
     if rfc:
-        assert unix_millis(id_) == millis
-        assert timestamp(id_) == expected
+        assert hyperuuid.v7_unix_millis(id_) == millis
+        assert hyperuuid.v7_timestamp(id_) == expected
 
 
 @pytest.mark.parametrize("vector", INSPECT, ids=_ids(INSPECT))

@@ -4,7 +4,7 @@ package hyperuuid
 //
 // The layout knowledge lives in the core: these only hand it a UUID's 16 bytes and say which
 // order they are in. A uuid.UUID is its bytes, so there is no conversion step in either
-// layout — a value from V7ToSqlOrder or V6ToSqlOrder already holds SQL Server's
+// layout — a value from V7ToSqlOrder already holds SQL Server's
 // uniqueidentifier wire bytes, which is what LayoutSqlServer means.
 
 import (
@@ -26,8 +26,9 @@ const (
 	// LayoutRfc9562 is RFC 9562 network order: what every other function in this package,
 	// and google/uuid, takes and returns.
 	LayoutRfc9562 UuidLayout = 1
-	// LayoutSqlServer is the order V7ToSqlOrder and V6ToSqlOrder return, which SQL Server's
-	// uniqueidentifier sorts by creation order. Defined for versions 6 and 7 only.
+	// LayoutSqlServer is the version 8 layout V7ToSqlOrder returns, which SQL Server's
+	// uniqueidentifier sorts by creation order. Defined for values converted from version 7
+	// only.
 	LayoutSqlServer UuidLayout = 2
 )
 
@@ -109,7 +110,7 @@ func oneUUID(b []byte) (uuid.UUID, error) {
 // It says nothing about the variant: use IsRfc when the question is "an RFC 9562 UUID of
 // version N". The same answer as google/uuid's id.Version(), read by the core.
 //
-// It reads id as RFC 9562 order. For a value from V7ToSqlOrder or V6ToSqlOrder, or read back
+// It reads id as RFC 9562 order. For a value from V7ToSqlOrder, or read back
 // from a uniqueidentifier column, use VersionIn with LayoutSqlServer: Version reads the wrong
 // bytes there.
 func Version(id uuid.UUID) int {
@@ -117,15 +118,13 @@ func Version(id uuid.UUID) int {
 }
 
 // VersionIn returns the version of an id held in layout's byte order. In LayoutRfc9562 it is
-// Version. LayoutSqlServer is defined only for the two versions that have a SQL Server order,
-// and answers 6 or 7 when the bytes form a SQL-ordered version 6 or 7 RFC 9562 UUID, and 0
-// when they don't. The version nibble lands at a different byte for each, and the other
-// version's random bits can mimic it there, so the core checks the variant bits too, where
-// each version puts them, and the answer never confuses the two. The layout itself is the
-// caller's to know: 16 bytes carry no mark of the order they are in, and an RFC-ordered value
-// can happen to form a valid SQL-ordered version 7 (about one random version 4 in 16 does),
-// so pass LayoutSqlServer at every call site that can see a SQL-ordered value. An undefined
-// layout returns ErrInvalidLayout.
+// Version. In LayoutSqlServer it is the version a SQL-ordered value was converted from, 7, and
+// 0 for anything else. Every SQL-ordered value is a version 8 (see V7ToSqlOrder): the core
+// checks for the 8 and the variant where that layout puts them. The layout itself is the
+// caller's to know: 16 bytes carry no mark of the order they are in, and RFC-ordered bytes
+// can happen to carry the 8 and the variant there (about one random version 4 in 16 does),
+// and then this answers 7, so pass LayoutSqlServer at every call site that can see a
+// SQL-ordered value. An undefined layout returns ErrInvalidLayout.
 func VersionIn(id uuid.UUID, layout UuidLayout) (int, error) {
 	code, err := layoutCode(layout)
 	if err != nil {
@@ -152,10 +151,9 @@ func VersionBytes(b []byte, layout UuidLayout) (int, error) {
 // for Nil, VariantFuture for Max, and VariantRfc9562 for anything this package or google/uuid
 // mints. Never VariantUnspecified.
 //
-// It reads RFC 9562 order only, and there is no layout form: in SQL Server order the variant
-// sits at a different byte for each version. Don't feed it a uniqueidentifier read-back or a
-// V7ToSqlOrder result; to validate one of those, use IsRfcIn with LayoutSqlServer, which
-// checks the variant where that version puts it.
+// It reads RFC 9562 order only, and there is no layout form: to validate a uniqueidentifier
+// read-back or a V7ToSqlOrder result, use IsRfcIn with LayoutSqlServer, which checks the
+// SQL-ordered value's version 8 and variant.
 func Variant(id uuid.UUID) UuidVariant {
 	return UuidVariant(variant(id))
 }
@@ -193,9 +191,9 @@ func IsRfc(id uuid.UUID, version int) bool {
 	return isRfc(id, rfcVersion(version), uint32(LayoutRfc9562))
 }
 
-// IsRfcIn is IsRfc for an id held in layout's byte order — in LayoutSqlServer, only versions
-// 6 and 7 can be true (see VersionIn), and the variant is checked where that version puts it,
-// which makes this the guard for a SQL-ordered value. An undefined layout returns
+// IsRfcIn is IsRfc for an id held in layout's byte order. In LayoutSqlServer it asks whether
+// the value was converted from an RFC 9562 UUID of version, so only 7 can be true (see
+// VersionIn), which makes this the guard for a SQL-ordered value. An undefined layout returns
 // ErrInvalidLayout.
 func IsRfcIn(id uuid.UUID, version int, layout UuidLayout) (bool, error) {
 	code, err := layoutCode(layout)
@@ -219,29 +217,8 @@ func IsRfcBytes(b []byte, version int, layout UuidLayout) (bool, error) {
 	return isRfc(id, rfcVersion(version), code), nil
 }
 
-// V6UnixMillisIn is V6UnixMillis for an id held in layout's byte order, reading a SQL-ordered
-// value's permuted bytes directly, with no V6FromSqlOrder first. Meaningful only for a genuine
-// version 6 UUID in that layout; IsRfcIn is the check. An undefined layout returns
-// ErrInvalidLayout.
-func V6UnixMillisIn(id uuid.UUID, layout UuidLayout) (uint64, error) {
-	code, err := layoutCode(layout)
-	if err != nil {
-		return 0, err
-	}
-	return v6UnixMillisIn(id, code), nil
-}
-
-// V6TimestampIn is V6Timestamp for an id held in layout's byte order; see V6UnixMillisIn.
-func V6TimestampIn(id uuid.UUID, layout UuidLayout) (time.Time, error) {
-	millis, err := V6UnixMillisIn(id, layout)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(int64(millis)).UTC(), nil
-}
-
 // V7UnixMillisIn is V7UnixMillis for an id held in layout's byte order, reading a SQL-ordered
-// value's permuted bytes directly, with no V7FromSqlOrder first. Meaningful only for a genuine
+// value's bytes directly, with no V7FromSqlOrder first. Meaningful only for a genuine
 // version 7 UUID in that layout; IsRfcIn is the check. An undefined layout returns
 // ErrInvalidLayout.
 func V7UnixMillisIn(id uuid.UUID, layout UuidLayout) (uint64, error) {
@@ -262,11 +239,12 @@ func V7TimestampIn(id uuid.UUID, layout UuidLayout) (time.Time, error) {
 }
 
 // GetTimestampIn is GetTimestamp for an id held in layout's byte order — in LayoutSqlServer,
-// the timestamp of a value straight from V7ToSqlOrder or V6ToSqlOrder (or a uniqueidentifier
-// column), read from its permuted bytes with no conversion back first. It returns
-// ErrNotTimeBased for anything that isn't an RFC 9562 version 6 or 7 UUID in that layout —
-// the variant is checked as well as the version, so a 6 or 7 nibble under another variant
-// has no timestamp — and ErrInvalidLayout for an undefined layout.
+// the timestamp of a value straight from V7ToSqlOrder (or a uniqueidentifier column), read
+// from its bytes with no conversion back first. It returns ErrNotTimeBased for anything that
+// isn't an RFC 9562 version 7 UUID in that layout (in LayoutSqlServer, a value converted from
+// one) — the variant is checked as well as the version, so a 7 nibble under another variant
+// has no timestamp, and neither has a version 6 — and ErrInvalidLayout for an undefined
+// layout.
 func GetTimestampIn(id uuid.UUID, layout UuidLayout) (time.Time, error) {
 	code, err := layoutCode(layout)
 	if err != nil {

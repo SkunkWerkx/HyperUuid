@@ -62,14 +62,6 @@ public final class Main {
 
         long rfcTestVectorMs = 1_645_557_742_000L;
         Instant rfcTestVector = Instant.ofEpochMilli(rfcTestVectorMs);
-        UUID v6 = UuidGenerator.newV6(rfcTestVectorMs);
-        require(v6.version() == 6, "expected v6 version 6, got " + v6.version());
-        require(
-                UuidGenerator.v6UnixMillis(v6) == rfcTestVectorMs,
-                "v6 timestamp round-trip failed: got " + UuidGenerator.v6UnixMillis(v6));
-        require(UuidGenerator.v6Timestamp(UuidGenerator.newV6(rfcTestVector)).equals(rfcTestVector), "v6 Instant");
-        require(UuidGenerator.newV6().version() == 6, "v6 at the current time");
-
         UUID v7 = UuidGenerator.newV7(rfcTestVectorMs);
         require(v7.version() == 7, "expected v7 version 7, got " + v7.version());
         require(
@@ -78,7 +70,9 @@ public final class Main {
         require(UuidGenerator.v7Timestamp(UuidGenerator.newV7(rfcTestVector)).equals(rfcTestVector), "v7 Instant");
         require(UuidGenerator.newV7().version() == 7, "v7 at the current time");
 
-        require(UuidGenerator.getTimestamp(v6).equals(Optional.of(rfcTestVector)), "getTimestamp(v6)");
+        // RFC 9562 Appendix A.5's version 6: only version 7 timestamps are read, so it has none.
+        UUID v6 = UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+        require(UuidGenerator.getTimestamp(v6).isEmpty(), "getTimestamp(v6) should be empty");
         require(UuidGenerator.getTimestamp(v7).equals(Optional.of(rfcTestVector)), "getTimestamp(v7)");
         require(UuidGenerator.getTimestamp(v4).isEmpty(), "getTimestamp(v4) should be empty");
         // A 7 nibble under the Microsoft variant (110x) is no RFC version, so no timestamp.
@@ -96,48 +90,59 @@ public final class Main {
         require(v7Batch[0].version() == 7, "expected batch v7 version 7, got " + v7Batch[0].version());
         require(UuidGenerator.newV7Batch(3).length == 3, "v7 batch at the current time");
 
-        UUID[] v6Batch = UuidGenerator.newV6Batch(10, rfcTestVectorMs);
-        require(v6Batch.length == 10, "expected 10 batch v6 UUIDs, got " + v6Batch.length);
-        require(v6Batch[0].version() == 6, "expected batch v6 version 6, got " + v6Batch[0].version());
-        require(UuidGenerator.newV6Batch(3).length == 3, "v6 batch at the current time");
-
         // The fills hand the core a buffer the caller owns: a UUID[] rebuilt from the bytes,
         // and a byte[] pinned and written in place — the heap-access half of the critical
         // downcall registration, which the scratch-segment doors above never touch.
         UUID[] filled = new UUID[4];
         UuidGenerator.fillV7(filled, rfcTestVectorMs);
         require(filled[3].version() == 7 && UuidGenerator.v7UnixMillis(filled[3]) == rfcTestVectorMs, "fillV7(UUID[])");
-        UuidGenerator.fillV6(filled, rfcTestVectorMs);
-        require(filled[3].version() == 6 && UuidGenerator.v6UnixMillis(filled[3]) == rfcTestVectorMs, "fillV6(UUID[])");
         UuidGenerator.fillV7(filled);
         require(filled[0].version() == 7, "fillV7(UUID[]) at the current time");
-        UuidGenerator.fillV6(filled);
-        require(filled[0].version() == 6, "fillV6(UUID[]) at the current time");
 
         byte[] raw = new byte[4 * 16];
         UuidGenerator.fillV7(raw, rfcTestVectorMs);
         require(
                 uuidAt(raw, 48).version() == 7 && UuidGenerator.v7UnixMillis(uuidAt(raw, 48)) == rfcTestVectorMs,
                 "fillV7(byte[])");
-        UuidGenerator.fillV6(raw, rfcTestVectorMs);
-        require(
-                uuidAt(raw, 48).version() == 6 && UuidGenerator.v6UnixMillis(uuidAt(raw, 48)) == rfcTestVectorMs,
-                "fillV6(byte[])");
         UuidGenerator.fillV7(raw);
         require(uuidAt(raw, 0).version() == 7, "fillV7(byte[]) at the current time");
-        UuidGenerator.fillV6(raw);
-        require(uuidAt(raw, 0).version() == 6, "fillV6(byte[]) at the current time");
 
-        // The four order-conversion downcalls share a distinct native signature
-        // ((ADDRESS)void) that none of the calls above exercise — GraalVM's FFM reachability
-        // metadata is per-signature, not per-function, but a native-image build only
-        // registers what its static analysis actually observes being called, so these have
-        // to be exercised for real or this smoke test can silently miss exactly the gap it
-        // exists to catch.
+        // The two order-conversion downcalls ((ADDRESS)INT, linked through their own handle)
+        // — a native-image build only registers what its static analysis actually observes
+        // being called, so these have to be exercised for real or this smoke test can
+        // silently miss exactly the gap it exists to catch. Their refusals too: a non-zero
+        // return code has to come back as the binding's exception, with the bytes untouched.
         UUID v7Sql = UuidGenerator.v7ToSqlOrder(v7);
         require(UuidGenerator.v7FromSqlOrder(v7Sql).equals(v7), "v7 SQL-order round-trip failed");
-        UUID v6Sql = UuidGenerator.v6ToSqlOrder(v6);
-        require(UuidGenerator.v6FromSqlOrder(v6Sql).equals(v6), "v6 SQL-order round-trip failed");
+        // Fixed inputs only: a random RFC-ordered v7 carries the SQL layout's 8 one time in 16,
+        // and a random SQL-ordered one passes for an RFC v7 as often, so neither is refused
+        // reliably. RFC 9562 A.6's v7 and its SQL form are refused every time.
+        UUID rfcA6 = UUID.fromString("017f22e2-79b0-7cc3-98c4-dc0c0c07398f");
+        UUID rfcA6Sql = UUID.fromString("0c07398f-dc0c-8c84-b30d-017f22e279b0");
+        require(UuidGenerator.v7ToSqlOrder(rfcA6).equals(rfcA6Sql), "RFC A.6 v7 SQL form");
+        try {
+            UuidGenerator.v7FromSqlOrder(rfcA6);
+            throw new IllegalStateException("v7FromSqlOrder accepted an RFC-ordered v7");
+        } catch (IllegalArgumentException expected) {
+            require(
+                    "the value is not a UUID of the version this conversion takes".equals(expected.getMessage()),
+                    "v7FromSqlOrder refusal message");
+        }
+        try {
+            UuidGenerator.v7ToSqlOrder(rfcA6Sql);
+            throw new IllegalStateException("v7ToSqlOrder accepted an already SQL-ordered v7");
+        } catch (IllegalArgumentException expected) {
+            require(
+                    "the value is not a UUID of the version this conversion takes".equals(expected.getMessage()),
+                    "v7ToSqlOrder refusal message");
+        }
+        byte[] refused = bytesOf(v6);
+        try {
+            UuidGenerator.v7ToSqlOrder(refused);
+            throw new IllegalStateException("v7ToSqlOrder(byte[]) accepted a v6");
+        } catch (IllegalArgumentException expected) {
+            require(Arrays.equals(refused, bytesOf(v6)), "a refused v7ToSqlOrder(byte[]) changed its bytes");
+        }
 
         // And their raw-byte forms, in place on a caller's own sixteen bytes.
         byte[] v7Bytes = bytesOf(v7);
@@ -145,11 +150,6 @@ public final class Main {
         require(Arrays.equals(v7Bytes, bytesOf(v7Sql)), "v7ToSqlOrder(byte[]) disagrees with the UUID form");
         UuidGenerator.v7FromSqlOrder(v7Bytes);
         require(Arrays.equals(v7Bytes, bytesOf(v7)), "v7 raw-byte SQL-order round-trip failed");
-        byte[] v6Bytes = bytesOf(v6);
-        UuidGenerator.v6ToSqlOrder(v6Bytes);
-        require(Arrays.equals(v6Bytes, bytesOf(v6Sql)), "v6ToSqlOrder(byte[]) disagrees with the UUID form");
-        UuidGenerator.v6FromSqlOrder(v6Bytes);
-        require(Arrays.equals(v6Bytes, bytesOf(v6)), "v6 raw-byte SQL-order round-trip failed");
 
         // The inspection exports: three more downcall signatures ((ADDRESS, INT)INT,
         // (ADDRESS, INT, INT)INT, (ADDRESS, INT)LONG), plus (ADDRESS)INT for the variant,
@@ -157,16 +157,14 @@ public final class Main {
         require(UuidGenerator.version(v7) == 7, "version(v7)");
         require(UuidGenerator.version(bytesOf(v6)) == 6, "version(byte[])");
         require(UuidGenerator.version(v7Sql, UuidLayout.SQL_SERVER) == 7, "version(v7Sql, SQL_SERVER)");
-        require(UuidGenerator.version(bytesOf(v6Sql), UuidLayout.SQL_SERVER) == 6, "version(byte[], SQL_SERVER)");
+        require(UuidGenerator.version(bytesOf(v7Sql), UuidLayout.SQL_SERVER) == 7, "version(byte[], SQL_SERVER)");
         require(UuidGenerator.variant(v4) == UuidVariant.RFC_9562, "variant(v4)");
         require(UuidGenerator.variant(bytesOf(UuidGenerator.MAX)) == UuidVariant.FUTURE, "variant(byte[] MAX)");
         require(UuidGenerator.isRfc(v5, 5) && !UuidGenerator.isRfc(v5, 4), "isRfc(v5)");
-        require(UuidGenerator.isRfc(v6Sql, 6, UuidLayout.SQL_SERVER), "isRfc(v6Sql, 6, SQL_SERVER)");
+        require(UuidGenerator.isRfc(v7Sql, 7, UuidLayout.SQL_SERVER), "isRfc(v7Sql, 7, SQL_SERVER)");
         require(UuidGenerator.isRfc(bytesOf(v7Sql), 7, UuidLayout.SQL_SERVER), "isRfc(byte[], 7, SQL_SERVER)");
         require(UuidGenerator.v7UnixMillis(v7Sql, UuidLayout.SQL_SERVER) == rfcTestVectorMs, "v7UnixMillis(SQL)");
-        require(UuidGenerator.v6UnixMillis(v6Sql, UuidLayout.SQL_SERVER) == rfcTestVectorMs, "v6UnixMillis(SQL)");
         require(UuidGenerator.v7Timestamp(v7Sql, UuidLayout.SQL_SERVER).equals(rfcTestVector), "v7Timestamp(SQL)");
-        require(UuidGenerator.v6Timestamp(v6Sql, UuidLayout.SQL_SERVER).equals(rfcTestVector), "v6Timestamp(SQL)");
         require(
                 UuidGenerator.getTimestamp(v7Sql, UuidLayout.SQL_SERVER).equals(Optional.of(rfcTestVector)),
                 "getTimestamp(v7Sql, SQL_SERVER)");
@@ -183,9 +181,8 @@ public final class Main {
                     "batch limit message");
         }
 
-        System.out.println("hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v6=" + v6 + " v7="
-                + v7 + " v7Batch[0]=" + v7Batch[0] + " v6Batch[0]=" + v6Batch[0] + " v7Sql=" + v7Sql
-                + " v6Sql=" + v6Sql);
+        System.out.println("hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v7=" + v7 + " v7Batch[0]="
+                + v7Batch[0] + " v7Sql=" + v7Sql);
     }
 
     // java.util.UUID's two longs are RFC 9562 byte order already, most significant first.

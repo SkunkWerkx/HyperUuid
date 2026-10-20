@@ -1,0 +1,11 @@
+[
+  {"direction": "to_sql", "uuid": "1ec9414c232a6b00b3c89f6bdeced846", "note": "a v6, RFC A.5"},
+  {"direction": "to_sql", "uuid": "919108f752d143209bacf847db4148a8", "note": "a v4, RFC A.3"},
+  {"direction": "to_sql", "uuid": "00000000000000000000000000000000", "note": "nil"},
+  {"direction": "to_sql", "uuid": "ffffffffffffffffffffffffffffffff", "note": "max"},
+  {"direction": "to_sql", "uuid": "000000000000028a8000017f22e279b0", "note": "already SQL-ordered"},
+  {"direction": "from_sql", "uuid": "017f22e279b07000802a000000000000", "note": "an RFC-ordered v7"},
+  {"direction": "from_sql", "uuid": "000000000000028a0000017f22e279b0", "note": "a SQL-ordered v7 with its variant cleared"},
+  {"direction": "from_sql", "uuid": "000000000000027a8000017f22e279b0", "note": "0.8.0's SQL order, a 7 where the 8 now is"},
+  {"direction": "from_sql", "uuid": "00000000000000000000000000000000", "note": "nil"}
+]

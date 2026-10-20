@@ -22,10 +22,9 @@ module HyperUuid
     RandomSourceError = HyperUuid::RandomSourceError
     TimestampOutOfRangeError = HyperUuid::TimestampOutOfRangeError
 
-    # One copy of each out-of-range message for the Fiddle backend and for the
-    # doors' own range check in hyperuuid.rb; the Magnus extension (rust/src/ruby_ext.rs)
-    # carries the same text, and spec/native_backend_spec.rb pins that the two agree.
-    V6_TIMESTAMP_OUT_OF_RANGE = "unix_millis does not fit the 60-bit v6 timestamp field"
+    # One copy of the out-of-range message for the Fiddle backend and for the doors' own
+    # range check in hyperuuid.rb; the Magnus extension (rust/src/ruby_ext.rs) carries the
+    # same text, and spec/native_backend_spec.rb pins that the two agree.
     V7_TIMESTAMP_OUT_OF_RANGE = "unix_millis must fit within the RFC 9562 48-bit field"
 
     # The two batch-size refusals, shared the same way: a version 7 batch past the 26-bit
@@ -35,6 +34,11 @@ module HyperUuid
     # errors, never a random source failure.
     V7_BATCH_TOO_LARGE = "a single version 7 batch takes at most 67108864 UUIDs (the 26-bit counter space)"
     BATCH_TOO_LARGE_TO_ADDRESS = "the batch is too large to address on this platform"
+
+    # The SQL Server order conversions' one refusal, in the core's own words (the Magnus
+    # extension raises its SqlOrderError's text): a value that isn't a UUID of the
+    # conversion's version (code 5), an ArgumentError. Every version 7 converts.
+    SQL_ORDER_WRONG_VERSION = "the value is not a UUID of the version this conversion takes"
 
     # The core's v7::MAX_BATCH, which hyperuuid.rb publishes as HyperUuid::MAX_V7_BATCH.
     MAX_V7_BATCH = 1 << 26
@@ -63,33 +67,6 @@ module HyperUuid
         raise random_source_failure("uuid_new_v5") unless rc.zero?
 
         out[0, 16]
-      end
-
-      def new_v6(unix_millis)
-        out = scratch
-        rc = functions[:new_v6].call(unix_millis, out)
-        case rc
-        when 0 then out[0, 16]
-        when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
-        else raise random_source_failure("uuid_new_v6")
-        end
-      end
-
-      def v6_unix_millis(bytes)
-        functions[:v6_unix_millis].call(bytes)
-      end
-
-      def new_v6_batch(count, unix_millis)
-        return "" if count.zero?
-
-        out = buffer(count * 16)
-        rc = functions[:new_v6_batch].call(unix_millis, count, out)
-        case rc
-        when 0 then out[0, count * 16]
-        when 2 then raise TimestampOutOfRangeError, V6_TIMESTAMP_OUT_OF_RANGE
-        when 3 then raise ArgumentError, BATCH_TOO_LARGE_TO_ADDRESS
-        else raise random_source_failure("uuid_new_v6_batch")
-        end
       end
 
       def new_v7(unix_millis)
@@ -140,17 +117,14 @@ module HyperUuid
         functions[:is_rfc].call(bytes, version, layout) == 1
       end
 
-      # The Unix ms of an RFC 9562 version 6 or 7 UUID held in +layout+'s order, or nil for
-      # anything else — another version, another variant. One core call; the version it
-      # answers with is not needed above Runtime, so it is dropped here.
+      # The Unix ms of an RFC 9562 version 7 UUID held in +layout+'s order, or nil for
+      # anything else — another version (a version 6 or 1 included), another variant. One
+      # core call; the version it answers with is not needed above Runtime, so it is dropped
+      # here.
       def get_timestamp(bytes, layout)
         out = millis_scratch
         version = functions[:get_timestamp].call(bytes, layout, out)
         version.zero? ? nil : out[0, 8].unpack1("Q")
-      end
-
-      def v6_unix_millis_in(bytes, layout)
-        functions[:v6_unix_millis_in].call(bytes, layout)
       end
 
       def v7_unix_millis_in(bytes, layout)
@@ -163,14 +137,6 @@ module HyperUuid
 
       def v7_to_rfc_order(bytes)
         rewrite(:v7_to_rfc_order, bytes)
-      end
-
-      def v6_to_sql_order(bytes)
-        rewrite(:v6_to_sql_order, bytes)
-      end
-
-      def v6_to_rfc_order(bytes)
-        rewrite(:v6_to_rfc_order, bytes)
       end
 
       # The loaded core's version word, major << 16 | minor << 8 | patch, straight from the
@@ -253,12 +219,16 @@ module HyperUuid
       end
 
       # The in-place byte-order rewrites are the one shape that must copy in: the native
-      # call genuinely mutates the buffer, and the input String is frozen.
+      # call genuinely mutates the buffer, and the input String is frozen. A refusal leaves
+      # the buffer as it was and raises what the Magnus extension raises for it.
       def rewrite(symbol, bytes)
         buf = scratch
         buf[0, 16] = bytes
-        functions[symbol].call(buf)
-        buf[0, 16]
+        case (rc = functions[symbol].call(buf))
+        when 0 then buf[0, 16]
+        when 5 then raise ArgumentError, SQL_ORDER_WRONG_VERSION
+        else raise "uuid_#{symbol}: unexpected return code #{rc}"
+        end
       end
 
       # Loaded lazily and exactly once, mirroring Java's class initializer / Swift's lazy
@@ -281,21 +251,6 @@ module HyperUuid
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_INT
           ),
-          new_v6: Fiddle::Function.new(
-            handle["uuid_new_v6"],
-            [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          ),
-          v6_unix_millis: Fiddle::Function.new(
-            handle["uuid_v6_unix_millis"],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_UINT64_T
-          ),
-          new_v6_batch: Fiddle::Function.new(
-            handle["uuid_new_v6_batch"],
-            [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_INT
-          ),
           new_v7: Fiddle::Function.new(
             handle["uuid_new_v7"],
             [Fiddle::TYPE_UINT64_T, Fiddle::TYPE_VOIDP],
@@ -314,22 +269,12 @@ module HyperUuid
           v7_to_sql_order: Fiddle::Function.new(
             handle["uuid_v7_to_sql_order"],
             [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
+            Fiddle::TYPE_INT
           ),
           v7_to_rfc_order: Fiddle::Function.new(
             handle["uuid_v7_to_rfc_order"],
             [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          ),
-          v6_to_sql_order: Fiddle::Function.new(
-            handle["uuid_v6_to_sql_order"],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
-          ),
-          v6_to_rfc_order: Fiddle::Function.new(
-            handle["uuid_v6_to_rfc_order"],
-            [Fiddle::TYPE_VOIDP],
-            Fiddle::TYPE_VOID
+            Fiddle::TYPE_INT
           ),
           version: Fiddle::Function.new(
             handle["uuid_version"],
@@ -346,11 +291,6 @@ module HyperUuid
             handle["uuid_get_timestamp"],
             [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T, Fiddle::TYPE_VOIDP],
             Fiddle::TYPE_UINT32_T
-          ),
-          v6_unix_millis_in: Fiddle::Function.new(
-            handle["uuid_v6_unix_millis_in"],
-            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_UINT32_T],
-            Fiddle::TYPE_UINT64_T
           ),
           v7_unix_millis_in: Fiddle::Function.new(
             handle["uuid_v7_unix_millis_in"],

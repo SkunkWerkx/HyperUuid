@@ -45,10 +45,6 @@ func main() {
 	fmt.Println("v5", v5)
 	check(err == nil && v5.String() == "2ed6657d-e927-568b-95e1-2665a8aea6a2", "v5 known answer")
 
-	v6, err := hyperuuid.NewV6()
-	fmt.Println("v6", v6)
-	check(err == nil && v6.Version() == 6 && v6.Variant() == uuid.RFC4122, "v6")
-
 	v7, err := hyperuuid.NewV7()
 	created, err2 := hyperuuid.V7Timestamp(v7)
 	fmt.Println("v7", v7, created)
@@ -61,12 +57,19 @@ func main() {
 	}
 	check(ordered, "v7 batch of 1000, strictly increasing")
 
-	batch6, err := hyperuuid.NewV6Batch(100)
-	check(err == nil && len(batch6) == 100 && batch6[99].Version() == 6, "v6 batch of 100")
-
 	sql, err := hyperuuid.V7ToSqlOrder(v7)
 	back, err2 := hyperuuid.V7FromSqlOrder(sql)
-	check(err == nil && err2 == nil && sql != v7 && back == v7, "v7 SQL-order round trip")
+	check(err == nil && err2 == nil && sql[7]>>4 == 8 && back == v7, "v7 SQL-order round trip through version 8")
+
+	// RFC 9562 Appendix A.5's version 6: a version this package neither mints nor converts.
+	v6 := uuid.MustParse("1ec9414c-232a-6b00-b3c8-9f6bdeced846")
+	// RFC 9562 Appendix A.6's version 7, fixed: a fresh v7's octet 7 carries the SQL
+	// layout's 8 one time in 16, and then it is taken for a SQL-ordered value.
+	_, err = hyperuuid.V7FromSqlOrder(uuid.MustParse("017f22e2-79b0-7cc3-98c4-dc0c0c07398f"))
+	_, err2 = hyperuuid.V7ToSqlOrder(v6)
+	_, err3 := hyperuuid.V7FromSqlOrder(hyperuuid.Nil)
+	check(errors.Is(err, hyperuuid.ErrWrongVersion) && errors.Is(err2, hyperuuid.ErrWrongVersion) &&
+		errors.Is(err3, hyperuuid.ErrWrongVersion), "SQL-order refusals")
 
 	sqlVersion, err := hyperuuid.VersionIn(sql, hyperuuid.LayoutSqlServer)
 	sqlRfc, err2 := hyperuuid.IsRfcIn(sql, 7, hyperuuid.LayoutSqlServer)
@@ -75,18 +78,15 @@ func main() {
 
 	sqlMillis, err := hyperuuid.V7UnixMillisIn(sql, hyperuuid.LayoutSqlServer)
 	millis, err2 := hyperuuid.V7UnixMillis(v7)
-	sql6, err3 := hyperuuid.V6ToSqlOrder(v6)
-	sql6Millis, err4 := hyperuuid.V6UnixMillisIn(sql6, hyperuuid.LayoutSqlServer)
-	millis6, _ := hyperuuid.V6UnixMillis(v6)
-	check(err == nil && err2 == nil && err3 == nil && err4 == nil && sqlMillis == millis && sql6Millis == millis6,
-		"timestamps read in SQL order")
+	check(err == nil && err2 == nil && sqlMillis == millis, "timestamp read in SQL order")
 
 	stamped, err := hyperuuid.GetTimestampIn(sql, hyperuuid.LayoutSqlServer)
 	notRfc := v7
 	notRfc[8] &^= 0xC0 // the NCS variant: a 7 nibble, but no RFC version and so no timestamp
 	_, err2 = hyperuuid.GetTimestamp(notRfc)
-	check(err == nil && stamped.Equal(created) && errors.Is(err2, hyperuuid.ErrNotTimeBased),
-		"GetTimestamp reads RFC 9562 v6/v7 only")
+	_, err3 = hyperuuid.GetTimestamp(v6)
+	check(err == nil && stamped.Equal(created) && errors.Is(err2, hyperuuid.ErrNotTimeBased) &&
+		errors.Is(err3, hyperuuid.ErrNotTimeBased), "GetTimestamp reads RFC 9562 v7 only")
 
 	_, err = hyperuuid.NewV7Batch(hyperuuid.MaxV7Batch + 1)
 	check(errors.Is(err, hyperuuid.ErrBatchTooLarge), "v7 batch past MaxV7Batch refused")

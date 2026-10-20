@@ -25,32 +25,18 @@ final class TimestampExtractionBench
 {
     private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
 
-    private Uuid $oursV6;
     private Uuid $oursV7;
-    private UuidInterface $ramseyV6;
     private UuidInterface $ramseyV7;
 
     public function warmUp(): void
     {
-        $this->oursV6 = HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
         $this->oursV7 = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
-        $this->ramseyV6 = RamseyUuid::uuid6();
         $this->ramseyV7 = RamseyUuid::uuid7();
-    }
-
-    public function benchOursV6Timestamp(): void
-    {
-        $this->oursV6->timestamp();
     }
 
     public function benchOursV7Timestamp(): void
     {
         $this->oursV7->timestamp();
-    }
-
-    public function benchRamseyV6GetDateTime(): void
-    {
-        $this->ramseyV6->getDateTime();
     }
 
     public function benchRamseyV7GetDateTime(): void

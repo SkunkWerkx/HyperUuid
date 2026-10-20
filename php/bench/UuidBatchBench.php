@@ -23,18 +23,6 @@ final class UuidBatchBench
 {
     private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
 
-    public function benchNewV6Batch1000(): void
-    {
-        HyperUuid::newV6Batch(1000, self::RFC_TEST_VECTOR_MS);
-    }
-
-    public function benchNewV6Individualx1000(): void
-    {
-        for ($i = 0; $i < 1000; $i++) {
-            HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-        }
-    }
-
     public function benchNewV7Batch1000(): void
     {
         HyperUuid::newV7Batch(1000, self::RFC_TEST_VECTOR_MS);
@@ -45,11 +33,6 @@ final class UuidBatchBench
         for ($i = 0; $i < 1000; $i++) {
             HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
         }
-    }
-
-    public function benchNewV6BatchBytes1000(): void
-    {
-        HyperUuid::newV6BatchBytes(1000, self::RFC_TEST_VECTOR_MS);
     }
 
     public function benchNewV7BatchBytes1000(): void

@@ -5,8 +5,8 @@ RFC_TEST_VECTOR_MS = 1_645_557_742_000
 
 # Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order — the
 # correctness oracle this project's C# test suite checks directly against the real type; no
-# Ruby equivalent exists to test against here, so this stands in for it. Shared by the v6 and
-# v7 #to_sql_order specs below, since the significance order itself doesn't depend on version.
+# Ruby equivalent exists to test against here, so this stands in for it in the #to_sql_order
+# specs below.
 def sql_guid_cmp(a, b)
   significance_order = [10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3]
   significance_order.each do |i|
@@ -80,62 +80,6 @@ RSpec.describe HyperUuid do
         .to raise_error(TypeError, /name must be a String; got Symbol/)
       expect { described_class.new_v5(HyperUuid::Namespaces::DNS, nil) }
         .to raise_error(TypeError, /name must be a String; got NilClass/)
-    end
-  end
-
-  describe ".new_v6" do
-    it "embeds the given timestamp" do
-      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
-      expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
-    end
-
-    it "has version and variant bits set" do
-      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
-      expect(id.version).to eq(6)
-      expect(id.variant).to eq(:rfc9562)
-    end
-
-    it "sets the node ID multicast bit" do
-      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
-      expect(id.bytes.getbyte(10) & 0x01).to eq(1)
-    end
-
-    it "is non-deterministic within the same millisecond" do
-      results = Array.new(100) { described_class.new_v6(RFC_TEST_VECTOR_MS) }
-      expect(results.uniq.size).to eq(100)
-    end
-
-    it "embeds the current time when called with no argument" do
-      before = (Time.now.to_r * 1000).to_i
-      id = described_class.new_v6
-      after = (Time.now.to_r * 1000).to_i
-
-      expect((id.timestamp.to_r * 1000).to_i).to be_between(before, after)
-    end
-  end
-
-  describe ".new_v6_batch" do
-    it "returns count UUIDs sharing the given timestamp" do
-      ids = described_class.new_v6_batch(10, RFC_TEST_VECTOR_MS)
-      expect(ids.size).to eq(10)
-      ids.each do |id|
-        expect(id.version).to eq(6)
-        expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
-      end
-    end
-
-    it "produces pairwise-distinct UUIDs" do
-      ids = described_class.new_v6_batch(100, RFC_TEST_VECTOR_MS)
-      expect(ids.uniq.size).to eq(100)
-    end
-
-    it "returns an empty array for count zero" do
-      expect(described_class.new_v6_batch(0, RFC_TEST_VECTOR_MS)).to eq([])
-    end
-
-    it "raises on an out-of-range timestamp" do
-      expect { described_class.new_v6_batch(1, 0xFFFF_FFFF_FFFF_FFFF) }
-        .to raise_error(HyperUuid::TimestampOutOfRangeError)
     end
   end
 
@@ -221,19 +165,19 @@ RSpec.describe HyperUuid do
       expect(described_class.new_v4.timestamp(raise_on_mismatch: false)).to be_nil
     end
 
-    it "still returns the real timestamp for v6/v7 when raise_on_mismatch is false" do
-      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
+    it "still returns the real timestamp for v7 when raise_on_mismatch is false" do
+      id = described_class.new_v7(RFC_TEST_VECTOR_MS)
       expect(id.timestamp(raise_on_mismatch: false)).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
+    end
+
+    it "has no timestamp for a v6 from another generator" do
+      v6 = HyperUuid::Uuid.parse("1ec9414c-232a-6b00-b3c8-9f6bdeced846") # RFC 9562 A.5
+      expect(v6.timestamp(raise_on_mismatch: false)).to be_nil
+      expect { v6.timestamp }.to raise_error(ArgumentError, /only defined for version 7 UUIDs, got version 6\z/)
     end
   end
 
   describe "creating from a Time" do
-    it ".new_v6 accepts a Time in place of a millisecond integer" do
-      time = Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc
-      id = described_class.new_v6(time)
-      expect((id.timestamp.to_r * 1000).to_i).to eq(RFC_TEST_VECTOR_MS)
-    end
-
     it ".new_v7 accepts a Time in place of a millisecond integer" do
       time = Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc
       id = described_class.new_v7(time)
@@ -249,10 +193,42 @@ RSpec.describe HyperUuid do
       expect(sql_ordered.from_sql_order).to eq(id)
     end
 
-    it "preserves the version and variant bits at octets 7 and 8" do
+    # Octet 7's top nibble and octet 8's top bits are where SQL Server's text form and a .NET
+    # Guid show the version and variant: an RFC 9562 version 8, the timestamp leading the key.
+    it "writes a version 8 with the RFC variant at octets 7 and 8" do
       sql_ordered = described_class.new_v7(RFC_TEST_VECTOR_MS).to_sql_order
-      expect(sql_ordered.bytes.getbyte(7) & 0xF0).to eq(0x70)
+      expect(sql_ordered.bytes.getbyte(7) & 0xF0).to eq(0x80)
       expect(sql_ordered.bytes.getbyte(8) & 0xC0).to eq(0x80)
+      expect(sql_ordered.bytes[10, 6]).to eq(described_class.new_v7(RFC_TEST_VECTOR_MS).bytes[0, 6])
+    end
+
+    it "converts every version 7 timestamp, up to the 48-bit maximum" do
+      [0, (1 << 47) - 1, 1 << 47, (1 << 48) - 1].each do |millis|
+        id = described_class.new_v7(millis)
+        sql_ordered = id.to_sql_order
+        expect(sql_ordered.timestamp(layout: :sql_server)).to eq(id.timestamp)
+        expect(sql_ordered.from_sql_order).to eq(id)
+      end
+    end
+
+    it "refuses a value of another version, a version 6 among them" do
+      [
+        described_class.new_v4, HyperUuid::Uuid::NIL, HyperUuid::Uuid::MAX,
+        HyperUuid::Uuid.parse("1ec9414c-232a-6b00-b3c8-9f6bdeced846") # a v6, RFC 9562 A.5
+      ].each do |id|
+        before = id.bytes.dup
+        expect { id.to_sql_order }.to raise_error(ArgumentError, HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION)
+        expect(id.bytes).to eq(before)
+      end
+    end
+
+    # RFC 9562's A.6 v7 and A.3 v4, fixed: a fresh value's random octet 7 carries the SQL
+    # layout's 8 one time in 16, and is then taken for a SQL-ordered value.
+    it "#from_sql_order refuses an RFC-ordered value" do
+      %w[017f22e2-79b0-7cc3-98c4-dc0c0c07398f 919108f7-52d1-4320-9bac-f847db4148a8].each do |text|
+        id = HyperUuid::Uuid.parse(text)
+        expect { id.from_sql_order }.to raise_error(ArgumentError, HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION)
+      end
     end
 
     it "sorts by creation order under SqlGuid-style comparison" do
@@ -263,41 +239,6 @@ RSpec.describe HyperUuid do
       sorted = sql_ordered.sort { |a, b| sql_guid_cmp(a, b) }
 
       expect(sorted).to eq(sql_ordered)
-    end
-  end
-
-  describe "Uuid#to_sql_order for v6" do
-    it "round-trips through #from_sql_order" do
-      id = described_class.new_v6(RFC_TEST_VECTOR_MS)
-      sql_ordered = id.to_sql_order
-      expect(sql_ordered).not_to eq(id)
-      expect(sql_ordered.from_sql_order).to eq(id)
-    end
-
-    it "preserves the version and variant bits at v6's (different from v7's) offsets" do
-      sql_ordered = described_class.new_v6(RFC_TEST_VECTOR_MS).to_sql_order
-      expect(sql_ordered.bytes.getbyte(8) & 0xF0).to eq(0x60)
-      expect(sql_ordered.bytes.getbyte(6) & 0xC0).to eq(0x80)
-    end
-
-    it "sorts by creation order under SqlGuid-style comparison for distinct timestamps" do
-      # Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed to
-      # sort in creation order even in plain RFC order, so this only exercises strictly
-      # increasing timestamps, where the timestamp alone determines order with no tie to break.
-      ids = (0...300).map { |i| described_class.new_v6(RFC_TEST_VECTOR_MS + i) }
-
-      sql_ordered = ids.map { |id| id.to_sql_order.bytes }
-      sorted = sql_ordered.sort { |a, b| sql_guid_cmp(a, b) }
-
-      expect(sorted).to eq(sql_ordered)
-    end
-
-    it "#from_sql_order round-trips both v6- and v7-sql-ordered values back to the right version" do
-      v6_sql = described_class.new_v6(RFC_TEST_VECTOR_MS).to_sql_order
-      v7_sql = described_class.new_v7(RFC_TEST_VECTOR_MS).to_sql_order
-
-      expect(v6_sql.from_sql_order.version).to eq(6)
-      expect(v7_sql.from_sql_order.version).to eq(7)
     end
   end
 
@@ -357,68 +298,45 @@ RSpec.describe HyperUuid do
     end
   end
 
-  describe ".new_v6_batch_bytes" do
-    it "returns one binary String of 16 bytes per UUID" do
-      bytes = described_class.new_v6_batch_bytes(8, RFC_TEST_VECTOR_MS)
-      expect(bytes.bytesize).to eq(8 * 16)
-      ids = Array.new(8) { |i| HyperUuid::Uuid.new(bytes[i * 16, 16]) }
-      expect(ids.map(&:version).uniq).to eq([6])
-    end
-  end
-
   # Caller bugs are caught once, in the shared doors, so the error is the same whichever
   # backend is live — this whole suite runs under both. Left to the backends these cases
   # diverged: a RangeError from the extension where Fiddle wrapped the value and raised
   # TimestampOutOfRangeError, a NoMemoryError for a negative count.
   describe "caller bugs" do
-    v6_doors = {
-      "new_v6" => ->(ms) { HyperUuid.new_v6(ms) },
-      "new_v6_batch" => ->(ms) { HyperUuid.new_v6_batch(2, ms) },
-      "new_v6_batch_bytes" => ->(ms) { HyperUuid.new_v6_batch_bytes(2, ms) }
-    }
-    v7_doors = {
+    doors = {
       "new_v7" => ->(ms) { HyperUuid.new_v7(ms) },
       "new_v7_batch" => ->(ms) { HyperUuid.new_v7_batch(2, ms) },
       "new_v7_batch_bytes" => ->(ms) { HyperUuid.new_v7_batch_bytes(2, ms) }
     }
 
-    { HyperUuid::Runtime::V6_TIMESTAMP_OUT_OF_RANGE => v6_doors,
-      HyperUuid::Runtime::V7_TIMESTAMP_OUT_OF_RANGE => v7_doors }.each do |message, doors|
-      doors.each do |name, door|
-        it "#{name} raises TimestampOutOfRangeError, with one message, for every out-of-range time" do
-          # The first three never reach a backend (they cannot cross the ABI as a u64); the
-          # last is in range for the ABI and refused by the core itself. Same class, same
-          # message, either way.
-          [-1, Time.at(-1), 2**64, 0xFFFF_FFFF_FFFF_FFFF].each do |time|
-            expect { door.call(time) }.to raise_error(HyperUuid::TimestampOutOfRangeError, message)
-          end
+    message = HyperUuid::Runtime::V7_TIMESTAMP_OUT_OF_RANGE
+    doors.each do |name, door|
+      it "#{name} raises TimestampOutOfRangeError, with one message, for every out-of-range time" do
+        # The first three never reach a backend (they cannot cross the ABI as a u64); the
+        # last is in range for the ABI and refused by the core itself. Same class, same
+        # message, either way.
+        [-1, Time.at(-1), 2**64, 0xFFFF_FFFF_FFFF_FFFF].each do |time|
+          expect { door.call(time) }.to raise_error(HyperUuid::TimestampOutOfRangeError, message)
         end
+      end
 
-        it "#{name} raises TypeError for a time that is neither a Time, an Integer nor nil" do
-          [1.5, "1645557742000", :now].each do |time|
-            expect { door.call(time) }.to raise_error(TypeError, /unix_millis must be a Time, an Integer or nil/)
-          end
+      it "#{name} raises TypeError for a time that is neither a Time, an Integer nor nil" do
+        [1.5, "1645557742000", :now].each do |time|
+          expect { door.call(time) }.to raise_error(TypeError, /unix_millis must be a Time, an Integer or nil/)
         end
       end
     end
 
-    %i[new_v6_batch new_v7_batch new_v6_batch_bytes new_v7_batch_bytes].each do |door|
+    %i[new_v7_batch new_v7_batch_bytes].each do |door|
       it "#{door} raises ArgumentError for a negative count" do
         expect { described_class.public_send(door, -1, RFC_TEST_VECTOR_MS) }
           .to raise_error(ArgumentError, /count must be between 0 and 4294967295; got -1/)
       end
 
-      if door.to_s.start_with?("new_v6")
-        it "#{door} raises ArgumentError for a count past 2**32 - 1" do
-          expect { described_class.public_send(door, 2**32, RFC_TEST_VECTOR_MS) }
-            .to raise_error(ArgumentError, /count must be between 0 and 4294967295; got #{2**32}/)
-        end
-      else
-        it "#{door} raises ArgumentError naming the limit for a count past MAX_V7_BATCH" do
-          [HyperUuid::MAX_V7_BATCH + 1, 2**32 - 1, 2**32].each do |count|
-            expect { described_class.public_send(door, count, RFC_TEST_VECTOR_MS) }
-              .to raise_error(ArgumentError, HyperUuid::Runtime::V7_BATCH_TOO_LARGE)
-          end
+      it "#{door} raises ArgumentError naming the limit for a count past MAX_V7_BATCH" do
+        [HyperUuid::MAX_V7_BATCH + 1, 2**32 - 1, 2**32].each do |count|
+          expect { described_class.public_send(door, count, RFC_TEST_VECTOR_MS) }
+            .to raise_error(ArgumentError, HyperUuid::Runtime::V7_BATCH_TOO_LARGE)
         end
       end
 

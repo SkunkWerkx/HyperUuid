@@ -17,7 +17,7 @@ group = "io.github.skunkwerkx"
 // workflow_dispatch runs during testing don't collide with an already-published version —
 // the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so
 // it always uses this committed version as-is.
-version = System.getenv("HYPERUUID_VERSION") ?: "0.8.0"
+version = System.getenv("HYPERUUID_VERSION") ?: "0.9.0"
 
 repositories {
     mavenCentral()
@@ -239,7 +239,8 @@ mavenPublishing {
     pom {
         name.set("hyperuuid")
         description.set(
-            "RFC 9562 UUID v4/v5/v6/v7 generation — high-performance FFM bindings " +
+            "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order for v7 — " +
+                "high-performance FFM bindings " +
                 "straight into a native Rust core (libhyperuuid) that never allocates. " +
                 "JDK 25+. No runtime bridge, no extra dependency."
         )

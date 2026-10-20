@@ -26,35 +26,9 @@ func BenchmarkNewV5String(b *testing.B) {
 	}
 }
 
-func BenchmarkNewV6At(b *testing.B) {
-	for b.Loop() {
-		if _, err := NewV6At(rfcTestVectorMs); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func BenchmarkNewV7At(b *testing.B) {
 	for b.Loop() {
 		if _, err := NewV7At(rfcTestVectorMs); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkV6IndividualX1000(b *testing.B) {
-	for b.Loop() {
-		for i := 0; i < 1000; i++ {
-			if _, err := NewV6At(rfcTestVectorMs); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
-
-func BenchmarkNewV6BatchAt1000(b *testing.B) {
-	for b.Loop() {
-		if _, err := NewV6BatchAt(1000, rfcTestVectorMs); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -80,20 +54,8 @@ func BenchmarkNewV7BatchAt1000(b *testing.B) {
 
 // Extraction benchmarks: google/uuid is already a real dependency here and has its own
 // timestamp-extraction method (uuid.UUID.Time(), documented as defined for versions 1, 2, 6,
-// and 7) — these measure HyperUuid's V6Timestamp/V7Timestamp head-to-head against it on the
+// and 7) — these measure HyperUuid's V7Timestamp head-to-head against it on the
 // same pre-generated UUID, generation excluded from the timed loop.
-
-func BenchmarkV6TimestampExtraction(b *testing.B) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		b.Fatal(err)
-	}
-	for b.Loop() {
-		if _, err := V6Timestamp(id); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func BenchmarkV7TimestampExtraction(b *testing.B) {
 	id, err := NewV7At(rfcTestVectorMs)
@@ -104,16 +66,6 @@ func BenchmarkV7TimestampExtraction(b *testing.B) {
 		if _, err := V7Timestamp(id); err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-func BenchmarkGoogleUuidV6TimeExtraction(b *testing.B) {
-	id, err := NewV6At(rfcTestVectorMs)
-	if err != nil {
-		b.Fatal(err)
-	}
-	for b.Loop() {
-		_ = id.Time()
 	}
 }
 
@@ -144,15 +96,6 @@ func BenchmarkFillV7BytesAt1000(b *testing.B) {
 	dst := make([]byte, 1000*16)
 	for b.Loop() {
 		if err := FillV7BytesAt(dst, rfcTestVectorMs); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkFillV6At1000(b *testing.B) {
-	dst := make([]uuid.UUID, 1000)
-	for b.Loop() {
-		if err := FillV6At(dst, rfcTestVectorMs); err != nil {
 			b.Fatal(err)
 		}
 	}

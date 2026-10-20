@@ -12,15 +12,29 @@ RSpec.describe "UUID inspection" do
     [
       [HyperUuid::Uuid.parse(SecureRandom.uuid), 4], [HyperUuid::Uuid.parse(SecureRandom.uuid_v7), 7],
       [HyperUuid.new_v4, 4], [HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "x"), 5],
-      [HyperUuid.new_v6(ms), 6], [HyperUuid.new_v7(ms), 7]
+      [HyperUuid.new_v7(ms), 7]
     ].each do |id, version|
       expect(id.version).to eq(version)
       expect(id.version(layout: :rfc9562)).to eq(version)
       expect(id.variant).to eq(:rfc9562)
       expect(id.rfc?(version)).to be(true)
       expect(id.rfc?(version, layout: :rfc9562)).to be(true)
-      expect(id.rfc?(version == 7 ? 6 : 7)).to be(false)
+      expect(id.rfc?(version == 7 ? 4 : 7)).to be(false)
     end
+  end
+
+  # Version 6 is still a version the nibble can hold, and a value from another generator still
+  # reads as one, but it carries no timestamp this gem reads and has no SQL Server order.
+  it "reads a v6 from elsewhere as version 6, with no timestamp and no SQL order" do
+    v6 = HyperUuid::Uuid.parse("1ec9414c-232a-6b00-b3c8-9f6bdeced846") # RFC 9562 A.5
+    expect(v6.version).to eq(6)
+    expect(v6.rfc?(6)).to be(true)
+    expect(v6.timestamp(raise_on_mismatch: false)).to be_nil
+    expect { v6.timestamp }
+      .to raise_error(ArgumentError, "timestamp is only defined for version 7 UUIDs, got version 6")
+    expect(v6.version(layout: :sql_server)).to eq(0)
+    expect(v6.timestamp(layout: :sql_server, raise_on_mismatch: false)).to be_nil
+    expect { v6.to_sql_order }.to raise_error(ArgumentError, HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION)
   end
 
   it "classifies Nil and Max as the RFC says" do
@@ -40,73 +54,61 @@ RSpec.describe "UUID inspection" do
     end
   end
 
-  # A 6 or 7 in the nibble is not a version 6 or 7 UUID unless the variant is RFC 9562's.
-  it "finds no timestamp in a 6 or 7 nibble under another variant, in either layout" do
+  # A 7 in the nibble is not a version 7 UUID unless the variant is RFC 9562's.
+  it "finds no timestamp in a 7 nibble under another variant, in either layout" do
     v7 = HyperUuid.new_v7(ms).bytes.dup
-    v6 = HyperUuid.new_v6(ms).bytes.dup
     { 0x00 => :ncs, 0xC0 => :microsoft, 0xE0 => :future }.each do |bits, variant|
-      [v6, v7].each do |rfc_bytes|
-        broken = rfc_bytes.dup
-        broken.setbyte(8, (broken.getbyte(8) & 0x1F) | bits)
-        id = HyperUuid::Uuid.new(broken)
-        found = id.version
-        expect(id.variant).to eq(variant)
-        expect(id.rfc?(found)).to be(false)
-        expect(id.timestamp(raise_on_mismatch: false)).to be_nil
-        expect { id.timestamp }.to raise_error(
-          ArgumentError,
-          "timestamp is only defined for version 6 or 7 UUIDs, got version #{found} with the #{variant.inspect} variant"
-        )
-      end
+      broken = v7.dup
+      broken.setbyte(8, (broken.getbyte(8) & 0x1F) | bits)
+      id = HyperUuid::Uuid.new(broken)
+      expect(id.version).to eq(7)
+      expect(id.variant).to eq(variant)
+      expect(id.rfc?(7)).to be(false)
+      expect(id.timestamp(raise_on_mismatch: false)).to be_nil
+      expect { id.timestamp }.to raise_error(
+        ArgumentError,
+        "timestamp is only defined for version 7 UUIDs, got version 7 with the #{variant.inspect} variant"
+      )
     end
-    # And in SQL order, where the variant sits in octet 8 (v7) or octet 6 (v6).
+    # And in SQL order, where the variant sits in octet 8.
     sql = HyperUuid.new_v7(ms).to_sql_order.bytes.dup
     sql.setbyte(8, sql.getbyte(8) & 0x3F)
     id = HyperUuid::Uuid.new(sql)
     expect(id.timestamp(layout: :sql_server, raise_on_mismatch: false)).to be_nil
     expect(id.version(layout: :sql_server)).to eq(0)
+    expect { id.from_sql_order }.to raise_error(ArgumentError, HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION)
   end
 
   it "raises TypeError for a version that isn't an Integer" do
     expect { HyperUuid.new_v7(ms).rfc?("7") }.to raise_error(TypeError, /version must be an Integer/)
   end
 
-  # In SQL order a v6's random clock_seq sits where a v7's version nibble does and reads as 7
-  # one time in 16; enough draws that a confusion would surface.
-  it "validates and reads SQL-ordered v6 and v7 in place without confusing them" do
-    2048.times do
-      six = HyperUuid.new_v6(ms).to_sql_order
+  it "validates and reads SQL-ordered v7 in place" do
+    256.times do
       seven = HyperUuid.new_v7(ms).to_sql_order
 
-      expect(six.version(layout: :sql_server)).to eq(6)
       expect(seven.version(layout: :sql_server)).to eq(7)
-      expect(six.rfc?(6, layout: :sql_server)).to be(true)
-      expect(six.rfc?(7, layout: :sql_server)).to be(false)
-      expect(seven.rfc?(7, layout: :sql_server)).to be(true)
-      expect(seven.rfc?(6, layout: :sql_server)).to be(false)
-
-      expect(six.timestamp(layout: :sql_server)).to eq(at_ms)
+      (0..15).each { |v| expect(seven.rfc?(v, layout: :sql_server)).to be(v == 7) }
       expect(seven.timestamp(layout: :sql_server)).to eq(at_ms)
       # Read straight from SQL order matches permuting back first.
       expect(seven.timestamp(layout: :sql_server)).to eq(seven.from_sql_order.timestamp)
-      expect(six.from_sql_order.version).to eq(6)
       expect(seven.from_sql_order.version).to eq(7)
     end
   end
 
-  # Fixed vectors only: a random v4's RFC bytes read as a SQL-ordered v7 one time in 16 (octet 8
-  # already carries the RFC variant and octet 7 is random), which is correct, since the layout
-  # is the caller's to know.
-  it "finds no SQL version in values that aren't SQL-ordered v6 or v7" do
+  # Fixed vectors only: a random v4's RFC bytes carry the layout's 8 and variant one time in 16
+  # (octet 8 already carries the RFC variant and octet 7 is random), which is correct, since the
+  # layout is the caller's to know.
+  it "finds no SQL version in values that aren't SQL-ordered v7" do
     [
       HyperUuid::Uuid::NIL, HyperUuid::Uuid::MAX, HyperUuid::Uuid.parse("919108f7-52d1-4320-9bac-f847db4148a8"),
-      HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "www.example.com")
+      HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "python.org")
     ].each do |id|
       expect(id.version(layout: :sql_server)).to eq(0)
       expect(id.timestamp(layout: :sql_server, raise_on_mismatch: false)).to be_nil
       expect { id.timestamp(layout: :sql_server) }
-        .to raise_error(ArgumentError, "timestamp: not a SQL-ordered version 6 or 7 UUID")
-      expect { id.from_sql_order }.to raise_error(ArgumentError, /not a recognized version 6 or 7/)
+        .to raise_error(ArgumentError, "timestamp: not a SQL-ordered version 7 UUID")
+      expect { id.from_sql_order }.to raise_error(ArgumentError, HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION)
     end
   end
 

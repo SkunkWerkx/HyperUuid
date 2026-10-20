@@ -143,75 +143,6 @@ public sealed class UuidGeneratorTests
 	const long RfcTestVectorMs = 1_645_557_742_000;
 
 	[Fact]
-	public void V6_EmbedsTheTimestamp()
-	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		UuidGenerator.V6Timestamp(id).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
-	}
-
-	[Fact]
-	public void V6_HasVersionAndVariantBitsSet()
-	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		Span<byte> rfc = stackalloc byte[16];
-		id.TryWriteBytes(rfc, bigEndian: true, out _);
-		(rfc[6] >> 4).ShouldBe((byte)6);
-		(rfc[8] & 0xC0).ShouldBe((byte)0x80);
-	}
-
-	[Fact]
-	public void V6_SetsTheNodeIdMulticastBit()
-	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		Span<byte> rfc = stackalloc byte[16];
-		id.TryWriteBytes(rfc, bigEndian: true, out _);
-		(rfc[10] & 0x01).ShouldBe(0x01);
-	}
-
-	[Fact]
-	public void V6_IsNonDeterministicWithinTheSameMillisecond()
-	{
-		var results = Enumerable.Range(0, 100).Select(_ => UuidGenerator.NewV6(RfcTestVectorMs)).ToHashSet();
-		results.Count.ShouldBe(100);
-	}
-
-	[Fact]
-	public void V6Timestamp_RoundTripsZero()
-	{
-		UuidGenerator.V6Timestamp(UuidGenerator.NewV6(0)).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(0));
-	}
-
-	[Fact]
-	public void V6Batch_ReturnsCountUuidsSharingTheTimestamp()
-	{
-		var ids = UuidGenerator.NewV6Batch(10, RfcTestVectorMs);
-		ids.Length.ShouldBe(10);
-		foreach (var id in ids)
-		{
-			UuidGenerator.V6Timestamp(id).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
-		}
-	}
-
-	[Fact]
-	public void V6Batch_ProducesPairwiseDistinctUuids()
-	{
-		var ids = UuidGenerator.NewV6Batch(100, RfcTestVectorMs);
-		ids.ToHashSet().Count.ShouldBe(100);
-	}
-
-	[Fact]
-	public void V6Batch_CountZeroReturnsEmptyArray()
-	{
-		UuidGenerator.NewV6Batch(0, RfcTestVectorMs).ShouldBeEmpty();
-	}
-
-	[Fact]
-	public void V6Batch_OverflowTimestampThrows()
-	{
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV6Batch(1, long.MaxValue));
-	}
-
-	[Fact]
 	public void Nil_IsAllZeroBytes()
 	{
 		UuidGenerator.Nil.ShouldBe(Guid.Empty);
@@ -308,11 +239,17 @@ public sealed class UuidGeneratorTests
 		UuidGenerator.GetTimestamp(UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "test")).ShouldBeNull();
 	}
 
+	// RFC 9562 Appendix A.5's version 6, minted elsewhere. It has a timestamp field, but only a
+	// version 7's timestamp is read, in either layout.
+	static readonly Guid RfcV6 = new("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+
 	[Fact]
-	public void GetTimestamp_MatchesV6Timestamp()
+	public void GetTimestamp_ReturnsNullForAVersion6()
 	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		UuidGenerator.GetTimestamp(id).ShouldBe(UuidGenerator.V6Timestamp(id));
+		UuidGenerator.Version(RfcV6).ShouldBe(6);
+		UuidGenerator.IsRfc(RfcV6, 6).ShouldBeTrue();
+		UuidGenerator.GetTimestamp(RfcV6).ShouldBeNull();
+		UuidGenerator.GetTimestamp(RfcV6, UuidLayout.SqlServer).ShouldBeNull();
 	}
 
 	[Fact]
@@ -348,6 +285,29 @@ public sealed class UuidGeneratorTests
 	}
 
 	[Fact]
+	public async Task FillV7_SurvivesAnotherThreadWritingTheSameBuffer()
+	{
+		// A race on the buffer's contents is the caller's to have, and must cost them the bytes,
+		// not the process. Windows' ProcessPrng fail-fasts the process when another thread writes
+		// the memory it is filling, which the core's batch fill used to hand it directly.
+		var buffer = new byte[16 * 100_000];
+		using var done = new ManualResetEventSlim();
+		var writers = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+		{
+			while (!done.IsSet)
+			{
+				Array.Clear(buffer);
+			}
+		}, TestContext.Current.CancellationToken)).ToArray();
+		for (var i = 0; i < 500; i++)
+		{
+			UuidGenerator.FillV7(buffer.AsSpan(), RfcTestVectorMs);
+		}
+		done.Set();
+		await Task.WhenAll(writers);
+	}
+
+	[Fact]
 	public void V7Batch_CountZeroReturnsEmptyArray()
 	{
 		UuidGenerator.NewV7Batch(0, RfcTestVectorMs).ShouldBeEmpty();
@@ -378,12 +338,13 @@ public sealed class UuidGeneratorTests
 	}
 
 	[Fact]
-	public void V7ToSqlOrder_PreservesVersionAndVariant()
+	public void V7ToSqlOrder_WritesAVersion8()
 	{
 		var sqlOrdered = UuidGenerator.V7ToSqlOrder(UuidGenerator.NewV7(RfcTestVectorMs));
 		var bytes = sqlOrdered.ToByteArray();
-		(bytes[7] & 0xF0).ShouldBe(0x70);
+		(bytes[7] & 0xF0).ShouldBe(0x80);
 		(bytes[8] & 0xC0).ShouldBe(0x80);
+		sqlOrdered.Version.ShouldBe(8);
 	}
 
 	[Fact]
@@ -409,41 +370,70 @@ public sealed class UuidGeneratorTests
 		sorted.ShouldBe(sqlOrdered);
 	}
 
-	[Fact]
-	public void V6ToSqlOrder_RoundTripsThroughV6FromSqlOrder()
+	// ---- SQL-order refusals -------------------------------------------------------------
+
+	const string WrongVersion = "the value is not a UUID of the version this conversion takes";
+
+	// Exactly TException, not a subclass: ArgumentOutOfRangeException is an ArgumentException.
+	static TException Refused<TException>(Action convert, string message) where TException : Exception
 	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		var sqlOrdered = UuidGenerator.V6ToSqlOrder(id);
-		sqlOrdered.ShouldNotBe(id);
-		UuidGenerator.V6FromSqlOrder(sqlOrdered).ShouldBe(id);
+		var thrown = Should.Throw<Exception>(convert);
+		thrown.GetType().ShouldBe(typeof(TException));
+		thrown.Message.ShouldStartWith(message);
+		((ArgumentException)thrown).ParamName.ShouldBe("uuid");
+		return (TException)thrown;
 	}
 
-	[Fact]
-	public void V6ToSqlOrder_PreservesVersionAndVariant()
+	// Guid form, then the in-place byte form, which must leave the buffer as it was.
+	static void RefusedEverywhere<TException>(Func<Guid, Guid> convert, SpanAction byteConvert, Guid value, byte[] bytes, string message)
+		where TException : Exception
 	{
-		// Different offsets than v7's sql order — see V6ToSqlOrder's doc comment for why.
-		var sqlOrdered = UuidGenerator.V6ToSqlOrder(UuidGenerator.NewV6(RfcTestVectorMs));
-		var bytes = sqlOrdered.ToByteArray();
-		(bytes[8] & 0xF0).ShouldBe(0x60);
-		(bytes[6] & 0xC0).ShouldBe(0x80);
+		Refused<TException>(() => convert(value), message);
+		var copy = bytes.ToArray();
+		Refused<TException>(() => byteConvert(copy), message);
+		copy.ShouldBe(bytes);
 	}
 
+	delegate void SpanAction(Span<byte> uuid);
+
+	static byte[] RfcBytes(Guid id) { var b = new byte[16]; id.TryWriteBytes(b, bigEndian: true, out _); return b; }
+
 	[Fact]
-	public void V6ToSqlOrder_SortsByCreationOrderUnderRealSqlGuidComparisonForDistinctTimestamps()
+	public void V7ToSqlOrder_RefusesAnythingButAVersion7()
 	{
-		// Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
-		// to sort in creation order even in plain RFC order, so this only exercises strictly
-		// increasing timestamps, where the timestamp alone determines order with no tie to break.
-		var ids = new List<Guid>();
-		for (long i = 0; i < 300; i++)
+		foreach (var id in new[] { UuidGenerator.NewV4(), RfcV6, UuidGenerator.Nil, UuidGenerator.Max,
+			UuidGenerator.V7ToSqlOrder(UuidGenerator.NewV7(RfcTestVectorMs)) })
 		{
-			ids.Add(UuidGenerator.NewV6(RfcTestVectorMs + i));
+			RefusedEverywhere<ArgumentException>(UuidGenerator.V7ToSqlOrder, UuidGenerator.V7ToSqlOrder, id, RfcBytes(id), WrongVersion);
 		}
+	}
 
-		var sqlOrdered = ids.Select(UuidGenerator.V6ToSqlOrder).ToList();
-		var sorted = sqlOrdered.OrderBy(g => new SqlGuid(g)).ToList();
+	[Fact]
+	public void V7ToSqlOrder_ConvertsEveryTimestamp()
+	{
+		// The layout holds all 122 of a v7's free bits, so there is no timestamp it refuses.
+		foreach (var ms in new[] { 0L, (1L << 47) - 1, 1L << 47, (1L << 48) - 1 })
+		{
+			var id = UuidGenerator.NewV7(ms);
+			var sql = UuidGenerator.V7ToSqlOrder(id);
+			UuidGenerator.V7FromSqlOrder(sql).ShouldBe(id);
+			UuidGenerator.V7UnixMillis(sql, UuidLayout.SqlServer).ShouldBe(ms);
+		}
+	}
 
-		sorted.ShouldBe(sqlOrdered);
+	[Fact]
+	public void FromSqlOrder_RefusesAnythingButASqlOrderedValue()
+	{
+		// RFC 9562 Appendix A.6's v7, fixed: its raw RFC bytes put rand_a's 0xc3 at octet 7.
+		// A freshly minted v7's raw bytes would carry a random octet 7, whose top nibble is the
+		// SQL layout's 8 one time in 16, and those bytes are then accepted in the byte form.
+		var v7 = new Guid("017f22e2-79b0-7cc3-98c4-dc0c0c07398f");
+		// 0.8.0 wrote this layout with a 7 where the 8 now is; such a value is refused.
+		var old = UuidGenerator.V7ToSqlOrder(v7).ToByteArray();
+		old[7] = (byte)(0x70 | (old[7] & 0x0F));
+		// A SQL-ordered Guid's bytes are its ToByteArray(); an RFC-ordered one's are big-endian.
+		foreach (var (id, bytes) in new[] { (v7, RfcBytes(v7)), (RfcV6, RfcBytes(RfcV6)), (new Guid(old), old), (UuidGenerator.Nil, new byte[16]) })
+			RefusedEverywhere<ArgumentException>(UuidGenerator.V7FromSqlOrder, UuidGenerator.V7FromSqlOrder, id, bytes, WrongVersion);
 	}
 
 	// ---- Non-throwing construction path -------------------------------------------------
@@ -461,13 +451,6 @@ public sealed class UuidGeneratorTests
 	{
 		UuidGenerator.TryNewV7(RfcTestVectorMs, out var id).ShouldBeTrue();
 		UuidGenerator.V7UnixMillis(id).ShouldBe(RfcTestVectorMs);
-	}
-
-	[Fact]
-	public void TryNewV6_SucceedsForAValidTimestamp()
-	{
-		UuidGenerator.TryNewV6(RfcTestVectorMs, out var id).ShouldBeTrue();
-		UuidGenerator.V6UnixMillis(id).ShouldBe(RfcTestVectorMs);
 	}
 
 	[Fact]
@@ -493,9 +476,9 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void V7ToSqlOrder_ByteOverloadAgreesWithTheGuidOverload()
 	{
-		// The equivalence that lets a byte-level oracle (Svartalfheim's SequentialGuidBytes)
-		// validate this without modelling Guid's mixed-endian field layout: the Guid overload's
-		// result, viewed as bytes, IS the byte overload's result.
+		// The equivalence that lets a byte-level oracle validate this without modelling Guid's
+		// mixed-endian field layout: the Guid overload's result, viewed as bytes, IS the byte
+		// overload's result.
 		var id = UuidGenerator.NewV7(RfcTestVectorMs);
 
 		Span<byte> rfc = stackalloc byte[16];
@@ -503,18 +486,6 @@ public sealed class UuidGeneratorTests
 		UuidGenerator.V7ToSqlOrder(rfc);
 
 		UuidGenerator.V7ToSqlOrder(id).ToByteArray().ShouldBe(rfc.ToArray());
-	}
-
-	[Fact]
-	public void V6ToSqlOrder_ByteOverloadAgreesWithTheGuidOverload()
-	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-
-		Span<byte> rfc = stackalloc byte[16];
-		id.TryWriteBytes(rfc, bigEndian: true, out _);
-		UuidGenerator.V6ToSqlOrder(rfc);
-
-		UuidGenerator.V6ToSqlOrder(id).ToByteArray().ShouldBe(rfc.ToArray());
 	}
 
 	[Fact]
@@ -532,24 +503,10 @@ public sealed class UuidGeneratorTests
 	}
 
 	[Fact]
-	public void V6SqlOrder_ByteOverloadsRoundTrip()
-	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		var rfc = new byte[16];
-		id.TryWriteBytes(rfc, bigEndian: true, out _);
-		var original = rfc.ToArray();
-
-		UuidGenerator.V6ToSqlOrder(rfc);
-		rfc.ShouldNotBe(original);
-		UuidGenerator.V6FromSqlOrder(rfc);
-		rfc.ShouldBe(original);
-	}
-
-	[Fact]
 	public void SqlOrder_ByteOverloadRejectsAWrongSizedBuffer()
 	{
 		Should.Throw<ArgumentException>(() => UuidGenerator.V7ToSqlOrder(new byte[15]));
-		Should.Throw<ArgumentException>(() => UuidGenerator.V6FromSqlOrder(new byte[17]));
+		Should.Throw<ArgumentException>(() => UuidGenerator.V7FromSqlOrder(new byte[17]));
 	}
 
 	// ---- Raw-byte batch fill ------------------------------------------------------------
@@ -590,7 +547,16 @@ public sealed class UuidGeneratorTests
 		var buf = new Guid[8];
 		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV7(buf, outOfRange));
 		UuidGenerator.TryFillV7(buf, outOfRange).ShouldBeFalse();
+		// "Left untouched" is part of the Guid overload's contract: it fills through a scratch
+		// buffer, so a failed call never writes a partial batch.
+		buf.ShouldAllBe(id => id == Guid.Empty);
 		UuidGenerator.TryFillV7(buf, RfcTestVectorMs).ShouldBeTrue();
+		buf.ShouldAllBe(id => id != Guid.Empty);
+
+		var bytes = new byte[32];
+		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV7(bytes, outOfRange));
+		UuidGenerator.TryFillV7(bytes, outOfRange).ShouldBeFalse();
+		UuidGenerator.TryFillV7(bytes, RfcTestVectorMs).ShouldBeTrue();
 	}
 
 	[Fact]
@@ -605,93 +571,33 @@ public sealed class UuidGeneratorTests
 			UuidGenerator.V7UnixMillis(id).ShouldBeInRange(before, after);
 	}
 
-	// ---- Version 6 fills ----------------------------------------------------------------
-
 	[Theory]
 	[InlineData(1)]
 	[InlineData(16)] // exactly the 256-byte stack scratch buffer
 	[InlineData(17)] // first size that rents from the pool
 	[InlineData(200)]
-	public void FillV6_FillsEveryElementWithADistinctV6SharingTheTimestamp(int count)
+	public void FillV7_FillsEveryElementWithAnIncreasingV7SharingTheTimestamp(int count)
 	{
 		var buf = new Guid[count];
-		UuidGenerator.FillV6(buf, RfcTestVectorMs);
+		UuidGenerator.FillV7(buf, RfcTestVectorMs);
 
 		foreach (var id in buf)
 		{
-			id.ToString()[14].ShouldBe('6');
-			UuidGenerator.V6UnixMillis(id).ShouldBe(RfcTestVectorMs);
+			id.ToString()[14].ShouldBe('7');
+			// At most one millisecond on, if the batch straddles the counter's wrap.
+			UuidGenerator.V7UnixMillis(id).ShouldBeInRange(RfcTestVectorMs, RfcTestVectorMs + 1);
 		}
+		buf.OrderBy(x => x).ShouldBe(buf, ignoreOrder: false);
 		buf.ToHashSet().Count.ShouldBe(count);
 	}
 
 	[Fact]
-	public void FillV6_EmptyDestinationIsANoOp()
+	public void FillV7_EmptyDestinationIsANoOp()
 	{
-		UuidGenerator.FillV6(Span<Guid>.Empty, RfcTestVectorMs);
-		UuidGenerator.FillV6(Span<byte>.Empty, RfcTestVectorMs);
-		UuidGenerator.TryFillV6(Span<Guid>.Empty, RfcTestVectorMs).ShouldBeTrue();
-		UuidGenerator.TryFillV6(Span<byte>.Empty, RfcTestVectorMs).ShouldBeTrue();
-	}
-
-	[Fact]
-	public void FillV6_NowOverloadEmbedsTheCurrentTimestamp()
-	{
-		var buf = new Guid[4];
-		var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		UuidGenerator.FillV6(buf);
-		var after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-		foreach (var id in buf)
-			UuidGenerator.V6UnixMillis(id).ShouldBeInRange(before, after);
-	}
-
-	[Fact]
-	public void FillV6_ByteOverloadMatchesTheGuidOverloadElementForElement()
-	{
-		const int count = 64;
-		var asGuids = new Guid[count];
-		UuidGenerator.FillV6(asGuids, RfcTestVectorMs);
-
-		var asBytes = new byte[count * 16];
-		UuidGenerator.FillV6(asBytes, RfcTestVectorMs);
-
-		// Not value-equal (each batch draws its own entropy), but structurally identical:
-		// every 16-byte chunk must decode to a v6 carrying the same timestamp.
-		for (var i = 0; i < count; i++)
-		{
-			var fromBytes = new Guid(asBytes.AsSpan(i * 16, 16), bigEndian: true);
-			UuidGenerator.V6UnixMillis(fromBytes).ShouldBe(RfcTestVectorMs);
-			UuidGenerator.V6UnixMillis(asGuids[i]).ShouldBe(RfcTestVectorMs);
-			fromBytes.ToString()[14].ShouldBe('6');
-		}
-	}
-
-	[Fact]
-	public void FillV6_ByteOverloadRejectsANonMultipleOf16()
-	{
-		Should.Throw<ArgumentException>(() => UuidGenerator.FillV6(new byte[17], RfcTestVectorMs));
-		UuidGenerator.TryFillV6(new byte[17], RfcTestVectorMs).ShouldBeFalse();
-	}
-
-	[Fact]
-	public void TryFillV6_ReturnsFalseWhereFillV6Throws()
-	{
-		// long.MaxValue ms overflows the 60-bit count of 100 ns ticks since 1582.
-		const long outOfRange = long.MaxValue;
-		var buf = new Guid[8];
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV6(buf, outOfRange));
-		UuidGenerator.TryFillV6(buf, outOfRange).ShouldBeFalse();
-		// "Left untouched" is part of the Guid overload's contract: it fills through a scratch
-		// buffer, so a failed call never writes a partial batch.
-		buf.ShouldAllBe(id => id == Guid.Empty);
-		UuidGenerator.TryFillV6(buf, RfcTestVectorMs).ShouldBeTrue();
-		buf.ShouldAllBe(id => id != Guid.Empty);
-
-		var bytes = new byte[32];
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV6(bytes, outOfRange));
-		UuidGenerator.TryFillV6(bytes, outOfRange).ShouldBeFalse();
-		UuidGenerator.TryFillV6(bytes, RfcTestVectorMs).ShouldBeTrue();
+		UuidGenerator.FillV7(Span<Guid>.Empty, RfcTestVectorMs);
+		UuidGenerator.FillV7(Span<byte>.Empty, RfcTestVectorMs);
+		UuidGenerator.TryFillV7(Span<Guid>.Empty, RfcTestVectorMs).ShouldBeTrue();
+		UuidGenerator.TryFillV7(Span<byte>.Empty, RfcTestVectorMs).ShouldBeTrue();
 	}
 
 	// ---- Caller-error edges -------------------------------------------------------------
@@ -699,79 +605,26 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void Batch_NegativeCountThrowsArgumentOutOfRange()
 	{
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV6Batch(-1, RfcTestVectorMs)).ParamName.ShouldBe("count");
 		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7Batch(-1, RfcTestVectorMs)).ParamName.ShouldBe("count");
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV6Batch(-1));
 		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7Batch(-1));
 	}
 
-	// Past int.MaxValue / 16 elements the scratch buffer's byte length no longer fits an int.
-	// The span here is never read or written — the length check comes first — so it can claim
-	// a length no test machine could actually allocate.
 	[Fact]
-	public void Fill_DestinationTooLongForOneFillIsRejectedBeforeAnythingIsWritten()
+	public void V7_NegativeTimestampIsRejectedNotEncoded()
 	{
-		const int tooMany = int.MaxValue / 16 + 1;
-
-		Should.Throw<ArgumentException>(() =>
-		{
-			var one = Guid.Empty;
-			UuidGenerator.FillV7(System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref one, tooMany), RfcTestVectorMs);
-		}).ParamName.ShouldBe("destination");
-		Should.Throw<ArgumentException>(() =>
-		{
-			var one = Guid.Empty;
-			UuidGenerator.FillV6(System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref one, tooMany), RfcTestVectorMs);
-		}).ParamName.ShouldBe("destination");
-
-		var sentinel = Guid.Empty;
-		UuidGenerator.TryFillV7(System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref sentinel, tooMany), RfcTestVectorMs).ShouldBeFalse();
-		UuidGenerator.TryFillV6(System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref sentinel, tooMany), RfcTestVectorMs).ShouldBeFalse();
-		sentinel.ShouldBe(Guid.Empty);
-	}
-
-	[Fact]
-	public void V6_NegativeTimestampIsRejectedNotEncoded()
-	{
-		// The v6 field counts from 1582 and could hold 1969, but the API is Unix-ms only.
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV6(-1)).ParamName.ShouldBe("unixMilliseconds");
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV6(DateTimeOffset.UnixEpoch.AddMilliseconds(-1)));
-		UuidGenerator.TryNewV6(-1, out var id).ShouldBeFalse();
+		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7(-1)).ParamName.ShouldBe("unixMilliseconds");
+		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7(DateTimeOffset.UnixEpoch.AddMilliseconds(-1)));
+		UuidGenerator.TryNewV7(-1, out var id).ShouldBeFalse();
 		id.ShouldBe(Guid.Empty);
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7(-1));
-	}
-
-	[Fact]
-	public void V6Timestamp_SaturatesToTheUnixEpochForAPre1970Uuid()
-	{
-		// A v6 UUID no call here can mint: timestamp field zero (1582-10-15), version 6,
-		// RFC variant. It is spec-valid, so it reads back — as the epoch, not a negative count.
-		var pre1970 = new Guid("00000000-0000-6000-8000-000000000001");
-		UuidGenerator.V6UnixMillis(pre1970).ShouldBe(0);
-		UuidGenerator.V6Timestamp(pre1970).ShouldBe(DateTimeOffset.UnixEpoch);
-		UuidGenerator.GetTimestamp(pre1970).ShouldBe(DateTimeOffset.UnixEpoch);
 	}
 
 	[Fact]
 	public void DateTimeOffsetOverloads_EmbedTheGivenInstant()
 	{
 		var instant = DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs);
-		UuidGenerator.V6Timestamp(UuidGenerator.NewV6(instant)).ShouldBe(instant);
 		UuidGenerator.V7Timestamp(UuidGenerator.NewV7(instant)).ShouldBe(instant);
 		// An offset is the same instant, not a different one.
 		UuidGenerator.V7Timestamp(UuidGenerator.NewV7(instant.ToOffset(TimeSpan.FromHours(5)))).ShouldBe(instant);
-	}
-
-	[Fact]
-	public void V6_NowOverloadsEmbedTheCurrentTimestamp()
-	{
-		var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		var id = UuidGenerator.NewV6();
-		UuidGenerator.TryNewV6(out var tried).ShouldBeTrue();
-		var after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-		UuidGenerator.V6UnixMillis(id).ShouldBeInRange(before, after);
-		UuidGenerator.V6UnixMillis(tried).ShouldBeInRange(before, after);
 	}
 
 	// ---- Native library probe -----------------------------------------------------------

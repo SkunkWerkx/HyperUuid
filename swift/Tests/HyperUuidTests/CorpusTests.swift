@@ -67,9 +67,14 @@ final class CorpusTests: XCTestCase {
     }
 
     private struct SqlOrderVector: Decodable {
-        let version: Int
         let rfc: String
         let sql: String
+    }
+
+    private struct SqlOrderRefusedVector: Decodable {
+        let direction: String
+        let uuid: String
+        let note: String
     }
 
     private struct TimestampVector: Decodable {
@@ -112,30 +117,46 @@ final class CorpusTests: XCTestCase {
             let sqlBytes = Self.hex(vector.sql)
             let rfc = UUID(rfcBytes: rfcBytes)
             let sql = UUID(rfcBytes: sqlBytes)
-            let toSql: (UUID) throws -> UUID
-            let toRfc: (UUID) throws -> UUID
-            let toSqlBytes: (UnsafeMutableRawBufferPointer) throws -> Void
-            let toRfcBytes: (UnsafeMutableRawBufferPointer) throws -> Void
-            switch vector.version {
-            case 6:
-                (toSql, toRfc) = (UuidGenerator.v6ToSqlOrder, UuidGenerator.v6FromSqlOrder)
-                (toSqlBytes, toRfcBytes) = (UuidGenerator.v6ToSqlOrder(bytes:), UuidGenerator.v6FromSqlOrder(bytes:))
-            case 7:
-                (toSql, toRfc) = (UuidGenerator.v7ToSqlOrder, UuidGenerator.v7FromSqlOrder)
-                (toSqlBytes, toRfcBytes) = (UuidGenerator.v7ToSqlOrder(bytes:), UuidGenerator.v7FromSqlOrder(bytes:))
-            default: fatalError("no SQL order for version \(vector.version)")
-            }
-            XCTAssertEqual(try toSql(rfc), sql, "\(vector)")
-            XCTAssertEqual(try toRfc(sql), rfc, "\(vector)")
+            XCTAssertEqual(try UuidGenerator.v7ToSqlOrder(rfc), sql, "\(vector)")
+            XCTAssertEqual(try UuidGenerator.v7FromSqlOrder(sql), rfc, "\(vector)")
             // What reaches SQL Server is the value's own sixteen bytes; they must be the wire bytes.
-            XCTAssertEqual(try toSql(rfc).rfcBytes, sqlBytes, "\(vector)")
+            XCTAssertEqual(try UuidGenerator.v7ToSqlOrder(rfc).rfcBytes, sqlBytes, "\(vector)")
 
             // The raw-byte doors, in place.
             var bytes = rfcBytes
-            try bytes.withUnsafeMutableBytes { try toSqlBytes($0) }
+            try bytes.withUnsafeMutableBytes { try UuidGenerator.v7ToSqlOrder(bytes: $0) }
             XCTAssertEqual(bytes, sqlBytes, "\(vector)")
-            try bytes.withUnsafeMutableBytes { try toRfcBytes($0) }
+            try bytes.withUnsafeMutableBytes { try UuidGenerator.v7FromSqlOrder(bytes: $0) }
             XCTAssertEqual(bytes, rfcBytes, "\(vector)")
+        }
+    }
+
+    func testSqlOrderRefusedCorpus() throws {
+        for vector in try corpus("sql_order_refused.json", as: SqlOrderRefusedVector.self) {
+            let original = Self.hex(vector.uuid)
+            let convert: (UUID) throws -> UUID
+            let convertBytes: (UnsafeMutableRawBufferPointer) throws -> Void
+            switch vector.direction {
+            case "to_sql": (convert, convertBytes) = (UuidGenerator.v7ToSqlOrder, UuidGenerator.v7ToSqlOrder(bytes:))
+            case "from_sql":
+                (convert, convertBytes) = (UuidGenerator.v7FromSqlOrder, UuidGenerator.v7FromSqlOrder(bytes:))
+            default: fatalError("no conversion for \(vector)")
+            }
+            let isExpected: (Swift.Error) -> Bool = { error in
+                if case UuidGenerator.Error.wrongVersion = error { return true }
+                return false
+            }
+            XCTAssertThrowsError(try convert(UUID(rfcBytes: original)), "\(vector)") { error in
+                XCTAssertTrue(isExpected(error), "\(vector): \(error)")
+            }
+            // The raw-byte door refuses the same way and leaves the bytes as they were.
+            var bytes = original
+            try bytes.withUnsafeMutableBytes { raw in
+                XCTAssertThrowsError(try convertBytes(raw), "\(vector)") { error in
+                    XCTAssertTrue(isExpected(error), "\(vector): \(error)")
+                }
+            }
+            XCTAssertEqual(bytes, original, "\(vector)")
         }
     }
 
@@ -161,23 +182,12 @@ final class CorpusTests: XCTestCase {
                 sawYear10889 = true
             }
 
-            switch vector.version {
-            case 6:
-                XCTAssertEqual(try UuidGenerator.v6UnixMillis(id, layout: layout), millis, "\(vector)")
-                XCTAssertEqual(try UuidGenerator.v6Timestamp(id, layout: layout), date, "\(vector)")
-                if layout == .rfc9562 {
-                    XCTAssertEqual(try UuidGenerator.v6UnixMillis(id), millis, "\(vector)")
-                    XCTAssertEqual(try UuidGenerator.v6Timestamp(id), date, "\(vector)")
-                }
-            case 7:
-                XCTAssertEqual(try UuidGenerator.v7UnixMillis(id, layout: layout), millis, "\(vector)")
-                XCTAssertEqual(try UuidGenerator.v7Timestamp(id, layout: layout), date, "\(vector)")
-                if layout == .rfc9562 {
-                    XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), millis, "\(vector)")
-                    XCTAssertEqual(try UuidGenerator.v7Timestamp(id), date, "\(vector)")
-                }
-            default:
-                XCTFail("a timestamp on version \(vector.version): \(vector)")
+            XCTAssertEqual(vector.version, 7, "a timestamp on version \(vector.version): \(vector)")
+            XCTAssertEqual(try UuidGenerator.v7UnixMillis(id, layout: layout), millis, "\(vector)")
+            XCTAssertEqual(try UuidGenerator.v7Timestamp(id, layout: layout), date, "\(vector)")
+            if layout == .rfc9562 {
+                XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), millis, "\(vector)")
+                XCTAssertEqual(try UuidGenerator.v7Timestamp(id), date, "\(vector)")
             }
         }
         XCTAssertTrue(sawYear10889, "the corpus no longer has the 2^48 - 1 ms row")

@@ -21,9 +21,11 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 class UuidGeneratorTest {
 
@@ -72,61 +74,6 @@ class UuidGeneratorTest {
 
     // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
     private static final long RFC_TEST_VECTOR_MS = 1_645_557_742_000L;
-
-    @Test
-    void v6EmbedsTheTimestamp() {
-        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
-        assertEquals(Instant.ofEpochMilli(RFC_TEST_VECTOR_MS), UuidGenerator.v6Timestamp(id));
-    }
-
-    @Test
-    void v6HasVersionAndVariantBitsSet() {
-        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
-        assertEquals(6, id.version());
-        assertEquals(2, id.variant());
-    }
-
-    @Test
-    void v6SetsTheNodeIdMulticastBit() {
-        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
-        long lsb = id.getLeastSignificantBits();
-        int nodeFirstOctet = (int) ((lsb >>> 40) & 0xFF);
-        assertEquals(1, nodeFirstOctet & 0x01);
-    }
-
-    @Test
-    void v6IsNonDeterministicWithinTheSameMillisecond() {
-        Set<UUID> results = IntStream.range(0, 100)
-                .mapToObj(i -> UuidGenerator.newV6(RFC_TEST_VECTOR_MS))
-                .collect(Collectors.toCollection(HashSet::new));
-        assertEquals(100, results.size());
-    }
-
-    @Test
-    void v6BatchReturnsCountUuidsSharingTheTimestamp() {
-        UUID[] ids = UuidGenerator.newV6Batch(10, RFC_TEST_VECTOR_MS);
-        assertEquals(10, ids.length);
-        for (UUID id : ids) {
-            assertEquals(6, id.version());
-            assertEquals(Instant.ofEpochMilli(RFC_TEST_VECTOR_MS), UuidGenerator.v6Timestamp(id));
-        }
-    }
-
-    @Test
-    void v6BatchProducesPairwiseDistinctUuids() {
-        UUID[] ids = UuidGenerator.newV6Batch(100, RFC_TEST_VECTOR_MS);
-        assertEquals(100, Set.of(ids).size());
-    }
-
-    @Test
-    void v6BatchCountZeroReturnsEmptyArray() {
-        assertEquals(0, UuidGenerator.newV6Batch(0, RFC_TEST_VECTOR_MS).length);
-    }
-
-    @Test
-    void v6BatchOverflowTimestampThrows() {
-        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6Batch(1, Long.MAX_VALUE));
-    }
 
     @Test
     void nilIsAllZeroBits() {
@@ -191,13 +138,6 @@ class UuidGeneratorTest {
     }
 
     @Test
-    void newV6FromInstantMatchesNewV6FromTheEquivalentMillis() {
-        Instant instant = Instant.ofEpochMilli(RFC_TEST_VECTOR_MS);
-        UUID byInstant = UuidGenerator.newV6(instant);
-        assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v6UnixMillis(byInstant));
-    }
-
-    @Test
     void newV7FromInstantMatchesNewV7FromTheEquivalentMillis() {
         Instant instant = Instant.ofEpochMilli(RFC_TEST_VECTOR_MS);
         UUID byInstant = UuidGenerator.newV7(instant);
@@ -211,10 +151,12 @@ class UuidGeneratorTest {
                 .isPresent());
     }
 
+    // Only version 7 timestamps are read: RFC 9562 A.5's version 6 has none.
     @Test
-    void getTimestampMatchesV6Timestamp() {
-        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
-        assertEquals(Optional.of(UuidGenerator.v6Timestamp(id)), UuidGenerator.getTimestamp(id));
+    void getTimestampReturnsEmptyForAV6() {
+        UUID v6 = UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+        assertEquals(6, v6.version());
+        assertEquals(Optional.empty(), UuidGenerator.getTimestamp(v6));
     }
 
     @Test
@@ -268,11 +210,13 @@ class UuidGeneratorTest {
         assertEquals(id, UuidGenerator.v7FromSqlOrder(sqlOrdered));
     }
 
+    // The SQL layout is an RFC 9562 version 8: the 8 at octet 7's top nibble and the variant at
+    // octet 8's top two bits, where SQL Server's mixed-endian text form shows them.
     @Test
-    void v7ToSqlOrderPreservesVersionAndVariantAtOctets7And8() {
+    void v7ToSqlOrderWritesVersion8AndTheVariantAtOctets7And8() {
         UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(UuidGenerator.newV7(RFC_TEST_VECTOR_MS));
         byte[] bytes = RfcBytes.toRfcBytes(sqlOrdered);
-        assertEquals(0x70, bytes[7] & 0xF0);
+        assertEquals(0x80, bytes[7] & 0xF0);
         assertEquals((byte) 0x80, (byte) (bytes[8] & 0xC0));
     }
 
@@ -316,44 +260,65 @@ class UuidGeneratorTest {
         }
     }
 
+    // ---- SQL-order refusals ------------------------------------------------------------
+
+    private static final String WRONG_VERSION = "the value is not a UUID of the version this conversion takes";
+
+    private static void assertRefused(String expected, Executable call) {
+        assertEquals(
+                expected, assertThrows(IllegalArgumentException.class, call).getMessage());
+    }
+
+    // The layout holds all 122 of a v7's free bits, so every timestamp newV7 takes converts,
+    // up to the 48-bit field's last millisecond, and comes back exactly.
     @Test
-    void v6ToSqlOrderRoundTripsThroughV6FromSqlOrder() {
-        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
-        UUID sqlOrdered = UuidGenerator.v6ToSqlOrder(id);
-        assertNotEquals(id, sqlOrdered);
-        assertEquals(id, UuidGenerator.v6FromSqlOrder(sqlOrdered));
+    void v7ToSqlOrderTakesEveryTimestamp() {
+        for (long ms : new long[] {0L, RFC_TEST_VECTOR_MS, 1L << 47, 0x0000_FFFF_FFFF_FFFFL}) {
+            UUID id = UuidGenerator.newV7(ms);
+            UUID sql = UuidGenerator.v7ToSqlOrder(id);
+            assertEquals(7, UuidGenerator.version(sql, UuidLayout.SQL_SERVER), "ms " + ms);
+            assertEquals(ms, UuidGenerator.v7UnixMillis(sql, UuidLayout.SQL_SERVER), "ms " + ms);
+            assertEquals(id, UuidGenerator.v7FromSqlOrder(sql), "ms " + ms);
+        }
     }
 
     @Test
-    void v6ToSqlOrderPreservesVersionAndVariant() {
-        // Different offsets than v7's sql order — see v6ToSqlOrder's doc comment for why.
-        UUID sqlOrdered = UuidGenerator.v6ToSqlOrder(UuidGenerator.newV6(RFC_TEST_VECTOR_MS));
-        byte[] bytes = RfcBytes.toRfcBytes(sqlOrdered);
-        assertEquals(0x60, bytes[8] & 0xF0);
-        assertEquals((byte) 0x80, (byte) (bytes[6] & 0xC0));
+    void theConversionsRefuseTheWrongVersion() {
+        // RFC 9562 A.5's v6, from another generator: never converted, in either direction.
+        UUID v6 = UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+        UUID v4 = UuidGenerator.newV4();
+        assertRefused(WRONG_VERSION, () -> UuidGenerator.v7ToSqlOrder(v6));
+        assertRefused(WRONG_VERSION, () -> UuidGenerator.v7ToSqlOrder(v4));
+        assertRefused(WRONG_VERSION, () -> UuidGenerator.v7FromSqlOrder(v6));
+        // RFC-ordered values: a fixed vector (RFC 9562 A.6), since a random one carries the
+        // SQL layout's 8 at octet 7 one time in 16.
+        assertRefused(
+                WRONG_VERSION,
+                () -> UuidGenerator.v7FromSqlOrder(UUID.fromString("017f22e2-79b0-7cc3-98c4-dc0c0c07398f")));
+        // And its SQL form, fixed for the same reason, refused going in again.
+        assertRefused(
+                WRONG_VERSION,
+                () -> UuidGenerator.v7ToSqlOrder(UUID.fromString("0c07398f-dc0c-8c84-b30d-017f22e279b0")));
+        // A converted v7 with its 8 put back to the 7 an earlier form of this layout kept is
+        // no longer read as SQL order.
+        UUID v7Sql = UuidGenerator.v7ToSqlOrder(UuidGenerator.newV7(RFC_TEST_VECTOR_MS));
+        UUID sevenInsteadOfEight =
+                new UUID((v7Sql.getMostSignificantBits() & ~0xF0L) | 0x70L, v7Sql.getLeastSignificantBits());
+        assertEquals(0, UuidGenerator.version(sevenInsteadOfEight, UuidLayout.SQL_SERVER));
+        assertRefused(WRONG_VERSION, () -> UuidGenerator.v7FromSqlOrder(sevenInsteadOfEight));
+        // Not checked the other way: a SQL-ordered value's octet 6 holds key bits, which read
+        // as an RFC 7 one time in 16, and then converting it "again" is not refused —
+        // the order a value is in is the caller's to track.
     }
 
     @Test
-    void v6ToSqlOrderSortsByCreationOrderUnderSqlGuidComparisonForDistinctTimestamps() {
-        // Unlike v7, v6 has no counter — two UUIDs at the same millisecond aren't guaranteed
-        // to sort in creation order even in plain RFC order, so this only exercises strictly
-        // increasing timestamps, where the timestamp alone determines order with no tie to break.
-        List<UUID> ids = new ArrayList<>();
-        for (long i = 0; i < 300; i++) {
-            ids.add(UuidGenerator.newV6(RFC_TEST_VECTOR_MS + i));
-        }
-
-        List<byte[]> sqlOrdered = ids.stream()
-                .map(UuidGenerator::v6ToSqlOrder)
-                .map(RfcBytes::toRfcBytes)
-                .collect(Collectors.toList());
-        List<byte[]> sorted = new ArrayList<>(sqlOrdered);
-        sorted.sort(UuidGeneratorTest::sqlGuidCompare);
-
-        assertEquals(sqlOrdered.size(), sorted.size());
-        for (int i = 0; i < sqlOrdered.size(); i++) {
-            assertArrayEquals(sqlOrdered.get(i), sorted.get(i));
-        }
+    void aRefusedRawByteConversionLeavesTheBytesUnchanged() {
+        // RFC 9562 A.5's v6: fixed, so its octet 7 never happens to carry the SQL layout's 8.
+        byte[] v6 = RfcBytes.toRfcBytes(UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846"));
+        byte[] original = v6.clone();
+        assertRefused(WRONG_VERSION, () -> UuidGenerator.v7ToSqlOrder(v6));
+        assertRefused(WRONG_VERSION, () -> UuidGenerator.v7FromSqlOrder(v6));
+        assertArrayEquals(original, v6);
     }
 
     // ---- Destination-buffer fills ----------------------------------------------------
@@ -378,15 +343,6 @@ class UuidGeneratorTest {
     }
 
     @Test
-    void fillV6FillsTheCallersArray() {
-        UUID[] dst = new UUID[32];
-        UuidGenerator.fillV6(dst, RFC_TEST_VECTOR_MS);
-        for (int i = 0; i < dst.length; i++) {
-            assertEquals(6, dst[i].version(), "item " + i + " version");
-        }
-    }
-
-    @Test
     void fillV7BytesMatchesTheArrayForm() {
         int count = 16;
         byte[] raw = new byte[count * 16];
@@ -400,9 +356,39 @@ class UuidGeneratorTest {
     }
 
     @Test
+    void fillV7SurvivesAnotherThreadWritingTheSameArray() throws Exception {
+        // A race on the array's contents is the caller's to have, and must cost them the bytes,
+        // not the process. The FFM backend hands the core the caller's own array (critical
+        // linking), and Windows' ProcessPrng fail-fasts the process when another thread writes
+        // the memory it is filling, which the core's batch fill used to hand it directly.
+        byte[] raw = new byte[16 * 20_000];
+        AtomicBoolean done = new AtomicBoolean();
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<?>> running = new ArrayList<>();
+            for (int w = 0; w < 2; w++) {
+                running.add(writers.submit(() -> {
+                    while (!done.get()) {
+                        Arrays.fill(raw, (byte) 0);
+                    }
+                }));
+            }
+            for (int i = 0; i < 100; i++) {
+                UuidGenerator.fillV7(raw, RFC_TEST_VECTOR_MS);
+            }
+            done.set(true);
+            for (Future<?> f : running) {
+                f.get();
+            }
+        } finally {
+            done.set(true);
+            writers.shutdownNow();
+        }
+    }
+
+    @Test
     void fillBytesRejectsAPartialUuid() {
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(new byte[17], RFC_TEST_VECTOR_MS));
-        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV6(new byte[15], RFC_TEST_VECTOR_MS));
     }
 
     @Test
@@ -423,15 +409,6 @@ class UuidGeneratorTest {
     }
 
     @Test
-    void v6ToSqlOrderBytesAgreesWithTheUuidForm() {
-        UUID id = UuidGenerator.newV6(RFC_TEST_VECTOR_MS);
-        byte[] want = RfcBytes.toRfcBytes(UuidGenerator.v6ToSqlOrder(id));
-        byte[] got = RfcBytes.toRfcBytes(id);
-        UuidGenerator.v6ToSqlOrder(got);
-        assertArrayEquals(want, got);
-    }
-
-    @Test
     void sqlOrderBytesRoundTrips() {
         UUID id = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
         byte[] original = RfcBytes.toRfcBytes(id);
@@ -445,7 +422,7 @@ class UuidGeneratorTest {
     @Test
     void sqlOrderBytesRejectsAWrongSizedBuffer() {
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v7ToSqlOrder(new byte[15]));
-        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v6FromSqlOrder(new byte[17]));
+        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.v7FromSqlOrder(new byte[17]));
     }
 
     // ---- The v5 name, in every form it can arrive -------------------------------------
@@ -473,11 +450,6 @@ class UuidGeneratorTest {
     // ---- Batch sizes and timestamps the core cannot be handed ---------------------------
 
     @Test
-    void v6OverflowTimestampThrows() {
-        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6(Long.MAX_VALUE));
-    }
-
-    @Test
     void batchCountOutsideWhatOneBatchCanCarryIsRejected() {
         // count * 16 is the size of the buffer the core fills. Negative counts, and counts
         // whose product no longer fits an int — 1 << 28 wraps it to exactly zero — have to
@@ -491,12 +463,7 @@ class UuidGeneratorTest {
                     IllegalArgumentException.class,
                     () -> UuidGenerator.newV7Batch(count, RFC_TEST_VECTOR_MS),
                     "v7 count " + count);
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> UuidGenerator.newV6Batch(count, RFC_TEST_VECTOR_MS),
-                    "v6 count " + count);
             assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV7Batch(count), "v7 count " + count);
-            assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV6Batch(count), "v6 count " + count);
             assertThrows(
                     IllegalArgumentException.class, () -> UuidGenerator.requireBatchCount(count), "count " + count);
         }
@@ -512,25 +479,11 @@ class UuidGeneratorTest {
         long past48Bits = 0x0001_0000_0000_0000L;
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(new UUID[4], past48Bits));
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(new UUID[4], -1L));
-        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV6(new UUID[4], Long.MAX_VALUE));
 
         // The raw-byte forms too, and a refused fill leaves the caller's buffer alone.
         byte[] raw = new byte[64];
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(raw, past48Bits));
-        assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV6(raw, Long.MAX_VALUE));
         assertArrayEquals(new byte[64], raw);
-    }
-
-    @Test
-    void fillV6BytesWritesWholeRfcOrderedUuids() {
-        int count = 16;
-        byte[] raw = new byte[count * 16];
-        UuidGenerator.fillV6(raw, RFC_TEST_VECTOR_MS);
-        for (int i = 0; i < count; i++) {
-            UUID id = RfcBytes.fromRfcBytes(raw, i * 16);
-            assertEquals(6, id.version(), "item " + i + " version");
-            assertEquals(RFC_TEST_VECTOR_MS, UuidGenerator.v6UnixMillis(id), "item " + i + " timestamp");
-        }
     }
 
     // ---- The core itself ----------------------------------------------------------------
@@ -575,8 +528,6 @@ class UuidGeneratorTest {
                         UUID v7 = UuidGenerator.newV7(mine);
                         assertEquals(mine, UuidGenerator.v7UnixMillis(v7));
                         assertEquals(v7, UuidGenerator.v7FromSqlOrder(UuidGenerator.v7ToSqlOrder(v7)));
-                        UUID v6 = UuidGenerator.newV6(mine);
-                        assertEquals(mine, UuidGenerator.v6UnixMillis(v6));
                         String name = "thread-" + id + "-item-" + i;
                         assertEquals(
                                 UuidGenerator.newV5(UuidGenerator.Namespaces.URL, name),

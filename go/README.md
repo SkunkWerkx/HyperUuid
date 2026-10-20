@@ -6,7 +6,8 @@
 
 **The same [`google/uuid.UUID`](https://pkg.go.dev/github.com/google/uuid) type your code already uses — minted by a shared Rust core instead of Go's own generator, so a Go service and a Python/Ruby/C#/whatever-else service agree byte-for-byte on every ID they produce.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation,
+RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
+version 8 SQL Server order for v7,
 calling directly into the native `hyperuuid` core — **linked into your binary through cgo**
 (`backend_static.go`). The core is a ~20 KB static library on the link line: nothing is
 embedded, nothing is extracted, nothing is `dlopen`ed, nothing can fail to load, and the
@@ -15,19 +16,19 @@ a C compiler at build time is the one requirement (see [Requirements](#requireme
 
 ```go
 import (
-	"github.com/google/uuid"
+	"time"
 
 	hyperuuid "github.com/SkunkWerkx/HyperUuid/go"
 )
 
 id, err := hyperuuid.NewV4()
 id, err = hyperuuid.NewV5String(hyperuuid.NamespaceDNS, "example.com")
-id, err = hyperuuid.NewV6()
 id, err = hyperuuid.NewV7()
+unixMillis := uint64(time.Now().UnixMilli())
 batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
-sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // byte order SQL Server's uniqueidentifier needs to sort by creation order
+sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // a version 8 SQL Server's uniqueidentifier sorts by creation order
 
-created, err := hyperuuid.GetTimestamp(id) // version-agnostic: ErrNotTimeBased unless id is an RFC 9562 v6/v7
+created, err := hyperuuid.GetTimestamp(id) // ErrNotTimeBased unless id is an RFC 9562 v7
 ```
 
 ## Install
@@ -120,24 +121,26 @@ writes, so there's no byte-swapping in this binding. `NamespaceDNS`/`NamespaceUR
 `NamespaceOID`/`NamespaceX500` are re-exports of `google/uuid`'s own (already
 RFC 9562 §6.6-identical) namespace constants, kept here for API-shape symmetry with
 the other bindings' `Namespaces.*`; `Nil`/`Max` (RFC 9562 §5.9/§5.10) are the same
-kind of re-export. `V6Timestamp`/`V7Timestamp` recover the embedded UTC `time.Time`
-from a version 6 or 7 UUID respectively. `NewV6BatchAt(count, unixMillis)`/
-`NewV7BatchAt(count, unixMillis)` generate `count` UUIDs sharing one timestamp
+kind of re-export. `V7Timestamp` recovers the embedded UTC `time.Time` from a version 7
+UUID. `NewV7BatchAt(count, unixMillis)` generates `count` UUIDs sharing one timestamp
 capture and one native call, instead of `count` of each. `V7ToSqlOrder`/`V7FromSqlOrder`
-convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier`
-needs on the wire to sort by creation order — computed once in the native Rust core
-(and verified there, and independently against the real `System.Data.SqlTypes.SqlGuid`
-comparator in the C# binding's test suite) rather than reimplemented per binding.
-`V6ToSqlOrder`/`V6FromSqlOrder` do the same for version 6, though same-millisecond
-v6 UUIDs aren't guaranteed to sort correctly afterward — v6 has no counter, so
-`clock_seq`/`node` (not the timestamp) decide ties, the same pre-existing RFC 9562
-v6 limitation plain order already has. `NewV6AtTime`/`NewV7AtTime` accept a `time.Time`
-directly in place of `NewV6At`/`NewV7At`'s raw millisecond count. `GetTimestamp` is
-the version-agnostic counterpart to `V6Timestamp`/`V7Timestamp` — one core call checks the
+convert a version 7 UUID to and from SQL Server order: an RFC 9562 version 8 (§5.8) whose
+8 and RFC variant sit at octets 7 and 8, where SQL Server's text form and a .NET `Guid` show
+them, with the other 122 bits filled in the order SQL Server's `uniqueidentifier` compares,
+so it sorts by creation order. It is computed once in the native Rust core (and verified
+there, and independently against the real `System.Data.SqlTypes.SqlGuid` comparator in the
+C# binding's test suite) rather than reimplemented per binding. Every version 7 converts,
+whatever its timestamp. The two are exact inverses, and refuse what they can't convert with
+`ErrWrongVersion`, returning the zero UUID: to SQL order, anything that isn't an RFC 9562
+version 7; from SQL order, anything not converted from one. `V7ToSqlOrder` reads its input as
+RFC order, so a value already in SQL order is converted a second time about one time in 16,
+when it happens to carry a 7 and the RFC variant there; keep track of which order a value is
+in. `NewV7AtTime` accepts a `time.Time` directly in place of `NewV7At`'s raw millisecond
+count. `GetTimestamp` is the checked counterpart to `V7Timestamp` — one core call checks the
 variant and version and reads the timestamp, and `GetTimestamp` returns `ErrNotTimeBased`
-for anything that isn't an RFC 9562 version 6 or 7 UUID, instead of assuming the caller
-already knows. The variant is checked too: a 6 or 7 nibble under another variant has no
-version, and so no timestamp.
+for anything that isn't an RFC 9562 version 7 UUID, instead of assuming the caller already
+knows. The variant is checked too: a 7 nibble under another variant has no version, and so
+no timestamp. A version 6 or version 1 UUID from another generator has none here either.
 
 `NewV5` is the raw-byte form `NewV5String` converts into: a name is bytes, not text, and
 nothing requires it to be valid UTF-8. An empty or nil name is valid and hashes the
@@ -151,36 +154,53 @@ answer as `id.Version()` but read by the core. `Variant(id)` returns a `UuidVari
 (includes `Max`), never `VariantUnspecified`. `IsRfc(id, version)` asks both at once — the
 RFC variant and that version nibble, in one native call — and is the guard to run before
 trusting a value's version-specific fields. A version outside 0–15 is simply false. All
-three read RFC 9562 order. `Variant` has no layout form at all: in SQL Server order the
-variant sits at a different byte for each version, so don't feed it a SQL-ordered value or a
-`uniqueidentifier` read-back; `IsRfcIn` with `LayoutSqlServer` is the check for those, and
-looks for the variant where that version puts it.
+three read RFC 9562 order. `Variant` has no layout form at all: `IsRfcIn` with
+`LayoutSqlServer` is the check for a SQL-ordered value or a `uniqueidentifier` read-back.
 
 A SQL-ordered value can be inspected where it is, without converting it back first. The
-`In` forms take a `UuidLayout`, `LayoutRfc9562` or `LayoutSqlServer` (the order
-`V6ToSqlOrder`/`V7ToSqlOrder` return, and what a `uniqueidentifier` column holds):
+`In` forms take a `UuidLayout`, `LayoutRfc9562` or `LayoutSqlServer` (the version 8 layout
+`V7ToSqlOrder` returns, and what a `uniqueidentifier` column holds):
 
 ```go
 sql, _ := hyperuuid.V7ToSqlOrder(id)
 v, err := hyperuuid.VersionIn(sql, hyperuuid.LayoutSqlServer)          // 7
 ok, err := hyperuuid.IsRfcIn(sql, 7, hyperuuid.LayoutSqlServer)        // true
 created, err := hyperuuid.GetTimestampIn(sql, hyperuuid.LayoutSqlServer)
-millis, err := hyperuuid.V7UnixMillisIn(sql, hyperuuid.LayoutSqlServer) // also V6UnixMillisIn, V6/V7TimestampIn
+millis, err := hyperuuid.V7UnixMillisIn(sql, hyperuuid.LayoutSqlServer) // also V7TimestampIn
 ```
 
-In `LayoutSqlServer` the only versions are 6 and 7: `VersionIn` answers 6 or 7 when the
-bytes form a SQL-ordered v6 or v7, and 0 when they don't, and never confuses the two (the
-core checks each version's variant bits where that version puts them). The layout itself
-is yours to track: sixteen bytes carry no mark of their order, and an RFC-ordered value can
-happen to form a valid SQL-ordered v7 — about one random v4 in 16 does. Carry it with the
+In `LayoutSqlServer` a version is the one the value was converted from: `VersionIn` checks
+for the layout's 8 and variant and answers 7, and 0 for bytes without them. `IsRfcIn` asks the same question for one version. The layout itself is
+yours to track: sixteen bytes carry no mark of their order, and RFC-ordered bytes can happen
+to carry the 8 and the variant there — about one random v4 in 16 does. Carry it with the
 value, as a column type already does, and pass it at every call site that can see a
 SQL-ordered value. The forms without a layout read RFC order, so `IsRfc(sqlOrdered, 7)` reads
 the wrong bytes; there is deliberately no layout-agnostic check. `GetTimestampIn`
-returns `ErrNotTimeBased` for anything that isn't an RFC 9562 v6/v7 in the given layout. The zero
+returns `ErrNotTimeBased` for anything that isn't an RFC 9562 v7 in the given layout. The zero
 value, `LayoutUnspecified`, and any undefined layout return `ErrInvalidLayout`; a layout is
 never guessed. `VersionBytes`, `VariantBytes` and `IsRfcBytes` take 16 raw bytes already in
 the given layout's order (`VariantBytes` is RFC order only). Every one of these is
 allocation-free.
+
+### Binding to SQL Server
+
+Bind `V7ToSqlOrder`'s result as a `[]byte`. go-mssqldb 1.11 sends an `mssql.UniqueIdentifier`,
+and a string, in SQL Server's mixed-endian text order by default, which stores the first three
+groups byte-reversed and loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). A `[]byte` goes in as
+binary and lands byte for byte, and scanning the column into a `[]byte` reads it back
+untouched:
+
+```go
+sqlOrdered, err := hyperuuid.V7ToSqlOrder(id)
+_, err = db.Exec("INSERT INTO orders (id) VALUES (@p1)", sqlOrdered[:])
+
+var raw []byte
+err = db.QueryRow("SELECT id FROM orders").Scan(&raw)
+stored, err := uuid.FromBytes(raw) // ready for LayoutSqlServer
+```
+
+With `guid conversion=true` in the connection string, `mssql.UniqueIdentifier` passes its bytes
+through unchanged in both directions too, though `[]byte` then reads back reversed.
 
 ### Errors
 
@@ -190,13 +210,14 @@ sentinels, all matched with `errors.Is`:
 
 | Error | Returned when |
 | --- | --- |
-| `ErrRandomSource` | the core's random source failed — `NewV4`, the v6 and v7 generators, and their batch and Fill forms. `NewV5` draws no entropy and never returns it |
-| `ErrTimestampOutOfRange` | `unixMillis` doesn't fit the version's own timestamp field — every v6 and v7 generator. Version 7 holds 48 bits of Unix milliseconds; version 6's 60-bit count of 100 ns ticks since 1582-10-15 runs out earlier, in the year 5236 |
-| `ErrNotTimeBased` | `GetTimestamp`/`GetTimestampIn` was given a UUID that isn't an RFC 9562 version 6 or 7 (in that layout): another version, or another variant |
-| `ErrNegativeCount` | `NewV6Batch`/`NewV7Batch` (and their `At` forms) were given a negative count. A count of 0 returns a nil slice |
+| `ErrRandomSource` | the core's random source failed — `NewV4`, the v7 generators, and their batch and Fill forms. `NewV5` draws no entropy and never returns it |
+| `ErrTimestampOutOfRange` | `unixMillis` doesn't fit version 7's 48 bits of Unix milliseconds — every v7 generator |
+| `ErrWrongVersion` | a SQL-order conversion was given a value it doesn't take: to SQL order, anything but an RFC 9562 version 7; from SQL order, anything not converted from one |
+| `ErrNotTimeBased` | `GetTimestamp`/`GetTimestampIn` was given a UUID that isn't an RFC 9562 version 7 (in that layout): another version, version 6 included, or another variant |
+| `ErrNegativeCount` | `NewV7Batch`/`NewV7BatchAt` was given a negative count. A count of 0 returns a nil slice |
 | `ErrBatchTooLarge` | a v7 batch or fill asked for more than `MaxV7Batch` UUIDs, checked before anything is allocated or written |
-| `ErrBatchUnaddressable` | the core can't address `count*16` bytes on this platform — reachable only on a 32-bit target |
-| `ErrBufferNotWholeUUIDs` | a `FillV6Bytes`/`FillV7Bytes` destination isn't a multiple of 16 bytes long |
+| `ErrBatchUnaddressable` | the core can't address `count*16` bytes on this platform. No batch reaches it: `MaxV7Batch` UUIDs are 1 GiB, which even a 32-bit target addresses |
+| `ErrBufferNotWholeUUIDs` | a `FillV7Bytes`/`FillV7BytesAt` destination isn't a multiple of 16 bytes long |
 | `ErrNotOneUUID` | a raw-byte SQL-order transform, or `VersionBytes`/`VariantBytes`/`IsRfcBytes`, was given a buffer that isn't exactly 16 bytes |
 | `ErrInvalidLayout` | a function that takes a `UuidLayout` was given `LayoutUnspecified` or an undefined value |
 
@@ -205,7 +226,7 @@ keeps compiling.
 
 ## Destination-buffer fills
 
-`FillV6`/`FillV7` (and the `At` variants) write into a slice you already own instead of allocating a fresh one per call:
+`FillV7`/`FillV7At` write into a slice you already own instead of allocating a fresh one per call:
 
 ```go
 dst := make([]uuid.UUID, 1000)
@@ -226,19 +247,19 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 | `FillV7At` into an existing slice | 3,763 | **0** | **0** |
 | `FillV7BytesAt` into an existing buffer | 3,661 | **0** | **0** |
 
-`FillV6Bytes`/`FillV7Bytes` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 3% of each other, since neither converts; the byte form exists for convenience, not speed.
+`FillV7Bytes`/`FillV7BytesAt` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 3% of each other, since neither converts; the byte form exists for convenience, not speed.
 
-`NewV6BatchAt`/`NewV7BatchAt` delegate to the fills, so the array-returning API is a single allocation with no intermediate copy.
+`NewV7Batch`/`NewV7BatchAt` delegate to the fills, so the array-returning API is a single allocation with no intermediate copy.
 
 ### Batch size and order
 
-One v7 batch or fill takes at most `MaxV7Batch` UUIDs — 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond — and every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it returns `ErrBatchTooLarge` before anything is allocated or written. Version 6 has no counter and no such limit.
+One v7 batch or fill takes at most `MaxV7Batch` UUIDs — 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond — and every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it returns `ErrBatchTooLarge` before anything is allocated or written.
 
 The roll-forward orders one batch, not the stream. The next batch or `NewV7At` call in the same real millisecond starts its counter just past the wrap and carries the supplied timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond later; two single calls either side of the wrap in one millisecond sort in reverse the same way. It happens at most once per `MaxV7Batch` UUIDs the process mints.
 
 ### Raw-byte SQL-order transforms
 
-`V6/V7ToSqlOrderBytes` and `V6/V7FromSqlOrderBytes` apply the same native permutation as `V7ToSqlOrder` in place on a caller's 16-byte slice. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo makes against the one native implementation.
+`V7ToSqlOrderBytes` and `V7FromSqlOrderBytes` apply the same native conversions as `V7ToSqlOrder`/`V7FromSqlOrder`, with the same refusals, in place on a caller's 16-byte slice; a refused buffer is left as it was. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same check every binding in this repo makes against the one native implementation.
 
 ## The native library: `Available`, `LoadError`, `NativeVersion`
 
@@ -376,32 +397,22 @@ The `hyperuuid_local` build tag is for working on the core in a checkout of this
 from the checkout, under `rust/target/local-core/`, in place of the committed one. A module
 fetched with `go get` has no such archive, so the tag fails at link time there.
 
-## Why not `google/uuid`'s own `NewV6`/`NewV7`?
+## Why not `google/uuid`'s own `NewV7`?
 
 This binding depends on `google/uuid` for the `uuid.UUID` type itself — it's already
-in your import graph, and it already ships working `NewV6()`/`NewV7()` functions of
-its own. Two real, checked-against-its-actual-source reasons to reach for this
-binding's generators instead:
-
-1. **Node ID privacy.** `google/uuid`'s `NewV6()` defaults to a real network
-   interface's MAC address for the node ID field when one is available (see its own
-   [`version6.go`](https://github.com/google/uuid/blob/master/version6.go) —
-   `setNodeInterface`), which is exactly the hardware-identity leak RFC 9562 §6.9
-   recommends against. `hyperuuid.NewV6`/`NewV6BatchAt` always use a random node ID
-   with the multicast bit set, the same way this project's v6 works in every other
-   binding.
-2. **Explicit, testable timestamps.** `google/uuid`'s `NewV6`/`NewV7` always read the
-   system clock internally with no way to inject a specific instant. Every time-based
-   generator here — `NewV6At`, `NewV7At`, and both batch variants — takes
-   `unixMillis` as an explicit parameter, so tests can assert against a fixed RFC
-   test vector instead of the wall clock.
+in your import graph, and it already ships a working `NewV7()` of its own. The
+checked-against-its-actual-source reason to reach for this binding's generator instead is
+**explicit, testable timestamps.** `google/uuid`'s `NewV7` always reads the system clock
+internally with no way to inject a specific instant. Every time-based generator here —
+`NewV7At`, `NewV7BatchAt` and the `FillV7At` family — takes `unixMillis` as an explicit
+parameter, so tests can assert against a fixed RFC test vector instead of the wall clock.
 
 (`google/uuid`'s own `NewV7()` *does* implement a real monotonic sub-millisecond
 sequence — worth knowing if you're comparing the two, since a naively-random v7
 generator would not.) Both libraries produce spec-valid, mutually interoperable
-UUIDs; picking one over the other for v6/v7 generation is about these two
-properties and, if your other services are in a different language, using the one
-engine that's byte-for-byte identical everywhere.
+UUIDs; picking one over the other for v7 generation is about that property and, if your
+other services are in a different language, using the one engine that's byte-for-byte
+identical everywhere.
 
 ## Benchmarks
 
@@ -413,7 +424,6 @@ session, median of three runs:
 | --- | ---: |
 | `NewV4` | 64 ns, 0 allocs |
 | `NewV5String` | 98 ns, 1 alloc |
-| `NewV6At` | 58 ns, 0 allocs |
 | `NewV7At` | 69 ns, 0 allocs |
 
 No call allocates (the one `NewV5String` keeps is Go's own `[]byte(name)` conversion).
@@ -430,7 +440,6 @@ crossings is the whole win:
 
 | Call | Time, allocations |
 | --- | ---: |
-| `NewV6BatchAt(1000, ...)` | 7.8 µs, 1 alloc |
 | `NewV7BatchAt(1000, ...)` | 7.0 µs, 1 alloc |
 
 against 69.8 µs for 1000 individual `NewV7At` calls (see
@@ -445,16 +454,15 @@ genuine head-to-head, not a strawman. Same machine, same run:
 
 | Call | hyperuuid | `google/uuid`'s `id.Time()` |
 | --- | ---: | ---: |
-| v6 | 30 ns, 0 allocs | 1.3 ns, 0 allocs |
 | v7 | 30 ns, 0 allocs | 1.8 ns, 0 allocs |
 
 `google/uuid`'s `Time()` wins outright, by roughly 20x — it's pure Go bit-shifting over
 bytes already in the process, with no FFI boundary to cross.
-`google/uuid.UUID.Time()` works on *any* RFC-conformant v6/v7 value regardless of
+`google/uuid.UUID.Time()` works on *any* RFC-conformant v7 value regardless of
 where it came from — it's pure bit math, not tied to how the value was minted — so
 there's no provenance argument for reaching past it here. Honestly: in Go
-specifically, prefer `id.Time()` over this binding's `V6Timestamp`/`V7Timestamp`
-unconditionally. They exist for API symmetry with every other
+specifically, prefer `id.Time()` over this binding's `V7Timestamp` unconditionally. It and
+`GetTimestamp` exist for API symmetry with every other
 binding in this repo, not because they're the better choice in Go.
 
 ## Verifying build provenance

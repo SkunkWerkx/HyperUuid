@@ -38,16 +38,15 @@ RSpec.describe "native backend" do
     expect(fiddle_eval('HyperUuid.new_v5(HyperUuid::Namespaces::URL, "").to_s')).to eq(native)
   end
 
-  it "agrees with the Fiddle backend on v6 and v7 timestamp extraction" do
-    [HyperUuid.new_v6(1_645_557_742_000), HyperUuid.new_v7(1_645_557_742_000)].each do |id|
-      expect(id.timestamp.to_i).to eq(1_645_557_742)
-      fiddle = fiddle_eval("HyperUuid::Uuid.parse(#{id.to_s.inspect}).timestamp.to_r.to_s")
-      expect(Rational(fiddle)).to eq(id.timestamp.to_r)
-    end
+  it "agrees with the Fiddle backend on v7 timestamp extraction" do
+    id = HyperUuid.new_v7(1_645_557_742_000)
+    expect(id.timestamp.to_i).to eq(1_645_557_742)
+    fiddle = fiddle_eval("HyperUuid::Uuid.parse(#{id.to_s.inspect}).timestamp.to_r.to_s")
+    expect(Rational(fiddle)).to eq(id.timestamp.to_r)
   end
 
-  it "agrees with the Fiddle backend on the v6 and v7 SQL-order permutations" do
-    [HyperUuid.new_v6(1_645_557_742_000), HyperUuid.new_v7(1_645_557_742_000)].each do |id|
+  it "agrees with the Fiddle backend on the v7 SQL-order permutations" do
+    [HyperUuid.new_v7(1_645_557_742_000), HyperUuid.new_v7((1 << 48) - 1)].each do |id|
       native = id.to_sql_order.to_s
       expect(fiddle_eval("HyperUuid::Uuid.parse(#{id.to_s.inspect}).to_sql_order.to_s")).to eq(native)
       expect(fiddle_eval("HyperUuid::Uuid.parse(#{native.inspect}).from_sql_order.to_s")).to eq(id.to_s)
@@ -61,9 +60,10 @@ RSpec.describe "native backend" do
       HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "x"),
       HyperUuid::Uuid.parse("919108f7-52d1-4320-d9ac-f847db4148a8"), # Microsoft variant
       HyperUuid::Uuid.parse("017f22e2-79b0-7cc3-68c4-dc0c0c07398f"), # a v7 nibble, NCS variant
-      *Array.new(16) { HyperUuid.new_v6(1_645_557_742_000) }, HyperUuid.new_v7(1_645_557_742_000)
+      HyperUuid::Uuid.parse("1ec9414c-232a-6b00-b3c8-9f6bdeced846"), # a v6, RFC 9562 A.5
+      *Array.new(16) { HyperUuid.new_v7(1_645_557_742_000) }
     ]
-    values += values.select { |id| [6, 7].include?(id.version) }.map(&:to_sql_order)
+    values += values.select { |id| id.rfc?(7) }.map(&:to_sql_order)
     # One source for both sides: evaluated here, and handed to the Fiddle subprocess as text.
     probe_source = <<~RUBY.tr("\n", " ")
       lambda { |id| [
@@ -82,8 +82,8 @@ RSpec.describe "native backend" do
     expect(Marshal.load(fiddle_eval(script).unpack1("m0"))).to eq(native)
   end
 
-  it "agrees with the Fiddle backend on from_sql_order's v6/v7 detection" do
-    sql = Array.new(64) { [HyperUuid.new_v6(1_645_557_742_000), HyperUuid.new_v7].map(&:to_sql_order) }.flatten
+  it "agrees with the Fiddle backend on from_sql_order" do
+    sql = Array.new(64) { HyperUuid.new_v7.to_sql_order }
     native = sql.map { |id| id.from_sql_order.to_s }
     script = "#{sql.map(&:to_s).inspect}.map { |s| HyperUuid::Uuid.parse(s).from_sql_order.to_s }.join(',')"
     fiddle = fiddle_eval(script)
@@ -104,6 +104,28 @@ RSpec.describe "native backend" do
     end
   end
 
+  it "raises the same error classes and messages for every SQL-order refusal" do
+    rescued = "begin; %s; 'none'; rescue ArgumentError => e; \"\#{e.class}: \#{e.message}\"; end"
+    # Fixed vectors (RFC 9562 A.3's v4, A.5's v6, A.6's v7 and its SQL form), so the
+    # refusals happen every run: fresh values pass for the other order one time in 16.
+    %w[
+      919108f7-52d1-4320-9bac-f847db4148a8 1ec9414c-232a-6b00-b3c8-9f6bdeced846
+      017f22e2-79b0-7cc3-98c4-dc0c0c07398f 0c07398f-dc0c-8c84-b30d-017f22e279b0
+    ].map { |text| HyperUuid::Uuid.parse(text) }.each do |id|
+      %i[to_sql_order from_sql_order].each do |method|
+        source = "HyperUuid::Uuid.parse(#{id.to_s.inspect}).#{method}"
+        native =
+          begin
+            id.public_send(method)
+            "none"
+          rescue ArgumentError => e
+            "#{e.class}: #{e.message}"
+          end
+        expect(fiddle_eval(format(rescued, source))).to eq(native)
+      end
+    end
+  end
+
   it "agrees with the Fiddle backend on the core's version and availability" do
     expect(fiddle_eval("HyperUuid.native_version")).to eq(HyperUuid.native_version)
     expect(fiddle_eval("HyperUuid.available?")).to eq(HyperUuid.available?.to_s)
@@ -113,13 +135,10 @@ RSpec.describe "native backend" do
     # 2**60 crosses the ABI and is refused by the core, so the message comes from the
     # extension's own Rust text — which has to match what runtime.rb gives Fiddle.
     rescued = "begin; %s; rescue HyperUuid::TimestampOutOfRangeError => e; e.message; end"
-    v6 = HyperUuid::Runtime::V6_TIMESTAMP_OUT_OF_RANGE
     v7 = HyperUuid::Runtime::V7_TIMESTAMP_OUT_OF_RANGE
     [
       ["HyperUuid.new_v7(2**60)", -> { HyperUuid.new_v7(2**60) }, v7],
-      ["HyperUuid.new_v7_batch(2, 2**60)", -> { HyperUuid.new_v7_batch(2, 2**60) }, v7],
-      ["HyperUuid.new_v6(2**63)", -> { HyperUuid.new_v6(2**63) }, v6],
-      ["HyperUuid.new_v6_batch(2, 2**63)", -> { HyperUuid.new_v6_batch(2, 2**63) }, v6]
+      ["HyperUuid.new_v7_batch(2, 2**60)", -> { HyperUuid.new_v7_batch(2, 2**60) }, v7]
     ].each do |source, call, message|
       expect(&call).to raise_error(HyperUuid::TimestampOutOfRangeError, message)
       expect(fiddle_eval(format(rescued, source))).to eq(message)

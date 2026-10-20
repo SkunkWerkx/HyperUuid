@@ -27,18 +27,10 @@ do {
     let v5 = try UuidGenerator.newV5(namespace: Namespaces.dns, name: "www.example.com")
     check(v5.uuidString.lowercased() == "2ed6657d-e927-568b-95e1-2665a8aea6a2", "v5 known answer, got \(v5)")
 
-    // v6 and v7: an explicit timestamp reads back, the clock form is recent, a batch is
-    // whole, and the SQL Server byte order round-trips.
+    // v7: an explicit timestamp reads back, the clock form is recent, a batch is whole, and
+    // the SQL Server byte order round-trips.
     let millis: UInt64 = 1_700_000_000_000
     let now = UInt64(Date().timeIntervalSince1970 * 1000)
-
-    let v6 = try UuidGenerator.newV6(unixMillis: millis)
-    check(versionNibble(v6) == 6, "v6 version nibble")
-    check(try UuidGenerator.v6UnixMillis(v6) == millis, "v6 timestamp round-trip")
-    check(try UuidGenerator.v6UnixMillis(try UuidGenerator.newV6()) >= now - 5_000, "v6 at the current time")
-    let v6Batch = try UuidGenerator.newV6Batch(count: 64, unixMillis: millis)
-    check(v6Batch.count == 64 && Set(v6Batch).count == 64, "v6 batch of 64 distinct")
-    check(try UuidGenerator.v6FromSqlOrder(try UuidGenerator.v6ToSqlOrder(v6)) == v6, "v6 SQL order round-trip")
 
     let v7 = try UuidGenerator.newV7(unixMillis: millis)
     check(versionNibble(v7) == 7, "v7 version nibble")
@@ -48,16 +40,25 @@ do {
     check(v7Batch.count == 64 && Set(v7Batch).count == 64, "v7 batch of 64 distinct")
     check(v7Batch == v7Batch.sorted { $0.uuidString < $1.uuidString }, "v7 batch is in order")
     check(try UuidGenerator.v7FromSqlOrder(try UuidGenerator.v7ToSqlOrder(v7)) == v7, "v7 SQL order round-trip")
+    // The conversions check their input: a v4 is not a v7, and an RFC-ordered v7 is not SQL-ordered.
+    do {
+        _ = try UuidGenerator.v7ToSqlOrder(v4)
+        check(false, "v7ToSqlOrder accepted a v4")
+    } catch UuidGenerator.Error.wrongVersion {}
+    // RFC 9562 A.6's v7, fixed: a fresh v7's octet 7 carries the SQL layout's 8 one time in 16.
+    do {
+        _ = try UuidGenerator.v7FromSqlOrder(UUID(uuidString: "017f22e2-79b0-7cc3-98c4-dc0c0c07398f")!)
+        check(false, "v7FromSqlOrder accepted an RFC-ordered v7")
+    } catch UuidGenerator.Error.wrongVersion {}
 
     // Inspection and the layout-aware doors: a SQL-ordered value is read in place.
     check(try UuidGenerator.version(v7) == 7, "version of a v7")
     check(try UuidGenerator.variant(v7) == .rfc9562, "variant of a v7")
-    check(try UuidGenerator.isRfc(v6, version: 6) && !(try UuidGenerator.isRfc(v6, version: 7)), "isRfc of a v6")
-    let sql6 = try UuidGenerator.v6ToSqlOrder(v6)
+    check(try UuidGenerator.isRfc(v7, version: 7) && !(try UuidGenerator.isRfc(v7, version: 4)), "isRfc of a v7")
     let sql7 = try UuidGenerator.v7ToSqlOrder(v7)
-    check(try UuidGenerator.version(sql6, layout: .sqlServer) == 6, "SQL-ordered v6 version")
+    check(sql7.uuid.7 >> 4 == 8, "SQL order is a version 8")
+    check(try UuidGenerator.version(sql7, layout: .sqlServer) == 7, "SQL-ordered v7 version")
     check(try UuidGenerator.isRfc(sql7, version: 7, layout: .sqlServer), "SQL-ordered v7 isRfc")
-    check(try UuidGenerator.v6UnixMillis(sql6, layout: .sqlServer) == millis, "SQL-ordered v6 timestamp")
     check(try UuidGenerator.v7UnixMillis(sql7, layout: .sqlServer) == millis, "SQL-ordered v7 timestamp")
     let sqlDate = try UuidGenerator.getTimestamp(sql7, layout: .sqlServer)
     check(sqlDate == Date(timeIntervalSince1970: Double(millis) / 1000), "SQL-ordered getTimestamp")
@@ -81,7 +82,7 @@ do {
     } catch UuidGenerator.Error.timestampOutOfRange {
     }
 
-    print("hyperuuid \(version) smoke test passed: v4=\(v4) v5=\(v5) v6=\(v6) v7=\(v7)")
+    print("hyperuuid \(version) smoke test passed: v4=\(v4) v5=\(v5) v7=\(v7)")
 } catch {
     print("FAILED: \(error)")
     exit(1)

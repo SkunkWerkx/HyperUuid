@@ -52,9 +52,9 @@ def ruby_spelling(export):
 
 C_PROTOTYPE = r"(?m)^(?:u?int\d+_t|void) (\w+)\("
 
-# Python's extension has conveniences past the C ABI: a buffer fill per time-ordered version
+# Python's extension has conveniences past the C ABI: a v7 buffer fill
 # and a datetime reading of the timestamp.
-PYTHON_EXTRA = ("_bind", "fill_v6_bytes", "fill_v7_bytes", "v6_timestamp", "v7_timestamp")
+PYTHON_EXTRA = ("_bind", "fill_v7_bytes", "v7_timestamp")
 
 # (binding, [(file glob, pattern)], what it must declare, names it may declare besides).
 # `all` is every export, `doors` every export but the version probe, and a function maps

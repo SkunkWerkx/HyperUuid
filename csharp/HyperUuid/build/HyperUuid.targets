@@ -30,9 +30,9 @@
        Two floors, and they are different on purpose. The package targets net10.0, which is
        what every native platform needs. This file sits directly under build/, with no
        target-framework folder, because it does its own gating below: a folder would only
-       repeat a decision the conditions already make. (The staticlib's directory is still
-       spelled nativeassets/net10.0/; the path below names it directly, so that spelling is
-       only a folder name, not something NuGet selects by.)
+       repeat a decision the conditions already make. (The staticlib's directory is spelled
+       nativeassets/net11.0/ to match the only framework that links it; the path below names
+       it directly, so the spelling is a folder name, not something NuGet selects by.)
        WebAssembly is .NET 11 and later only: the exception-handling translation further down
        is .NET 11 toolchain behavior, and the browser proof (HyperUuid.WasmSmokeTest) targets
        net11.0 and nothing older. NuGet imports this file into a net10.0 Blazor WebAssembly
@@ -46,34 +46,54 @@
        project's own property and is set wherever this file is imported from, while the
        latter is only derived once Sdk.targets runs. A restored package is imported after
        that, but HyperUuid.WasmSmokeTest imports this file by hand from its project body,
-       before it, and has to take the same branch a real consumer does. -->
+       before it, and has to take the same branch a real consumer does.
+
+       uuid_variant is P/Invoked like every other entry point but deliberately not in the
+       export list. Emscripten ships a libuuid compatibility library (src/lib/libuuid.js)
+       that defines a JavaScript uuid_variant, a stub that always returns 1, and a name in
+       EXPORTED_FUNCTIONS that the JavaScript library also defines is filled from the
+       library: the glue gained Module._uuid_variant = (uu) => 1 and the wasm export was
+       dropped. The P/Invoke never noticed, because the runtime's pinvoke table calls the
+       Rust function directly inside the module, but anything reaching the export from
+       JavaScript got the stub. Leaving it out keeps the stub out of the glue too. No other
+       name here collides with an Emscripten JavaScript library. -->
   <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <_HyperUuidWasmSupported>false</_HyperUuidWasmSupported>
     <_HyperUuidWasmSupported Condition="'$(TargetFramework)' != '' And $([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0'))">true</_HyperUuidWasmSupported>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(_HyperUuidWasmSupported)' == 'true'">
-    <NativeFileReference Include="$(MSBuildThisFileDirectory)../runtimes/browser-wasm/nativeassets/net10.0/libhyperuuid.a" />
+    <NativeFileReference Include="$(MSBuildThisFileDirectory)../runtimes/browser-wasm/nativeassets/net11.0/libhyperuuid.a" />
     <EmccExportedFunction Include="_hyperuuid_version" />
     <EmccExportedFunction Include="_uuid_new_v4" />
     <EmccExportedFunction Include="_uuid_new_v5" />
-    <EmccExportedFunction Include="_uuid_new_v6" />
-    <EmccExportedFunction Include="_uuid_v6_unix_millis" />
-    <EmccExportedFunction Include="_uuid_new_v6_batch" />
     <EmccExportedFunction Include="_uuid_new_v7" />
     <EmccExportedFunction Include="_uuid_v7_unix_millis" />
     <EmccExportedFunction Include="_uuid_new_v7_batch" />
     <EmccExportedFunction Include="_uuid_v7_to_sql_order" />
     <EmccExportedFunction Include="_uuid_v7_to_rfc_order" />
-    <EmccExportedFunction Include="_uuid_v6_to_sql_order" />
-    <EmccExportedFunction Include="_uuid_v6_to_rfc_order" />
     <EmccExportedFunction Include="_uuid_version" />
-    <EmccExportedFunction Include="_uuid_variant" />
     <EmccExportedFunction Include="_uuid_is_rfc" />
     <EmccExportedFunction Include="_uuid_get_timestamp" />
-    <EmccExportedFunction Include="_uuid_v6_unix_millis_in" />
     <EmccExportedFunction Include="_uuid_v7_unix_millis_in" />
   </ItemGroup>
+
+  <!-- The link above happens only where the wasm-tools workload is installed. Without it the
+       SDK never relinks the runtime: @(NativeFileReference) is skipped with nothing louder
+       than the SDK's own warning, the publish succeeds, and the app ships the stock
+       dotnet.native.wasm with no uuid_* symbols in it. NETSDK1147 does not fire for this,
+       and setting WasmBuildNative from here cannot make it: the workload manifest decides
+       whether the workload is needed before NuGet's package targets are imported.
+       WasmNativeWorkloadAvailable is settled by then, so the check reads it directly and
+       stops the build. An app that gates on UuidGenerator.IsAvailable and keeps a managed
+       fallback can set HyperUuidRequireWasmWorkload to false. HyperCast's package carries
+       the same check. -->
+  <Target Name="_HyperUuidErrorWasmWorkloadMissing"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(_HyperUuidWasmSupported)' == 'true' And '$(WasmNativeWorkloadAvailable)' != 'true' And '$(HyperUuidRequireWasmWorkload)' != 'false'">
+    <Error Code="HYPERUUID002"
+           Text="HyperUuid's WebAssembly support links its native core into the runtime, which needs the wasm-tools workload, and it is not installed. Without it the publish succeeds but the app has no uuid_* symbols, UuidGenerator.IsAvailable is false in the browser and every generator call throws. Run 'dotnet workload install wasm-tools', or set HyperUuidRequireWasmWorkload to false if the app keeps a managed fallback." />
+  </Target>
 
   <!-- .NET 11 and later link browser-wasm with the new (exnref) exception-handling encoding,
        while Rust's precompiled core and compiler_builtins inside the emscripten staticlib use

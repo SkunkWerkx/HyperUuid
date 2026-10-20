@@ -1,7 +1,8 @@
 //! Entropy for every generator: [`fill`] is `getrandom::fill`, except on Linux, where it is
-//! ChaCha20 run in user space in one of two shapes, and on Android, which has the first.
+//! ChaCha20 run in user space in one of two shapes, on Android, which has the first, and on
+//! Windows, where `getrandom` writes through a buffer of its own (see `fill_with` there).
 //!
-//! **Large requests (a batch of 32 v7 or 24 v6 UUIDs and up), Linux and Android:** one 32-byte
+//! **Large requests (a batch of 32 v7 UUIDs and up), Linux and Android:** one 32-byte
 //! `getrandom` draw keys a ChaCha20 keystream that fills the whole request. That is the
 //! construction the kernel itself uses behind `getrandom` (a ChaCha20 key per request, fresh
 //! from the entropy pool), run here with AVX2/SSE2/NEON instead of the kernel's
@@ -32,7 +33,7 @@ pub(crate) fn fill(buf: &mut [u8]) -> Result<(), getrandom::Error> {
     fill_with(buf, None)
 }
 
-/// [`fill`] for a caller that already holds a time, as v6 and v7 do: `unix_millis` is the
+/// [`fill`] for a caller that already holds a time, as v7 does: `unix_millis` is the
 /// timestamp going into the UUIDs being made. On Linux a timestamp within a second of the
 /// slot's key spares the pool its own clock read; any other sends it to the clock, which alone
 /// retires a key (see [`pool`]).
@@ -71,10 +72,51 @@ fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::
         .map_err(|_| getrandom::Error::UNEXPECTED)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
 #[inline(always)]
 fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
     getrandom::fill(buf)
+}
+
+/// Windows: `ProcessPrng` into a buffer of its own, then copied out, never into `buf` directly.
+/// `ProcessPrng` fail-fasts the whole process (`0xC0000409`) when another thread writes the
+/// memory it is filling, and a batch fill's `buf` is the caller's memory: a free-threaded Python
+/// thread writing the same `bytearray` through a `memoryview`, or a .NET, Java or Go thread
+/// writing the same array, took the process down mid-fill. A race on the caller's bytes is the
+/// caller's to have, but it has to cost them the bytes, not the process.
+///
+/// Both buffers stay under a page, because a frame of a page or more makes LLVM emit a stack
+/// probe (`__chkstk`), which MSVC's CRT supplies and MinGW's, which Go's cgo links the MSVC
+/// archive with, does not. A single UUID's few bytes go through a small one inline; a batch
+/// goes a chunk at a time through a 3 KiB one in a frame of its own, so the single-UUID
+/// generators don't carry it. Measured on win-x64, the chunk costs about 0.4 ns a UUID over
+/// the direct call (1.33 against 0.97 ns for the 6 random bytes a v7 takes), against 2.4 ns
+/// for the whole batch; a 1 KiB chunk cost 0.7 ns, and 4 KiB no less than 3.
+#[cfg(windows)]
+#[inline(always)]
+fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+    const SMALL: usize = 64;
+    if buf.len() > SMALL {
+        return fill_chunked(buf);
+    }
+    let mut own = [0u8; SMALL];
+    let drawn = &mut own[..buf.len()];
+    getrandom::fill(drawn)?;
+    buf.copy_from_slice(drawn);
+    Ok(())
+}
+
+/// The batch half of the Windows [`fill_with`]: its 3 KiB buffer, in a frame of its own.
+#[cfg(windows)]
+#[inline(never)]
+fn fill_chunked(buf: &mut [u8]) -> Result<(), getrandom::Error> {
+    let mut chunk = [0u8; 3072];
+    for out in buf.chunks_mut(chunk.len()) {
+        let drawn = &mut chunk[..out.len()];
+        getrandom::fill(drawn)?;
+        out.copy_from_slice(drawn);
+    }
+    Ok(())
 }
 
 /// The small-request generator: a fixed pool of ChaCha20 generators, each a kilobyte of
@@ -106,7 +148,7 @@ fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom:
 /// What is left is a snapshot taken within a second of a key being drawn and restored onto a
 /// clock that has not been moved on: the copies then share bytes until that second runs out.
 ///
-/// The clock is `CLOCK_REALTIME_COARSE`, a few nanoseconds through the vDSO. v6 and v7 arrive
+/// The clock is `CLOCK_REALTIME_COARSE`, a few nanoseconds through the vDSO. v7 arrives
 /// holding a timestamp, and when that timestamp is within the second the slot is taken to be
 /// fresh without the clock being read. A timestamp can only save the read: one that disagrees
 /// (a backfill minting UUIDs for old rows, a fixed test value) sends the question to the clock,

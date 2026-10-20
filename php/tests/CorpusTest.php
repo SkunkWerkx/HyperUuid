@@ -91,10 +91,36 @@ final class CorpusTest extends TestCase
             $rfc = self::uuid($vector['rfc']);
             $sql = self::uuid($vector['sql']);
             self::assertSame($vector['sql'], bin2hex($rfc->toSqlOrder()->bytes()), $context);
-            self::assertSame($vector['rfc'], bin2hex($sql->fromSqlOrder($vector['version'])->bytes()), $context);
-            // The polymorphic inverse reads the version from the SQL-ordered bytes themselves.
             self::assertSame($vector['rfc'], bin2hex($sql->fromSqlOrder()->bytes()), $context);
-            self::assertSame($vector['version'], $sql->version(UuidLayout::SqlServer), $context);
+            self::assertSame(7, $sql->version(UuidLayout::SqlServer), $context);
+            self::assertTrue($sql->isRfc(7, UuidLayout::SqlServer), $context);
+        }
+    }
+
+    /**
+     * Every refused vector fails with InvalidArgumentException and the core's wrong-version
+     * message, through the conversion its direction names; the source Uuid is left as it was.
+     */
+    public function testSqlOrderRefusedCorpus(): void
+    {
+        foreach (self::corpus('sql_order_refused.json') as $vector) {
+            $context = json_encode($vector);
+            $id = self::uuid($vector['uuid']);
+            try {
+                match ($vector['direction']) {
+                    'to_sql' => $id->toSqlOrder(),
+                    'from_sql' => $id->fromSqlOrder(),
+                };
+                self::fail("accepted: {$context}");
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame(\InvalidArgumentException::class, $e::class, $context);
+                self::assertSame(
+                    'the value is not a UUID of the version this conversion takes',
+                    $e->getMessage(),
+                    $context
+                );
+            }
+            self::assertSame($vector['uuid'], bin2hex($id->bytes()), $context);
         }
     }
 

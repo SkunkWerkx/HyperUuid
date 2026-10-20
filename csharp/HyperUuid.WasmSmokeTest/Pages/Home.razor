@@ -26,7 +26,7 @@
         // lands in the statically linked wasm module via LibraryImport("*"), so an entry point
         // missing from build/HyperUuid.targets' EmccExportedFunction list fails here at
         // runtime, not at the link. That only holds for an entry point this page actually
-        // calls, so it calls all nineteen: the eighteen uuid_* functions and hyperuuid_version.
+        // calls, so it calls all thirteen: the twelve uuid_* functions and hyperuuid_version.
         try
         {
             // The probe must name the core that actually linked in. First, because it is the
@@ -47,9 +47,11 @@
             else lines.Add($"ok   v5: {v5} matches RFC 9562 Appendix A.4 vector");
 
             const long fixedMs = 1_645_557_742_000L;
-            var v6 = UuidGenerator.NewV6(fixedMs);
-            if (UuidGenerator.V6UnixMillis(v6) != fixedMs) Fail($"v6 fixed-timestamp mismatch for {v6}");
-            else lines.Add($"ok   v6 (fixed): {v6} embeds timestamp {fixedMs}");
+            // A version 6 minted elsewhere (RFC 9562 Appendix A.5): a version, but no timestamp.
+            var v6 = new Guid("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+            if (UuidGenerator.Version(v6) != 6 || UuidGenerator.GetTimestamp(v6) is not null)
+                Fail($"v6 reported a timestamp or the wrong version: {v6}");
+            else lines.Add($"ok   v6 (RFC A.5): {v6} has no timestamp");
 
             var v7 = UuidGenerator.NewV7(fixedMs);
             if (UuidGenerator.V7UnixMillis(v7) != fixedMs) Fail($"v7 fixed-timestamp mismatch for {v7}");
@@ -73,19 +75,8 @@
             if (batch.Length != 1000 || !increasing) Fail("v7 batch is not 1000 distinct ids at the requested timestamp");
             else lines.Add("ok   v7 batch: 1000 distinct ids at the requested timestamp");
 
-            // The v6 batch is its own entry point, in both destination shapes.
-            var v6Batch = UuidGenerator.NewV6Batch(1000, fixedMs);
-            var v6Raw = new byte[4 * 16];
-            UuidGenerator.FillV6(v6Raw, fixedMs);
-            if (v6Batch.Distinct().Count() != 1000
-                || v6Batch.Any(id => UuidGenerator.V6UnixMillis(id) != fixedMs)
-                || UuidGenerator.V6UnixMillis(new Guid(v6Raw.AsSpan(3 * 16, 16), bigEndian: true)) != fixedMs)
-                Fail("v6 batch is not 1000 distinct ids at the requested timestamp");
-            else
-                lines.Add("ok   v6 batch: 1000 distinct ids at the requested timestamp");
-
-            // The four SQL-order entry points: to and back, per version, with the raw-byte form
-            // agreeing with the Guid form on the way out.
+            // Both SQL-order entry points: to and back, with the raw-byte form agreeing with the
+            // Guid form on the way out.
             var v7Bytes = new byte[16];
             v7.TryWriteBytes(v7Bytes, bigEndian: true, out _);
             UuidGenerator.V7ToSqlOrder(v7Bytes);
@@ -95,25 +86,29 @@
             else
                 lines.Add($"ok   v7 SQL order: {v7Sql} round-trips");
 
-            var v6Bytes = new byte[16];
-            v6.TryWriteBytes(v6Bytes, bigEndian: true, out _);
-            UuidGenerator.V6ToSqlOrder(v6Bytes);
-            var v6Sql = UuidGenerator.V6ToSqlOrder(v6);
-            if (v6Sql == v6 || !v6Bytes.AsSpan().SequenceEqual(v6Sql.ToByteArray()) || UuidGenerator.V6FromSqlOrder(v6Sql) != v6)
-                Fail($"v6 SQL order does not round-trip for {v6}");
-            else
-                lines.Add($"ok   v6 SQL order: {v6Sql} round-trips");
-
             // Inspection and the layout-aware reads: uuid_version, uuid_variant, uuid_is_rfc
-            // and both uuid_v*_unix_millis_in, the last two on SQL-ordered values in place.
+            // and uuid_v7_unix_millis_in, the last two on a SQL-ordered value in place.
             if (UuidGenerator.Version(v7) != 7 || UuidGenerator.Variant(v7) != UuidVariant.Rfc9562
-                || !UuidGenerator.IsRfc(v7Sql, 7, UuidLayout.SqlServer) || UuidGenerator.Version(v6Sql, UuidLayout.SqlServer) != 6
+                || !UuidGenerator.IsRfc(v7Sql, 7, UuidLayout.SqlServer) || UuidGenerator.Version(v7Sql, UuidLayout.SqlServer) != 7
                 || UuidGenerator.V7UnixMillis(v7Sql, UuidLayout.SqlServer) != UuidGenerator.V7UnixMillis(v7)
-                || UuidGenerator.V6UnixMillis(v6Sql, UuidLayout.SqlServer) != UuidGenerator.V6UnixMillis(v6)
                 || UuidGenerator.GetTimestamp(v7Sql, UuidLayout.SqlServer) != UuidGenerator.V7Timestamp(v7))
                 Fail($"inspection disagrees for {v7} / {v6}");
             else
                 lines.Add("ok   inspection: version, variant, IsRfc and SQL-layout timestamps agree");
+
+            // A SQL-ordered value is a version 8 to the Guid, and the conversions refuse a value
+            // of the wrong version through the wasm export's return code, bytes left untouched.
+            var refusedBytes = new byte[16];
+            v6.TryWriteBytes(refusedBytes, bigEndian: true, out _);
+            var refusedCopy = refusedBytes.ToArray();
+            if (v7Sql.Version != 8
+                || !Refuses<ArgumentException>(() => UuidGenerator.V7ToSqlOrder(v6))
+                || !Refuses<ArgumentException>(() => UuidGenerator.V7FromSqlOrder(v7))
+                || !Refuses<ArgumentException>(() => { UuidGenerator.V7ToSqlOrder(refusedBytes); return Guid.Empty; })
+                || !refusedBytes.AsSpan().SequenceEqual(refusedCopy))
+                Fail($"SQL-order version 8 marker or refusals disagree for {v7} / {v6}");
+            else
+                lines.Add("ok   SQL order: version 8 marker, refusals leave the bytes untouched");
         }
         catch (Exception ex)
         {
@@ -124,5 +119,19 @@
         lines.Add(failed ? "SOME WASM CHECKS FAILED" : "ALL WASM CHECKS PASSED");
         Results = string.Join("\n", lines);
         Title = failed ? "FAIL" : "PASS";
+    }
+
+    // Whether convert throws exactly TException (not a subclass) and nothing else.
+    static bool Refuses<TException>(Func<Guid> convert) where TException : Exception
+    {
+        try
+        {
+            convert();
+            return false;
+        }
+        catch (Exception e)
+        {
+            return e.GetType() == typeof(TException);
+        }
     }
 }

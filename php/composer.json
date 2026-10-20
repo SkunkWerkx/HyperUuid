@@ -1,8 +1,8 @@
 {
     "name": "skunkwerkx/hyperuuid",
-    "description": "RFC 9562 UUID v4/v5/v6/v7 generation — direct native FFI into a Rust core, no runtime bridge.",
+    "description": "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order — direct native FFI into a Rust core, no runtime bridge.",
     "type": "library",
-    "keywords": ["uuid", "guid", "rfc9562", "uuidv4", "uuidv5", "uuidv6", "uuidv7", "ffi", "rust"],
+    "keywords": ["uuid", "guid", "rfc9562", "uuidv4", "uuidv5", "uuidv7", "ffi", "rust"],
     "license": "MIT",
     "authors": [
         {

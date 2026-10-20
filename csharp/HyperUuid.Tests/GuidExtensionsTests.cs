@@ -14,11 +14,15 @@ public sealed class GuidExtensionsTests
 		id.Timestamp.ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
 	}
 
+	// RFC 9562 Appendix A.5's version 6: it has a timestamp field, but this library reads
+	// timestamps from version 7 only, so it answers null like any other non-v7 value.
+	static readonly Guid RfcV6 = new("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+
 	[Fact]
-	public void Timestamp_RecoversTheEmbeddedV6Timestamp()
+	public void Timestamp_IsNullForAVersion6()
 	{
-		var id = UuidGenerator.NewV6(RfcTestVectorMs);
-		id.Timestamp.ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(RfcTestVectorMs));
+		UuidGenerator.Version(RfcV6).ShouldBe(6);
+		RfcV6.Timestamp.ShouldBeNull();
 	}
 
 	[Fact]
@@ -40,9 +44,8 @@ public sealed class GuidExtensionsTests
 		[
 			UuidGenerator.NewV4(),
 			UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "www.example.com"),
-			UuidGenerator.NewV6(RfcTestVectorMs),
+			RfcV6,
 			UuidGenerator.NewV7(RfcTestVectorMs),
-			UuidGenerator.NewV6(0),
 			UuidGenerator.NewV7(0),
 			UuidGenerator.Nil,
 			UuidGenerator.Max,

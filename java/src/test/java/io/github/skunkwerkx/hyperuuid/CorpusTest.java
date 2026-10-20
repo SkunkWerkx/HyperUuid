@@ -3,6 +3,7 @@ package io.github.skunkwerkx.hyperuuid;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,7 +33,8 @@ import org.junit.jupiter.api.Test;
  * hex's sixteen bytes, most significant first, in either layout, exactly as
  * {@link UuidGenerator#v7ToSqlOrder(UUID)} returns a SQL-ordered value. A vector that fails
  * here is a break in the cross-language contract, and for {@code sql_order.json} a change to
- * data already persisted in SQL Server.
+ * data already persisted in SQL Server; {@code sql_order_refused.json} pins the values the
+ * conversions refuse, every one with the wrong-version exception.
  */
 class CorpusTest {
     private static final Path CORPUS = findCorpus();
@@ -138,29 +141,47 @@ class CorpusTest {
             byte[] sqlBytes = hex(vector, "sql");
             UUID rfc = RfcBytes.fromRfcBytes(rfcBytes);
             UUID sql = RfcBytes.fromRfcBytes(sqlBytes);
-            int version = intOf(vector, "version");
             String message = vector.toString();
-            UnaryOperator<UUID> toSql = version == 6 ? UuidGenerator::v6ToSqlOrder : UuidGenerator::v7ToSqlOrder;
-            UnaryOperator<UUID> toRfc = version == 6 ? UuidGenerator::v6FromSqlOrder : UuidGenerator::v7FromSqlOrder;
-            assertEquals(sql, toSql.apply(rfc), message);
-            assertEquals(rfc, toRfc.apply(sql), message);
+            assertEquals(sql, UuidGenerator.v7ToSqlOrder(rfc), message);
+            assertEquals(rfc, UuidGenerator.v7FromSqlOrder(sql), message);
             // What reaches SQL Server is the UUID's sixteen bytes, most significant first.
-            assertArrayEquals(sqlBytes, RfcBytes.toRfcBytes(toSql.apply(rfc)), message);
+            assertArrayEquals(sqlBytes, RfcBytes.toRfcBytes(UuidGenerator.v7ToSqlOrder(rfc)), message);
 
             // The raw-byte doors, in place.
             byte[] bytes = rfcBytes.clone();
-            if (version == 6) {
-                UuidGenerator.v6ToSqlOrder(bytes);
-            } else {
-                UuidGenerator.v7ToSqlOrder(bytes);
-            }
+            UuidGenerator.v7ToSqlOrder(bytes);
             assertArrayEquals(sqlBytes, bytes, message);
-            if (version == 6) {
-                UuidGenerator.v6FromSqlOrder(bytes);
-            } else {
-                UuidGenerator.v7FromSqlOrder(bytes);
-            }
+            UuidGenerator.v7FromSqlOrder(bytes);
             assertArrayEquals(rfcBytes, bytes, message);
+        }
+    }
+
+    // The one refusal, exactly as both backends throw it.
+    private static final String WRONG_VERSION = "the value is not a UUID of the version this conversion takes";
+
+    @Test
+    void sqlOrderRefusedCorpus() {
+        for (Map<String, Object> vector : corpus("sql_order_refused.json")) {
+            byte[] bytes = hex(vector, "uuid");
+            UUID id = RfcBytes.fromRfcBytes(bytes);
+            boolean toSql = switch ((String) vector.get("direction")) {
+                case "to_sql" -> true;
+                case "from_sql" -> false;
+                default -> throw new IllegalStateException("unknown direction in " + vector);
+            };
+            String message = vector.toString();
+            UnaryOperator<UUID> convert = toSql ? UuidGenerator::v7ToSqlOrder : UuidGenerator::v7FromSqlOrder;
+            Consumer<byte[]> convertBytes = toSql ? UuidGenerator::v7ToSqlOrder : UuidGenerator::v7FromSqlOrder;
+
+            IllegalArgumentException thrown =
+                    assertThrows(IllegalArgumentException.class, () -> convert.apply(id), message);
+            assertEquals(WRONG_VERSION, thrown.getMessage(), message);
+
+            // The raw-byte door refuses the same way and leaves the caller's bytes untouched.
+            byte[] inPlace = bytes.clone();
+            thrown = assertThrows(IllegalArgumentException.class, () -> convertBytes.accept(inPlace), message);
+            assertEquals(WRONG_VERSION, thrown.getMessage(), message);
+            assertArrayEquals(bytes, inPlace, message);
         }
     }
 
@@ -184,24 +205,14 @@ class CorpusTest {
             if (millis == null) {
                 continue;
             }
-            switch (version) {
-                case 6 -> {
-                    assertEquals(millis, UuidGenerator.v6UnixMillis(id, layout), message);
-                    assertEquals(expected.orElseThrow(), UuidGenerator.v6Timestamp(id, layout), message);
-                    if (layout == UuidLayout.RFC_9562) {
-                        assertEquals(millis, UuidGenerator.v6UnixMillis(id), message);
-                        assertEquals(expected.orElseThrow(), UuidGenerator.v6Timestamp(id), message);
-                    }
-                }
-                case 7 -> {
-                    assertEquals(millis, UuidGenerator.v7UnixMillis(id, layout), message);
-                    assertEquals(expected.orElseThrow(), UuidGenerator.v7Timestamp(id, layout), message);
-                    if (layout == UuidLayout.RFC_9562) {
-                        assertEquals(millis, UuidGenerator.v7UnixMillis(id), message);
-                        assertEquals(expected.orElseThrow(), UuidGenerator.v7Timestamp(id), message);
-                    }
-                }
-                default -> throw new IllegalStateException("a timestamp on a version " + version + ": " + vector);
+            if (version != 7) {
+                throw new IllegalStateException("a timestamp on a version " + version + ": " + vector);
+            }
+            assertEquals(millis, UuidGenerator.v7UnixMillis(id, layout), message);
+            assertEquals(expected.orElseThrow(), UuidGenerator.v7Timestamp(id, layout), message);
+            if (layout == UuidLayout.RFC_9562) {
+                assertEquals(millis, UuidGenerator.v7UnixMillis(id), message);
+                assertEquals(expected.orElseThrow(), UuidGenerator.v7Timestamp(id), message);
             }
         }
     }

@@ -27,7 +27,6 @@ final class InspectionTest extends TestCase
             [new Uuid(\Ramsey\Uuid\Uuid::uuid7()->getBytes()), 7],
             [HyperUuid::newV4(), 4],
             [HyperUuid::newV5(Namespaces::dns(), 'x'), 5],
-            [HyperUuid::newV6(self::MS), 6],
             [HyperUuid::newV7(self::MS), 7],
         ];
         foreach ($cases as [$id, $version]) {
@@ -59,36 +58,33 @@ final class InspectionTest extends TestCase
     }
 
     /**
-     * In SQL order a v6's random clock_seq sits where a v7's version nibble does and reads as
-     * 7 one time in 16; enough draws that a confusion would surface.
+     * A converted version 7 is validated and its timestamp read in place, as version 7 and no
+     * other; enough draws that a random counter or tail bit leaking into the read would surface.
      */
-    public function testSqlOrderedV6AndV7AreValidatedAndReadInPlaceWithoutConfusion(): void
+    public function testSqlOrderedV7IsValidatedAndReadInPlace(): void
     {
         $sql = UuidLayout::SqlServer;
         for ($i = 0; $i < 2048; $i++) {
-            $six = HyperUuid::newV6(self::MS)->toSqlOrder();
             $seven = HyperUuid::newV7(self::MS)->toSqlOrder();
 
-            self::assertSame(6, $six->version($sql));
             self::assertSame(7, $seven->version($sql));
-            self::assertTrue($six->isRfc(6, $sql));
-            self::assertFalse($six->isRfc(7, $sql));
             self::assertTrue($seven->isRfc(7, $sql));
-            self::assertFalse($seven->isRfc(6, $sql));
+            for ($other = 0; $other <= 15; $other++) {
+                if ($other !== 7) {
+                    self::assertFalse($seven->isRfc($other, $sql), "version {$other}");
+                }
+            }
 
-            self::assertSame(self::MS, $six->unixMillis($sql));
             self::assertSame(self::MS, $seven->unixMillis($sql));
-            self::assertEquals($six->fromSqlOrder()->timestamp(), $six->timestamp(layout: $sql));
             self::assertEquals($seven->fromSqlOrder()->timestamp(), $seven->timestamp(layout: $sql));
-            self::assertSame(6, $six->fromSqlOrder()->version());
             self::assertSame(7, $seven->fromSqlOrder()->version());
         }
     }
 
     /**
      * Fixed values only: a Uuid holds its bytes as given, so a random v4 (variant already in
-     * octet 8) reads as a SQL-ordered v7 whenever its random octet 7 starts with 7 — one time
-     * in 16, and genuinely indistinguishable from one. RFC 9562's A.3 v4 has 0x20 there.
+     * octet 8) reads as a SQL-ordered value whenever its random octet 7 starts with 8 — one
+     * time in 16, and genuinely indistinguishable from one. RFC 9562's A.3 v4 has 0x20 there.
      */
     public function testNonSqlValuesHaveNoSqlVersion(): void
     {
@@ -108,13 +104,16 @@ final class InspectionTest extends TestCase
                 $id->fromSqlOrder();
                 self::fail("fromSqlOrder() accepted {$id}");
             } catch (\InvalidArgumentException $e) {
-                self::assertStringContainsString('not a SQL-ordered version 6 or 7 UUID', $e->getMessage());
+                self::assertSame(
+                    'the value is not a UUID of the version this conversion takes',
+                    $e->getMessage()
+                );
             }
         }
     }
 
     /**
-     * A 6 or 7 nibble under another variant has no RFC version, so it has no timestamp:
+     * A 7 nibble under another variant has no RFC version, so it has no timestamp:
      * {@see Uuid::version()} still reads the nibble, but the timestamp doors refuse it.
      */
     public function testATimeBasedNibbleUnderAnotherVariantHasNoTimestamp(): void
@@ -181,8 +180,6 @@ final class InspectionTest extends TestCase
             }
             self::assertLessThan(1 << 20, memory_get_peak_usage() - $before, $door);
         }
-        // Version 6 has no counter and no such limit (count only has to fit the uint32_t).
-        self::assertSame('', HyperUuid::newV6BatchBytes(0, self::MS));
     }
 
     /**

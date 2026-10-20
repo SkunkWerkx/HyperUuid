@@ -36,11 +36,6 @@ final class UuidBench
         HyperUuid::newV5(Namespaces::dns(), 'example.com');
     }
 
-    public function benchNewV6(): void
-    {
-        HyperUuid::newV6(self::RFC_TEST_VECTOR_MS);
-    }
-
     public function benchNewV7(): void
     {
         HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);

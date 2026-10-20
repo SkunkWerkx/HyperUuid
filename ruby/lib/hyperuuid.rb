@@ -4,21 +4,22 @@ require_relative "hyperuuid/namespaces"
 require_relative "hyperuuid/native_platform"
 require_relative "hyperuuid/runtime"
 
-# RFC 9562 UUID v4 (random), v5 (deterministic), v6 and v7 (time-sortable) generation from one
-# Rust core, reached through whichever of two backends this install can load: the core
-# linked straight into a Magnus native extension (shipped precompiled in the platform gems),
-# or the native libhyperuuid shared library called through Fiddle (the universal gem bundles
-# one per supported platform, picked by HyperUuid::NativePlatform). No runtime bridge in
-# either, and nothing compiled at install time. HyperUuid::BACKEND names the one that loaded; the selection logic
-# is at the bottom of this file.
+# RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
+# version 8 SQL Server order for v7, from one Rust core, reached through whichever of two
+# backends this install can load: the core linked straight into a Magnus native extension
+# (shipped precompiled in the platform gems), or the native libhyperuuid shared library
+# called through Fiddle (the universal gem bundles one per supported platform, picked by
+# HyperUuid::NativePlatform). No runtime bridge in either, and nothing compiled at install
+# time. HyperUuid::BACKEND names the one that loaded; the selection logic is at the bottom of
+# this file.
 #
 # The doors below — with Uuid, Namespaces and the two exception classes — are the public
 # surface, and are shared by every backend, argument validation included: a caller bug raises
 # the same error whichever backend is live.
 module HyperUuid
-  # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v6/v7) the
-  # rest of this module generates.
-  VERSION = "0.8.0"
+  # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v7) the rest
+  # of this module generates.
+  VERSION = "0.9.0"
 
   # The widest batch count, and the longest v5 name in bytes, the native ABI carries (a u32).
   # (The millisecond count is a u64; unix_millis_from refuses anything wider.)
@@ -27,8 +28,7 @@ module HyperUuid
 
   # The most UUIDs one version 7 batch (#new_v7_batch, #new_v7_batch_bytes) mints:
   # 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. A larger
-  # count is refused with ArgumentError before anything is allocated. Version 6 has no counter
-  # and no such limit.
+  # count is refused with ArgumentError before anything is allocated.
   #
   # Every batch up to this size is in strictly increasing order: the counter is one
   # process-wide sequence, so a batch can straddle the point where it wraps back to 0, and the
@@ -68,7 +68,7 @@ module HyperUuid
   # Converts +value+ to a Unix-epoch millisecond integer: +nil+ becomes the current time, a
   # +Time+ is converted exactly (via its own Rational seconds, avoiding float rounding), and
   # an Integer millisecond count passes through unchanged. Shared by every
-  # `new_v6`/`new_v7`/batch door below so a caller can pass either a `Time` or a raw
+  # `new_v7`/batch door below so a caller can pass either a `Time` or a raw
   # millisecond count interchangeably.
   #
   # This is also where a caller bug is caught once, for every backend: anything else is a
@@ -100,29 +100,6 @@ module HyperUuid
     raise ArgumentError, "count must be between 0 and #{U32_MAX}; got #{count}" unless count.between?(0, U32_MAX)
 
     count
-  end
-
-  # Creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible reordering of
-  # version 1 for better sort/index locality. Defaults to the current time; pass an explicit
-  # `Time` or Unix-epoch millisecond integer to embed a specific time instead. `clock_seq` and
-  # `node` are randomly generated on every call — unlike version 7, there is no monotonic
-  # counter, so calls within the same millisecond are not guaranteed to sort in creation order.
-  #
-  # @raise [TimestampOutOfRangeError] if the time is negative or past the 60-bit v6 field.
-  # @raise [TypeError] if +unix_millis+ isn't a Time, an Integer or nil.
-  def self.new_v6(unix_millis = nil)
-    Uuid.new(Runtime.new_v6(unix_millis_from(unix_millis, Runtime::V6_TIMESTAMP_OUT_OF_RANGE)), true)
-  end
-
-  # Creates `count` time-sortable version 6 UUIDs sharing one timestamp capture — one FFI call
-  # and one random-bytes fetch instead of `count` of each. Defaults to the current time; pass
-  # an explicit `Time` or Unix-epoch millisecond integer to embed a specific time instead.
-  #
-  # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and 2**32 - 1.
-  # @raise [TimestampOutOfRangeError] if the time is negative or past the 60-bit v6 field.
-  def self.new_v6_batch(count, unix_millis = nil)
-    bytes = new_v6_batch_bytes(count, unix_millis)
-    Array.new(count) { |i| Uuid.new(bytes[i * 16, 16], true) }
   end
 
   # Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time; pass
@@ -182,21 +159,6 @@ module HyperUuid
 
     count = batch_count(count)
     Runtime.new_v7_batch(count, unix_millis_from(unix_millis, Runtime::V7_TIMESTAMP_OUT_OF_RANGE))
-  end
-
-  # Returns `count` version 6 UUIDs as one binary String of raw RFC 9562-ordered bytes,
-  # 16 per UUID. The version 6 counterpart to #new_v7_batch_bytes, with the same rationale and
-  # the same guidance about when it is the right call.
-  #
-  # clock_seq and node are independently random per item; unlike version 7 there is no
-  # monotonic counter, so items minted in the same millisecond are not guaranteed to sort in
-  # creation order.
-  #
-  # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and 2**32 - 1.
-  # @raise [TimestampOutOfRangeError] if the time is negative or past the 60-bit v6 field.
-  def self.new_v6_batch_bytes(count, unix_millis = nil)
-    count = batch_count(count)
-    Runtime.new_v6_batch(count, unix_millis_from(unix_millis, Runtime::V6_TIMESTAMP_OUT_OF_RANGE))
   end
 
   # The version of the native core actually loaded, as "major.minor.patch" — read from the

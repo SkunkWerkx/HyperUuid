@@ -50,12 +50,29 @@ RSpec.describe "conformance corpus" do
 
   describe "sql_order.json" do
     corpus("sql_order.json").each do |row|
-      it "v#{row['version']} #{row['rfc']} <-> #{row['sql']}" do
+      it "#{row['rfc']} <-> #{row['sql']}" do
         rfc = uuid_of(row["rfc"])
         sql = uuid_of(row["sql"])
         expect(rfc.to_sql_order.bytes.unpack1("H*")).to eq(row["sql"])
         expect(sql.from_sql_order.bytes.unpack1("H*")).to eq(row["rfc"])
-        expect(sql.version(layout: :sql_server)).to eq(row["version"])
+        expect(sql.version(layout: :sql_server)).to eq(7)
+        expect(sql.rfc?(7, layout: :sql_server)).to be(true)
+      end
+    end
+  end
+
+  # Every row is refused as the wrong version, by the method and by the backend's conversion
+  # directly, and leaves the value as it was.
+  describe "sql_order_refused.json" do
+    corpus("sql_order_refused.json").each do |row|
+      it "#{row['direction']} refuses #{row['uuid']} (#{row['note']})" do
+        id = uuid_of(row["uuid"])
+        method, conversion =
+          row["direction"] == "to_sql" ? %i[to_sql_order v7_to_sql_order] : %i[from_sql_order v7_to_rfc_order]
+        message = HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION
+        expect { id.public_send(method) }.to raise_error(ArgumentError, message)
+        expect { HyperUuid::Runtime.public_send(conversion, id.bytes) }.to raise_error(ArgumentError, message)
+        expect(id.bytes.unpack1("H*")).to eq(row["uuid"])
       end
     end
   end
@@ -83,11 +100,10 @@ RSpec.describe "conformance corpus" do
         else
           expect(id.timestamp(layout: layout)).to eq(expected)
           expect((id.timestamp(layout: layout).to_r * 1000).to_i).to eq(millis)
-          # The per-version millisecond reads, which trust the caller's version and check nothing.
-          expect(HyperUuid::Runtime.public_send(:"v#{row['version']}_unix_millis_in", id.bytes, code)).to eq(millis)
-          if layout == :rfc9562
-            expect(HyperUuid::Runtime.public_send(:"v#{row['version']}_unix_millis", id.bytes)).to eq(millis)
-          end
+          # The version 7 millisecond reads, which trust the caller's version and check nothing.
+          expect(row["version"]).to eq(7)
+          expect(HyperUuid::Runtime.v7_unix_millis_in(id.bytes, code)).to eq(millis)
+          expect(HyperUuid::Runtime.v7_unix_millis(id.bytes)).to eq(millis) if layout == :rfc9562
         end
       end
     end

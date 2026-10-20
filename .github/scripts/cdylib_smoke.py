@@ -23,21 +23,15 @@ for name, restype, argtypes in [
     ("hyperuuid_version", u32, []),
     ("uuid_new_v4", i32, [u8p]),
     ("uuid_new_v5", i32, [u8p, u8p, u32, u8p]),
-    ("uuid_new_v6", i32, [u64, u8p]),
-    ("uuid_new_v6_batch", i32, [u64, u32, u8p]),
-    ("uuid_v6_unix_millis", u64, [u8p]),
-    ("uuid_v6_to_sql_order", None, [u8p]),
-    ("uuid_v6_to_rfc_order", None, [u8p]),
     ("uuid_new_v7", i32, [u64, u8p]),
     ("uuid_new_v7_batch", i32, [u64, u32, u8p]),
     ("uuid_v7_unix_millis", u64, [u8p]),
-    ("uuid_v7_to_sql_order", None, [u8p]),
-    ("uuid_v7_to_rfc_order", None, [u8p]),
+    ("uuid_v7_to_sql_order", i32, [u8p]),
+    ("uuid_v7_to_rfc_order", i32, [u8p]),
     ("uuid_version", u32, [u8p, u32]),
     ("uuid_variant", u32, [u8p]),
     ("uuid_is_rfc", u32, [u8p, u32, u32]),
     ("uuid_get_timestamp", u32, [u8p, u32, ctypes.POINTER(u64)]),
-    ("uuid_v6_unix_millis_in", u64, [u8p, u32]),
     ("uuid_v7_unix_millis_in", u64, [u8p, u32]),
 ]:
     names.append(name)
@@ -62,28 +56,35 @@ check(lib.uuid_new_v5(uuid.NAMESPACE_DNS.bytes, name, len(name), out) == 0, "uui
 check(uuid.UUID(bytes=out.raw) == uuid.uuid5(uuid.NAMESPACE_DNS, name.decode()), "uuid_new_v5 vector")
 
 ms = 1645557742000  # RFC 9562 Appendix A's timestamp
-for v_ in (6, 7):
-    new, batch, millis = (getattr(lib, f"uuid_new_v{v_}"), getattr(lib, f"uuid_new_v{v_}_batch"),
-                          getattr(lib, f"uuid_v{v_}_unix_millis"))
-    check(new(ms, out) == 0 and uuid.UUID(bytes=out.raw).version == v_, f"uuid_new_v{v_}")
-    check(millis(out) == ms, f"uuid_v{v_}_unix_millis")
-    before = out.raw
-    getattr(lib, f"uuid_v{v_}_to_sql_order")(out)
-    getattr(lib, f"uuid_v{v_}_to_rfc_order")(out)
-    check(out.raw == before, f"v{v_} SQL order round trip")
-    check(lib.uuid_version(out, 1) == v_ and lib.uuid_is_rfc(out, v_, 1) == 1, f"v{v_} inspection")
-    check(lib.uuid_variant(out) == 2, f"v{v_} variant")
-    getattr(lib, f"uuid_v{v_}_to_sql_order")(out)
-    check(lib.uuid_version(out, 2) == v_ and lib.uuid_is_rfc(out, v_, 2) == 1, f"SQL-ordered v{v_} inspection")
-    check(getattr(lib, f"uuid_v{v_}_unix_millis_in")(out, 2) == ms, f"uuid_v{v_}_unix_millis_in")
-    got_ms = u64(0)
-    check(lib.uuid_get_timestamp(out, 2, ctypes.byref(got_ms)) == v_ and got_ms.value == ms,
-          f"uuid_get_timestamp on SQL-ordered v{v_}")
-    getattr(lib, f"uuid_v{v_}_to_rfc_order")(out)
-    many = ctypes.create_string_buffer(16 * 1000)
-    check(batch(ms, 1000, many) == 0, f"uuid_new_v{v_}_batch failed")
-    ids = [many.raw[i:i + 16] for i in range(0, 16000, 16)]
-    check(len(set(ids)) == 1000, f"uuid_new_v{v_}_batch repeated an id")
+check(lib.uuid_new_v7(ms, out) == 0 and uuid.UUID(bytes=out.raw).version == 7, "uuid_new_v7")
+check(lib.uuid_v7_unix_millis(out) == ms, "uuid_v7_unix_millis")
+before = out.raw
+check(lib.uuid_v7_to_sql_order(out) == 0, "uuid_v7_to_sql_order failed")
+# SQL order is an RFC 9562 version 8, read in Guid (mixed-endian) order.
+check(uuid.UUID(bytes_le=out.raw).version == 8, "SQL-ordered v7 is not a v8")
+check(lib.uuid_v7_to_rfc_order(out) == 0, "uuid_v7_to_rfc_order failed")
+check(out.raw == before, "v7 SQL order round trip")
+# Each direction refuses what isn't its input (code 5) and leaves the bytes alone. Fixed values,
+# because a random v7's octet 7 carries the SQL layout's 8 one time in 16.
+v7 = bytes.fromhex("017f22e279b07cc398c4dc0c0c07398f")  # RFC 9562 Appendix A.6
+seven = ctypes.create_string_buffer(v7, 16)
+check(lib.uuid_v7_to_rfc_order(seven) == 5 and seven.raw == v7, "uuid_v7_to_rfc_order took an RFC v7")
+v6 = bytes.fromhex("1ec9414c232a6b00b3c89f6bdeced846")  # RFC 9562 Appendix A.5
+six = ctypes.create_string_buffer(v6, 16)
+check(lib.uuid_v7_to_sql_order(six) == 5 and six.raw == v6, "uuid_v7_to_sql_order took a v6")
+check(lib.uuid_version(out, 1) == 7 and lib.uuid_is_rfc(out, 7, 1) == 1, "v7 inspection")
+check(lib.uuid_variant(out) == 2, "v7 variant")
+check(lib.uuid_v7_to_sql_order(out) == 0, "uuid_v7_to_sql_order failed")
+check(lib.uuid_version(out, 2) == 7 and lib.uuid_is_rfc(out, 7, 2) == 1, "SQL-ordered v7 inspection")
+check(lib.uuid_v7_unix_millis_in(out, 2) == ms, "uuid_v7_unix_millis_in")
+got_ms = u64(0)
+check(lib.uuid_get_timestamp(out, 2, ctypes.byref(got_ms)) == 7 and got_ms.value == ms,
+      "uuid_get_timestamp on SQL-ordered v7")
+check(lib.uuid_get_timestamp(six, 1, ctypes.byref(got_ms)) == 0, "uuid_get_timestamp read a v6")
+many = ctypes.create_string_buffer(16 * 1000)
+check(lib.uuid_new_v7_batch(ms, 1000, many) == 0, "uuid_new_v7_batch failed")
+ids = [many.raw[i:i + 16] for i in range(0, 16000, 16)]
+check(len(set(ids)) == 1000, "uuid_new_v7_batch repeated an id")
 
 # Past the 26-bit counter space a v7 batch is refused (code 4) before anything is written.
 check(lib.uuid_new_v7_batch(ms, (1 << 26) + 1, out) == 4, "oversized v7 batch not refused")

@@ -13,7 +13,7 @@ final class InspectionTests: XCTestCase {
         let values: [(UUID, Int)] = [
             (UUID(), 4), (try UuidGenerator.newV4(), 4),
             (try UuidGenerator.newV5(namespace: Namespaces.dns, name: "x"), 5),
-            (try UuidGenerator.newV6(unixMillis: ms), 6), (try UuidGenerator.newV7(unixMillis: ms), 7),
+            (try UuidGenerator.newV7(unixMillis: ms), 7),
         ]
         for (id, version) in values {
             XCTAssertEqual(try UuidGenerator.version(id), version, "\(id)")
@@ -48,24 +48,20 @@ final class InspectionTests: XCTestCase {
         }
     }
 
-    // In SQL order a v6's random clock_seq sits where a v7's version nibble does and reads as 7
-    // one time in 16; enough draws that a confusion would surface.
-    func testSqlOrderedV6AndV7AreValidatedAndReadInPlaceWithoutConfusion() throws {
+    // Enough draws that a random bit landing where the layout's version or variant sits would
+    // surface.
+    func testSqlOrderedV7IsValidatedAndReadInPlace() throws {
         let date = Date(timeIntervalSince1970: Double(ms) / 1000)
         for _ in 0..<2048 {
-            let six = try UuidGenerator.v6ToSqlOrder(try UuidGenerator.newV6(unixMillis: ms))
             let seven = try UuidGenerator.v7ToSqlOrder(try UuidGenerator.newV7(unixMillis: ms))
 
-            XCTAssertEqual(try UuidGenerator.version(six, layout: .sqlServer), 6)
             XCTAssertEqual(try UuidGenerator.version(seven, layout: .sqlServer), 7)
-            XCTAssertTrue(try UuidGenerator.isRfc(six, version: 6, layout: .sqlServer))
-            XCTAssertFalse(try UuidGenerator.isRfc(six, version: 7, layout: .sqlServer))
             XCTAssertTrue(try UuidGenerator.isRfc(seven, version: 7, layout: .sqlServer))
-            XCTAssertFalse(try UuidGenerator.isRfc(seven, version: 6, layout: .sqlServer))
+            for other in 0...15 where other != 7 {
+                XCTAssertFalse(try UuidGenerator.isRfc(seven, version: other, layout: .sqlServer))
+            }
 
-            XCTAssertEqual(try UuidGenerator.v6UnixMillis(six, layout: .sqlServer), ms)
             XCTAssertEqual(try UuidGenerator.v7UnixMillis(seven, layout: .sqlServer), ms)
-            XCTAssertEqual(try UuidGenerator.getTimestamp(six, layout: .sqlServer), date)
             XCTAssertEqual(try UuidGenerator.getTimestamp(seven, layout: .sqlServer), date)
             // Read straight from SQL order matches permuting back first.
             XCTAssertEqual(
@@ -74,19 +70,18 @@ final class InspectionTests: XCTestCase {
             // The raw form takes the bytes SQL Server stores, which are the value's own.
             try seven.rfcBytes.withUnsafeBytes { raw in
                 XCTAssertEqual(try UuidGenerator.version(bytes: raw, layout: .sqlServer), 7)
-            }
-            try six.rfcBytes.withUnsafeBytes { raw in
-                XCTAssertTrue(try UuidGenerator.isRfc(bytes: raw, version: 6, layout: .sqlServer))
+                XCTAssertTrue(try UuidGenerator.isRfc(bytes: raw, version: 7, layout: .sqlServer))
             }
         }
     }
 
-    // Fixed values only: RFC-order bytes can genuinely form a SQL-ordered v7 (octet 8 already
-    // holds the RFC variant and a random v4's octet 7 starts with 7 one time in 16), so a
-    // random UUID() here would fail one run in sixteen. The layout is the caller's to know.
+    // Fixed values only: RFC-order bytes can genuinely look SQL-ordered (octet 8 already holds
+    // the RFC variant and a random v4's octet 7 starts with 8 one time in 16), so a random
+    // UUID() here would fail one run in sixteen. The layout is the caller's to know.
     func testNonSqlValuesHaveNoSqlVersion() throws {
         let values = [
             UUID(uuidString: "919108f7-52d1-4320-9bac-f847db4148a8")!,  // RFC 9562 A.3 (v4)
+            UUID(uuidString: "1ec9414c-232a-6b00-b3c8-9f6bdeced846")!,  // RFC 9562 A.5 (v6)
             WellKnownUuids.nilUUID, WellKnownUuids.maxUUID,
             try UuidGenerator.newV5(namespace: Namespaces.dns, name: "x"),
         ]
@@ -94,6 +89,17 @@ final class InspectionTests: XCTestCase {
             XCTAssertEqual(try UuidGenerator.version(id, layout: .sqlServer), 0, "\(id)")
             XCTAssertNil(try UuidGenerator.getTimestamp(id, layout: .sqlServer), "\(id)")
         }
+    }
+
+    // A version 6 (or 1) from another generator reads as its nibble but carries no timestamp
+    // this library reads, in either layout.
+    func testAVersion6HasNoTimestamp() throws {
+        let v6 = UUID(uuidString: "1ec9414c-232a-6b00-b3c8-9f6bdeced846")!  // RFC 9562 A.5
+        XCTAssertEqual(try UuidGenerator.version(v6), 6)
+        XCTAssertTrue(try UuidGenerator.isRfc(v6, version: 6))
+        XCTAssertNil(try UuidGenerator.getTimestamp(v6))
+        XCTAssertNil(try UuidGenerator.getTimestamp(v6, layout: .rfc9562))
+        XCTAssertNil(try UuidGenerator.getTimestamp(v6, layout: .sqlServer))
     }
 
     // The core's 0 ("unspecified") and any undefined code have no UuidLayout, so no door can
@@ -189,24 +195,6 @@ final class InspectionTests: XCTestCase {
         XCTAssertTrue(increasing)
         let last = UUID(rfcBytes: Array(UnsafeRawBufferPointer(rebasing: buffer[(count - 1) * 16..<count * 16])))
         XCTAssertTrue((ms...ms + 1).contains(try UuidGenerator.v7UnixMillis(last)))
-    }
-
-    // A v6 batch has no counter limit, but its count must fit the native call's 32 bits;
-    // past that it throws instead of trapping on the conversion, again before allocating.
-    func testAV6BatchPastTheNativeCountIsRefusedInsteadOfTrapping() throws {
-        guard Int.bitWidth == 64 else { throw XCTSkip("a count past UInt32.max needs a 64-bit Int") }
-        let tooMany = Int(UInt32.max) + 1
-        XCTAssertThrowsError(try UuidGenerator.newV6Batch(count: tooMany, unixMillis: ms)) { error in
-            guard case UuidGenerator.Error.batchNotAddressable(tooMany) = error else { return XCTFail("\(error)") }
-        }
-        var one = [UInt8](repeating: 0, count: 16)
-        try one.withUnsafeMutableBytes { storage in
-            let claimed = UnsafeMutableRawBufferPointer(start: storage.baseAddress, count: tooMany * 16)
-            XCTAssertThrowsError(try UuidGenerator.fillV6(into: claimed, unixMillis: ms)) { error in
-                guard case UuidGenerator.Error.batchNotAddressable(tooMany) = error else { return XCTFail("\(error)") }
-            }
-        }
-        XCTAssertEqual(one, [UInt8](repeating: 0, count: 16))
     }
 
     // The two 1 GiB tests: skipped under WASI, whose 32-bit linear memory a gigabyte would

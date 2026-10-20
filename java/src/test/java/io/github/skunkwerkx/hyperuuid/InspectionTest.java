@@ -27,7 +27,7 @@ class InspectionTest {
             {UUID.nameUUIDFromBytes(new byte[] {1, 2, 3}), 3},
             {UuidGenerator.newV4(), 4},
             {UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, "x"), 5},
-            {UuidGenerator.newV6(MS), 6},
+            {UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846"), 6}, // RFC 9562 A.5, from another generator
             {UuidGenerator.newV7(MS), 7},
         };
         for (Object[] c : cases) {
@@ -77,70 +77,76 @@ class InspectionTest {
         }
     }
 
-    // In SQL order a v6's random clock_seq sits where a v7's version nibble does and reads as 7
-    // one time in 16; enough draws that a confusion would surface.
+    // Every converted v7 reads as version 7 in place, whatever its random bits: enough draws
+    // that a value the layout mis-read would surface.
     @Test
-    void sqlOrderedV6AndV7AreValidatedAndReadInPlaceWithoutConfusion() {
+    void sqlOrderedV7IsValidatedAndReadInPlace() {
         Optional<Instant> at = Optional.of(Instant.ofEpochMilli(MS));
         for (int i = 0; i < 2048; i++) {
-            UUID six = UuidGenerator.v6ToSqlOrder(UuidGenerator.newV6(MS));
             UUID seven = UuidGenerator.v7ToSqlOrder(UuidGenerator.newV7(MS));
 
-            assertEquals(6, UuidGenerator.version(six, UuidLayout.SQL_SERVER));
             assertEquals(7, UuidGenerator.version(seven, UuidLayout.SQL_SERVER));
-            assertTrue(UuidGenerator.isRfc(six, 6, UuidLayout.SQL_SERVER));
-            assertFalse(UuidGenerator.isRfc(six, 7, UuidLayout.SQL_SERVER));
             assertTrue(UuidGenerator.isRfc(seven, 7, UuidLayout.SQL_SERVER));
             assertFalse(UuidGenerator.isRfc(seven, 6, UuidLayout.SQL_SERVER));
+            assertFalse(UuidGenerator.isRfc(seven, 8, UuidLayout.SQL_SERVER));
 
-            assertEquals(MS, UuidGenerator.v6UnixMillis(six, UuidLayout.SQL_SERVER));
             assertEquals(MS, UuidGenerator.v7UnixMillis(seven, UuidLayout.SQL_SERVER));
-            assertEquals(at, UuidGenerator.getTimestamp(six, UuidLayout.SQL_SERVER));
             assertEquals(at, UuidGenerator.getTimestamp(seven, UuidLayout.SQL_SERVER));
-            // Read straight from SQL order matches permuting back first.
+            // Read straight from SQL order matches converting back first.
             assertEquals(
                     UuidGenerator.v7UnixMillis(UuidGenerator.v7FromSqlOrder(seven)),
                     UuidGenerator.v7UnixMillis(seven, UuidLayout.SQL_SERVER));
             // The raw form takes the bytes SQL Server stores: the SQL-ordered UUID's bytes.
             assertEquals(7, UuidGenerator.version(RfcBytes.toRfcBytes(seven), UuidLayout.SQL_SERVER));
-            assertEquals(6, UuidGenerator.version(RfcBytes.toRfcBytes(six), UuidLayout.SQL_SERVER));
         }
     }
 
-    // Fixed vectors only: RFC-ordered bytes can genuinely form a SQL-ordered v7 (octet 8
-    // already carries the RFC variant, octet 7 is random), so one random v4 in 16 would read
-    // as SQL v7. That is correct; the layout is the caller's to know.
+    // Fixed vectors only: RFC-ordered bytes can genuinely carry the SQL layout's 8 and variant
+    // (octet 8 already carries the RFC variant, octet 7 is random), so one random v4 in 16
+    // would read as a SQL-ordered v7. That is correct; the layout is the caller's to know.
     @Test
     void nonSqlValuesHaveNoSqlVersion() {
         UUID[] ids = {
             UuidGenerator.NIL,
             UuidGenerator.MAX,
             UUID.fromString("919108f7-52d1-4320-9bac-f847db4148a8"), // v4, RFC 9562 A.3
-            UUID.fromString("2ed6657d-e927-568b-95e1-2665a8aea6a2"), // v5, RFC 9562 A.4
+            UUID.fromString("017f22e2-79b0-7cc3-98c4-dc0c0c07398f"), // v7, RFC 9562 A.6
+            UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846"), // v6, RFC 9562 A.5
         };
         for (UUID id : ids) {
             assertEquals(0, UuidGenerator.version(id, UuidLayout.SQL_SERVER), id.toString());
             assertEquals(Optional.empty(), UuidGenerator.getTimestamp(id, UuidLayout.SQL_SERVER), id.toString());
         }
+        // RFC 9562 A.4's v5 is one of the one in 16: octet 7 is 0x8b and octet 8 0x95, so read
+        // as SQL order it carries the layout's 8 and variant.
+        UUID v5 = UUID.fromString("2ed6657d-e927-568b-95e1-2665a8aea6a2");
+        assertEquals(7, UuidGenerator.version(v5, UuidLayout.SQL_SERVER));
     }
 
     // getTimestamp requires the RFC variant in both layouts: the nibble alone is not a version.
     @Test
     void getTimestampRequiresTheRfcVariant() {
         UUID v7 = UuidGenerator.newV7(MS);
-        UUID v6 = UuidGenerator.newV6(MS);
         for (long variantBits : new long[] {0x0L, 0x6L, 0x7L}) { // NCS 0xx, Microsoft 110, future 111
-            for (UUID id : new UUID[] {v6, v7}) {
-                UUID broken = new UUID(
-                        id.getMostSignificantBits(),
-                        (id.getLeastSignificantBits() & ~(0x7L << 61)) | (variantBits << 61));
-                assertEquals(id.version(), UuidGenerator.version(broken), broken.toString());
-                assertEquals(Optional.empty(), UuidGenerator.getTimestamp(broken), broken.toString());
-                assertEquals(Optional.empty(), UuidGenerator.getTimestamp(broken, UuidLayout.RFC_9562));
-            }
+            UUID broken = new UUID(
+                    v7.getMostSignificantBits(), (v7.getLeastSignificantBits() & ~(0x7L << 61)) | (variantBits << 61));
+            assertEquals(7, UuidGenerator.version(broken), broken.toString());
+            assertEquals(Optional.empty(), UuidGenerator.getTimestamp(broken), broken.toString());
+            assertEquals(Optional.empty(), UuidGenerator.getTimestamp(broken, UuidLayout.RFC_9562));
         }
         assertEquals(Optional.of(Instant.ofEpochMilli(MS)), UuidGenerator.getTimestamp(v7));
-        assertEquals(Optional.of(Instant.ofEpochMilli(MS)), UuidGenerator.getTimestamp(v6));
+    }
+
+    // Only version 7 timestamps are read: a version 6 from another generator has none, in
+    // either layout, though its version nibble still reads 6.
+    @Test
+    void aV6HasNoTimestamp() {
+        UUID v6 = UUID.fromString("1ec9414c-232a-6b00-b3c8-9f6bdeced846");
+        assertEquals(6, UuidGenerator.version(v6));
+        assertTrue(UuidGenerator.isRfc(v6, 6));
+        assertEquals(Optional.empty(), UuidGenerator.getTimestamp(v6));
+        assertEquals(Optional.empty(), UuidGenerator.getTimestamp(v6, UuidLayout.RFC_9562));
+        assertEquals(Optional.empty(), UuidGenerator.getTimestamp(v6, UuidLayout.SQL_SERVER));
     }
 
     @Test
@@ -151,9 +157,7 @@ class InspectionTest {
             () -> UuidGenerator.version(id, UuidLayout.UNSPECIFIED),
             () -> UuidGenerator.isRfc(id, 7, UuidLayout.UNSPECIFIED),
             () -> UuidGenerator.v7UnixMillis(id, UuidLayout.UNSPECIFIED),
-            () -> UuidGenerator.v6UnixMillis(id, UuidLayout.UNSPECIFIED),
             () -> UuidGenerator.v7Timestamp(id, UuidLayout.UNSPECIFIED),
-            () -> UuidGenerator.v6Timestamp(id, UuidLayout.UNSPECIFIED),
             () -> UuidGenerator.getTimestamp(id, UuidLayout.UNSPECIFIED),
             () -> UuidGenerator.version(raw, UuidLayout.UNSPECIFIED),
             () -> UuidGenerator.isRfc(raw, 7, UuidLayout.UNSPECIFIED),
@@ -166,9 +170,7 @@ class InspectionTest {
             () -> UuidGenerator.version(id, null),
             () -> UuidGenerator.isRfc(id, 7, null),
             () -> UuidGenerator.v7UnixMillis(id, null),
-            () -> UuidGenerator.v6UnixMillis(id, null),
             () -> UuidGenerator.v7Timestamp(id, null),
-            () -> UuidGenerator.v6Timestamp(id, null),
             () -> UuidGenerator.getTimestamp(id, null),
             () -> UuidGenerator.version(raw, null),
             () -> UuidGenerator.isRfc(raw, 7, null),
@@ -220,7 +222,6 @@ class InspectionTest {
         assertThrows(IllegalArgumentException.class, () -> UuidGenerator.fillV7(bytes));
         assertArrayEquals(new byte[64], Arrays.copyOf(bytes, 64));
 
-        // Version 6 has no counter and no such limit; only the int-sized-array one applies.
         assertEquals(1 << 26, UuidGenerator.MAX_V7_BATCH);
     }
 
@@ -232,10 +233,10 @@ class InspectionTest {
         assertTrue(UuidGenerator.batchFailure(4, "uuid_new_v7_batch", 7, "ts")
                 .getMessage()
                 .contains(Integer.toString(UuidGenerator.MAX_V7_BATCH)));
-        assertTrue(UuidGenerator.batchFailure(3, "uuid_new_v6_batch", 7, "ts") instanceof IllegalArgumentException);
+        assertTrue(UuidGenerator.batchFailure(3, "uuid_new_v7_batch", 7, "ts") instanceof IllegalArgumentException);
         assertEquals(
                 "ts",
-                UuidGenerator.batchFailure(2, "uuid_new_v6_batch", 7, "ts").getMessage());
+                UuidGenerator.batchFailure(2, "uuid_new_v7_batch", 7, "ts").getMessage());
         assertTrue(UuidGenerator.batchFailure(1, "uuid_new_v7_batch", 7, "ts") instanceof IllegalStateException);
     }
 

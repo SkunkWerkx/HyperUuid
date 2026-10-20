@@ -79,17 +79,6 @@
         }
       },
       {
-        "returnType": "void",
-        "parameterTypes": [
-          "void*"
-        ],
-        "options": {
-          "critical": {
-            "allowHeapAccess": true
-          }
-        }
-      },
-      {
         "returnType": "jint",
         "parameterTypes": [
           "void*",

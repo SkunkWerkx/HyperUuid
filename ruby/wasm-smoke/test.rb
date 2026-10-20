@@ -19,26 +19,33 @@ v4 = HyperUuid.new_v4.to_s
 check.("v4", v4.match?(/\A\h{8}-\h{4}-4\h{3}-[89ab]\h{3}-\h{12}\z/), v4)
 v5 = HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "www.example.com").to_s
 check.("v5 test vector", v5 == "2ed6657d-e927-568b-95e1-2665a8aea6a2", v5)
-check.("v6", HyperUuid.new_v6.to_s[14] == "6")
 check.("v7 at a fixed time", HyperUuid.new_v7(1_700_000_000_000).to_s.start_with?("018bcfe5-6800-7"))
 # The batch doors take their count as a u32, which Magnus 0.8.2 rejected for every value on
 # a 32-bit target (magnus#187).
 batch = HyperUuid.new_v7_batch(100).map(&:to_s)
 check.("v7 batch is sorted and unique", batch.size == 100 && batch == batch.sort && batch.uniq.size == 100)
-check.("v6 batch", HyperUuid.new_v6_batch(3).size == 3)
 check.("v7 batch bytes", HyperUuid.new_v7_batch_bytes(1000).bytesize == 16_000)
 # The inspection doors, each a core call: version and variant, rfc? in both layouts, and the
 # SQL-order timestamp read in place.
-v6 = HyperUuid.new_v6(1_700_000_000_000)
-v6_sql = v6.to_sql_order
-check.("version and variant", v6.version == 6 && v6.variant == :rfc9562 &&
+v7 = HyperUuid.new_v7(1_700_000_000_000)
+v7_sql = v7.to_sql_order
+check.("version and variant", v7.version == 7 && v7.variant == :rfc9562 &&
   HyperUuid::Uuid::MAX.variant == :future)
-check.("rfc? in both layouts", v6.rfc?(6) && !v6.rfc?(7) && v6_sql.rfc?(6, layout: :sql_server) &&
-  !v6_sql.rfc?(7, layout: :sql_server))
-check.("SQL Server layout", v6_sql.version(layout: :sql_server) == 6 && v6_sql.from_sql_order == v6 &&
-  v6_sql.timestamp(layout: :sql_server) == v6.timestamp)
-check.("v7 SQL timestamp", HyperUuid.new_v7(1_700_000_000_000).to_sql_order.timestamp(layout: :sql_server).to_i ==
-  1_700_000_000)
+check.("rfc? in both layouts", v7.rfc?(7) && !v7.rfc?(4) && v7_sql.rfc?(7, layout: :sql_server) &&
+  !v7_sql.rfc?(8, layout: :sql_server))
+check.("SQL Server layout", v7_sql.version(layout: :sql_server) == 7 && v7_sql.from_sql_order == v7 &&
+  v7_sql.timestamp(layout: :sql_server) == v7.timestamp)
+check.("v7 SQL timestamp", v7_sql.timestamp(layout: :sql_server).to_i == 1_700_000_000)
+check.("SQL layout is a version 8", v7_sql.bytes.getbyte(7) >> 4 == 8)
+# The conversions' refusal crosses the extension as an ArgumentError, in the core's words. RFC
+# 9562 A.6's v7, fixed: a fresh v7's octet 7 carries the SQL layout's 8 one time in 16.
+wrong_version = begin
+  HyperUuid::Uuid.parse("017f22e2-79b0-7cc3-98c4-dc0c0c07398f").from_sql_order
+  nil
+rescue ArgumentError => e
+  e.message
+end
+check.("SQL wrong-version refusal", wrong_version == HyperUuid::Runtime::SQL_ORDER_WRONG_VERSION, wrong_version)
 # The strict timestamp read (uuid_get_timestamp's Rust side): a v7 nibble under the NCS variant
 # is not a version 7 UUID, so it has no timestamp.
 ncs_v7 = HyperUuid::Uuid.parse("017f22e2-79b0-7cc3-68c4-dc0c0c07398f")

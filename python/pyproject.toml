@@ -1,13 +1,14 @@
 [build-system]
-# 1.9 is the first maturin with full PEP 639 support — the SPDX `license` string and the
-# top-level `license-files` below. An older one does not build this file.
-requires = ["maturin>=1.9,<2.0"]
+# 1.15 is the first maturin that builds PyO3 0.30's abi3t extension correctly (its
+# PyModExport entry point; abi3t support itself came in 1.14), and it reads PEP 639's SPDX
+# `license` string and top-level `license-files` below, which needed 1.9.
+requires = ["maturin>=1.15,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "hyperuuid"
 dynamic = ["version"]
-description = "RFC 9562 UUID v4/v5/v6/v7 generation — a PyO3 native extension linking a Rust core directly into CPython. No runtime bridge, no compiler needed to install."
+description = "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order — a PyO3 native extension linking a Rust core directly into CPython. No runtime bridge, no compiler needed to install."
 readme = "README.md"
 license = "MIT"
 # A local copy, not a path up to the repo root: PEP 639 globs forbid `..` outright
@@ -16,8 +17,9 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Brian Buvinghausen" }]
 # 3.11 floor: 3.9 reached end of life in October 2025 and 3.10 does on 2026-10-31. The
-# extension is built abi3-py311, so one wheel per platform covers the whole floor-and-up range — the
-# same floor HyperCast has.
+# extension is built abi3-py311, so one wheel per platform covers the whole floor-and-up range
+# with the GIL — the same floor HyperCast has. Free-threaded CPython takes a cp314t wheel and,
+# from 3.15, the abi3t one (rust/Cargo.toml's abi3t-py315).
 requires-python = ">=3.11"
 dependencies = []
 keywords = ["uuid", "rfc9562", "guid", "identifier", "pyo3"]
@@ -28,6 +30,7 @@ classifiers = [
     "Environment :: WebAssembly :: Emscripten",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Free Threading :: 3 - Stable",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Libraries :: Python Modules",

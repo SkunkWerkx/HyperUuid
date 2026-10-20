@@ -42,33 +42,26 @@ impl Uuid {
 
     /// The version of a UUID held in `layout`'s byte order.
     ///
-    /// [`Layout::Rfc9562`] is [`version`](Self::version). [`Layout::SqlServer`] is defined only
-    /// for the two versions that have a SQL Server order, and answers 6, 7, or 0 for anything
-    /// that isn't a SQL-ordered version 6 or 7 RFC 9562 UUID. The version nibble lands at a
-    /// different octet for each (octet 7 for v7, octet 8 for v6), and the other version's
-    /// random bits can mimic it there, so this checks the variant too, where each version
-    /// puts it: a v7's variant shares octet 8 with the v6 nibble's slot and can never read 6
-    /// there, and a v6's version byte sits where a v7's variant would be and never reads as
-    /// one. Either way the answer can't confuse the two.
+    /// [`Layout::Rfc9562`] is [`version`](Self::version). In [`Layout::SqlServer`] it is the
+    /// version a SQL-ordered value was converted from, 7, and 0 for anything else. Every
+    /// SQL-ordered value is a version 8 ([`crate::sql`]): this checks for the 8 and the
+    /// variant where that layout puts them.
     ///
     /// What it can't know is whether the bytes are in SQL Server order at all: that is the
-    /// caller's to track. Bytes in RFC order can happen to form a valid SQL-ordered v7 (a
-    /// random v4 does one time in 16), and then this answers 7.
+    /// caller's to track. Bytes in RFC order can happen to carry the 8 and the variant there
+    /// (a random v4 does one time in 16), and then this answers 7.
     pub const fn version_in(&self, layout: Layout) -> u8 {
         let b = &self.0;
         match layout {
             Layout::Rfc9562 => self.version(),
-            Layout::SqlServer if b[7] >> 4 == 7 && b[8] & 0xC0 == 0x80 => 7,
-            Layout::SqlServer if b[8] >> 4 == 6 && b[6] & 0xC0 == 0x80 => 6,
-            Layout::SqlServer => 0,
+            Layout::SqlServer => crate::sql::source_version(b),
         }
     }
 
     /// The variant field (RFC 9562 §4.1, the top bits of octet 8) of a UUID in RFC 9562 order.
     /// Nil reads as [`Variant::Ncs`] and Max as [`Variant::Future`], which is how the RFC
-    /// classifies them. There is no layout form: in SQL Server order the variant sits at a
-    /// different octet for each version, and [`is_rfc_in`](Self::is_rfc_in) is the check that
-    /// reads it there.
+    /// classifies them. There is no layout form: [`is_rfc_in`](Self::is_rfc_in) is the check
+    /// that reads a SQL-ordered value's variant.
     pub const fn variant(&self) -> Variant {
         match self.0[8] >> 5 {
             0..=3 => Variant::Ncs,
@@ -91,8 +84,8 @@ impl Uuid {
     }
 
     /// [`is_rfc`](Self::is_rfc) for a UUID held in `layout`'s byte order. In
-    /// [`Layout::SqlServer`] only versions 6 and 7 can be true, the two that have a SQL Server
-    /// order; see [`version_in`](Self::version_in).
+    /// [`Layout::SqlServer`] it asks whether the value was converted from an RFC 9562 UUID of
+    /// `version`, so only 7 can be true; see [`version_in`](Self::version_in).
     pub const fn is_rfc_in(&self, version: u8, layout: Layout) -> bool {
         match layout {
             Layout::Rfc9562 => self.is_rfc(version),
@@ -130,9 +123,9 @@ pub enum Layout {
     /// RFC 9562 network order, what every function in this crate takes unless it says
     /// otherwise.
     Rfc9562,
-    /// The order [`v6::to_sql_order`](crate::v6::to_sql_order) and
-    /// [`v7::to_sql_order`](crate::v7::to_sql_order) write, which SQL Server's
-    /// `uniqueidentifier` sorts by creation order. Defined for versions 6 and 7 only.
+    /// The version 8 layout [`v7::to_sql_order`](crate::v7::to_sql_order) writes
+    /// ([`crate::sql`]), which SQL Server's `uniqueidentifier` sorts by creation order.
+    /// Defined for values converted from version 7 only.
     SqlServer,
 }
 

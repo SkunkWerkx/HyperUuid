@@ -15,7 +15,7 @@ import org.graalvm.polyglot.io.ByteSequence;
 /**
  * The Rust core as a {@code wasm32-wasip1} module, run inside the JVM by
  * <a href="https://www.graalvm.org/webassembly/">GraalWasm</a>. No native binary, no
- * {@code java.lang.foreign} downcall: the eighteen {@code uuid_*} functions and
+ * {@code java.lang.foreign} downcall: the twelve {@code uuid_*} functions and
  * {@code hyperuuid_version} that {@link UuidGenerator} downcalls into natively are called
  * through the polyglot API instead, on the module bundled at
  * {@code /native/wasm32-wasip1/hyperuuid.wasm}.
@@ -70,22 +70,16 @@ final class WasmBackend implements Backend {
     private final Value freeFn;
     private final Value newV4Fn;
     private final Value newV5Fn;
-    private final Value newV6Fn;
-    private final Value v6UnixMillisFn;
-    private final Value newV6BatchFn;
     private final Value newV7Fn;
     private final Value v7UnixMillisFn;
     private final Value newV7BatchFn;
     private final Value v7ToSqlOrderFn;
     private final Value v7ToRfcOrderFn;
-    private final Value v6ToSqlOrderFn;
-    private final Value v6ToRfcOrderFn;
     private final Value versionFn;
     private final Value uuidVersionFn;
     private final Value uuidVariantFn;
     private final Value uuidIsRfcFn;
     private final Value getTimestampFn;
-    private final Value v6UnixMillisInFn;
     private final Value v7UnixMillisInFn;
 
     // Sixteen bytes read back from the guest per single-UUID door; guarded by the same
@@ -129,22 +123,16 @@ final class WasmBackend implements Backend {
         freeFn = export("free");
         newV4Fn = export("uuid_new_v4");
         newV5Fn = export("uuid_new_v5");
-        newV6Fn = export("uuid_new_v6");
-        v6UnixMillisFn = export("uuid_v6_unix_millis");
-        newV6BatchFn = export("uuid_new_v6_batch");
         newV7Fn = export("uuid_new_v7");
         v7UnixMillisFn = export("uuid_v7_unix_millis");
         newV7BatchFn = export("uuid_new_v7_batch");
         v7ToSqlOrderFn = export("uuid_v7_to_sql_order");
         v7ToRfcOrderFn = export("uuid_v7_to_rfc_order");
-        v6ToSqlOrderFn = export("uuid_v6_to_sql_order");
-        v6ToRfcOrderFn = export("uuid_v6_to_rfc_order");
         versionFn = export("hyperuuid_version");
         uuidVersionFn = export("uuid_version");
         uuidVariantFn = export("uuid_variant");
         uuidIsRfcFn = export("uuid_is_rfc");
         getTimestampFn = export("uuid_get_timestamp");
-        v6UnixMillisInFn = export("uuid_v6_unix_millis_in");
         v7UnixMillisInFn = export("uuid_v7_unix_millis_in");
         scratchIn = malloc(16);
         scratchOut = malloc(16);
@@ -217,7 +205,7 @@ final class WasmBackend implements Backend {
         return fn.execute(args).asInt();
     }
 
-    // ---- the version probe, and the eighteen exports with UuidGenerator's exact error contract
+    // ---- the version probe, and the twelve exports with UuidGenerator's exact error contract
 
     @Override
     public synchronized int version() {
@@ -247,38 +235,6 @@ final class WasmBackend implements Backend {
             throw new IllegalStateException("uuid_new_v5 failed with code " + rc);
         }
         return readUuid(scratchOut);
-    }
-
-    @Override
-    public synchronized UUID newV6(long unixMillis) {
-        int rc = call(newV6Fn, unixMillis, scratchOut);
-        if (rc == 2) {
-            throw new IllegalArgumentException("unixMillis does not fit the 60-bit v6 timestamp field");
-        }
-        if (rc != 0) {
-            throw new IllegalStateException("uuid_new_v6 failed with code " + rc + " (random source failure)");
-        }
-        return readUuid(scratchOut);
-    }
-
-    @Override
-    public synchronized long v6UnixMillis(UUID uuid) {
-        writeUuid(scratchIn, uuid);
-        return v6UnixMillisFn.execute(scratchIn).asLong();
-    }
-
-    @Override
-    public synchronized UUID[] newV6Batch(int count, long unixMillis) {
-        if (count == 0) {
-            return new UUID[0];
-        }
-        int out = fillBatch(
-                newV6BatchFn,
-                "uuid_new_v6_batch",
-                count,
-                unixMillis,
-                "unixMillis does not fit the 60-bit v6 timestamp field");
-        return readUuids(out, count, new UUID[count]);
     }
 
     @Override
@@ -315,22 +271,12 @@ final class WasmBackend implements Backend {
 
     @Override
     public synchronized UUID v7ToSqlOrder(UUID uuid) {
-        return rewrite(v7ToSqlOrderFn, uuid);
+        return rewrite(v7ToSqlOrderFn, "uuid_v7_to_sql_order", uuid);
     }
 
     @Override
     public synchronized UUID v7FromSqlOrder(UUID uuid) {
-        return rewrite(v7ToRfcOrderFn, uuid);
-    }
-
-    @Override
-    public synchronized UUID v6ToSqlOrder(UUID uuid) {
-        return rewrite(v6ToSqlOrderFn, uuid);
-    }
-
-    @Override
-    public synchronized UUID v6FromSqlOrder(UUID uuid) {
-        return rewrite(v6ToRfcOrderFn, uuid);
+        return rewrite(v7ToRfcOrderFn, "uuid_v7_to_rfc_order", uuid);
     }
 
     @Override
@@ -343,21 +289,7 @@ final class WasmBackend implements Backend {
                 "uuid_new_v7_batch",
                 destination.length,
                 unixMillis,
-                "unixMillis does not fit this version's timestamp field");
-        readUuids(out, destination.length, destination);
-    }
-
-    @Override
-    public synchronized void fillV6(UUID[] destination, long unixMillis) {
-        if (destination.length == 0) {
-            return;
-        }
-        int out = fillBatch(
-                newV6BatchFn,
-                "uuid_new_v6_batch",
-                destination.length,
-                unixMillis,
-                "unixMillis does not fit this version's timestamp field");
+                "unixMillis must be non-negative and fit within 48 bits");
         readUuids(out, destination.length, destination);
     }
 
@@ -367,28 +299,13 @@ final class WasmBackend implements Backend {
     }
 
     @Override
-    public synchronized void fillV6(byte[] destination, long unixMillis) {
-        fillBytes(newV6BatchFn, "uuid_new_v6_batch", destination, unixMillis);
-    }
-
-    @Override
     public synchronized void v7ToSqlOrder(byte[] uuid) {
-        rewrite(v7ToSqlOrderFn, uuid);
+        rewrite(v7ToSqlOrderFn, "uuid_v7_to_sql_order", uuid);
     }
 
     @Override
     public synchronized void v7FromSqlOrder(byte[] uuid) {
-        rewrite(v7ToRfcOrderFn, uuid);
-    }
-
-    @Override
-    public synchronized void v6ToSqlOrder(byte[] uuid) {
-        rewrite(v6ToSqlOrderFn, uuid);
-    }
-
-    @Override
-    public synchronized void v6FromSqlOrder(byte[] uuid) {
-        rewrite(v6ToRfcOrderFn, uuid);
+        rewrite(v7ToRfcOrderFn, "uuid_v7_to_rfc_order", uuid);
     }
 
     @Override
@@ -438,12 +355,6 @@ final class WasmBackend implements Backend {
     }
 
     @Override
-    public synchronized long v6UnixMillisIn(UUID uuid, int layout) {
-        writeUuid(scratchIn, uuid);
-        return v6UnixMillisInFn.execute(scratchIn, layout).asLong();
-    }
-
-    @Override
     public synchronized long v7UnixMillisIn(UUID uuid, int layout) {
         writeUuid(scratchIn, uuid);
         return v7UnixMillisInFn.execute(scratchIn, layout).asLong();
@@ -490,22 +401,30 @@ final class WasmBackend implements Backend {
                 name,
                 destination.length / 16,
                 unixMillis,
-                "unixMillis does not fit this version's timestamp field");
+                "unixMillis must be non-negative and fit within 48 bits");
         memory.readBuffer(out, destination, 0, destination.length);
     }
 
-    private UUID rewrite(Value fn, UUID uuid) {
+    // The two SQL-order exports return 0 or a refusal code, mapped by the same helper the
+    // FFM path uses. On a refusal nothing is read back, so a caller's byte[] stays as it was.
+    private UUID rewrite(Value fn, String name, UUID uuid) {
         writeUuid(scratchIn, uuid);
-        fn.execute(scratchIn);
+        int rc = call(fn, scratchIn);
+        if (rc != 0) {
+            throw UuidGenerator.sqlOrderFailure(rc, name);
+        }
         return readUuid(scratchIn);
     }
 
-    private void rewrite(Value fn, byte[] uuid) {
+    private void rewrite(Value fn, String name, byte[] uuid) {
         if (uuid.length != 16) {
             throw new IllegalArgumentException("a UUID is exactly 16 bytes; got " + uuid.length);
         }
         writeBytes(scratchIn, uuid);
-        fn.execute(scratchIn);
+        int rc = call(fn, scratchIn);
+        if (rc != 0) {
+            throw UuidGenerator.sqlOrderFailure(rc, name);
+        }
         memory.readBuffer(scratchIn, uuid, 0, 16);
     }
 }

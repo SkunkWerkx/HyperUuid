@@ -1,5 +1,5 @@
-// Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v6/v7
-// time-sortable) by calling the Rust core, linked into the binary as a static library through
+// Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v7
+// time-sortable, with a version 8 SQL Server order for v7) by calling the Rust core, linked into the binary as a static library through
 // cgo (backend_static.go). It builds on Linux, macOS and Windows, on amd64 and arm64, with a
 // C compiler present, and under TinyGo for WebAssembly, browser included (backend_tinygo.go);
 // anything else is a compile error that says so (unsupported.go).
@@ -63,79 +63,6 @@ func NewV5String(namespace uuid.UUID, name string) (uuid.UUID, error) {
 	return NewV5(namespace, []byte(name))
 }
 
-// NewV6 creates a time-sortable UUID version 6 (RFC 9562 §5.6), a field-compatible
-// reordering of version 1 for better sort/index locality, using the current time.
-func NewV6() (uuid.UUID, error) {
-	return NewV6At(uint64(time.Now().UnixMilli()))
-}
-
-// NewV6At creates a time-sortable UUID version 6 (RFC 9562 §5.6), embedding unixMillis
-// (milliseconds since the Unix epoch). clock_seq and node are randomly generated on every
-// call — unlike version 7, there is no monotonic counter, so calls within the same
-// millisecond are not guaranteed to sort in creation order.
-func NewV6At(unixMillis uint64) (uuid.UUID, error) {
-	out, rc := newV6(unixMillis)
-	switch rc {
-	case 0:
-		return out, nil
-	case 2:
-		return uuid.UUID{}, fmt.Errorf("uuid_new_v6 failed with code %d: %w", rc, ErrTimestampOutOfRange)
-	default:
-		return uuid.UUID{}, fmt.Errorf("uuid_new_v6 failed with code %d: %w", rc, ErrRandomSource)
-	}
-}
-
-// NewV6AtTime creates a time-sortable UUID version 6 (RFC 9562 §5.6) from a time.Time — pulls
-// the Unix-epoch milliseconds off t and mints it through NewV6At.
-func NewV6AtTime(t time.Time) (uuid.UUID, error) {
-	return NewV6At(uint64(t.UnixMilli()))
-}
-
-// NewV6Batch creates count time-sortable version 6 UUIDs sharing one timestamp capture,
-// using the current time — one native call and one random-bytes fetch instead of count of
-// each.
-func NewV6Batch(count int) ([]uuid.UUID, error) {
-	return NewV6BatchAt(count, uint64(time.Now().UnixMilli()))
-}
-
-// NewV6BatchAt creates count time-sortable version 6 UUIDs sharing one unixMillis timestamp
-// capture. clock_seq and node are independently random per item — unlike version 7, there is
-// no monotonic counter, so items are not guaranteed to sort in creation order. A count of 0
-// returns a nil slice; a negative one returns ErrNegativeCount.
-func NewV6BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
-	if count < 0 {
-		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
-	}
-	if count == 0 {
-		return nil, nil
-	}
-	// Delegates to FillV6At: because a []uuid.UUID is already contiguous 16-byte records,
-	// the native call writes straight into result. No scratch byte buffer and no
-	// per-element copy — this used to allocate both and then copy between them.
-	result := make([]uuid.UUID, count)
-	if err := FillV6At(result, unixMillis); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// V6UnixMillis recovers the Unix-epoch millisecond timestamp embedded in a version 6 UUID's
-// timestamp field. Only meaningful when id.Version() == 6 — the RFC 9562 bit layout doesn't
-// distinguish "not a v6 UUID" from "v6 UUID with a very early timestamp", so the caller is
-// responsible for checking that first if it matters.
-func V6UnixMillis(id uuid.UUID) (uint64, error) {
-	return v6UnixMillis(id), nil
-}
-
-// V6Timestamp recovers the UTC timestamp embedded in a version 6 UUID as a time.Time.
-func V6Timestamp(id uuid.UUID) (time.Time, error) {
-	millis, err := V6UnixMillis(id)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(int64(millis)).UTC(), nil
-}
-
 // V7UnixMillis recovers the Unix-epoch millisecond timestamp embedded in a version 7 UUID's
 // unix_ts_ms field. Only meaningful when id.Version() == 7 — the RFC 9562 bit layout doesn't
 // distinguish "not a v7 UUID" from "v7 UUID with a very early timestamp", so the caller is
@@ -179,10 +106,11 @@ func NewV7AtTime(t time.Time) (uuid.UUID, error) {
 }
 
 // GetTimestamp recovers the UTC timestamp embedded in id as a time.Time, or ErrNotTimeBased if
-// id isn't an RFC 9562 version 6 or 7 UUID. Unlike V6Timestamp/V7Timestamp, this checks the
-// variant and version itself, so a caller doesn't need to already know (or separately check)
-// which version id is before asking: a 6 or 7 nibble under a variant other than RFC 9562's
-// has no version, and so no timestamp. One core call does the check and the read, with no
+// id isn't an RFC 9562 version 7 UUID. Unlike V7Timestamp, this checks the variant and version
+// itself, so a caller doesn't need to already know (or separately check) what id is before
+// asking: a 7 nibble under a variant other than RFC 9562's has no version, and so no
+// timestamp. Only version 7 has one here: a version 6 or version 1 UUID from another
+// generator returns ErrNotTimeBased too. One core call does the check and the read, with no
 // bit-layout logic here. GetTimestampIn is the form for a SQL-ordered value.
 func GetTimestamp(id uuid.UUID) (time.Time, error) {
 	return timestampIn(id, uint32(LayoutRfc9562))
@@ -197,7 +125,7 @@ func GetTimestamp(id uuid.UUID) (time.Time, error) {
 // UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
 // than sorting before the ones ahead of them. A larger batch would have to reuse counter
 // values within one millisecond, so it is refused with ErrBatchTooLarge before anything is
-// allocated or written. Version 6 has no counter and no such limit.
+// allocated or written.
 //
 // The roll-forward orders one batch, not the stream. The next batch or NewV7At call in the
 // same real millisecond starts its counter just past the wrap and carries the supplied
@@ -244,63 +172,66 @@ func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	return result, nil
 }
 
-// V7ToSqlOrder converts an RFC 9562-ordered version 7 id to the byte order SQL Server's
-// uniqueidentifier needs on the wire to sort by creation order.
+// errSqlOrder maps a SQL-order conversion's return code onto this package's errors. Each is
+// a prebuilt sentinel, so a refusal allocates nothing either.
+func errSqlOrder(rc int32) error {
+	switch rc {
+	case 0:
+		return nil
+	case 5:
+		return ErrWrongVersion
+	default:
+		return fmt.Errorf("hyperuuid: SQL-order conversion failed with code %d", rc)
+	}
+}
+
+// sqlOrder runs one SQL-order conversion, returning the zero UUID with the error on a refusal.
+func sqlOrder(id uuid.UUID, call func(uuid.UUID) (uuid.UUID, int32)) (uuid.UUID, error) {
+	out, rc := call(id)
+	if err := errSqlOrder(rc); err != nil {
+		return uuid.UUID{}, err
+	}
+	return out, nil
+}
+
+// V7ToSqlOrder converts an RFC 9562 version 7 id to SQL Server order: a version 8 UUID (RFC
+// 9562 §5.8, the version for custom layouts) whose uniqueidentifier sort is creation order.
 //
 // System.Data.SqlTypes.SqlGuid comparison — and therefore T-SQL ORDER BY on a
-// uniqueidentifier column — doesn't compare a GUID's 16 bytes left to right; it uses a fixed,
-// non-sequential byte significance order (most-significant first: octets 10,11,12,13,14,15,
-// 8,9, 6,7, 4,5, 0,1,2,3). This moves the timestamp and counter — the two fields that
-// determine creation order — into those most-significant octets, and moves the trailing
-// entropy, which carries no ordering information, into the least-significant ones as one
-// intact block. The permutation is computed once in the native Rust core and verified there
-// (and independently, against the real System.Data.SqlTypes.SqlGuid comparator, in this
-// project's C# test suite); this binding calls the same native function rather than
-// reimplementing the math. Meaningful only for a genuine version 7 UUID — see V6ToSqlOrder
-// for the version 6 equivalent.
+// uniqueidentifier column — doesn't compare a GUID's 16 bytes left to right; it uses a fixed
+// significance order (most significant first: octets 10,11,12,13,14,15, 8,9, 6,7, 4,5,
+// 0,1,2,3). The layout puts the version nibble 8 at octet 7's top nibble and the RFC variant
+// at octet 8's top two bits — where SQL Server's text form, and a .NET Guid, show them — and
+// fills the other 122 bits, most significant first, with all 122 of the version 7's own: the
+// 48-bit timestamp, the 26-bit counter, then the 48 trailing random bits as one block. So the
+// timestamp lands in octets 10-15, the counter split around the version and variant, and the
+// random bits in 4-5 and 0-3, and values sort by timestamp, then by counter within a
+// millisecond. VersionIn with LayoutSqlServer reads 7 back from the 8 and the variant. Every
+// version 7 converts, whatever its timestamp. The conversion is computed in the native core and verified there (and
+// independently, against the real SqlGuid comparator, in this project's C# test suite).
+//
+// The result is no longer a version 7: RFC 9562 §6.11 sends a byte order other than the
+// RFC's to version 8. V7FromSqlOrder gives back the exact original.
+//
+// It refuses a value that isn't an RFC 9562 version 7 with ErrWrongVersion and returns the
+// zero UUID. The check reads the bytes as RFC order, so a value already in SQL order is
+// converted a second time about one time in 16, when it happens to carry a 7 and the RFC
+// variant there: keep track of which order a value is in.
 func V7ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	return v7ToSqlOrder(id), nil
+	return sqlOrder(id, v7ToSqlOrder)
 }
 
-// V7FromSqlOrder is the inverse of V7ToSqlOrder — converts a SQL-Server-ordered version 7 id
-// back to RFC 9562 order.
+// V7FromSqlOrder is the inverse of V7ToSqlOrder — converts a SQL-ordered value back to the
+// RFC 9562 version 7 it came from. Anything VersionIn with LayoutSqlServer doesn't read as a
+// converted version 7 — an RFC-ordered value, say — returns ErrWrongVersion and the zero
+// UUID.
 func V7FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	return v7ToRfcOrder(id), nil
-}
-
-// V6ToSqlOrder converts an RFC 9562-ordered version 6 id to the byte order SQL Server's
-// uniqueidentifier needs on the wire to sort by creation order.
-//
-// Same SqlGuid significance order as V7ToSqlOrder, applied to v6's very different field
-// layout. v6 has no monotonic counter the way v7 does; the only field that determines its
-// creation order is the 60-bit timestamp itself, so this moves that whole timestamp — most
-// significant chunk first — into the comparison's most significant octets, and relocates
-// clock_seq/node (no ordering value here — generated randomly on every call, not a counter)
-// into the remaining octets. Version and variant end up at different byte offsets than
-// V7ToSqlOrder's result (octet 8's top nibble and octet 6's top two bits here, not 7/8) —
-// fine, since the two versions are separate functions and a caller always knows which one
-// it's calling.
-//
-// Unlike v7, two version 6 UUIDs minted at the same millisecond have identical timestamp
-// bits — clock_seq/node are independently random, not a counter — so this doesn't (and
-// can't) make same-millisecond v6 UUIDs sort in creation order any more than plain RFC order
-// already does. Distinct timestamps sort correctly; same-timestamp ties don't, by the RFC's
-// own v6 design, not a limitation introduced here.
-//
-// Meaningful only for a genuine version 6 UUID.
-func V6ToSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	return v6ToSqlOrder(id), nil
-}
-
-// V6FromSqlOrder is the inverse of V6ToSqlOrder — converts a SQL-Server-ordered version 6 id
-// back to RFC 9562 order.
-func V6FromSqlOrder(id uuid.UUID) (uuid.UUID, error) {
-	return v6ToRfcOrder(id), nil
+	return sqlOrder(id, v7ToRfcOrder)
 }
 
 // ---- Destination-buffer fills -------------------------------------------------------
 //
-// NewV6Batch/NewV7Batch above allocate a fresh slice per call. These write into one the
+// NewV7Batch above allocates a fresh slice per call. These write into one the
 // caller already owns, which is the shape that lets a hot path reuse a buffer instead of
 // handing the collector a new one every batch — the same reason io.Reader takes a
 // destination rather than returning a slice.
@@ -359,19 +290,6 @@ func fillBytes(dst []byte, unixMillis uint64, fn string,
 	return errBatch(fn, call(unixMillis, uint32(count), unsafe.Pointer(&dst[0])))
 }
 
-// FillV6 fills dst with time-sortable version 6 UUIDs sharing one timestamp capture, using
-// the current time. clock_seq and node are independently random per item — unlike version 7
-// there is no monotonic counter, so items are not guaranteed to sort in creation order.
-func FillV6(dst []uuid.UUID) error {
-	return FillV6At(dst, uint64(time.Now().UnixMilli()))
-}
-
-// FillV6At fills dst with version 6 UUIDs sharing the given unixMillis timestamp capture.
-func FillV6At(dst []uuid.UUID, unixMillis uint64) error {
-	return fillUUIDs(dst, unixMillis, "uuid_new_v6_batch",
-		newV6Batch)
-}
-
 // FillV7 fills dst with time-sortable version 7 UUIDs sharing one timestamp capture and one
 // contiguous block of the monotonic counter, using the current time. Same order and limits
 // as FillV7At.
@@ -390,20 +308,6 @@ func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
 	}
 	return fillUUIDs(dst, unixMillis, "uuid_new_v7_batch",
 		newV7Batch)
-}
-
-// FillV6Bytes fills dst with raw RFC 9562-ordered version 6 UUID bytes, 16 per UUID, using
-// the current time. len(dst) must be a multiple of 16; anything else returns
-// ErrBufferNotWholeUUIDs.
-func FillV6Bytes(dst []byte) error {
-	return FillV6BytesAt(dst, uint64(time.Now().UnixMilli()))
-}
-
-// FillV6BytesAt fills dst with raw RFC 9562-ordered version 6 UUID bytes sharing the given
-// unixMillis timestamp capture.
-func FillV6BytesAt(dst []byte, unixMillis uint64) error {
-	return fillBytes(dst, unixMillis, "uuid_new_v6_batch",
-		newV6Batch)
 }
 
 // FillV7Bytes fills dst with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID, using
@@ -427,23 +331,23 @@ func FillV7BytesAt(dst []byte, unixMillis uint64) error {
 
 // ---- Raw-byte SQL-order transforms --------------------------------------------------
 //
-// The same native permutations as V6/V7To/FromSqlOrder above, rewriting a caller's own
-// 16-byte buffer in place instead of taking and returning a uuid.UUID. Useful when the value
+// The same native conversions as V7ToSqlOrder and V7FromSqlOrder above, with the same refusals,
+// rewriting a caller's own 16-byte buffer in place instead of taking and returning a
+// uuid.UUID. A refusal leaves the buffer as it was. Useful when the value
 // is already bytes on its way to a wire format or a database parameter, and — because they
 // are pure byte-in/byte-out — they are the form a byte-level correctness oracle can be
 // pointed at directly, shared across every binding in this repo rather than re-expressed in
 // each language's own UUID type.
 
-func sqlOrderBytes(b []byte, call func(unsafe.Pointer)) error {
+func sqlOrderBytes(b []byte, call func(unsafe.Pointer) int32) error {
 	if len(b) != 16 {
 		return fmt.Errorf("%w: got %d", ErrNotOneUUID, len(b))
 	}
-	call(unsafe.Pointer(&b[0]))
-	return nil
+	return errSqlOrder(call(unsafe.Pointer(&b[0])))
 }
 
 // V7ToSqlOrderBytes rewrites the 16 RFC 9562-ordered version 7 bytes in b into SQL Server
-// uniqueidentifier sort order, in place. See V7ToSqlOrder for the byte-level rationale.
+// order, in place. See V7ToSqlOrder for the layout and the refusals.
 func V7ToSqlOrderBytes(b []byte) error {
 	return sqlOrderBytes(b, v7ToSqlOrderBytes)
 }
@@ -451,15 +355,4 @@ func V7ToSqlOrderBytes(b []byte) error {
 // V7FromSqlOrderBytes is the inverse of V7ToSqlOrderBytes, in place.
 func V7FromSqlOrderBytes(b []byte) error {
 	return sqlOrderBytes(b, v7ToRfcOrderBytes)
-}
-
-// V6ToSqlOrderBytes rewrites the 16 RFC 9562-ordered version 6 bytes in b into SQL Server
-// uniqueidentifier sort order, in place. See V6ToSqlOrder for the byte-level rationale.
-func V6ToSqlOrderBytes(b []byte) error {
-	return sqlOrderBytes(b, v6ToSqlOrderBytes)
-}
-
-// V6FromSqlOrderBytes is the inverse of V6ToSqlOrderBytes, in place.
-func V6FromSqlOrderBytes(b []byte) error {
-	return sqlOrderBytes(b, v6ToRfcOrderBytes)
 }
