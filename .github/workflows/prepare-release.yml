@@ -34,6 +34,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-source-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   prepare-release:
     runs-on: ubuntu-26.04

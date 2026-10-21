@@ -33,6 +33,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-source-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   stage-native-binaries:
     if: >-
@@ -100,7 +104,7 @@ jobs:
       - name: Install object-format-capable symbol readers
         run: sudo apt-get update && sudo apt-get install -y llvm
 
-      - name: Validate downloaded symbols, version and conversion return codes
+      - name: Validate downloaded symbols, version and runtime contract
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
@@ -251,6 +255,7 @@ jobs:
             done
           done
 
+          sort -k2 -o digests.txt digests.txt
           echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat digests.txt >> "$GITHUB_STEP_SUMMARY"
@@ -270,6 +275,7 @@ jobs:
           # -f: go/staticlib's archives are in .gitignore, so that this workflow is the only
           # thing that ever adds one — a developer's own build of them stays out of a commit.
           git add -f go/staticlib
+          python3 .github/scripts/release_guard.py index
           if git diff --cached --quiet; then
             echo "::notice::Bytes are unchanged; recording the verified source/run relationship."
           fi
