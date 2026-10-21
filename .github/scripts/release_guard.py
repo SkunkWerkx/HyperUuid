@@ -84,8 +84,8 @@ def version_at(root, sha):
 def release_record(root, commit, tag, override, repo):
     message = git(root, 'show', '-s', '--format=%B', commit)
     def trailer(key, pattern):
-        values = re.findall(rf'^{key}: ({pattern})$', message, re.M)
-        if len(values) != 1:
+        values = re.findall(rf'^{key}: (.*)$', message, re.M)
+        if len(values) != 1 or not re.fullmatch(pattern, values[0]):
             raise ValueError(f'staging commit requires exactly one {key} trailer')
         return values[0]
     sha = trailer('Release-Source-SHA', '[0-9a-f]{40}')
@@ -99,6 +99,14 @@ def release_record(root, commit, tag, override, repo):
         raise ValueError(f'tag {tag} does not match version {want}')
     if version_at(root, sha) != want:
         raise ValueError('preparation and staging versions differ')
+    validate_transition(root, sha, commit)
+    validate_staged_tree(root, commit)
+    validate_run(api(repo, f'actions/runs/{run_id}'), sha, run_id, repo)
+    return sha, run_id
+
+
+
+def validate_transition(root, sha, commit):
     allowed = payload_paths(Path('artifacts'))
     changed = git(root, 'diff', '--name-only', '--no-renames', sha, commit).splitlines()
     for path in changed:
@@ -111,8 +119,36 @@ def release_record(root, commit, tag, override, repo):
         expected_mode = '100755' if path.startswith('php/') else '100644'
         if mode != expected_mode:
             raise ValueError(f'invalid staged file mode for {path}: {mode}')
-    validate_run(api(repo, f'actions/runs/{run_id}'), sha, run_id, repo)
-    return sha, run_id
+
+
+def validate_staging_index(root, sha):
+    if git(root, 'rev-parse', 'HEAD') != sha:
+        raise ValueError('staging index is not based on preparation source A')
+    tree = git(root, 'write-tree')
+    validate_transition(root, sha, tree)
+    validate_staged_tree(root, tree)
+    compare_payloads(root, payload_paths(root / 'artifacts'), tree)
+
+
+def validate_staged_tree(root, commit):
+    """Validate every shipped path, including files unchanged by staging."""
+    expected = payload_paths(Path('artifacts'))
+    source_paths = {'php/src/native/README.md', 'go/staticlib/README.md',
+                    f'{BUNDLE}/include/hyperuuid.h', f'{BUNDLE}/include/module.modulemap'}
+    entries = {}
+    for line in git(root, 'ls-tree', '-r', commit, '--', 'php/src/native', BUNDLE, APPLE,
+                    'go/staticlib').splitlines():
+        metadata, path = line.split('\t', 1)
+        entries[path] = metadata.split()[0]
+    for path in expected:
+        if path not in entries:
+            raise ValueError(f'missing staged payload: {path}')
+        mode = '100755' if path.startswith('php/') else '100644'
+        if entries[path] != mode:
+            raise ValueError(f'invalid staged file mode for {path}: {entries[path]}')
+    for path in entries:
+        if path not in expected and path not in source_paths:
+            raise ValueError(f'unexpected staged payload: {path}')
 
 
 def verify_attestation(path, sha, repo):
@@ -120,11 +156,12 @@ def verify_attestation(path, sha, repo):
                     '--signer-repo', 'SkunkWerkx/.github', '--source-digest', sha], check=True)
 
 
-def compare_payloads(root, paths):
+def compare_payloads(root, paths, tree=None):
     for dest, src in paths.items():
         if src.is_symlink() or (root / dest).is_symlink():
             raise ValueError(f'staged payload must be a regular file: {dest}')
-        if src.read_bytes() != (root / dest).read_bytes():
+        shipped = subprocess.check_output(['git', 'show', f'{tree}:{dest}'], cwd=root) if tree else (root / dest).read_bytes()
+        if src.read_bytes() != shipped:
             raise ValueError(f'staged bytes do not match the recorded CI run: {dest}')
 
 
@@ -204,13 +241,16 @@ def validate_payloads(root, paths, sha, repo, compare=False, attest=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('record', 'run', 'master', 'payloads', 'compare'))
+    parser.add_argument('mode', choices=('record', 'run', 'master', 'index', 'payloads', 'compare'))
     args = parser.parse_args()
     root = Path.cwd()
     repo, sha = os.environ['GITHUB_REPOSITORY'], os.environ.get('SOURCE_SHA', '')
     run_id = os.environ.get('RUN_ID', '')
     if args.mode == 'record':
-        tag = os.environ['GITHUB_REF_NAME'] if os.environ.get('GITHUB_REF_TYPE') == 'tag' else ''
+        ref = os.environ.get('GITHUB_REF', '')
+        tag = ref.removeprefix('refs/tags/') if ref.startswith('refs/tags/') else ''
+        if not tag and os.environ.get('GITHUB_REF_TYPE') == 'tag':
+            tag = os.environ['GITHUB_REF_NAME']
         sha, run_id = release_record(root, os.environ['GITHUB_SHA'], tag,
                                      os.environ.get('CI_RUN_ID_OVERRIDE', ''), repo)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
@@ -219,6 +259,8 @@ def main():
         validate_run(api(repo, f'actions/runs/{run_id}'), sha, run_id, repo)
     elif args.mode == 'master':
         require_master(root, sha)
+    elif args.mode == 'index':
+        validate_staging_index(root, sha)
     else:
         # Staging's existing verify-and-copy step checks provenance once, after these
         # ABI checks. At release entry, verify it here while comparing the shipped bytes.

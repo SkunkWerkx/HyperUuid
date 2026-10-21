@@ -26,7 +26,10 @@ class ReleaseGuardTests(unittest.TestCase):
         self.commit('preparation')
         self.a = self.git('rev-parse', 'HEAD')
         self.payload = 'go/staticlib/linux_amd64/libhyperuuid.a'
-        self.write(self.payload, 'verified bytes')
+        for path in guard.payload_paths(Path('artifacts')):
+            self.write(path, 'verified bytes')
+            if path.startswith('php/'):
+                (self.root / path).chmod(0o755)
         self.commit(f'stage\n\nRelease-Source-SHA: {self.a}\nRelease-CI-Run-ID: 42')
         self.b = self.git('rev-parse', 'HEAD')
         self.run = dict(id=42, head_sha=self.a, head_branch='master',
@@ -117,6 +120,48 @@ class ReleaseGuardTests(unittest.TestCase):
             raise subprocess.CalledProcessError(1, args, 'wrong source')
         with patch.object(guard.subprocess, 'run', side_effect=gh), self.assertRaises(subprocess.CalledProcessError):
             guard.verify_attestation(self.root / self.payload, self.a, 'SkunkWerkx/HyperUuid')
+
+    def test_reject_missing_payload_even_when_it_did_not_change(self):
+        # A staging record must describe a complete tree, including unchanged paths.
+        missing = 'go/staticlib/windows_arm64/libhyperuuid.a'
+        self.git('rm', missing)
+        self.git('commit', '--amend', '--no-edit', '-q')
+        self.b = self.git('rev-parse', 'HEAD')
+        with self.assertRaisesRegex(ValueError, 'missing staged payload'):
+            self.gate()
+
+    def test_reject_payload_with_wrong_git_mode(self):
+        self.git('update-index', '--chmod=+x', self.payload)
+        self.git('commit', '--amend', '--no-edit', '-q')
+        self.b = self.git('rev-parse', 'HEAD')
+        with self.assertRaises(ValueError):
+            self.gate()
+
+
+    def test_reject_duplicate_trailer_even_when_one_value_is_invalid(self):
+        self.git('commit', '--amend', '-qm',
+                 f'stage\n\nRelease-Source-SHA: {self.a}\nRelease-CI-Run-ID: 42\nRelease-CI-Run-ID: invalid')
+        self.b = self.git('rev-parse', 'HEAD')
+        with self.assertRaises(ValueError):
+            self.gate()
+
+    def test_record_cli_checks_full_tag_ref_and_supports_branch_dispatch(self):
+        import sys
+        output = self.root / 'outputs'
+        env = {'GITHUB_REPOSITORY': 'SkunkWerkx/HyperUuid', 'GITHUB_SHA': self.b,
+               'GITHUB_OUTPUT': str(output), 'GITHUB_REF': 'refs/heads/master'}
+        before = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with patch.dict(os.environ, env, clear=True), patch.object(guard, 'api', return_value=self.run), \
+                 patch.object(sys, 'argv', ['release_guard.py', 'record']):
+                guard.main()
+                self.assertEqual(output.read_text(), f'source_sha={self.a}\nrun_id=42\n')
+                os.environ['GITHUB_REF'] = 'refs/tags/v0.8.0'
+                with self.assertRaisesRegex(ValueError, 'does not match'):
+                    guard.main()
+        finally:
+            os.chdir(before)
 
 
 class BinaryTests(unittest.TestCase):
@@ -279,6 +324,12 @@ EXPORT int32_t uuid_v7_to_rfc_order(uint8_t *p) {if(p[7]>>4 != 8) return 5; p[6]
             tail = workflow.split('      - name: Verify attestations, then stage into php/, swift/, go/\n')[1]
             script = textwrap.dedent(tail.split('        run: |\n')[1].split('      - name: Commit and push')[0])
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(['git', '-C', str(root), 'config', 'commit.gpgsign', 'false'], check=True)
+            subprocess.run(['git', '-C', str(root), 'config', 'user.name', 'Test'], check=True)
+            subprocess.run(['git', '-C', str(root), 'config', 'user.email', 'test@example.com'], check=True)
+            subprocess.run(['git', '-C', str(root), 'add', 'rust', guard.BUNDLE + '/include'], check=True)
+            subprocess.run(['git', '-C', str(root), 'commit', '-qm', 'source A'], check=True)
+            source_sha = guard.git(root, 'rev-parse', 'HEAD')
             gh = root / 'bin/gh'
             gh.parent.mkdir()
             gh.write_text('#!/bin/sh\ncase "$*" in *"--source-digest ' + sha + '"*) test -f "$3";; *) exit 1;; esac\n')
@@ -289,6 +340,24 @@ EXPORT int32_t uuid_v7_to_rfc_order(uint8_t *p) {if(p[7]>>4 != 8) return 5; p[6]
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.assertEqual(result.returncode, 0, result.stderr)
             guard.compare_payloads(root, paths)
+            subprocess.run(['git', '-C', str(root), 'add', 'php/src/native', guard.BUNDLE,
+                            guard.APPLE, 'go/staticlib'], check=True)
+            guard.validate_staging_index(root, source_sha)
+            shipped = root / 'go/staticlib/linux_amd64/libhyperuuid.a'
+            original_bytes = shipped.read_bytes()
+            shipped.write_bytes(b'copied wrong artifact')
+            subprocess.run(['git', '-C', str(root), 'add', str(shipped)], check=True)
+            with self.assertRaisesRegex(ValueError, 'do not match the recorded CI run'):
+                guard.validate_staging_index(root, source_sha)
+            shipped.write_bytes(original_bytes)
+            subprocess.run(['git', '-C', str(root), 'add', str(shipped)], check=True)
+            with self.assertRaisesRegex(ValueError, 'not based on preparation'):
+                guard.validate_staging_index(root, 'f' * 40)
+            manifest = root / 'rust/Cargo.toml'
+            manifest.write_text(manifest.read_text() + '\n# unrelated change\n')
+            subprocess.run(['git', '-C', str(root), 'add', 'rust/Cargo.toml'], check=True)
+            with self.assertRaisesRegex(ValueError, 'unrelated A -> B change'):
+                guard.validate_staging_index(root, source_sha)
             self.assertEqual(len((root / 'digests.txt').read_text().splitlines()), 35)
             missing = paths['go/staticlib/linux_amd64/libhyperuuid.a']
             missing.unlink()
