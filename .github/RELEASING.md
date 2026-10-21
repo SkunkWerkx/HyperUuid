@@ -1,6 +1,6 @@
 # HyperUuid release flow
 
-Follow the [shared runbook](https://github.com/SkunkWerkx/.github/blob/64522784d83ea5bab7f6c917fca84f0d27bb09e0/docs/release-runbook.md).
+Follow the [shared runbook](https://github.com/SkunkWerkx/.github/blob/e07bcd90b7bd369afe5b0e043e7a427bd312f081/docs/release-runbook.md).
 The workflows pin one immutable Forge revision; changing that pin is a reviewed update.
 
 Prepare with the existing prepare-release.yml version input, wait for the full CI
