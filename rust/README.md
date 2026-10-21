@@ -270,8 +270,8 @@ CI never hits this — each leg builds in its own job.
 ## Verifying provenance
 
 The published `.crate` carries a GitHub build-provenance attestation, but not one signed by
-this repo directly — `release.yml`'s `pack-crates` job hands off to a reusable workflow
-(`hyper-publish-crate.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
+this repo directly — `release.yml`'s `crate-pack` job hands off to a reusable workflow
+(`hyper-pack-crate.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
 identity Fulcio records as the signer. `--repo` alone isn't enough; add `--signer-repo`,
 or use `--owner` in place of both:
 
@@ -296,7 +296,7 @@ cargo add hyperuuid
 Requires Rust 1.85 or later (`rust-version` in the manifest, edition 2024's own floor); CI
 builds the library and the `no_std` shared library on exactly that toolchain on every PR.
 
-Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't rebuild or retest anything itself — it just finds that already-green run for the tagged commit and republishes what it produced.
+Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't retest anything itself — it finds that already-green run for the tagged commit and packs the crate from that same commit, with `cargo package`'s own verify build the only compile it does.
 
 ## License
 

@@ -224,8 +224,8 @@ FFM is compiled in the image, not interpreted, because the downcall handles are 
 ## Verifying provenance
 
 The published jar carries a GitHub build-provenance attestation, but not one signed by this
-repo directly — `release.yml`'s `maven-publish` job hands off to a reusable workflow
-(`hyper-publish-maven.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
+repo directly — `release.yml`'s `maven-pack` job hands off to a reusable workflow
+(`hyper-pack-maven.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
 identity Fulcio records as the signer. `--repo` alone isn't enough; add `--signer-repo`,
 or use `--owner` in place of both:
 
