@@ -90,13 +90,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Before init, so outside CodeQL's tracer: SwiftPM compiles and caches the manifest here,
-      # and the traced build below reuses it. Under the tracer that setup took ~7 minutes, before
-      # the first source file compiled.
-      - name: Load the Swift package manifest
-        if: matrix.language == 'swift'
-        run: swift package describe > /dev/null
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
@@ -105,7 +98,9 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       # From the root Package.swift, the one consumers resolve; its HyperUuid target is the
-      # same sources as swift/Package.swift's.
+      # same sources as swift/Package.swift's. Under the tracer, SwiftPM's setup takes ~7 minutes
+      # before the first source file compiles. Loading the manifest before init does not help:
+      # the traced build does not reuse that cache.
       - name: Build the Swift library
         if: matrix.build-mode == 'manual'
         run: swift build --target HyperUuid
