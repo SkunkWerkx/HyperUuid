@@ -94,7 +94,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: SkunkWerkx/.github
-          ref: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           path: .hyperforge
           persist-credentials: false
       - name: Validate the exact preserved release run
@@ -108,14 +108,14 @@ jobs:
           STAGING_SHA: ${{ github.sha }}
           CI_RUN_ID: ${{ steps.find.outputs.run_id }}
           PACKAGE_RUN_ID: ${{ github.run_id }}
-          FORGE_SHA: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           PREPARED_RUN_ID: ${{ inputs.prepared_run_id }}
         run: python3 .hyperforge/.github/scripts/release_inventory.py run
 
   nuget-org-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       actions: read
@@ -133,7 +133,7 @@ jobs:
   crate-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       id-token: write
@@ -142,7 +142,7 @@ jobs:
   maven-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       actions: read
@@ -467,13 +467,13 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
         with:
           repository: SkunkWerkx/.github
-          ref: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           path: .hyperforge
           persist-credentials: false
       - uses: actions/download-artifact@v8
@@ -569,14 +569,14 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
       PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
         with:
           repository: SkunkWerkx/.github
-          ref: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           path: .hyperforge
           persist-credentials: false
       - uses: actions/download-artifact@v8
@@ -664,14 +664,14 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
       PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
         with:
           repository: SkunkWerkx/.github
-          ref: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           path: .hyperforge
           persist-credentials: false
       - uses: actions/download-artifact@v8
@@ -722,14 +722,14 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
       PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
         with:
           repository: SkunkWerkx/.github
-          ref: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           path: .hyperforge
           persist-credentials: false
       - uses: actions/download-artifact@v8
@@ -760,7 +760,7 @@ jobs:
     if: >-
       !cancelled() && needs.find-ci-run.result == 'success' &&
       needs.publication-gate.result == 'success'
-    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       actions: read
@@ -776,7 +776,7 @@ jobs:
     if: >-
       !cancelled() && needs.find-ci-run.result == 'success' &&
       needs.publication-gate.result == 'success'
-    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       actions: read
@@ -817,7 +817,7 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     steps:
       - uses: actions/checkout@v7
         with:
@@ -825,7 +825,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: SkunkWerkx/.github
-          ref: e07bcd90b7bd369afe5b0e043e7a427bd312f081
+          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
           path: .hyperforge
           persist-credentials: false
       - uses: actions/download-artifact@v8

@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   build-static:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-static.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-static.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       id-token: write
@@ -56,7 +56,7 @@ jobs:
       android: true
 
   build-android:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-android.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-android.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
       id-token: write
@@ -67,14 +67,14 @@ jobs:
 
   test-swift-static:
     needs: build-static
-    uses: SkunkWerkx/.github/.github/workflows/hyper-test-swift-static.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-swift-static.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     permissions:
       contents: read
     with:
       project: HyperUuid
 
   build-native:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     # A reusable workflow can never escalate beyond what the calling job was granted, so the
     # two scopes attest-build-provenance needs have to be handed down from here — id-token to
     # mint the OIDC token it signs with, attestations to record the result. contents stays
@@ -121,8 +121,7 @@ jobs:
       # check a consumer can actually perform. The permissions block above is what makes it
       # work; without those scopes the step fails rather than silently skipping.
       # .NET 11 is HyperUuid's floor, on every platform including Blazor WebAssembly; preview
-      # quality until the pinned SDK in global.json goes GA (HyperForge's own default stays
-      # 8.0/ga for other repos).
+      # quality until the pinned SDK in global.json goes GA.
       dotnet_version: "11.0.x"
       dotnet_quality: "preview"
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
@@ -139,7 +138,7 @@ jobs:
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
   # Architecture), so it's built on every PR too, not just at release time.
   build-wasm:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     # Handed down for the same reason as build-native's: the ruby.wasm job attests the
     # archives the companion gem ships.
     permissions:
@@ -172,7 +171,7 @@ jobs:
   # were built in release.yml, 0.4.0's osx-x64 wheel failed its first install with four
   # registries already published.
   build-wheels:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@e07bcd90b7bd369afe5b0e043e7a427bd312f081
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
     # Same two scopes build-native hands down, for the same reason: the forge attests each
     # wheel and cannot escalate past what this job was granted.
     permissions:
