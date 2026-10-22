@@ -14,21 +14,23 @@ name: CodeQL
 # The cost of the switch is that this file now owns what default setup owned: a language added
 # to the repository is unscanned until it is added to the matrix.
 
+# Weekly and on demand, not on pull requests or pushes: the scan is a release gate, run on the
+# staging commit before tagging (.github/RELEASING.md), and the weekly run keeps the dashboard
+# current between releases. Swift alone is why: under CodeQL's tracer a Swift build of this
+# library costs 7-8½ minutes however it is invoked (`swift build --target` took 7m37s, `swiftc`
+# on the six sources directly 8m27s; untraced, either takes seconds), a fixed cost of the
+# extractor rather than of the code, and not one worth paying on every pull request.
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
   schedule:
     # Weekly, off the hour and off CI's Monday board.
     - cron: "27 4 * * 2"
   workflow_dispatch:
 
-# A new push supersedes the run for that ref, except on master, where a run to completion is
+# A run for a ref waits for the one before it rather than cancelling it: a run to completion is
 # what keeps the code scanning dashboard current.
 concurrency:
   group: codeql-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -97,19 +99,11 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
 
-      # The compiler directly, not SwiftPM: under the tracer, `swift build` spent ~7 minutes in
-      # SwiftPM's own setup before the first source file compiled (loading the manifest before
-      # init does not help; the traced build does not reuse that cache). This is the library's
-      # target as Package.swift declares it — its sources, the core's module map, Swift 6 — so a
-      # setting changed there and not here fails this step rather than scanning something else.
-      # Outputs go to the runner's temp directory and are never used.
+      # From the root Package.swift, the one consumers resolve; its HyperUuid target is the
+      # same sources as swift/Package.swift's.
       - name: Build the Swift library
         if: matrix.build-mode == 'manual'
-        working-directory: ${{ runner.temp }}
-        run: >
-          swiftc -c -parse-as-library -swift-version 6 -module-name HyperUuid -emit-module
-          -I "$GITHUB_WORKSPACE/swift/HyperUuidCore.artifactbundle/include"
-          "$GITHUB_WORKSPACE"/swift/Sources/HyperUuid/*.swift
+        run: swift build --target HyperUuid
 
       # Builds the autobuild languages and uploads every language's SARIF, once each, under the
       # same `/language:<lang>` category default setup used.

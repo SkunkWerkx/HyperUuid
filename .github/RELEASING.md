@@ -9,6 +9,10 @@ release prepares and attests every registry input before publication and preserv
 the complete release-packages artifact. After all five publishers succeed, it
 creates the matching go/vX.Y.Z tag and GitHub Release automatically.
 
+CodeQL runs weekly and on demand, not on pull requests. Before tagging, run it on
+B (`gh workflow run codeql.yml`, with master at B) and tag only once it is green
+and code scanning shows no open alerts.
+
 To recover saved bytes, dispatch release.yml at the same root tag with
 prepared_run_id naming the earlier release run, plus publication_run_id when
 registry receipts exist. Missing or conflicting bytes fail; no ancestor lookup,
