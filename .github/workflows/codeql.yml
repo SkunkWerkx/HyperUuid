@@ -97,13 +97,19 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
 
-      # From the root Package.swift, the one consumers resolve; its HyperUuid target is the
-      # same sources as swift/Package.swift's. Under the tracer, SwiftPM's setup takes ~7 minutes
-      # before the first source file compiles. Loading the manifest before init does not help:
-      # the traced build does not reuse that cache.
+      # The compiler directly, not SwiftPM: under the tracer, `swift build` spent ~7 minutes in
+      # SwiftPM's own setup before the first source file compiled (loading the manifest before
+      # init does not help; the traced build does not reuse that cache). This is the library's
+      # target as Package.swift declares it — its sources, the core's module map, Swift 6 — so a
+      # setting changed there and not here fails this step rather than scanning something else.
+      # Outputs go to the runner's temp directory and are never used.
       - name: Build the Swift library
         if: matrix.build-mode == 'manual'
-        run: swift build --target HyperUuid
+        working-directory: ${{ runner.temp }}
+        run: >
+          swiftc -c -parse-as-library -swift-version 6 -module-name HyperUuid -emit-module
+          -I "$GITHUB_WORKSPACE/swift/HyperUuidCore.artifactbundle/include"
+          "$GITHUB_WORKSPACE"/swift/Sources/HyperUuid/*.swift
 
       # Builds the autobuild languages and uploads every language's SARIF, once each, under the
       # same `/language:<lang>` category default setup used.
