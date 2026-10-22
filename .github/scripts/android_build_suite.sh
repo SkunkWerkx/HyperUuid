@@ -19,7 +19,7 @@
 #
 #   ANDROID=1 .github/scripts/local-core.sh
 #   .github/scripts/android_build_suite.sh go x86_64 /tmp/go hyperuuid_local
-#   .github/scripts/android_device_test.sh /tmp/go ./hyperuuid.test -test.v
+#   .github/scripts/android_device_test.sh /tmp/go ./hyperuuid.test -test.v -test.short
 #   HYPERUUID_LOCAL_CORE=1 .github/scripts/android_build_suite.sh swift x86_64 /tmp/swift
 #   .github/scripts/android_device_test.sh /tmp/swift ./HyperUuidPackageTests.xctest
 set -euo pipefail
@@ -31,7 +31,12 @@ stage="${3:?$usage}"
 tags="${4:-}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ndk="${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME to the Android NDK}"
-prebuilt="$ndk/toolchains/llvm/prebuilt/linux-x86_64"
+# The NDK carries one host toolchain, named for its host: linux-x86_64 on the runners,
+# darwin-x86_64 (universal) on a Mac.
+hosts=("$ndk"/toolchains/llvm/prebuilt/*/)
+[ "${#hosts[@]}" -eq 1 ] && [ -d "${hosts[0]}" ] \
+  || { echo "error: expected one host toolchain under $ndk/toolchains/llvm/prebuilt" >&2; exit 1; }
+prebuilt="${hosts[0]%/}"
 
 case "$arch" in
   x86_64) goarch=amd64 ;;

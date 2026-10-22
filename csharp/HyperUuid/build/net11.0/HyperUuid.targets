@@ -30,15 +30,12 @@
        One floor. The package targets net11.0 and nothing older, and this file sits under
        build/net11.0/ (with buildTransitive/net11.0/'s copy beside it) like the assembly
        under lib/net11.0/. With every framework-specific asset in a net11.0 folder, NuGet
-       refuses the package to an older project at restore (NU1202, "not compatible with
-       net10.0") instead of restoring it and leaving the build to fail later, so nothing here
-       needs a target-framework gate of its own: the wiring below never meets a toolchain
-       older than the .NET 11 one the exception-handling translation further down depends
-       on. (The staticlib's directory is spelled nativeassets/net11.0/ to match; the path
+       refuses the package to an older project at restore (NU1202) instead of restoring it
+       and leaving the build to fail later, so nothing here needs a target-framework gate
+       of its own: the wiring below never meets a toolchain older than the .NET 11 one the
+       exception-handling translation further down depends on. (The staticlib's directory is spelled nativeassets/net11.0/ to match; the path
        below names it directly, so the spelling is a folder name, not something NuGet selects
-       by.) The package used to carry a net10.0 floor with the WebAssembly wiring gated on the
-       consumer's framework, and HYPERUUID001 was the warning for a consumer below it; both
-       went with the floor, and HyperCast's copy of this file has never needed them.
+       by.)
 
        uuid_variant is P/Invoked like every other entry point but deliberately not in the
        export list. Emscripten ships a libuuid compatibility library (src/lib/libuuid.js)

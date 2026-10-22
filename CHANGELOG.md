@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+The next release is **1.0.0**, and with it every package's public API and the platforms in
+the README's [State of the union](README.md#state-of-the-union) table become a commitment
+under Semantic Versioning: breaking or dropping either takes a new major version. Until then
+a minor release can still break both, as 0.9.0 did.
+
 ### Changed
 
 - **C# — .NET 11 is the floor.** The package targets `net11.0` and nothing older, on every

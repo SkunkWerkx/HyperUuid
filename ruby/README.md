@@ -401,6 +401,12 @@ which read the clock through WASI.
 - **No Rust toolchain.** The gem's `extconf.rb` only hands rbwasm the prebuilt archive, and
   rbwasm downloads its own wasi-sdk. The first `rbwasm build` compiles Ruby itself and takes
   15–20 minutes; later builds reuse it.
+- **macOS with Homebrew: limit pkg-config to `openssl@3`.** Run the build as
+  `PKG_CONFIG_LIBDIR="$(brew --prefix openssl@3)/lib/pkgconfig" bundle exec rbwasm build …`.
+  Without it Homebrew's pkg-config files reach into the build twice: its `openssl` is OpenSSL
+  4, which the native Ruby rbwasm builds first does not compile against, and its `libyaml`
+  is a macOS library that psych then links into the wasm interpreter, which fails for Ruby
+  4.0.
 - **Static linking only,** into ruby.wasm's default `wasm32-unknown-wasip1` interpreter.
   rbwasm's dynamic-linking build (a pic target, for the component model) is not supported.
 - **Size.** rbwasm packs every gem's files into the interpreter, the archives included, so the
