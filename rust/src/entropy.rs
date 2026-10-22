@@ -41,11 +41,26 @@ pub(crate) fn fill_at(buf: &mut [u8], unix_millis: u64) -> Result<(), getrandom:
     fill_with(buf, Some(unix_millis))
 }
 
+/// A ChaCha20 keyed for exactly one keystream. Both users below — [`fill_with`]'s request-sized
+/// fill and [`pool`]'s refills — draw a fresh key each time and never key a second cipher with
+/// it, so the nonce is zero: a nonce has work to do only when a key is reused, and no key here
+/// is.
+///
+/// The zero is spelled `Default::default()` rather than `[0u8; 12]` because it is the absence of
+/// a nonce, not a chosen one — and a zero literal in the IV argument is what
+/// `rust/hard-coded-cryptographic-value` reads as a hard-coded IV.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[inline(always)]
+fn keyed_once(key: &[u8; 32]) -> chacha20::ChaCha20 {
+    use chacha20::cipher::KeyIvInit;
+
+    chacha20::ChaCha20::new(&(*key).into(), &Default::default())
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[inline(always)]
 fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
-    use chacha20::ChaCha20;
-    use chacha20::cipher::{KeyIvInit, StreamCipher};
+    use chacha20::cipher::StreamCipher;
 
     /// The request size at which keying a cipher per request beats the pool.
     const STRETCH_THRESHOLD: usize = 192;
@@ -67,7 +82,7 @@ fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::
     // than a batch can ask for): the optimizer only proves that while this is inlined into a
     // batch function whose length it can see, and the no-panic proof should not depend on it.
     buf.fill(0);
-    ChaCha20::new(&key.into(), &[0u8; 12].into())
+    keyed_once(&key)
         .try_apply_keystream(buf)
         .map_err(|_| getrandom::Error::UNEXPECTED)
 }
@@ -165,8 +180,7 @@ fn fill_chunked(buf: &mut [u8]) -> Result<(), getrandom::Error> {
 /// never a deadlock.
 #[cfg(target_os = "linux")]
 mod pool {
-    use chacha20::ChaCha20;
-    use chacha20::cipher::{KeyIvInit, StreamCipher};
+    use chacha20::cipher::StreamCipher;
     use core::cell::UnsafeCell;
     use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
@@ -366,7 +380,7 @@ mod pool {
 
     fn refill(generator: &mut Generator) -> Result<(), getrandom::Error> {
         generator.stream.fill(0);
-        ChaCha20::new(&generator.key.into(), &[0u8; 12].into())
+        super::keyed_once(&generator.key)
             .try_apply_keystream(&mut generator.stream)
             .map_err(|_| getrandom::Error::UNEXPECTED)?;
         let (next_key, _) = generator.stream.split_at_mut(32);

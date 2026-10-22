@@ -36,6 +36,14 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
+# Least privilege for the whole board: every job below reads the repository and nothing more.
+# The five HyperForge build jobs need id-token and attestations on top of that (SLSA provenance
+# for what they build), and each declares those itself — a job-level `permissions:` replaces this
+# block rather than adding to it, so the writes never reach a local job. This is also what
+# quietens CodeQL's actions/missing-workflow-permissions, which otherwise fires once per job.
+permissions:
+  contents: read
+
 # A new push to a PR supersedes its running board; anything else runs to completion.
 concurrency:
   group: ci-${{ github.ref }}

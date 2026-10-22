@@ -1,0 +1,34 @@
+# CodeQL configuration for this repository, read by .github/workflows/codeql.yml.
+#
+# GitHub's default setup cannot filter paths, which is why this repository uses advanced setup:
+# the only way to keep test code out of the analysis is a config file like this one.
+
+name: "HyperUuid CodeQL config"
+
+# Test code is out of scope for the security queries. It ships in no artifact and runs against no
+# input but its own fixtures, so a UUID a test writes to a log is the test doing its job, not a
+# leak. This is what `rust/cleartext-logging` fires on for the asserts in src/lib.rs's `mod tests`.
+#
+# A path filter excludes whole files, so a test module inline in a file that also ships is still
+# analyzed. The Rust unit tests therefore live in `rust/src/tests.rs` rather than in `lib.rs`, and
+# that file is listed here. `rust/src/entropy.rs` keeps its tests inline: they reach private items
+# of a private `pool` module that a sibling file cannot, and they raise nothing today.
+paths-ignore:
+  # rust/src/tests.rs: the crate's unit tests, split out of lib.rs so this filter can reach them
+  - "rust/src/tests.rs"
+  # rust/tests, python/tests, php/tests, java/src/test/java
+  - "**/tests/**"
+  - "**/Tests/**"
+  - "**/test/**"
+  # ruby/spec
+  - "**/spec/**"
+  # csharp/HyperUuid.Tests
+  - "**/*.Tests/**"
+  # go: the Go extractor already skips _test.go, listed so the intent is explicit
+  - "**/*_test.go"
+  # csharp/HyperUuid.*SmokeTest, java/aot-smoke-test, swift/StaticSmokeTest, ruby/wasm-smoke
+  - "**/*SmokeTest*/**"
+  - "**/*smoke-test*/**"
+  - "**/wasm-smoke/**"
+  # Fixtures and golden files
+  - "**/testdata/**"

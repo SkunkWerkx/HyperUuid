@@ -1,0 +1,97 @@
+name: CodeQL
+
+# Advanced setup rather than GitHub's default setup, for one reason only: default setup has no
+# path filters, and test code is out of scope for the security queries. The excluding is done by
+# .github/codeql/codeql-config.yml, which explains why.
+#
+# Everything else mirrors what default setup ran — the same nine languages, the same default
+# query suite, the same weekly cadence — and `category` is spelled out below so alerts keep the
+# `/language:<lang>` identity they had under default setup instead of being re-raised from
+# scratch as new ones.
+#
+# The cost of the switch is that this file now owns what default setup owned: a language added
+# to the repository is unscanned until it is added to the matrix.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly, off the hour and off CI's Monday board.
+    - cron: "27 4 * * 2"
+  workflow_dispatch:
+
+# A new push supersedes the run for that ref, except on master, where a run to completion is
+# what keeps the code scanning dashboard current.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      # What the CodeQL job needs and nothing more: SARIF upload, the workflow's own metadata, and
+      # the default read-only access to the repository.
+      security-events: write
+      actions: read
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # No build to trace.
+          - language: actions
+            build-mode: none
+            runner: ubuntu-latest
+          - language: javascript-typescript
+            build-mode: none
+            runner: ubuntu-latest
+          - language: python
+            build-mode: none
+            runner: ubuntu-latest
+          - language: ruby
+            build-mode: none
+            runner: ubuntu-latest
+          # Compiled, with a database built without a build. There is no Kotlin in this
+          # repository, so `none` is valid for java-kotlin; the Rust and C# extractors are built
+          # for it.
+          - language: csharp
+            build-mode: none
+            runner: ubuntu-latest
+          - language: java-kotlin
+            build-mode: none
+            runner: ubuntu-latest
+          - language: rust
+            build-mode: none
+            runner: ubuntu-latest
+          # Go and Swift have no no-build mode: CodeQL runs the build itself.
+          - language: go
+            build-mode: autobuild
+            runner: ubuntu-latest
+          - language: swift
+            build-mode: autobuild
+            runner: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # Builds the autobuild languages and uploads every language's SARIF, once each, under the
+      # same `/language:<lang>` category default setup used.
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
