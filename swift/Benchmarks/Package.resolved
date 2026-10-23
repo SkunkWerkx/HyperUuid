@@ -5,8 +5,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ordo-one/benchmark",
       "state" : {
-        "revision" : "2f192a6502392735b33466e3c5ae07e95a8065da",
-        "version" : "1.36.2"
+        "revision" : "def9afdba446b03efbbbcecb3b892e97e8294214",
+        "version" : "1.38.0"
       }
     },
     {
@@ -23,8 +23,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ordo-one/malloc-interposer.git",
       "state" : {
-        "revision" : "9221411ac2e845a93ce65b9ca2ab84f8c1084b0d",
-        "version" : "1.4.0"
+        "revision" : "f479398f73b14dbd1d25f4e01fd667171ddc9f18",
+        "version" : "1.6.0"
       }
     },
     {
