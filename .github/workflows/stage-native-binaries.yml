@@ -51,7 +51,7 @@ jobs:
       attestations: read
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: master
 
@@ -80,7 +80,7 @@ jobs:
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: native-*
           path: artifacts/native
@@ -94,7 +94,7 @@ jobs:
       # whatever archives are committed. The artifact is laid out by repository path; it
       # also carries the C# package's archives, which are packed at release and never
       # committed. Same verify-then-stage gate as the rest.
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: static-libs
           path: artifacts/static-libs

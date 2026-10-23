@@ -1,0 +1,106 @@
+version: 2
+
+# One monthly pull request for every ecosystem: third-party dependencies, build plugins and test
+# tooling alike, majors included. Each entry skips releases younger than a week, so a bad or
+# hijacked release has time to be pulled. Every third-party action is pinned to a commit with its
+# version in a trailing comment; Dependabot moves both together.
+multi-ecosystem-groups:
+  dependencies:
+    schedule:
+      interval: monthly
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+    ignore:
+      # Our own Forge is called at master, deliberately unpinned: a Forge change takes effect
+      # in every consumer at once.
+      - dependency-name: SkunkWerkx/.github
+      # Pinned to the heads of its `stable` and `master` branches. The repo's only tag, v1,
+      # follows master, whose action.yml requires a toolchain input the `stable` steps don't
+      # pass, so Dependabot's bump to it would break them. Refresh these pins by hand.
+      - dependency-name: dtolnay/rust-toolchain
+
+  # The core and its wasm-bindgen browser test. check-msrv in ci.yml holds the lockfiles to
+  # rust-version.
+  - package-ecosystem: cargo
+    directories: ["/rust", "/rust/browser-test"]
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: gomod
+    directory: "/go"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  # The WebAssembly smoke test's ASP.NET Core packages carry the SDK's exact version, so the
+  # SDK and NuGet updates land in the same pull request.
+  - package-ecosystem: dotnet-sdk
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: nuget
+    directories: ["/csharp/*"]
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+    ignore:
+      # The Android smoke test consumes the package this repo builds, at the version CI passes.
+      - dependency-name: HyperUuid
+
+  - package-ecosystem: gradle
+    directory: "/java"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  # Not ruby/wasm-smoke: its Gemfile names the gem under test from the environment. Its js and
+  # ruby_wasm gems move with the npm package below and are bumped by hand alongside it.
+  - package-ecosystem: bundler
+    directory: "/ruby"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: npm
+    directory: "/ruby/wasm-smoke"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  # The root manifest is the Packagist one and php/'s is the local one; they move together.
+  - package-ecosystem: composer
+    directories: ["/", "/php"]
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: pip
+    directory: "/python"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: swift
+    directory: "/swift/Benchmarks"
+    patterns: ["*"]
+    multi-ecosystem-group: dependencies
+    cooldown:
+      default-days: 7

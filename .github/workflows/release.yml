@@ -39,12 +39,13 @@ jobs:
       run_id: ${{ steps.find.outputs.run_id }}
       source_sha: ${{ steps.find.outputs.source_sha }}
       version: ${{ steps.subject.outputs.version }}
+      forge_sha: ${{ steps.forge.outputs.sha }}
     permissions:
       contents: read
       actions: read
       attestations: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -63,7 +64,7 @@ jobs:
           CI_RUN_ID_OVERRIDE: ${{ inputs.ci_run_id }}
         run: python3 .github/scripts/release_guard.py record
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           pattern: native-*
@@ -72,7 +73,7 @@ jobs:
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           name: static-libs
@@ -91,10 +92,26 @@ jobs:
           SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
         run: python3 .github/scripts/release_guard.py compare
 
-      - uses: actions/checkout@v7
+      # The Forge is called at master. GitHub resolves that to one commit when the run is queued
+      # and records it in the run's referenced_workflows; every .hyperforge checkout and the
+      # inventory's forge_sha use that commit, so the scripts match the reusable workflows. A
+      # recovery run verifies the preserved inventory against it, so recovery needs the Forge's
+      # master unchanged since the packaging run.
+      - name: Resolve the Forge commit this run uses
+        id: forge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --jq '[.referenced_workflows[] | select(.path | startswith("SkunkWerkx/.github/")) | .sha] | unique | .[]')
+          [[ "$shas" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected one Forge commit in this run, got: ${shas:-none}"; exit 1; }
+          echo "sha=$shas" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          ref: ${{ steps.forge.outputs.sha }}
           path: .hyperforge
           persist-credentials: false
       - name: Validate the exact preserved release run
@@ -108,14 +125,14 @@ jobs:
           STAGING_SHA: ${{ github.sha }}
           CI_RUN_ID: ${{ steps.find.outputs.run_id }}
           PACKAGE_RUN_ID: ${{ github.run_id }}
-          FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          FORGE_SHA: ${{ steps.forge.outputs.sha }}
           PREPARED_RUN_ID: ${{ inputs.prepared_run_id }}
         run: python3 .hyperforge/.github/scripts/release_inventory.py run
 
   nuget-org-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
     permissions:
       contents: read
       actions: read
@@ -133,7 +150,7 @@ jobs:
   crate-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@master
     permissions:
       contents: read
       id-token: write
@@ -142,7 +159,7 @@ jobs:
   maven-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@master
     permissions:
       contents: read
       actions: read
@@ -170,9 +187,9 @@ jobs:
       # write: the gems built from them are themselves attested below.
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: native-*
           path: artifacts/native
@@ -180,7 +197,7 @@ jobs:
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ruby-native-*
           path: artifacts/ruby-native
@@ -188,7 +205,7 @@ jobs:
           run-id: ${{ needs.find-ci-run.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ruby-wasm-*
           path: artifacts/ruby-wasm
@@ -230,7 +247,7 @@ jobs:
             echo "::endgroup::"
           done
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -366,11 +383,11 @@ jobs:
       #
       #     gh attestation verify <gem>-<version>[-<platform>].gem --repo <owner>/<repo>
       - name: Attest the built gems
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: ruby/pkg/*.gem
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ruby-packages
           path: ruby/pkg/*.gem
@@ -389,9 +406,9 @@ jobs:
       id-token: write
       attestations: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: pypi-wheels-*
           path: dist
@@ -437,7 +454,7 @@ jobs:
             echo "::endgroup::"
           done
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pypi-packages
           path: dist/*.whl
@@ -467,41 +484,41 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           name: nuget-org-package
           path: release-packages/nuget
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           name: ruby-packages
           path: release-packages/ruby
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           name: pypi-packages
           path: release-packages/pypi
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           name: crate-package
           path: release-packages/crate
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id == ''
         with:
           name: maven-central-package
           path: release-packages/maven
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.prepared_run_id != ''
         with:
           name: release-packages
@@ -515,7 +532,7 @@ jobs:
 
       - name: Attest the complete package inventory
         if: inputs.prepared_run_id == ''
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: release-packages/inventory.json
 
@@ -525,7 +542,7 @@ jobs:
         run: python3 .hyperforge/.github/scripts/release_inventory.py verify ${{ inputs.prepared_run_id == '' && '--inventory-only' || '' }}
 
       - name: Preserve the complete verified release inputs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-packages
           path: release-packages
@@ -533,7 +550,7 @@ jobs:
           retention-days: 90
           overwrite: true
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verified-crate-package
           path: release-packages/crate
@@ -541,7 +558,7 @@ jobs:
           retention-days: 90
           overwrite: true
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verified-maven-central-package
           path: release-packages/maven
@@ -569,17 +586,17 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
       PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-packages
           path: release-packages
@@ -587,7 +604,7 @@ jobs:
       - name: Recheck the immutable inventory before authentication
         run: python3 .hyperforge/.github/scripts/release_inventory.py verify --registry nuget
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "11.0.x"
           dotnet-quality: preview
@@ -598,7 +615,7 @@ jobs:
 
       - name: NuGet login (OIDC)
         if: steps.pending.outputs.pending == 'true'
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         id: login
         with:
           user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
@@ -615,11 +632,11 @@ jobs:
 
       - name: Attest successful NuGet receipt
         if: steps.pending.outputs.pending == 'true'
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: nuget-receipt/receipt.json
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.pending.outputs.pending == 'true'
         with:
           name: nuget-publication-receipt
@@ -632,11 +649,11 @@ jobs:
         run: python3 .hyperforge/.github/scripts/release_inventory.py nuget-finalized
 
       - name: Attest the finalized served package
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: nuget-finalized/*.nupkg
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nuget-finalized-package
           path: nuget-finalized
@@ -664,17 +681,17 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
       PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-packages
           path: release-packages
@@ -682,7 +699,7 @@ jobs:
       - name: Recheck the immutable inventory before authentication
         run: python3 .hyperforge/.github/scripts/release_inventory.py verify --registry ruby
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: "4.0"
 
@@ -690,7 +707,7 @@ jobs:
         id: pending
         run: python3 .hyperforge/.github/scripts/release_inventory.py registry-plan --registry ruby --output pending-ruby
 
-      - uses: rubygems/configure-rubygems-credentials@main
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
         if: steps.pending.outputs.pending == 'true'
 
       - name: Publish only missing preserved gems
@@ -722,17 +739,17 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
       PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-packages
           path: release-packages
@@ -746,7 +763,7 @@ jobs:
 
       - name: Publish only missing preserved wheels (Trusted Publishing)
         if: steps.pending.outputs.pending == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: pending-pypi
 
@@ -760,7 +777,7 @@ jobs:
     if: >-
       !cancelled() && needs.find-ci-run.result == 'success' &&
       needs.publication-gate.result == 'success'
-    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-crate.yml@master
     permissions:
       contents: read
       actions: read
@@ -776,7 +793,7 @@ jobs:
     if: >-
       !cancelled() && needs.find-ci-run.result == 'success' &&
       needs.publication-gate.result == 'success'
-    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+    uses: SkunkWerkx/.github/.github/workflows/hyper-publish-maven.yml@master
     permissions:
       contents: read
       actions: read
@@ -817,18 +834,18 @@ jobs:
       STAGING_SHA: ${{ github.sha }}
       CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
       PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: e29701eaf94a3893b2ac7dd7d50e44b7b125456f
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-packages
           path: release-packages

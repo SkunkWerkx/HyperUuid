@@ -1,7 +1,9 @@
 # HyperUuid release flow
 
-Follow the [shared runbook](https://github.com/SkunkWerkx/.github/blob/e29701eaf94a3893b2ac7dd7d50e44b7b125456f/docs/release-runbook.md).
-The workflows pin one immutable Forge revision; changing that pin is a reviewed update.
+Follow the [shared runbook](https://github.com/SkunkWerkx/.github/blob/master/docs/release-runbook.md).
+The workflows call the Forge at master. Each release run resolves that to one commit and
+records it in the package inventory, so recovering a release needs the Forge's master
+unchanged since the run that packaged it: hold Forge merges until a release is out.
 
 Prepare with the existing prepare-release.yml version input, wait for the full CI
 on A and verified staging commit B, then create the root vX.Y.Z tag at B. The
