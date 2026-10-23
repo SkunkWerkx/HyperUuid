@@ -142,8 +142,6 @@ jobs:
       crate: hyperuuid
       csproj_path: csharp/HyperUuid/HyperUuid.csproj
       runtimes_dir: csharp/HyperUuid/runtimes
-      dotnet_version: "11.0.x"
-      dotnet_quality: "preview"
       android: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
 
@@ -606,8 +604,7 @@ jobs:
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "11.0.x"
-          dotnet-quality: preview
+          global-json-file: global.json
 
       - name: Reconcile existing NuGet publication
         id: pending

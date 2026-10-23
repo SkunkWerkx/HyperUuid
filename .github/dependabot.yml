@@ -3,7 +3,9 @@ version: 2
 # One monthly pull request for every ecosystem: third-party dependencies, build plugins and test
 # tooling alike, majors included. Each entry skips releases younger than a week, so a bad or
 # hijacked release has time to be pulled. Every third-party action is pinned to a commit with its
-# version in a trailing comment; Dependabot moves both together.
+# version in a trailing comment; Dependabot moves both together. C#'s package references float
+# (`*`, and `11.*-*` for the ASP.NET Core ones), so its only pin is the SDK in global.json, which
+# every workflow installs from.
 multi-ecosystem-groups:
   dependencies:
     schedule:
@@ -41,24 +43,12 @@ updates:
     cooldown:
       default-days: 7
 
-  # The WebAssembly smoke test's ASP.NET Core packages carry the SDK's exact version, so the
-  # SDK and NuGet updates land in the same pull request.
   - package-ecosystem: dotnet-sdk
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: dependencies
     cooldown:
       default-days: 7
-
-  - package-ecosystem: nuget
-    directories: ["/csharp/*"]
-    patterns: ["*"]
-    multi-ecosystem-group: dependencies
-    cooldown:
-      default-days: 7
-    ignore:
-      # The Android smoke test consumes the package this repo builds, at the version CI passes.
-      - dependency-name: HyperUuid
 
   - package-ecosystem: gradle
     directory: "/java"

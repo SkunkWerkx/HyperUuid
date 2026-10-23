@@ -128,10 +128,8 @@ jobs:
       # rustc build and a runner's differ in hash and size), so rebuild-and-compare isn't a
       # check a consumer can actually perform. The permissions block above is what makes it
       # work; without those scopes the step fails rather than silently skipping.
-      # .NET 11 is HyperUuid's floor, on every platform including Blazor WebAssembly; preview
-      # quality until the pinned SDK in global.json goes GA.
-      dotnet_version: "11.0.x"
-      dotnet_quality: "preview"
+      # .NET 11 is HyperUuid's floor, on every platform including Blazor WebAssembly; the forge
+      # installs the SDK global.json names.
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
       # A jar has no per-platform package selection like NuGet's RID folders, and the
       # csproj's runtimes/**/native wildcard stages at pack time — so both bindings take
@@ -561,13 +559,11 @@ jobs:
             || { echo "::error::the iOS device test binary does not define uuid_new_v7; the core was not linked in"; exit 1; }
           echo "the iOS device test binary defines the core's exports"
 
-      # .NET 11, as build-native's legs take it: HyperUuid's floor, preview until the pinned
-      # SDK in global.json goes GA.
+      # The SDK global.json names, as build-native's legs take it.
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         if: ${{ !cancelled() }}
         with:
-          dotnet-version: "11.0.x"
-          dotnet-quality: "preview"
+          global-json-file: global.json
 
       - name: Install the .NET iOS and Mac Catalyst workloads
         if: ${{ !cancelled() }}
@@ -680,8 +676,7 @@ jobs:
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "11.0.x"
-          dotnet-quality: "preview"
+          global-json-file: global.json
 
       # The android workload's build tasks run on a JDK.
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -966,7 +961,6 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-quality: preview
       # csharp/.editorconfig: tabs, LF, a final newline.
       - working-directory: csharp
         run: dotnet format whitespace HyperUuid.slnx --verify-no-changes
