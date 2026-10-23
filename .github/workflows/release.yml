@@ -383,7 +383,7 @@ jobs:
       #
       #     gh attestation verify <gem>-<version>[-<platform>].gem --repo <owner>/<repo>
       - name: Attest the built gems
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ruby/pkg/*.gem
 
@@ -532,7 +532,7 @@ jobs:
 
       - name: Attest the complete package inventory
         if: inputs.prepared_run_id == ''
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release-packages/inventory.json
 
@@ -632,7 +632,7 @@ jobs:
 
       - name: Attest successful NuGet receipt
         if: steps.pending.outputs.pending == 'true'
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: nuget-receipt/receipt.json
 
@@ -649,7 +649,7 @@ jobs:
         run: python3 .hyperforge/.github/scripts/release_inventory.py nuget-finalized
 
       - name: Attest the finalized served package
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: nuget-finalized/*.nupkg
 
