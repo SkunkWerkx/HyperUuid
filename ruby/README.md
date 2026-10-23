@@ -261,29 +261,37 @@ callers" examples run under both.
 
 ## Verifying provenance
 
-Every gem RubyGems.org serves — the universal fallback, each of the seven precompiled
-platform gems and `hyperuuid-wasm` — carries its own GitHub build-provenance attestation, signed directly by
-this repo's own `release.yml` (the `ruby-pack` job attests `ruby/pkg/*.gem` as soon as
-they are built, and `rubygems-publish` pushes those preserved bytes), so plain `--repo` verifies any of them:
+Every gem RubyGems.org serves — the universal fallback, each of the seven precompiled platform
+gems and `hyperuuid-wasm` — verifies from the release tag alone: the release attestation,
+signed by this repository's `release.yml` at the tag, names every one of them, with the
+release inventory as its predicate.
 
 ```sh
-gem fetch hyperuuid -v X.Y.Z --platform <platform>   # or omit --platform for the universal gem
-gh attestation verify hyperuuid-X.Y.Z-<platform>.gem --repo SkunkWerkx/HyperUuid
+gem fetch hyperuuid -v <version> --platform <platform>   # or omit --platform for the universal gem
+gh attestation verify hyperuuid-<version>-<platform>.gem --repo SkunkWerkx/HyperUuid \
+  --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
 ```
 
-That's the release's second layer of checking, not the only one: before any gem gets built,
-the same job verifies every native binary it packs — the Fiddle libraries, the Magnus
-extensions (one per Ruby ABI per platform), the `wasm32-wasip1` archives — against *their own*
-attestations — those are signed from `SkunkWerkx/.github` by `hyper-build-native.yml` and
-`hyper-build-wasm.yml`, so
-that check needs `--signer-repo SkunkWerkx/.github` added — and refuses to proceed on an
-unverified one. RubyGems.org has no unpublish and no
-duplicate-version overwrite, so this all happens while a bad artifact is still reversible.
-The release run then re-fetches every gem from rubygems.org and fails unless each matches
-the attested bytes exactly, turning "rubygems.org stores an upload verbatim" into a
-per-release check rather than an assumption — see
-[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for
-more on why `--signer-repo` is needed for some artifacts here and not others.
+Each gem's build provenance is this repository's too: the `ruby-pack` job attests
+`ruby/pkg/*.gem` as soon as they are built and `rubygems-publish` pushes those preserved
+bytes, so plain `--repo` verifies it:
+
+```sh
+gh attestation verify hyperuuid-<version>-<platform>.gem --repo SkunkWerkx/HyperUuid
+```
+
+That is the release's second layer of checking, not the only one: before any gem is built, the
+same job verifies every native binary it packs — the Fiddle libraries, the Magnus extensions
+(one per Ruby ABI per platform), the `wasm32-wasip1` archives — against *their own* build
+provenance, signed from `SkunkWerkx/.github` by `hyper-build-native.yml` and
+`hyper-build-wasm.yml` (so that check needs `--signer-repo SkunkWerkx/.github` added), and
+refuses to proceed on an unverified one. RubyGems.org has no unpublish and no
+duplicate-version overwrite, so all of this happens while a bad artifact is still reversible,
+and the push itself is a separate dispatch from the preserved bytes. The release run then
+re-fetches every gem from rubygems.org and fails unless each matches the attested bytes
+exactly, turning "rubygems.org stores an upload verbatim" into a per-release check rather than
+an assumption. The root README's [Provenance](../README.md#provenance) section has the whole
+picture.
 
 ## Install
 

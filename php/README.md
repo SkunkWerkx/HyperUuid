@@ -486,25 +486,33 @@ binding.
 
 ## Verifying provenance
 
-Packagist has nothing of its own to attest — there's no packed artifact, just a git tag it
-resolves against this repo. What's actually worth checking is the native binaries
-`stage-native-binaries.yml` committed into `php/src/native/`, each individually signed
-by `hyper-build-native.yml` when it was built — that workflow physically lives in
-`SkunkWerkx/.github`, so verifying needs `--signer-repo` alongside `--repo`, or `gh` reports
-a bare `verifying with issuer "sigstore.dev"` that reads like a bad signature but is only an
-identity mismatch:
+Packagist has nothing of its own to attest: there is no packed artifact, just a git tag it
+resolves against this repo. What is worth checking is the native libraries committed under
+`php/src/native/`, and each verifies from the release tag alone: the release attestation,
+signed by this repository's `release.yml` at the tag, names every one of them, with the
+release inventory as its predicate.
 
 ```sh
-composer require skunkwerkx/hyperuuid:X.Y.Z
+composer require skunkwerkx/hyperuuid:<version>
+gh attestation verify vendor/skunkwerkx/hyperuuid/php/src/native/linux-x64/libhyperuuid.so \
+  --repo SkunkWerkx/HyperUuid --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
+```
+
+Each library also carries build provenance from `hyper-build-native.yml` in
+`SkunkWerkx/.github`, at the preparation commit the tagged commit was staged from
+(`stage-native-binaries.yml` verifies that before committing a byte, and the staging commit's
+`Release-Source-SHA` and `Release-CI-Run-ID` trailers name the commit and the run), so that
+check needs `--signer-repo` beside `--repo`:
+
+```sh
 gh attestation verify vendor/skunkwerkx/hyperuuid/php/src/native/linux-x64/libhyperuuid.so \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
 
-The staging commit's own message records the exact `ci.yml` run ID and source SHA the
-binary came from (e.g. `chore: stage native binaries from ci.yml run 33523131897`), so
-you can cross-check the attested commit against that message directly. See
-[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for
-more on why `--signer-repo` is needed for some artifacts here and not others.
+Get the signer wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
+reads like a bad signature but is only an identity mismatch. The root README's
+[Provenance](../README.md#provenance) section has the whole picture: the inventory, which
+artifacts are signed from where, and the gates every byte passes before publication.
 
 ## Install
 

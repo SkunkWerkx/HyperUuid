@@ -15,17 +15,17 @@
        ordinary P/Invoke. Without this file, the browser-wasm build succeeds but throws
        DllNotFoundException("*") at runtime because the native code never got linked in at all.
 
-       NativeFileReference alone isn't the whole story, though — confirmed the hard way with a
-       real PackageReference-only consumer in a real headless-Chromium session, not assumed:
-       linking libhyperuuid.a in (which the above accomplishes) does NOT make its functions
-       resolvable via LibraryImport("*") at runtime. The WASM SDK's emcc invocation only
-       exports the runtime's own baseline functions (malloc, free, math intrinsics, ...) via
-       @(EmccExportedFunction) — it does not scan P/Invoke declarations in the app's own
-       assembly OR any referenced assembly/package to discover what else needs exporting
-       (see dotnet/runtime's WasmApp.Common.targets: EmccExportedFunction's defaults come from
-       wasm-props.json, not from a P/Invoke scan). So every native function UuidGenerator.cs
-       P/Invokes has to be listed explicitly here too, Emscripten-style with a leading
-       underscore, or it links in but stays invisible to "*" resolution.
+       The NativeFileReference is the whole wiring. The SDK scans every assembly's P/Invokes
+       and generates a pinvoke table that calls each native function by symbol, so the link
+       itself resolves them against the archive: with the archive missing, wasm-ld fails with an
+       undefined symbol per entry point, and with it present LibraryImport("*") reaches each one
+       through that table. An @(EmccExportedFunction) entry per function used to be listed here
+       too, on the belief that "*" resolution needed the Emscripten export. It does not:
+       HyperUuid.WasmSmokeTest calls all thirteen entry points with the list gone on .NET SDK
+       11.0.100-rc.2, and fails at the link with the archive unlinked, so the list was dead
+       weight and is not kept. Leaving it out also keeps uuid_variant clear of Emscripten's
+       libuuid JavaScript library (src/lib/libuuid.js), which defines a stub of that name and
+       took over the export whenever it was listed.
 
        One floor. The package targets net11.0 and nothing older, and this file sits under
        build/net11.0/ (with buildTransitive/net11.0/'s copy beside it) like the assembly
@@ -35,31 +35,9 @@
        of its own: the wiring below never meets a toolchain older than the .NET 11 one the
        exception-handling translation further down depends on. (The staticlib's directory is spelled nativeassets/net11.0/ to match; the path
        below names it directly, so the spelling is a folder name, not something NuGet selects
-       by.)
-
-       uuid_variant is P/Invoked like every other entry point but deliberately not in the
-       export list. Emscripten ships a libuuid compatibility library (src/lib/libuuid.js)
-       that defines a JavaScript uuid_variant, a stub that always returns 1, and a name in
-       EXPORTED_FUNCTIONS that the JavaScript library also defines is filled from the
-       library: the glue gained Module._uuid_variant = (uu) => 1 and the wasm export was
-       dropped. The P/Invoke never noticed, because the runtime's pinvoke table calls the
-       Rust function directly inside the module, but anything reaching the export from
-       JavaScript got the stub. Leaving it out keeps the stub out of the glue too. No other
-       name here collides with an Emscripten JavaScript library. -->
+       by.) -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <NativeFileReference Include="$(MSBuildThisFileDirectory)../../runtimes/browser-wasm/nativeassets/net11.0/libhyperuuid.a" />
-    <EmccExportedFunction Include="_hyperuuid_version" />
-    <EmccExportedFunction Include="_uuid_new_v4" />
-    <EmccExportedFunction Include="_uuid_new_v5" />
-    <EmccExportedFunction Include="_uuid_new_v7" />
-    <EmccExportedFunction Include="_uuid_v7_unix_millis" />
-    <EmccExportedFunction Include="_uuid_new_v7_batch" />
-    <EmccExportedFunction Include="_uuid_v7_to_sql_order" />
-    <EmccExportedFunction Include="_uuid_v7_to_rfc_order" />
-    <EmccExportedFunction Include="_uuid_version" />
-    <EmccExportedFunction Include="_uuid_is_rfc" />
-    <EmccExportedFunction Include="_uuid_get_timestamp" />
-    <EmccExportedFunction Include="_uuid_v7_unix_millis_in" />
   </ItemGroup>
 
   <!-- The link above happens only where the wasm-tools workload is installed. Without it the

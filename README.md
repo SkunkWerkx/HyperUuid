@@ -111,7 +111,7 @@ The v7 counter is one process-wide sequence, seeded once and advanced atomically
 
 The timestamp is the caller's, trusted as given: nothing detects a clock that goes backwards, and a v7 minted after one sorts before the values minted ahead of it.
 
-## State of the union
+## Platform support
 
 Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s `build-native` matrix builds the Rust core fresh on each of 5 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library — not just that it compiles. A second job does the same for the two musl RIDs inside real Alpine containers, on the language's own official `*-alpine` image. Intel macOS has no leg of its own; see the osx-x64 note under the table.
 
@@ -139,7 +139,7 @@ All three reach past the table that way. **iOS and Mac Catalyst** load no librar
 
 The musl libraries are built so that they depend on musl's libc and nothing else — the unwinder is linked statically — which is what lets them load on a bare `alpine` or `python:alpine` image with no `libgcc` installed. The glibc libraries need glibc 2.34 or newer.
 
-**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is .NET 11, JDK 25, Go 1.26, Python 3.11, Ruby 3.3 and PHP 8.2, and the musl job runs the PHP, Ruby and Python suites on those oldest versions as well as the newest. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4.
+**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is .NET 11, JDK 25, Go 1.26, Python 3.11, Ruby 3.3 and PHP 8.2, and the musl job runs the PHP, Ruby and Python suites on those oldest versions as well as the newest. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4. The crate's own floor is Rust 1.85 (`rust-version` in its manifest, edition 2024's own floor), and CI builds the library and the `no_std` shared library on exactly that toolchain.
 
 Every leg also builds the core as a `wasm32-wasip1` module and runs the Java suite a second time through its in-process GraalWasm backend — see [WebAssembly](#webassembly).
 
@@ -147,25 +147,44 @@ Every leg also builds the core as a `wasm32-wasip1` module and runs the Java sui
 
 ## Provenance
 
-Every published artifact across all eight bindings — the package itself where a registry
-has one, and the native binaries underneath it either way — carries a GitHub build-provenance
-attestation, checkable with `gh attestation verify`. Which flags that needs depends on where
-the signing workflow physically lives, not on which registry the artifact ended up in:
-artifacts signed directly inside this repo's own `release.yml` — the RubyGems gem and the
-published NuGet package — verify with plain `--repo SkunkWerkx/HyperUuid`.
-Artifacts signed by a reusable workflow hosted in `SkunkWerkx/.github` — the crates.io crate,
-the Maven jar, the PyPI wheels, the pre-push NuGet package, every native library (which is the entire
-story for Go, Swift, and PHP, none of which has a package-level attestation of its own), and
-the `wasm32-wasip1` module that rides inside the jar —
-need `--signer-repo SkunkWerkx/.github` added, or `--owner SkunkWerkx` in place of both
-flags. Get it wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
-reads like a bad signature but is only an identity mismatch.
+Every file a release ships verifies from the tag alone. One release attestation, signed by
+this repository's own `release.yml` at the tag, names every registry package (the `.nupkg` as
+packed and as nuget.org serves it, the gems, the wheels, the crate, the Maven files) and every
+native library committed for Go, Swift and PHP, and its predicate is the release inventory:
+every file's path, size, SHA-256, the commit it was built from and the repository that signed
+its build provenance. One command, any file:
 
-See each binding's own README for its exact verify command and artifact:
-[Rust](rust/#verifying-provenance), [C#](csharp/#native-binary-provenance),
-[Java](java/#verifying-provenance), [Ruby](ruby/#verifying-provenance),
-[Python](python/#verifying-provenance), [PHP](php/#verifying-provenance),
-[Swift](swift/#verifying-provenance), [Go](go/#verifying-build-provenance).
+```sh
+gh attestation verify <file> --repo SkunkWerkx/HyperUuid \
+  --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
+```
+
+Underneath it, every artifact also carries GitHub build provenance from the run that made it,
+and there the flags depend on where the signing workflow lives, not on the registry. The gems,
+`inventory.json` and the published NuGet package are signed inside this repository's
+`release.yml` and verify with plain `--repo SkunkWerkx/HyperUuid`. The crate, the jar, the
+wheels, the pre-push NuGet package, every native library (the whole story for Go, Swift and
+PHP, which have no package of their own) and the `wasm32-wasip1` module inside the jar are
+signed by reusable workflows in `SkunkWerkx/.github`: the crate and the Maven files at the
+tagged commit, the wheels, the natives and the module at the preparation commit on master they
+were built from. Add `--signer-repo SkunkWerkx/.github` (and `--source-digest <commit>` to pin
+either), or `--owner SkunkWerkx` in place of both. Get the
+signer wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which reads like a
+bad signature but is only an identity mismatch. PyPI additionally holds a
+[PEP 740](https://peps.python.org/pep-0740/) publish attestation for every wheel, filed by the
+publish action and shown on each file's PyPI page.
+
+The gates run on the way in, not just on the way out: `stage-native-binaries.yml` verifies each
+native library's attestation before committing it for the Go, Swift and PHP consumers, the gem
+job verifies every native artifact it packs before building a gem, every package is attested
+and preserved before anything is uploaded, and the upload itself is a second, deliberate
+dispatch of `release.yml` from those preserved bytes ([RELEASING.md](.github/RELEASING.md)), so
+a failed check stops the release while nothing is yet irreversible. Each binding's README shows
+the command on its own artifact: [Rust](rust/#verifying-provenance),
+[C#](csharp/#native-binary-provenance), [Java](java/#verifying-provenance),
+[Ruby](ruby/#verifying-provenance), [Python](python/#verifying-provenance),
+[PHP](php/#verifying-provenance), [Swift](swift/#verifying-provenance),
+[Go](go/#verifying-build-provenance).
 
 ## WebAssembly
 

@@ -8,18 +8,15 @@ name: Stage native binaries for release
 #
 # Those are staged once per release, not once per merge. A PR's ci.yml run is in `pr` mode
 # and attests nothing, so it has nothing this workflow would accept; master's binaries are
-# simply the last release's until the next one. Nothing on master reads them — every ci.yml
-# leg builds and links its own — so they only have to be right at the tagged commit.
+# simply the last release's until the next one. Nothing on master reads them (every ci.yml
+# leg builds and links its own), so they only have to be right at the tagged commit.
 #
-# The trigger is a release's version bump: the libraries embed the crate version,
-# prepare-release.yml direct-pushes the bump and dispatches ci.yml (release mode) against
-# it, and when that run completes on master this pulls its attested output, verifies it,
-# and commits it straight back — so the commit a human then tags carries libraries that
-# report the version being released. Deliberately a direct push, not a bot-opened PR: a diff
-# of binary files is something nobody can review. Scheduled runs are not staged.
-#
-# workflow_dispatch stages from any already-green, release-mode ci.yml run by commit SHA —
-# the manual route when master needs restaging for another reason.
+# The trigger is a release's version bump: prepare-release.yml pushes A and dispatches ci.yml
+# (release mode) against it, and when that run completes on master this pulls its attested
+# output, verifies every byte of it, and commits it straight back as B with the run, A and
+# the Forge commit recorded as trailers release.yml reads. Scheduled runs are not staged.
+# workflow_dispatch stages from any already-green, release-mode ci.yml run by commit SHA.
+# The body lives in the Forge; the paths and targets come from .github/hyper.json.
 
 on:
   workflow_run:
@@ -37,6 +34,9 @@ concurrency:
   group: release-source-${{ github.repository }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   stage-native-binaries:
     if: >-
@@ -44,245 +44,12 @@ jobs:
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'workflow_dispatch')
-    runs-on: ubuntu-26.04
+    uses: SkunkWerkx/.github/.github/workflows/hyper-stage-natives.yml@master
     permissions:
       contents: write
       # gh attestation verify reads this repo's attestations before any binary is committed.
       attestations: read
       actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: master
-
-      - name: Resolve and validate the exact preparation run
-        id: find
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.head_sha }}
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-        run: |
-          set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected a full preparation SHA"; exit 1; }
-          git fetch origin master
-          python3 .github/scripts/release_guard.py master
-          [ "$(git rev-parse HEAD)" = "$SOURCE_SHA" ] || { echo "::error::Checkout is not preparation source A"; exit 1; }
-          if [ -n "$EVENT_RUN_ID" ]; then
-            RUN_ID="$EVENT_RUN_ID"
-          else
-            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --commit "$SOURCE_SHA" --branch master --status success --json databaseId,event \
-              --jq 'map(select(.event == "workflow_dispatch" or .event == "schedule"))[0].databaseId // empty')
-          fi
-          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::No successful release-mode ci.yml run for A"; exit 1; }
-          export RUN_ID
-          python3 .github/scripts/release_guard.py run
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: native-*
-          path: artifacts/native
-          merge-multiple: false
-          run-id: ${{ steps.find.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      # The static libraries, for the two bindings that link the core in and have no packing
-      # step of their own: Swift (swift/HyperUuidCore.artifactbundle) and Go (go/staticlib),
-      # each on every platform it builds for. A consumer of either gets
-      # whatever archives are committed. The artifact is laid out by repository path; it
-      # also carries the C# package's archives, which are packed at release and never
-      # committed. Same verify-then-stage gate as the rest.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: static-libs
-          path: artifacts/static-libs
-          run-id: ${{ steps.find.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Install object-format-capable symbol readers
-        run: sudo apt-get update && sudo apt-get install -y llvm
-
-      - name: Validate downloaded symbols, version and runtime contract
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
-        run: python3 .github/scripts/release_guard.py payloads
-
-      # Committed binaries are the weakest provenance story in this repo: a reviewer can't
-      # diff them, and "trust me, CI built it" is exactly what a downstream consumer inside a
-      # trust boundary can't accept. So each artifact's SLSA attestation is verified BEFORE it
-      # is allowed into the tree — "it's in git" now also means "its provenance checked out at
-      # staging time." A failure here stops the commit rather than quietly shipping an
-      # unverifiable blob.
-      #
-      # Several destinations, one set of bytes: git stores these as a single blob each (a
-      # static archive Swift and Go both carry hashes to the same object in both trees), so
-      # the duplication costs nothing in repository storage. Symlinking them was considered and rejected: //go:embed
-      # refuses symlinks outright ("contains no embeddable files"), the Go module proxy's zip
-      # format drops them, and a Windows checkout without Developer Mode materializes them as
-      # text files, which would break PHP's FFI dlopen in a way that looks like corruption.
-      - name: Verify attestations, then stage into php/, swift/, go/
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
-        run: |
-          set -euo pipefail
-          declare -A LIB_NAMES=(
-            [linux-x64]=libhyperuuid.so
-            [linux-arm64]=libhyperuuid.so
-            [linux-musl-x64]=libhyperuuid.so
-            [linux-musl-arm64]=libhyperuuid.so
-            [osx-x64]=libhyperuuid.dylib
-            [osx-arm64]=libhyperuuid.dylib
-            [win-x64]=hyperuuid.dll
-            [win-arm64]=hyperuuid.dll
-          )
-          : > digests.txt
-          for rid in "${!LIB_NAMES[@]}"; do
-            src="artifacts/native/native-$rid/${LIB_NAMES[$rid]}"
-            echo "::group::verify $rid"
-            # --signer-repo is not optional here. `--repo X` alone asserts BOTH that the
-            # artifact's source repo is X and that the workflow which signed it lives in X.
-            # The first is true (source is this repo); the second is not — the signing step
-            # is in hyper-build-native.yml, which physically lives in the shared
-            # SkunkWerkx/.github forge repo, so Fulcio records that as the build signer.
-            # Same job_workflow_ref reality that blocks nuget.org Trusted Publishing from
-            # the forge (see hyper-pack-nuget.yml's header). Without this flag every
-            # verification fails with a bare `verifying with issuer "sigstore.dev"` and
-            # this gate rejects six perfectly good binaries. Confirmed against all six
-            # artifacts of run 33518617482: FAIL with --repo alone, PASS with both.
-            if ! gh attestation verify "$src" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
-                   --source-digest "$SOURCE_SHA"; then
-              echo "::error::No valid build provenance for $rid — refusing to commit it."
-              exit 1
-            fi
-            echo "::endgroup::"
-            echo "$(sha256sum "$src" | cut -d' ' -f1)  $rid/${LIB_NAMES[$rid]}" >> digests.txt
-          done
-
-          # PHP is the one tree that still takes shared libraries. PHP on Windows is an x64
-          # process even on ARM hardware, so an ARM64 DLL under php/ can never be loaded; the
-          # one that earlier stagings committed there is removed.
-          #
-          # install -m 755 rather than cp: download-artifact does not preserve modes, and
-          # the two repos' committed libraries had drifted to different ones.
-          for rid in "${!LIB_NAMES[@]}"; do
-            [ "$rid" = win-arm64 ] && continue
-            mkdir -p "php/src/native/$rid"
-            install -m 755 "artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "php/src/native/$rid/${LIB_NAMES[$rid]}"
-          done
-          git rm -r --quiet --ignore-unmatch php/src/native/win-arm64
-          # Swift links the core in on every platform now (its bundle, below), so the shared
-          # libraries earlier stagings committed for it are loaded by nothing: under
-          # HyperUuidNativeLibs (0.6.0 development) and under HyperUuid's own resources
-          # (through 0.5.0).
-          git rm -r --quiet --ignore-unmatch \
-            swift/Sources/HyperUuidNativeLibs \
-            swift/Sources/HyperUuid/NativeLibs
-
-          # Go links the core on every platform now (go/staticlib, below), so the shared
-          # libraries and the wasm module earlier stagings committed under go/native are
-          # loaded by nothing.
-          git rm -r --quiet --ignore-unmatch go/native
-
-          # The static libraries: nine for Swift's bundle (glibc and musl Linux, macOS and
-          # Windows on two architectures each, and wasm32-wasip1 — the two Windows ones named
-          # hyperuuid.lib, as MSVC's linker convention has it), seven for Go (Linux, macOS and
-          # Windows — the MSVC archives, which MinGW's linker reads — plus the wasm32-wasip1
-          # one TinyGo links, the same bytes as Swift's). All of a
-          # tree's or none: a Swift bundle whose info.json names an archive that is not there
-          # fails every consumer's build, and a Go build with no archive for its platform
-          # does not link. info.json is generated text naming those nine paths and the crate
-          # version; it rides along unattested, readable in the diff.
-          #
-          # And three for Swift's XCFramework: iOS, the iOS simulator and Mac Catalyst, arm64
-          # each. That tree is committed whole from the artifact, since nothing of it is
-          # source: beside the archives, its Info.plist and each slice's copy of the header
-          # and module map are generated text, unattested and readable in the diff like
-          # info.json. swift/Package.swift declares the target only when the Info.plist is
-          # there, so a tree from before this first ran simply has no iOS support yet.
-          # Go's tree takes the four Apple mobile archives as plain files beside its seven:
-          # iOS, the iOS simulator, and Mac Catalyst on both architectures.
-          #
-          # And Android, arm64 and x86_64, in both of the first trees: two more variants in
-          # Swift's bundle, which the Swift SDK for Android links, and two more archives in
-          # Go's, which cgo links under GOOS=android. That makes eleven and thirteen.
-          declare -A STATIC_TREES=(
-            [swift/HyperUuidCore.artifactbundle]=11
-            [swift/HyperUuidCoreApple.xcframework]=3
-            [go/staticlib]=13
-          )
-          for tree in "${!STATIC_TREES[@]}"; do
-            archives=()
-            for archive in artifacts/static-libs/"$tree"/*/libhyperuuid.a artifacts/static-libs/"$tree"/*/hyperuuid.lib; do
-              [ -e "$archive" ] && archives+=("$archive")
-            done
-            if [ "${#archives[@]}" != "${STATIC_TREES[$tree]}" ]; then
-              echo "::error::Expected ${STATIC_TREES[$tree]} static libraries under $tree in the static-libs artifact."
-              exit 1
-            fi
-            for archive in "${archives[@]}"; do
-              dest="${archive#artifacts/static-libs/}"
-              echo "::group::verify $dest"
-              if ! gh attestation verify "$archive" \
-                   --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
-                   --source-digest "$SOURCE_SHA"; then
-                echo "::error::No valid build provenance for $dest — refusing to commit it."
-                exit 1
-              fi
-              echo "::endgroup::"
-              echo "$(sha256sum "$archive" | cut -d' ' -f1)  $dest" >> digests.txt
-              mkdir -p "$(dirname "$dest")"
-              install -m 644 "$archive" "$dest"
-            done
-          done
-          install -m 644 "artifacts/static-libs/swift/HyperUuidCore.artifactbundle/info.json" \
-            "swift/HyperUuidCore.artifactbundle/info.json"
-          xcframework=swift/HyperUuidCoreApple.xcframework
-          install -m 644 "artifacts/static-libs/$xcframework/Info.plist" "$xcframework/Info.plist"
-          for header in artifacts/static-libs/"$xcframework"/*/Headers/HyperUuidCore/*; do
-            dest="${header#artifacts/static-libs/}"
-            mkdir -p "$(dirname "$dest")"
-            install -m 644 "$header" "$dest"
-          done
-          for slice in "$xcframework"/*/; do
-            for file in hyperuuid.h module.modulemap; do
-              [ -f "$slice/Headers/HyperUuidCore/$file" ] \
-                || { echo "::error::$slice has no Headers/HyperUuidCore/$file in the static-libs artifact."; exit 1; }
-            done
-          done
-
-          sort -k2 -o digests.txt digests.txt
-          echo "### Staged native binaries (attestations verified)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat digests.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Commit and push if anything actually changed
-        env:
-          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
-          RUN_ID: ${{ steps.find.outputs.run_id }}
-        run: |
-          set -euo pipefail
-          git fetch origin master
-          python3 .github/scripts/release_guard.py master
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add php/src/native swift/HyperUuidCore.artifactbundle swift/HyperUuidCoreApple.xcframework
-          # -f: go/staticlib's archives are in .gitignore, so that this workflow is the only
-          # thing that ever adds one — a developer's own build of them stays out of a commit.
-          git add -f go/staticlib
-          python3 .github/scripts/release_guard.py index
-          if git diff --cached --quiet; then
-            echo "::notice::Bytes are unchanged; recording the verified source/run relationship."
-          fi
-          git commit --allow-empty \
-            -m "chore: stage native binaries from ci.yml run $RUN_ID ($SOURCE_SHA)" \
-            -m "Build provenance verified with \`gh attestation verify\` before staging." \
-            -m "sha256:" -m "$(cat digests.txt)" \
-            -m "Release-Source-SHA: $SOURCE_SHA
-          Release-CI-Run-ID: $RUN_ID"
-          git push origin HEAD:master
+    with:
+      source_sha: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.head_sha }}
+      event_run_id: ${{ github.event.workflow_run.id }}

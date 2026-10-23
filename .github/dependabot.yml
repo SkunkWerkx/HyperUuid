@@ -27,8 +27,8 @@ updates:
       # pass, so Dependabot's bump to it would break them. Refresh these pins by hand.
       - dependency-name: dtolnay/rust-toolchain
 
-  # The core and its wasm-bindgen browser test. check-msrv in ci.yml holds the lockfiles to
-  # rust-version.
+  # The core and its wasm-bindgen browser test. The Forge's check-msrv (hyper-check-core.yml)
+  # holds the lockfiles to rust-version.
   - package-ecosystem: cargo
     directories: ["/rust", "/rust/browser-test"]
     patterns: ["*"]

@@ -1,8 +1,20 @@
 name: Release — prepare, verify, preserve, publish, finalize
 
-# Root v tag is the deliberate release initiation. All five registry publishers
-# wait for one complete preserved package inventory. Recovery runs at the SAME
-# root tag/B using an exact prepared_run_id; it never rebuilds the native matrix.
+# The release is two deliberate acts at the same root tag (B, the staging commit).
+#
+#   1. Pushing the tag runs this workflow with no inputs: it verifies B against its
+#      preparation run, packs every registry input, attests each package and the release
+#      as a whole (inventory.json plus the release attestation over every shipped file),
+#      preserves the complete release-packages artifact, plans every registry upload and
+#      proves every Trusted Publisher exchange it can without uploading. Nothing is pushed,
+#      no Go tag, no GitHub Release.
+#   2. `gh workflow run release.yml --ref vX.Y.Z -f prepared_run_id=<that run>` publishes
+#      from the preserved bytes through the recovery path, so every release exercises it.
+#
+# Recovery is the same dispatch, plus publication_run_id when registry receipts exist. It
+# never rebuilds the native matrix and never re-attests; it verifies the preserved bytes
+# against the attestations the tag run made. The job bodies live in the Forge
+# (SkunkWerkx/.github/.github/actions/*), called at the one Forge commit this run resolved.
 on:
   push:
     tags: ["v*"]
@@ -36,9 +48,9 @@ jobs:
   find-ci-run:
     runs-on: ubuntu-26.04
     outputs:
-      run_id: ${{ steps.find.outputs.run_id }}
-      source_sha: ${{ steps.find.outputs.source_sha }}
-      version: ${{ steps.subject.outputs.version }}
+      run_id: ${{ steps.guard.outputs.run_id }}
+      source_sha: ${{ steps.guard.outputs.source_sha }}
+      version: ${{ steps.guard.outputs.version }}
       forge_sha: ${{ steps.forge.outputs.sha }}
     permissions:
       contents: read
@@ -49,54 +61,11 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Require the exact release tag at B
-        id: subject
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Run release.yml at the root version tag, including recovery"; exit 1; }
-          echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify the staging commit and its exact preparation run
-        id: find
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CI_RUN_ID_OVERRIDE: ${{ inputs.ci_run_id }}
-        run: python3 .github/scripts/release_guard.py record
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
-        with:
-          pattern: native-*
-          path: artifacts/native
-          merge-multiple: false
-          run-id: ${{ steps.find.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
-        with:
-          name: static-libs
-          path: artifacts/static-libs
-          run-id: ${{ steps.find.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Install object-format-capable symbol readers
-        if: inputs.prepared_run_id == ''
-        run: sudo apt-get update && sudo apt-get install -y llvm
-
-      - name: Compare every staged payload with the verified preparation artifacts
-        if: inputs.prepared_run_id == ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
-        run: python3 .github/scripts/release_guard.py compare
-
       # The Forge is called at master. GitHub resolves that to one commit when the run is queued
       # and records it in the run's referenced_workflows; every .hyperforge checkout and the
-      # inventory's forge_sha use that commit, so the scripts match the reusable workflows. A
-      # recovery run verifies the preserved inventory against it, so recovery needs the Forge's
-      # master unchanged since the packaging run.
+      # inventory's forge_sha use that commit, so the actions and scripts match the reusable
+      # workflows. A recovery run verifies the preserved inventory against it, so recovery needs
+      # the Forge's master unchanged since the packaging run.
       - name: Resolve the Forge commit this run uses
         id: forge
         env:
@@ -114,20 +83,14 @@ jobs:
           ref: ${{ steps.forge.outputs.sha }}
           path: .hyperforge
           persist-credentials: false
-      - name: Validate the exact preserved release run
-        if: inputs.prepared_run_id != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CRATE: hyperuuid
-          VERSION: ${{ steps.subject.outputs.version }}
-          SOURCE_SHA: ${{ steps.find.outputs.source_sha }}
-          STAGING_SHA: ${{ github.sha }}
-          CI_RUN_ID: ${{ steps.find.outputs.run_id }}
-          PACKAGE_RUN_ID: ${{ github.run_id }}
-          FORGE_SHA: ${{ steps.forge.outputs.sha }}
-          PREPARED_RUN_ID: ${{ inputs.prepared_run_id }}
-        run: python3 .hyperforge/.github/scripts/release_inventory.py run
+
+      - id: guard
+        uses: ./.hyperforge/.github/actions/release-guard
+        with:
+          ci_run_id: ${{ inputs.ci_run_id }}
+          prepared_run_id: ${{ inputs.prepared_run_id }}
+          forge_sha: ${{ steps.forge.outputs.sha }}
+          token: ${{ github.token }}
 
   nuget-org-pack:
     needs: find-ci-run
@@ -172,293 +135,57 @@ jobs:
       MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
       MAVEN_SIGNING_KEY_PASSWORD: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
 
+  # The gems and the wheels are handled by composite actions, not reusable workflows, because
+  # the gems are attested here and RubyGems.org verifies this repository's identity: a
+  # composite action keeps the caller's OIDC identity, a reusable workflow carries the Forge's.
   ruby-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
     runs-on: ubuntu-26.04
     permissions:
-      # Explicit, so checkout keeps working if this repo ever stops being public — a
-      # permissions block sets every unlisted scope to none.
       contents: read
       id-token: write
-      # read: gh attestation verify checks every downloaded binary before it is packed.
-      # write: the gems built from them are themselves attested below.
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          pattern: native-*
-          path: artifacts/native
-          merge-multiple: false
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-gems
         with:
-          pattern: ruby-native-*
-          path: artifacts/ruby-native
-          merge-multiple: false
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: ruby-wasm-*
-          path: artifacts/ruby-wasm
-          merge-multiple: false
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      # Nothing downloaded above is inspectable, and nothing here gets rebuilt — the
-      # eight plain FFI libs go verbatim into the universal "ruby" platform gem and each
-      # Magnus extension goes verbatim into its own precompiled platform gem, the two
-      # wasm32-wasip1 archives into the -wasm gem — so `gem push` is the last moment
-      # these bytes can still be rejected, and it is irreversible (RubyGems has no
-      # unpublish and no duplicate-version overwrite). ci.yml attested all twenty-two
-      # (eight libraries, fourteen extensions) at build time via hyper-build-native.yml,
-      # and the two archives via hyper-build-wasm.yml; this is the gate that actually
-      # spends those attestations instead of just producing them.
-      #
-      # --signer-repo is not optional. `--repo X` alone asserts BOTH that the artifact's
-      # source repo is X and that the workflow which signed it lives in X. Only the first
-      # is true — the attest step is in hyper-build-native.yml, which physically lives in
-      # the shared SkunkWerkx/.github forge, and that job_workflow_ref is what Fulcio
-      # records as the build signer. Omit it and every one fails with a bare `verifying with
-      # issuer "sigstore.dev"` that reads like a bad signature but is only an identity
-      # mismatch. Same flag, same reason as stage-native-binaries.yml's gate.
-      - name: Verify build provenance of every binary about to be packed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          for f in artifacts/native/native-*/* artifacts/ruby-native/ruby-native-*/* \
-                   artifacts/ruby-wasm/ruby-wasm-*/*; do
-            echo "::group::verify $f"
-            if ! gh attestation verify "$f" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
-                 --source-digest "${{ needs.find-ci-run.outputs.source_sha }}"; then
-              echo "::error::No valid build provenance for $f — refusing to publish a gem containing it."
-              exit 1
-            fi
-            echo "::endgroup::"
-          done
-
-      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
-        with:
-          ruby-version: "4.0"
-          bundler-cache: true
-          working-directory: ruby
-
-      - name: Build the universal "ruby" platform gem (pure Fiddle, all 8 native libraries bundled)
-        working-directory: ruby
-        shell: bash
-        run: |
-          set -euo pipefail
-          declare -A LIB_NAMES=(
-            [linux-x64]=libhyperuuid.so
-            [linux-arm64]=libhyperuuid.so
-            [linux-musl-x64]=libhyperuuid.so
-            [linux-musl-arm64]=libhyperuuid.so
-            [osx-x64]=libhyperuuid.dylib
-            [osx-arm64]=libhyperuuid.dylib
-            [win-x64]=hyperuuid.dll
-            [win-arm64]=hyperuuid.dll
-          )
-          for rid in "${!LIB_NAMES[@]}"; do
-            dest="lib/hyperuuid/native/$rid"
-            mkdir -p "$dest"
-            cp "../artifacts/native/native-$rid/${LIB_NAMES[$rid]}" "$dest/"
-          done
-          bundle exec rake build
-
-      - name: Build precompiled platform gems (Magnus)
-        working-directory: ruby
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Both Windows RIDs map to RubyInstaller's own platform strings, and the `ext=so`
-          # default below is already right for both — mingw Ruby's DLEXT is `so`, not `dll`,
-          # on either architecture. Every RID named here must have a matching ruby-native-*
-          # artifact from the forge or this loop fails at the `cp`, which is the intended
-          # failure: a missing extension should stop the release, not silently ship a gem
-          # that claims a platform it has no code for.
-          #
-          # Seven RIDs, one gem each: every one but osx-x64, which has no platform gem — an
-          # Intel Mac installs the universal gem and runs on Fiddle, the price of not keeping
-          # an Intel runner job for a platform Apple is retiring. The musl extensions come from
-          # the forge's musl job (built in each Ruby's Alpine image), under the same
-          # ruby-native-{rid}-{abi} names as every other leg.
-          #
-          # The glibc gems are `-linux-gnu`, not plain `-linux`. RubyGems before 4.0 (Ruby 3.4's
-          # 3.6) matches a plain `x86_64-linux` gem on Alpine ahead of `x86_64-linux-musl` —
-          # even under `gem install --platform x86_64-linux-musl` — which now that platform
-          # gems carry no Fiddle library would be a gem that cannot load. Naming the libc on
-          # both sides is what makes every supported RubyGems and Bundler pick right; Nokogiri
-          # names its gems the same way for the same reason.
-          #
-          # All eight libraries the universal gem's step staged are still under
-          # lib/hyperuuid/native/ here; native:gem leaves every one of them out of a platform
-          # gem, which carries its Magnus extensions and nothing else native. The check after
-          # the loop holds it to that.
-          declare -A PLATFORMS=(
-            [linux-x64]=x86_64-linux-gnu
-            [linux-arm64]=aarch64-linux-gnu
-            [linux-musl-x64]=x86_64-linux-musl
-            [linux-musl-arm64]=aarch64-linux-musl
-            [osx-arm64]=arm64-darwin
-            [win-x64]=x64-mingw-ucrt
-            [win-arm64]=aarch64-mingw-ucrt
-          )
-          # One extension per Ruby ABI per platform — a Magnus extension is bound to a single
-          # Ruby minor, so a platform gem has to be "fat" to cover more than one. Keep this
-          # list in step with ruby/Rakefile's ABIS and the forge's per-ABI Ruby trios; the
-          # rake task aborts naming the missing file if they drift apart.
-          ABIS=(3.4 4.0)
-          for rid in "${!PLATFORMS[@]}"; do
-            ext=so
-            [[ "$rid" == osx-* ]] && ext=bundle
-            for abi in "${ABIS[@]}"; do
-              mkdir -p "lib/hyperuuid/$abi"
-              cp "../artifacts/ruby-native/ruby-native-$rid-$abi/hyperuuid_native.$ext" \
-                 "lib/hyperuuid/$abi/hyperuuid_native.$ext"
-            done
-            bundle exec rake "native:gem[${PLATFORMS[$rid]}]"
-            for abi in "${ABIS[@]}"; do rm -rf "lib/hyperuuid/$abi"; done
-          done
-
-          # Seven platform gems, each with its two extensions and no Fiddle library — and the
-          # universal gem with all eight libraries. A drift in the Rakefile or the gemspec
-          # glob fails the release here instead of shipping the wrong contents.
-          platform_gems=(pkg/*-*-*.gem)
-          [ "${#platform_gems[@]}" -eq "${#PLATFORMS[@]}" ] \
-            || { echo "::error::expected ${#PLATFORMS[@]} platform gems in pkg/, found: $(ls pkg)"; exit 1; }
-          for gem in pkg/*.gem; do
-            files=$(tar -xOf "$gem" data.tar.gz | tar -tzf -)
-            natives=$(grep -c '^lib/hyperuuid/native/' <<<"$files" || true)
-            exts=$(grep -c '/hyperuuid_native\.' <<<"$files" || true)
-            echo "$gem: $natives Fiddle libraries, $exts Magnus extensions"
-            # hyperuuid-X.Y.Z.gem is the universal one; a platform gem's name adds -<platform>.
-            want="0 ${#ABIS[@]}"
-            [[ "$(basename "$gem" .gem)" == *-*-* ]] || want="8 0"
-            [ "$natives $exts" = "$want" ] \
-              || { echo "::error::$gem carries $natives Fiddle libraries and $exts extensions; expected $want"; exit 1; }
-          done
-
-
-      # The ruby.wasm companion gem: the same lib/ with no fiddle, the extconf rbwasm runs, and
-      # one wasm32-wasip1 archive per Ruby minor, gzipped. Packed last so the platform gems'
-      # count above never sees it. Keep ABIS in step with the forge's ruby_wasm_abis default
-      # and ruby/Rakefile's ABIS; the rake task aborts naming the missing file otherwise.
-      - name: Build the ruby.wasm companion gem (hyperuuid-wasm)
-        working-directory: ruby
-        shell: bash
-        run: |
-          set -euo pipefail
-          ABIS=(3.4 4.0)
-          for abi in "${ABIS[@]}"; do
-            mkdir -p "ext/hyperuuid_native/$abi"
-            cp "../artifacts/ruby-wasm/ruby-wasm-$abi/hyperuuid_native.a" "ext/hyperuuid_native/$abi/"
-          done
-          bundle exec rake wasm:gem
-          gem=(pkg/hyperuuid-wasm-*.gem)
-          files=$(tar -xOf "${gem[0]}" data.tar.gz | tar -tzf -)
-          echo "$files"
-          archives=$(grep -c '^ext/hyperuuid_native/[0-9.]*/hyperuuid_native\.a\.gz$' <<<"$files" || true)
-          natives=$(grep -c '^lib/hyperuuid/native/' <<<"$files" || true)
-          [ "$archives $natives" = "${#ABIS[@]} 0" ] && grep -qx 'ext/hyperuuid_native/extconf.rb' <<<"$files" \
-            || { echo "::error::${gem[0]} carries $archives archives and $natives Fiddle libraries; expected ${#ABIS[@]} and 0, plus the extconf"; exit 1; }
-
-      # Attested BEFORE the push, over ruby/pkg/*.gem — these exact files are what `gem
-      # push` uploads, with no repack in between, so the attested digest is the published
-      # digest. Ordering it first is the whole point: a failure here stops the release
-      # while it is still reversible, unlike NuGet, where nuget.org rewrites the package
-      # and forces a second attestation after an irreversible push.
-      #
-      # No --signer-repo when verifying: this signing step lives in this repo's own
-      # release.yml, so Fulcio records one identity for source and signer alike.
-      #
-      #     gh attestation verify <gem>-<version>[-<platform>].gem --repo <owner>/<repo>
-      - name: Attest the built gems
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: ruby/pkg/*.gem
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ruby-packages
-          path: ruby/pkg/*.gem
-          if-no-files-found: error
-          retention-days: 90
+          run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          token: ${{ github.token }}
 
   pypi-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
     runs-on: ubuntu-26.04
     permissions:
-      # A permissions block sets every unlisted scope to none, so contents is spelled out
-      # for checkout. id-token is PyPI Trusted Publishing; attestations: read is what
-      # `gh attestation verify` below needs.
       contents: read
       id-token: write
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          pattern: pypi-wheels-*
-          path: dist
-          merge-multiple: true
-          run-id: ${{ needs.find-ci-run.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      # The last moment these files can still be rejected: a PyPI upload is permanent, and
-      # nothing below rebuilds what was downloaded. Three things are held, each a way a
-      # release could otherwise go out wrong with every job green: all 25 wheels are
-      # here (a missing artifact would publish a release with a platform silently absent),
-      # every one is named for the version being released, and every one carries build
-      # provenance from that ci.yml run.
-      #
-      # --signer-repo is not optional, for the same reason as the gem gate above: the
-      # attest step is in hyper-build-wheels.yml, which lives in the SkunkWerkx/.github
-      # forge, and that is what Fulcio records as the build signer.
-      - name: Verify the wheels about to be published
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          ls -l dist
-          shopt -s nullglob
-          wheels=(dist/*.whl)
-          if [ "${#wheels[@]}" -ne 25 ]; then
-            echo "::error::Expected 25 wheels from ci.yml run ${{ needs.find-ci-run.outputs.run_id }}, found ${#wheels[@]}."
-            exit 1
-          fi
-          for wheel in "${wheels[@]}"; do
-            case "$(basename "$wheel")" in
-              hyperuuid-"$want"-*) ;;
-              *) echo "::error::$wheel is not a hyperuuid $want wheel — refusing to publish it."; exit 1 ;;
-            esac
-            echo "::group::verify $wheel"
-            if ! gh attestation verify "$wheel" \
-                 --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
-                 --source-digest "${{ needs.find-ci-run.outputs.source_sha }}"; then
-              echo "::error::No valid build provenance for $wheel — refusing to publish it."
-              exit 1
-            fi
-            echo "::endgroup::"
-          done
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/verify-wheels
         with:
-          name: pypi-packages
-          path: dist/*.whl
-          if-no-files-found: error
-          retention-days: 90
+          run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          token: ${{ github.token }}
 
+  # One inventory of every registry input and every native committed at B, attested twice:
+  # build provenance for inventory.json, and the release attestation whose subjects are every
+  # shipped file and whose predicate is the inventory. Preserved for 90 days as
+  # release-packages; a recovery run verifies the preserved bytes and never re-attests.
   publication-gate:
     needs: [find-ci-run, nuget-org-pack, ruby-pack, pypi-pack, crate-pack, maven-pack]
     if: >-
@@ -473,16 +200,6 @@ jobs:
       actions: read
       id-token: write
       attestations: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      CRATE: hyperuuid
-      VERSION: ${{ needs.find-ci-run.outputs.version }}
-      SOURCE_SHA: ${{ needs.find-ci-run.outputs.source_sha }}
-      STAGING_SHA: ${{ github.sha }}
-      CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
-      PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -491,79 +208,18 @@ jobs:
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
+      - uses: ./.hyperforge/.github/actions/release-gate
         with:
-          name: nuget-org-package
-          path: release-packages/nuget
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
-        with:
-          name: ruby-packages
-          path: release-packages/ruby
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
-        with:
-          name: pypi-packages
-          path: release-packages/pypi
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
-        with:
-          name: crate-package
-          path: release-packages/crate
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id == ''
-        with:
-          name: maven-central-package
-          path: release-packages/maven
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.prepared_run_id != ''
-        with:
-          name: release-packages
-          path: release-packages
-          run-id: ${{ inputs.prepared_run_id }}
-          github-token: ${{ github.token }}
+          version: ${{ needs.find-ci-run.outputs.version }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
+          prepared_run_id: ${{ inputs.prepared_run_id }}
+          token: ${{ github.token }}
 
-      - name: Verify every final package and create the source/run inventory
-        if: inputs.prepared_run_id == ''
-        run: python3 .hyperforge/.github/scripts/release_inventory.py create
-
-      - name: Attest the complete package inventory
-        if: inputs.prepared_run_id == ''
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: release-packages/inventory.json
-
-      - name: Revalidate complete preserved bytes and every provenance source
-        # Fresh files were individually verified by create above; a recovery
-        # rechecks every file's attestation as well as the signed inventory.
-        run: python3 .hyperforge/.github/scripts/release_inventory.py verify ${{ inputs.prepared_run_id == '' && '--inventory-only' || '' }}
-
-      - name: Preserve the complete verified release inputs
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-packages
-          path: release-packages
-          if-no-files-found: error
-          retention-days: 90
-          overwrite: true
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: verified-crate-package
-          path: release-packages/crate
-          if-no-files-found: error
-          retention-days: 90
-          overwrite: true
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: verified-maven-central-package
-          path: release-packages/maven
-          if-no-files-found: error
-          retention-days: 90
-          overwrite: true
-
+  # Every publisher below runs on the tag push with publish off: it plans the upload from the
+  # preserved inventory and, where the registry allows it, completes the Trusted Publisher
+  # exchange without uploading. Only a workflow_dispatch publishes.
   nuget-org-publish:
     needs: [find-ci-run, publication-gate]
     if: >-
@@ -575,17 +231,6 @@ jobs:
       actions: read
       id-token: write
       attestations: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      CRATE: hyperuuid
-      VERSION: ${{ needs.find-ci-run.outputs.version }}
-      SOURCE_SHA: ${{ needs.find-ci-run.outputs.source_sha }}
-      STAGING_SHA: ${{ github.sha }}
-      CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
-      PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
-      PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -594,69 +239,16 @@ jobs:
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: ./.hyperforge/.github/actions/publish-nuget
         with:
-          name: release-packages
-          path: release-packages
-
-      - name: Recheck the immutable inventory before authentication
-        run: python3 .hyperforge/.github/scripts/release_inventory.py verify --registry nuget
-
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-
-      - name: Reconcile existing NuGet publication
-        id: pending
-        run: python3 .hyperforge/.github/scripts/release_inventory.py registry-plan --registry nuget --output pending-nuget
-
-      - name: NuGet login (OIDC)
-        if: steps.pending.outputs.pending == 'true'
-        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
-        id: login
-        with:
-          user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
-
-      - name: Publish the preserved package and symbols
-        if: steps.pending.outputs.pending == 'true'
-        env:
-          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        run: dotnet nuget push "pending-nuget/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
-
-      - name: Record accepted package and symbols
-        if: steps.pending.outputs.pending == 'true'
-        run: python3 .hyperforge/.github/scripts/release_inventory.py nuget-receipt --output nuget-receipt
-
-      - name: Attest successful NuGet receipt
-        if: steps.pending.outputs.pending == 'true'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: nuget-receipt/receipt.json
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: steps.pending.outputs.pending == 'true'
-        with:
-          name: nuget-publication-receipt
-          path: nuget-receipt
-          if-no-files-found: error
-          retention-days: 90
-          overwrite: true
-
-      - name: Verify the finalized repository-signed package
-        run: python3 .hyperforge/.github/scripts/release_inventory.py nuget-finalized
-
-      - name: Attest the finalized served package
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: nuget-finalized/*.nupkg
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: nuget-finalized-package
-          path: nuget-finalized
-          if-no-files-found: error
-          retention-days: 90
-          overwrite: true
+          version: ${{ needs.find-ci-run.outputs.version }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
+          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          trusted_publisher_user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
+          token: ${{ github.token }}
 
   rubygems-publish:
     needs: [find-ci-run, publication-gate]
@@ -669,17 +261,6 @@ jobs:
       actions: read
       id-token: write
       attestations: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      CRATE: hyperuuid
-      VERSION: ${{ needs.find-ci-run.outputs.version }}
-      SOURCE_SHA: ${{ needs.find-ci-run.outputs.source_sha }}
-      STAGING_SHA: ${{ github.sha }}
-      CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
-      PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
-      PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -688,33 +269,15 @@ jobs:
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: ./.hyperforge/.github/actions/publish-rubygems
         with:
-          name: release-packages
-          path: release-packages
-
-      - name: Recheck the immutable inventory before authentication
-        run: python3 .hyperforge/.github/scripts/release_inventory.py verify --registry ruby
-
-      - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
-        with:
-          ruby-version: "4.0"
-
-      - name: Reconcile existing gems by exact public bytes
-        id: pending
-        run: python3 .hyperforge/.github/scripts/release_inventory.py registry-plan --registry ruby --output pending-ruby
-
-      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
-        if: steps.pending.outputs.pending == 'true'
-
-      - name: Publish only missing preserved gems
-        if: steps.pending.outputs.pending == 'true'
-        run: |
-          set -euo pipefail
-          for gem in pending-ruby/*.gem; do gem push "$gem"; done
-
-      - name: Verify every public gem matches the prepared bytes
-        run: python3 .hyperforge/.github/scripts/release_inventory.py registry-confirm --registry ruby
+          version: ${{ needs.find-ci-run.outputs.version }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
+          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          token: ${{ github.token }}
 
   pypi-publish:
     needs: [find-ci-run, publication-gate]
@@ -727,17 +290,6 @@ jobs:
       actions: read
       id-token: write
       attestations: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      CRATE: hyperuuid
-      VERSION: ${{ needs.find-ci-run.outputs.version }}
-      SOURCE_SHA: ${{ needs.find-ci-run.outputs.source_sha }}
-      STAGING_SHA: ${{ github.sha }}
-      CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
-      PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
-      PUBLICATION_RUN_ID: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -746,29 +298,18 @@ jobs:
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: ./.hyperforge/.github/actions/publish-pypi
         with:
-          name: release-packages
-          path: release-packages
+          version: ${{ needs.find-ci-run.outputs.version }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
+          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          token: ${{ github.token }}
 
-      - name: Recheck the immutable inventory before authentication
-        run: python3 .hyperforge/.github/scripts/release_inventory.py verify --registry pypi
-
-      - name: Reconcile existing wheels by exact public bytes
-        id: pending
-        run: python3 .hyperforge/.github/scripts/release_inventory.py registry-plan --registry pypi --output pending-pypi
-
-      - name: Publish only missing preserved wheels (Trusted Publishing)
-        if: steps.pending.outputs.pending == 'true'
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: pending-pypi
-
-      - name: Verify every public wheel matches the prepared bytes
-        run: python3 .hyperforge/.github/scripts/release_inventory.py registry-confirm --registry pypi
-
-  # Do not move this job's authentication out of Forge: crates.io registration
-  # names hyper-publish-crate.yml. Assembly is separate; publishing identity stays.
+  # crates.io Trusted Publishing is registered against hyper-publish-crate.yml's publish job,
+  # and package_preparation.py matches this job's name in run history: don't rename it.
   pack-crates:
     needs: [find-ci-run, publication-gate]
     if: >-
@@ -784,6 +325,7 @@ jobs:
       prepared_run_id: ${{ github.run_id }}
       prepared_artifact_name: verified-crate-package
       publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+      publish: ${{ github.event_name == 'workflow_dispatch' }}
 
   maven-publish:
     needs: [find-ci-run, publication-gate]
@@ -805,16 +347,20 @@ jobs:
       prepared_artifact_name: verified-maven-central-package
       publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
       deployment_id: ${{ inputs.maven_deployment_id }}
+      publish: ${{ github.event_name == 'workflow_dispatch' }}
     secrets:
       MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
       MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
       MAVEN_SIGNING_KEY_PASSWORD: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
 
+  # The go/vX.Y.Z tag and the GitHub Release (notes from the CHANGELOG's section plus the
+  # verification commands), only once every registry has the bytes, and only on a dispatch.
   finalize-release:
     needs: [find-ci-run, publication-gate, nuget-org-publish, rubygems-publish, pypi-publish, pack-crates, maven-publish]
     if: >-
-      !cancelled() && needs.find-ci-run.result == 'success' && needs.publication-gate.result == 'success' &&
+      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      needs.find-ci-run.result == 'success' && needs.publication-gate.result == 'success' &&
       needs.nuget-org-publish.result == 'success' && needs.rubygems-publish.result == 'success' &&
       needs.pypi-publish.result == 'success' && needs.pack-crates.result == 'success' && needs.maven-publish.result == 'success'
     runs-on: ubuntu-26.04
@@ -822,37 +368,18 @@ jobs:
       contents: write
       actions: read
       attestations: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      CRATE: hyperuuid
-      VERSION: ${{ needs.find-ci-run.outputs.version }}
-      SOURCE_SHA: ${{ needs.find-ci-run.outputs.source_sha }}
-      STAGING_SHA: ${{ github.sha }}
-      CI_RUN_ID: ${{ needs.find-ci-run.outputs.run_id }}
-      PACKAGE_RUN_ID: ${{ github.run_id }}
-      FORGE_SHA: ${{ needs.find-ci-run.outputs.forge_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: ./.hyperforge/.github/actions/finalize-release
         with:
-          name: release-packages
-          path: release-packages
-
-      - name: Verify the final release inventory
-        run: python3 .hyperforge/.github/scripts/release_inventory.py verify --inventory-only
-
-      - name: Create or validate the Go tag and GitHub Release at B
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          python3 .hyperforge/.github/scripts/release_inventory.py finalize
+          version: ${{ needs.find-ci-run.outputs.version }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
+          token: ${{ github.token }}
