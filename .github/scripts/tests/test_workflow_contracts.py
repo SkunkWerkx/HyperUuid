@@ -51,12 +51,12 @@ class ConsumerFlowTests(unittest.TestCase):
                 self.assertIn('needs: [build-static, build-android]',workflow['test-android'])
                 self.assertIn('needs: build-static',workflow['test-swift-static'])
 
-    def test_no_consumer_forge_call_uses_mutable_master(self):
+    def test_every_consumer_forge_call_follows_master(self):
         for repo in (ROOT.name,):
             for path in (BASE/repo/'.github/workflows').glob('*.yml'):
                 for reference in re.findall(r'SkunkWerkx/\.github/\.github/[^\s]+',path.read_text()):
                     with self.subTest(repo=repo,reference=reference):
-                        self.assertRegex(reference,r'@[0-9a-f]{40}$')
+                        self.assertRegex(reference,r'@master$')
 
 
 if __name__=='__main__': unittest.main()
