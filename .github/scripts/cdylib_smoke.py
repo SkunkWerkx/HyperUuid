@@ -1,6 +1,6 @@
 """Loads the shared library every FFI binding loads and calls every C export once.
 
-ci.yml's check-cdylib job runs this against a freshly built no_std library on every platform
+The Forge's check-cdylib job (hyper-check-core.yml) runs this against a freshly built no_std library on every platform
 the forge ships: a library that links but will not load, or loads but misbehaves at the ABI,
 fails here before any binding sees it. ctypes because Python is on every runner and opens
 the library the way a host does (dlopen, LoadLibrary), with nothing compiled in between.

@@ -1,0 +1,10 @@
+{
+  "crate": "hyperuuid",
+  "project": "HyperUuid",
+  "exports": {
+    "sources": ["rust/src/ffi.rs"],
+    "patterns": ["pub extern \"C\" fn (\\w+)"],
+    "prefixes": ["uuid_", "hyperuuid_"]
+  },
+  "cdylib_smoke": ".github/scripts/cdylib_smoke.py"
+}

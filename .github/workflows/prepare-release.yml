@@ -1,36 +1,27 @@
 name: Prepare release
 
-# Bumps the version everywhere it has to live as committed text — Rust, C#, Java, and Ruby
-# (both its gemspec and the drifted lib/hyperuuid.rb VERSION constant, together, so they
-# never disagree again) — and regenerates rust/Cargo.lock's own self-referential entry to
-# match (cargo publish --locked fails on a stale one). Python needs nothing here: pyproject.toml
-# declares its version dynamic, sourced straight from rust/Cargo.toml.
+# Step one of a release: bump the version in every manifest that carries it as committed
+# text (rust/Cargo.toml, the csproj, build.gradle.kts, the gemspec and lib/hyperuuid.rb's
+# VERSION constant, together, so they never disagree), refresh the lock files, push the bump
+# straight to master and dispatch ci.yml against it. Python needs nothing: pyproject.toml
+# sources its version from rust/Cargo.toml. PHP, Swift and Go have no version field, but the
+# native libraries committed for them report the crate version (`hyperuuid_version()`), so
+# ci.yml's release-mode run on the bump commit (A) is what stage-native-binaries.yml stages
+# onto it as B. The order of a release:
 #
-# PHP, Swift, and Go have no version field of their own (Packagist/SwiftPM/Go modules all
-# resolve straight from the git tag), but they are not untouched by a bump: the native
-# libraries committed for them embed the crate version (`hyperuuid_version()`), so they have to
-# be rebuilt from the bump commit and restaged before a tag can be cut.
+#   1. this workflow: bump every manifest, push A, dispatch ci.yml on A;
+#   2. ci.yml goes green on A, and its completion triggers stage-native-binaries.yml, which
+#      commits that run's libraries on top as B;
+#   3. a human tags B; release.yml refuses a tag whose ci.yml run or committed libraries were
+#      built at a different version, then prepares, and a dispatch publishes (RELEASING.md).
 #
-# That is why this workflow ends by dispatching ci.yml against the commit it just pushed.
-# It used to stop at the push, on the reasoning that a version-string change needs no
-# rebuild — true until the library started reporting its own version, and the cause of
-# HyperCast 0.3.0 shipping libraries that say 0.2.0. The order of a release is now:
-#
-#   1. this workflow: bump every manifest, push, dispatch ci.yml on the bump commit;
-#   2. ci.yml goes green, and its completion triggers stage-native-binaries.yml, which
-#      commits that run's libraries on top of the bump;
-#   3. a human tags that staging commit, and release.yml refuses any tag whose ci.yml run
-#      or committed libraries were built at a different version.
-#
-# Still a direct push straight to master, not a PR: the diff is mechanical, not something
-# a review meaningfully improves. This workflow does not tag anything — that stays a
-# deliberate, separate, human action once master's state looks right.
+# The manifests come from .github/hyper.json; the body lives in the Forge.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Target version, e.g. "0.1.0" (no leading "v" — that belongs on the git tag, not in any manifest)'
+        description: 'Target version, e.g. "1.0.0" (no leading "v": that belongs on the git tag, not in any manifest)'
         required: true
         type: string
 
@@ -38,77 +29,15 @@ concurrency:
   group: release-source-${{ github.repository }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   prepare-release:
-    runs-on: ubuntu-26.04
+    uses: SkunkWerkx/.github/.github/workflows/hyper-prepare-release.yml@master
     permissions:
       contents: write
       # gh workflow run: the bump commit needs a ci.yml run of its own (see the header).
       actions: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: master
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-
-      - name: Validate the version string
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          if [[ "$VERSION" == v* ]]; then
-            echo "::error::Pass the bare version (e.g. 0.1.0), not a tag name — got '$VERSION'." >&2
-            exit 1
-          fi
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::'$VERSION' doesn't look like a plain X.Y.Z semver version." >&2
-            exit 1
-          fi
-
-      - name: Bump every committed manifest to $VERSION
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" rust/Cargo.toml
-          sed -i "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" csharp/HyperUuid/HyperUuid.csproj
-          sed -i "s/^version = System.getenv(\"HYPERUUID_VERSION\") ?: \".*\"/version = System.getenv(\"HYPERUUID_VERSION\") ?: \"$VERSION\"/" java/build.gradle.kts
-          sed -i "s/spec\.version = \".*\"/spec.version = \"$VERSION\"/" ruby/hyperuuid.gemspec
-          sed -i "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" ruby/lib/hyperuuid.rb
-
-          # Regenerates Cargo.lock's own self-referential package entry to match the bump
-          # above — cargo publish --locked (pack-crates in release.yml) fails on a mismatch.
-          cargo check --manifest-path rust/Cargo.toml
-
-      - name: Show what changed
-        run: git diff --stat
-
-      - name: Commit and push if anything actually changed
-        id: push
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rust/Cargo.toml rust/Cargo.lock csharp/HyperUuid/HyperUuid.csproj \
-            java/build.gradle.kts ruby/hyperuuid.gemspec ruby/lib/hyperuuid.rb
-          if git diff --cached --quiet; then
-            echo "::notice::Every manifest already says $VERSION — nothing to commit."
-          else
-            git commit -m "chore: prepare v$VERSION"
-            git push origin HEAD:master
-          fi
-          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      # workflow_dispatch is one of the two events a GITHUB_TOKEN is allowed to raise, so
-      # this needs no PAT. ci.yml has no push trigger on purpose; this is the one push that
-      # must be built, because it is the first commit whose native libraries will report
-      # the new version. stage-native-binaries.yml picks the run up when it completes.
-      - name: Run ci.yml against the preparation source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ steps.push.outputs.source_sha }}
-        run: python3 .github/scripts/dispatch_preparation.py
+    with:
+      version: ${{ inputs.version }}

@@ -34,7 +34,7 @@ created, err := hyperuuid.GetTimestamp(id) // ErrNotTimeBased unless id is an RF
 ## Install
 
 ```sh
-go get github.com/SkunkWerkx/HyperUuid/go
+go get github.com/SkunkWerkx/HyperUuid/go@latest
 ```
 
 Requires Go 1.26 or later (the `go` directive in `go.mod`). The import path ends in `/go`
@@ -45,7 +45,7 @@ reads as if the package were called `go`.
 Go modules have no separate registry to publish to — `go get` resolves straight from a git
 tag, which *is* the real, complete publish story here, not a placeholder for one. This
 module lives in a subdirectory of the monorepo, so its own semver tags are prefixed
-(`go/vX.Y.Z`, not a bare `vX.Y.Z` — those track this repo's other bindings' own release
+(`go/v<version>`, not a bare `v<version>` — those track this repo's other bindings' own release
 events instead). The core's static libraries under `staticlib/{goos}_{goarch}/` are
 committed straight into git: unlike a real package registry, `go get`/`go build` has no
 packing step of its own, so whatever is in the git tree at the resolved module version is
@@ -468,20 +468,33 @@ binding in this repo, not because they're the better choice in Go.
 ## Verifying build provenance
 
 (Not to be confused with the UUID-provenance point above — this is about the binary, not the
-ID.) Go has no package registry to attest either — `go get` resolves straight from the
-`go/vX.Y.Z` git tag against this repo. The static libraries committed under `go/staticlib/`
-(staged by `stage-native-binaries.yml`, which verifies each one before committing it) each
-carry their own build-provenance attestation from the build in `SkunkWerkx/.github` — so
-verifying needs `--signer-repo` alongside `--repo`, or `gh` reports a bare `verifying with
-issuer "sigstore.dev"` that reads like a bad signature but is only an identity mismatch:
+ID.) Go has no package registry to attest: `go get` resolves straight from the `go/v<version>`
+git tag against this repo, and what it fetches is the tree at that tag, the static libraries
+under `go/staticlib/` included. Each of them verifies from the release tag alone: the release
+attestation, signed by this repository's `release.yml` at the root tag, names every one of
+them, with the release inventory as its predicate. The same file sits in the module cache at
+`$(go env GOMODCACHE)/github.com/!skunk!werkx/!hyper!uuid/go@v<version>/staticlib/`.
+
+```sh
+gh attestation verify go/staticlib/linux_amd64/libhyperuuid.a --repo SkunkWerkx/HyperUuid \
+  --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
+```
+
+Each archive also carries build provenance from `hyper-build-static.yml` in
+`SkunkWerkx/.github`, at the preparation commit the tagged commit was staged from
+(`stage-native-binaries.yml` verifies that before committing a byte, and the staging commit's
+`Release-Source-SHA` and `Release-CI-Run-ID` trailers name the commit and the run), so that
+check needs `--signer-repo` beside `--repo`:
 
 ```sh
 gh attestation verify go/staticlib/linux_amd64/libhyperuuid.a \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
 
-See [csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance)
-for more on why `--signer-repo` is needed for some artifacts here and not others.
+Get the signer wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
+reads like a bad signature but is only an identity mismatch. The root README's
+[Provenance](../README.md#provenance) section has the whole picture: the inventory, which
+artifacts are signed from where, and the gates every byte passes before publication.
 
 ## License
 

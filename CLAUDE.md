@@ -25,16 +25,18 @@ numbers without re-running the harness, and don't soften the Go section.
 
 ## Lists that move together
 
-- Ruby ABIs: `ABIS` in `ruby/Rakefile`, both `ABIS=(…)` in `release.yml`,
-  `ruby_compat_version` in `ci.yml`, and the Forge's `ruby_wasm_abis` default. Magnus
+- Ruby ABIs: `ABIS` in `ruby/Rakefile`, `ruby_compat_version` in `ci.yml`, and in the Forge
+  the `ruby.abis` default in `hyper_config.py` (an `.github/hyper.json` override if this repo
+  ever differs) and the `ruby_wasm_abis` default. Magnus
   extensions are tied to one Ruby minor, so gems are fat across these ABIs and Fiddle
   covers everything outside them, including other platforms. Fiddle must never be
   restricted to old Rubies. Ruby 3.4 reaches EOL on 2028-03-31: then drop it from those
   lists and clear `ruby_compat_version`.
 - Adding or removing a C export: every binding, C#'s three `LibraryImport` declarations
-  (`"hyperuuid"`, `"*"`, `"__Internal"`), the `EmccExportedFunction` list in
-  `csharp/HyperUuid/build/net11.0/HyperUuid.targets` (`uuid_variant` is excluded on
-  purpose), the AOT and wasm smoke tests, and the export count in the READMEs.
+  (`"hyperuuid"`, `"*"`, `"__Internal"`), the sites in `.github/scripts/check_exports.py`,
+  `cdylib_smoke.py`, the prefixes in `.github/hyper.json` (the Forge's symbol check reads
+  them), the AOT and wasm smoke tests, and the export count in the READMEs. The Blazor
+  archive needs no export list: the SDK's pinvoke table links every P/Invoke by symbol.
 
 ## Never hand-edit
 
@@ -55,8 +57,22 @@ HyperTabular and move together.
 
 - The Forge is called at master, deliberately unpinned: a Forge merge reaches every consumer
   at once, and breakage it causes is fixed forward. `release.yml` resolves master to one
-  commit per run (`find-ci-run`'s `forge_sha`), because the package inventory records it and
-  recovery requires it unchanged. Don't merge Forge changes while a release is in flight.
+  commit per run (`find-ci-run`'s `forge_sha`), checks the Forge out at it as `.hyperforge`
+  and runs every job body as a composite action from there (`release-guard`, `pack-gems`,
+  `verify-wheels`, `release-gate`, `publish-*`, `finalize-release`); the inventory records
+  the commit and recovery requires it unchanged. Don't merge Forge changes while a release
+  is in flight.
+- `prepare-release.yml`, `stage-native-binaries.yml` and ci.yml's `check-core` are one
+  `uses:` each of a Forge reusable workflow; this repo keeps triggers, permissions and gates.
+  `.github/hyper.json` is what the Forge knows about this project (crate and project names,
+  the export rule, the ABI probe, the cdylib smoke script; every other name is derived in
+  the Forge's `hyper_config.py`). `.github/scripts/tests` holds the workflow shape contracts
+  and the probe tests; the generic release-guard tests live in the Forge.
+- The release is two acts at one tag: the tag push packs, attests (build provenance and the
+  release attestation over every shipped file) and preserves without uploading; `gh workflow
+  run release.yml --ref vX.Y.Z -f prepared_run_id=<tag run>` publishes from the preserved
+  bytes. The finalizer writes the GitHub Release from the CHANGELOG's `## [X.Y.Z]` section,
+  and the tag run refuses a CHANGELOG without it.
 - Third-party actions are pinned to a commit with the version in a trailing comment, and
   `.github/dependabot.yml` moves them with every other ecosystem in one monthly pull request.
   It ignores the Forge and `dtolnay/rust-toolchain` (branch heads, refreshed by hand).
@@ -105,15 +121,13 @@ trap").
 - Remove agent worktrees and their branches once the work is in the main checkout;
   `.claude/` is untracked and `git add` picks it up.
 
-## Open follow-ups (as of 2026-10-21)
+## Open follow-ups (as of 2026-10-23)
 
 - Benchmark tables were measured on the WSL2 i9-11900H box. When the dev machine changes,
   re-measure every harness there before relabelling a table; never mix machines, and say
   which tables predate a core change. A benchmarking workflow is an idea, not started.
-- The `EmccExportedFunction` list in
-  `csharp/HyperUuid/build/net11.0/HyperUuid.targets` may be dead weight: on .NET 11 rc.1
-  the wasm smoke test passed with every item removed (P/Invoke through `"*"` uses the
-  runtime's static pinvoke table). Re-verify on the current SDK in all three repos, then
-  drop the lists and correct the docs that call them load-bearing, together.
+- 1.0.0 is the first release on the two-step flow. What only it can prove: the composite
+  actions in a real job, PyPI Trusted Publishing, nuget.org's finalized bytes, the Maven
+  confirmation wait, the finalizer. Afterwards the Forge drops its schema-1 inventory paths.
 - Java does not reach Android: the binding uses FFM, which ART lacks, so it would need a
   JNI layer. Python, Ruby and PHP don't reach Android either.

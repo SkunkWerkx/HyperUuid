@@ -223,23 +223,34 @@ FFM is compiled in the image, not interpreted, because the downcall handles are 
 
 ## Verifying provenance
 
-The published jar carries a GitHub build-provenance attestation, but not one signed by this
-repo directly — `release.yml`'s `maven-pack` job hands off to a reusable workflow
-(`hyper-pack-maven.yml`) that physically lives in `SkunkWerkx/.github`, and that's the
-identity Fulcio records as the signer. `--repo` alone isn't enough; add `--signer-repo`,
-or use `--owner` in place of both:
+The published jar verifies from the release tag alone, and so do the sources and javadoc jars,
+the `.pom` and their signatures: the release attestation, signed by this repository's
+`release.yml` at the tag, names every file of the Central bundle among everything the release
+ships, with the release inventory as its predicate.
 
 ```sh
-curl -LO https://repo1.maven.org/maven2/io/github/skunkwerkx/hyperuuid/X.Y.Z/hyperuuid-X.Y.Z.jar
-gh attestation verify hyperuuid-X.Y.Z.jar \
-  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
-# or: gh attestation verify hyperuuid-X.Y.Z.jar --owner SkunkWerkx
+curl -LO https://repo1.maven.org/maven2/io/github/skunkwerkx/hyperuuid/<version>/hyperuuid-<version>.jar
+gh attestation verify hyperuuid-<version>.jar --repo SkunkWerkx/HyperUuid \
+  --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
 ```
 
-Get the signer-repo wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`,
-which reads like a bad signature but is only an identity mismatch — see
-[csharp/README.md's provenance section](../csharp/README.md#native-binary-provenance) for the
-full breakdown of which artifacts in this project are signed from which repo and why.
+Its build provenance is the second check. The bundle is assembled by `hyper-pack-maven.yml`,
+a reusable workflow that lives in `SkunkWerkx/.github`, and that is the identity Fulcio
+records as the signer, so `--repo` alone is not enough there: add `--signer-repo`, or use
+`--owner` in place of both. The native libraries and the `wasm32-wasip1` module inside the jar
+carry their own, from the Forge's build workflows at the preparation commit on master, and the
+pack job verifies each of them before it goes into the jar.
+
+```sh
+gh attestation verify hyperuuid-<version>.jar \
+  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+# or: gh attestation verify hyperuuid-<version>.jar --owner SkunkWerkx
+```
+
+Get the signer wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
+reads like a bad signature but is only an identity mismatch. The root README's
+[Provenance](../README.md#provenance) section has the whole picture: the inventory, which
+artifacts are signed from where, and the gates every byte passes before publication.
 
 ## Install
 

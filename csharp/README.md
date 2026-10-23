@@ -126,15 +126,15 @@ Works from a plain `<PackageReference Include="HyperUuid" />` on **.NET 11 and l
 
 Building this exact source once instead of twice also turned out to matter beyond simplicity: two independent, from-scratch `dotnet pack` runs produce a byte-identical managed assembly (verified with a real checksum comparison, not assumed) — the earlier two-builds-sharing-one-`obj/`-directory design never gave that guarantee, and was the leading suspect for this package's NuGet health-check failures on the releases that used it (0.0.5 and earlier).
 
-The one piece that *doesn't* auto-wire — NuGet's `runtimes/{rid}/nativeassets/{tfm}/` convention is real, and the WASM SDK really does auto-promote a resolved `NativeLibrary` item into `NativeFileReference`, but restore doesn't actually populate `NativeLibrary` from a plain `PackageReference`'s `nativeassets` folder the way it does `native/` for ordinary P/Invoke (confirmed empirically, not assumed) — is supplied by this package's own `build/HyperUuid.targets`, auto-imported into every consuming project via NuGet's standard convention, which adds both the `NativeFileReference` and (also confirmed necessary the hard way — linking the code in alone does *not* make it resolvable via `"*"` at runtime) an explicit `EmccExportedFunction` entry per native function this package P/Invokes. All but one: `uuid_variant` is left off, because Emscripten ships a libuuid compatibility library with a JavaScript function of that name, a stub that always returns 1, and an exported name the JavaScript library also defines is filled from the library, so the export put that stub in the glue as `Module._uuid_variant`. `UuidGenerator.Variant` never went through it (the runtime's P/Invoke table calls the Rust function inside the module, and the smoke test checks it in the browser), but JavaScript reaching for the export got the stub. That's the actual mechanism making this "just works" for real, not a hopeful description of how NuGet packaging is supposed to behave.
+The one piece that *doesn't* auto-wire — NuGet's `runtimes/{rid}/nativeassets/{tfm}/` convention is real, and the WASM SDK really does auto-promote a resolved `NativeLibrary` item into `NativeFileReference`, but restore doesn't actually populate `NativeLibrary` from a plain `PackageReference`'s `nativeassets` folder the way it does `native/` for ordinary P/Invoke (confirmed empirically, not assumed) — is supplied by this package's own `build/net11.0/HyperUuid.targets`, auto-imported into every consuming project via NuGet's standard convention, which adds the `NativeFileReference`. That is the whole wiring: the SDK scans every assembly's P/Invokes and generates a pinvoke table that calls each native function by symbol, so the link resolves them against the archive (with it missing, `wasm-ld` reports an undefined symbol per entry point) and `LibraryImport("*")` reaches each one through that table. The file used to list an `EmccExportedFunction` per entry point as well, on the belief that `"*"` resolution needed the Emscripten export. It does not: the smoke test below passes with the list removed on .NET SDK 11.0.100-rc.2 and fails at the link with the archive unlinked, so the list is gone. Dropping it also keeps `uuid_variant` clear of Emscripten's libuuid JavaScript library, which defines a stub of that name and took over the export whenever it was listed.
 
 The link happens whether or not the app ends up calling HyperUuid. The targets file is evaluated before the trimmer runs and cannot see what it removes, so a client bundle whose trimmer drops `HyperUuid.Managed` entirely still links the archive and its exports into `dotnet.native.wasm`. One Blazor consumer measured the cost of that, for this package and HyperCast together, at 66 KB raw and 2 KB compressed.
 
-`HyperUuid.WasmSmokeTest` proves this chain in a real browser: a Blazor WebAssembly app (`net11.0`) that imports the shipped `build/net11.0/HyperUuid.targets`, calls every native entry point — the twelve `uuid_*` functions and `hyperuuid_version` — through the public `UuidGenerator` surface, and renders `PASS` or `FAIL`. Every one, because that is the only way the check means what it says: an entry point missing from the `EmccExportedFunction` list links fine and fails only when called. `./check.sh` in that directory stages the wasm static library, publishes the app, loads it in headless Chromium and requires `PASS`. CI runs the same script on every PR, in headless Chrome with the `wasm-tools` workload, against the static library that run just built (`STATICLIB` names it, so the script skips building its own); it is not part of the solution, so a plain `dotnet build` never needs the workload or a browser.
+`HyperUuid.WasmSmokeTest` proves this chain in a real browser: a Blazor WebAssembly app (`net11.0`) that imports the shipped `build/net11.0/HyperUuid.targets`, calls every native entry point — the twelve `uuid_*` functions and `hyperuuid_version` — through the public `UuidGenerator` surface, and renders `PASS` or `FAIL`. Every one: the link proves each symbol is in the archive, and only a call proves it works through the pinvoke table and the exception-handling translation. `./check.sh` in that directory stages the wasm static library, publishes the app, loads it in headless Chromium and requires `PASS`. CI runs the same script on every PR, in headless Chrome with the `wasm-tools` workload, against the static library that run just built (`STATICLIB` names it, so the script skips building its own); it is not part of the solution, so a plain `dotnet build` never needs the workload or a browser.
 
 **WebAssembly is .NET 11 and later only.** .NET 11 links browser-wasm with the new (exnref) exception-handling encoding, while the precompiled Rust standard library inside the static library uses the legacy one, and the browser refuses a module that mixes them (`module uses a mix of legacy and new exception handling instructions`). The same `HyperUuid.targets` therefore appends Binaryen's translate-to-exnref pass to the SDK's post-link `wasm-opt`, with no action needed from a consumer.
 
-**Previously reported SDK blocker, not reproduced on .NET 11.** Earlier `wasm-tools` SDK bands failed any native relink with `Unknown option '--enable-bulk-memory-opt'`, a rustc-versus-Binaryen skew filed as [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858). On .NET SDK 11.0.100-rc.1 the smoke test relinks cleanly with the SDK's bundled `wasm-opt` and no workaround. If you hit it on another band, swapping the SDK's bundled `wasm-opt` (`~/.dotnet/packs/Microsoft.NET.Runtime.Emscripten.<version>.Sdk.<rid>/<pack-version>/tools/bin/wasm-opt`) for a newer one from a standalone `emsdk` is the verified workaround.
+**Previously reported SDK blocker, not reproduced on .NET 11.** Earlier `wasm-tools` SDK bands failed any native relink with `Unknown option '--enable-bulk-memory-opt'`, a rustc-versus-Binaryen skew filed as [dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858). On .NET SDK 11.0.100-rc.2 (the `global.json` pin) the smoke test relinks cleanly with the SDK's bundled `wasm-opt` and no workaround. If you hit it on another band, swapping the SDK's bundled `wasm-opt` (`~/.dotnet/packs/Microsoft.NET.Runtime.Emscripten.<version>.Sdk.<rid>/<pack-version>/tools/bin/wasm-opt`) for a newer one from a standalone `emsdk` is the verified workaround.
 
 ## Platform support
 
@@ -184,43 +184,39 @@ Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's
 
 **Reproducibility, stated honestly.** The build is deterministic *locally*: `cargo clean -p hyperuuid` followed by `cargo cdylib` reproduces a byte-identical `libhyperuuid.so` (verified by SHA-256). It is **not** currently bit-reproducible *across machines* — a local `rustc 1.98.0` build on WSL and the CI-built `linux-arm64` artifact differ in both hash and size (458,712 vs 458,176 bytes), as you'd expect from differing toolchain versions and embedded build paths. So "rebuild it and compare hashes" is not a verification path a consumer can currently rely on.
 
-**Signed provenance.** Because rebuild-and-compare doesn't work across machines, the mechanism that does is a cryptographic attestation binding each artifact to the workflow run and commit that produced it. CI emits [SLSA build provenance](https://github.com/actions/attest-build-provenance) at three points, because the package is not the same bytes at every stage of its life:
+**Signed provenance.** Because rebuild-and-compare doesn't work across machines, the mechanism that does is a cryptographic attestation binding each artifact to the workflow run and commit that produced it. Two kinds cover the package.
 
-| Attested artifact | Where | How to verify |
-| --- | --- | --- |
-| Each native library, as built | `hyper-build-native.yml` | `gh attestation verify libhyperuuid.so --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github` |
-| The browser-wasm archive, as built | `hyper-build-wasm.yml` | `gh attestation verify libhyperuuid.a --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github` |
-| The `.nupkg` as packed, pre-push | `hyper-pack-nuget.yml` | strip the repo signature first (below) |
-| The `.nupkg` as published | `release.yml`, after the push | verify the downloaded file directly |
-
-The reason for the last two rows: **nuget.org adds its repository signature as a `.signature.p7s` entry inside the `.nupkg` zip during validation**, which changes the file's SHA-256. So the package you download is not the package that was built, and one attestation cannot cover both. Rather than pick, the pipeline takes both — and because the mutation is exactly one added zip entry, the pre-push attestation stays recoverable:
+The *release attestation* is one statement, signed by this repository's `release.yml` at the release tag, whose subjects are every file the release ships — the `.nupkg` as packed and as nuget.org serves it, every other registry package, and every native library committed for Go, Swift and PHP — and whose predicate is the release inventory (`inventory.json`: every file's size, SHA-256 and the commit it was built from). One command verifies any of them from the tag alone:
 
 ```shell
-# verify the published bytes directly — nothing to undo.
-# Signed by release.yml, which lives in this repo, so no --signer-repo is needed.
-gh attestation verify HyperUuid.X.Y.Z.nupkg --repo SkunkWerkx/HyperUuid
+gh attestation verify HyperUuid.<version>.nupkg --repo SkunkWerkx/HyperUuid \
+  --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
+```
 
-# or recover the as-built artifact and verify that instead.
-# Signed by hyper-pack-nuget.yml over in the forge repo, so this half needs --signer-repo.
-zip -d HyperUuid.X.Y.Z.nupkg .signature.p7s
-gh attestation verify HyperUuid.X.Y.Z.nupkg \
+*Build provenance* ([SLSA](https://github.com/actions/attest-build-provenance)) is the second layer, emitted where the bytes are made, which for this package is four places, because it is not the same bytes at every stage of its life:
+
+| Attested artifact | Where | Signer |
+| --- | --- | --- |
+| Each native library, as built | `hyper-build-native.yml` | `SkunkWerkx/.github` |
+| The browser-wasm archive, as built | `hyper-build-wasm.yml` | `SkunkWerkx/.github` |
+| The `.nupkg` as packed, pre-push | `hyper-pack-nuget.yml` | `SkunkWerkx/.github` |
+| The `.nupkg` as published | `release.yml`, after the push | `SkunkWerkx/HyperUuid` |
+
+The reason for the last two rows: **nuget.org adds its repository signature as a `.signature.p7s` entry inside the `.nupkg` zip during validation**, which changes the file's SHA-256. So the package you download is not the package that was built, and one attestation cannot cover both. The pipeline takes both, and the release attestation is made for both: once in the publication gate over the packed bytes, once after the push over the served bytes, with the same inventory as predicate. The signer column is the flag that changes: an artifact signed by a reusable workflow in `SkunkWerkx/.github` needs `--signer-repo SkunkWerkx/.github` beside `--repo` (or `--owner SkunkWerkx` in place of both); one signed by this repository's `release.yml` verifies with `--repo` alone. Get it wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which reads like a bad signature but is only an identity mismatch.
+
+```shell
+# the published bytes, signed by release.yml
+gh attestation verify HyperUuid.<version>.nupkg --repo SkunkWerkx/HyperUuid
+
+# the as-built package, recovered by removing nuget.org's one added entry; signed by the Forge
+zip -d HyperUuid.<version>.nupkg .signature.p7s
+gh attestation verify HyperUuid.<version>.nupkg \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
 
-**Why `--signer-repo` appears on some of these and not others.** `--repo X` asserts two
-separate things: that the artifact came from repo X, and that the workflow which signed it
-also lives in X. Everything CI builds here comes from this repo, so the first half always
-holds — but the signing step's location varies. Anything signed inside a reusable workflow
-(`hyper-build-native.yml`, `hyper-pack-nuget.yml`) is signed by a file that physically lives
-in `SkunkWerkx/.github`, and that is what Fulcio records as the build signer; anything signed
-directly by this repo's own `release.yml` is signed by this repo. Get it wrong and `gh`
-reports `verifying with issuer "sigstore.dev"` with no further detail, which reads like a bad
-signature but is only an identity mismatch. `--owner SkunkWerkx` works for every row above if
-you would rather not track which is which.
-
 The release run downloads the package nuget.org serves, runs `dotnet nuget verify` on it, and requires every entry but `.signature.p7s` to match the packed package before attesting it. That claim is checked on every release rather than asserted here, so if nuget.org ever changes how it finalizes packages, the run says so instead of the README quietly going stale.
 
-Attestations are produced by every release-mode build — the release's own run and the weekly one. Pull requests build in `pr` mode, which ships nothing and so signs nothing. The post-publish half waits up to 20 minutes for nuget.org to serve the package, and the Go tag and GitHub Release wait on it; the push is irreversible, so a slower validation is recovered by re-dispatching the release with `prepared_run_id` and `publication_run_id`, which pushes nothing again (see [RELEASING.md](../.github/RELEASING.md)).
+Attestations are produced by every release-mode build — the release's own run and the weekly one. Pull requests build in `pr` mode, which ships nothing and so signs nothing. The release itself is two acts at one tag: the tag push packs, attests and preserves everything without uploading, and a dispatch of `release.yml` publishes from those preserved bytes, waiting up to 20 minutes for nuget.org to serve the package before attesting the served bytes; the Go tag and GitHub Release wait on it. A slower validation is recovered by dispatching again with `publication_run_id`, which pushes nothing twice (see [RELEASING.md](../.github/RELEASING.md)). The root README's [Provenance](../README.md#provenance) section has the whole picture across the eight bindings.
 
 **Not currently done: NuGet author signing.** The package carries nuget.org's repository signature but no author signature of our own, which would need an X.509 code-signing certificate registered to the account. It's complementary to the above rather than a substitute, and the difference is who does the checking: an author signature is verified automatically by every consumer's SDK at restore time, whereas an attestation is only checked by someone who deliberately runs `gh attestation verify`. Attestation ties an artifact to a commit and a build; an author signature ties it to an identity. If you want the automatic restore-time check, this is the gap.
 
