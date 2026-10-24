@@ -123,3 +123,6 @@ ruby/lib/hyperuuid/*/hyperuuid_native.bundle
 # The corpus copy test-apple-mobile stages for the Go suite in the iOS simulator
 # (go_ios_exec carries only the module's testdata), if made by hand.
 go/testdata/corpus/
+
+# What Finder writes into any folder it opens.
+.DS_Store
