@@ -47,8 +47,7 @@ chacha20 = { version = "0.10.2", default-features = false, features = ["cipher"]
 # module struct — under the same crate, not meant to coexist in one binary).
 [features]
 # On by default for the crates.io consumer, the test suite and the benchmarks; no artifact
-# this repo ships is built with it except the extension modules and the wasm32-wasip1
-# module (whose hosts depend on the malloc/free exports std's allocator brings).
+# this repo ships is built with it except the extension modules.
 # `default-features = false` gives a genuine `#![no_std]` rlib on every target, which is
 # what the crate's published `no-std` category means; see lib.rs.
 # getrandom's own `std` feature only adds `impl std::error::Error for getrandom::Error`, so
@@ -126,8 +125,7 @@ required-features = ["no-panic"]
 # strip drops the symbol table and debug info from what is linked, never the exports, and
 # never the code: the stripped linux-x64 library's .text is byte-identical to the unstripped one.
 # Against the 0.5.0 artifacts, a stripped local build puts the linux-x64 shared library at
-# 16,632 bytes (from 19,048), the wasm32-wasip1 module at 40,617 (from 48,986) and the Linux
-# Magnus extension at 313,680 (from 390,624; a platform gem ships two). Windows already got
+# 16,632 bytes (from 19,048) and the Linux Magnus extension at 313,680 (from 390,624; a platform gem ships two). Windows already got
 # this for the Magnus build from the forge's RUSTFLAGS; this is every other leg. A static
 # library is not linked, so the archives keep their symbols — they are how the consumer's
 # linker finds the core.

@@ -89,17 +89,6 @@ SITES = [
         "all",
         (),
     ),
-    (
-        "Java (GraalWasm)",
-        [
-            (
-                "java/src/main/java/io/github/skunkwerkx/hyperuuid/WasmBackend.java",
-                r'= export\("(\w+)"\)',
-            )
-        ],
-        "all",
-        ("malloc", "free"),
-    ),
     ("Go (cgo)", [("go/backend_static.go", C_PROTOTYPE)], "all", ()),
     ("Go (TinyGo)", [("go/backend_tinygo.go", C_PROTOTYPE)], "all", ()),
     (

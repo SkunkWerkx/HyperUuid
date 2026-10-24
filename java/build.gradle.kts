@@ -34,18 +34,7 @@ spotless {
     }
 }
 
-// GraalWasm, the wasm backend's runtime, is deliberately compileOnly: this jar's POM carries no
-// dependency on it, so a consumer on the default FFM path downloads nothing extra. Opting into
-// the wasm path means adding both artifacts (polyglot for the API, wasm for the engine — a
-// POM-type dependency that fans out into Truffle) to their own build; see README.md's
-// WebAssembly section. Tests get both on the runtime classpath so the whole suite can run a
-// second time through the wasm module (the testWasm task below).
-val graalPolyglotVersion = "25.4.4.1.1"
-
 dependencies {
-    compileOnly("org.graalvm.polyglot:polyglot:$graalPolyglotVersion")
-    testRuntimeOnly("org.graalvm.polyglot:polyglot:$graalPolyglotVersion")
-    testRuntimeOnly("org.graalvm.polyglot:wasm:$graalPolyglotVersion")
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -60,8 +49,7 @@ dependencies {
 // The same resolution NativePlatform.java does at runtime, so the library lands under the
 // RID the loader will ask for: x64 or arm64 only, and on Linux the musl family when this
 // (Gradle's own) JVM has musl's loader mapped — `cargo cdylib` on Alpine produces a musl
-// library, and it has to be staged as linux-musl-*. Anything else stages nothing, and the
-// suite then runs through the wasm module exactly as a consumer on that platform would.
+// library, and it has to be staged as linux-musl-*. Anything else stages nothing.
 val nativeRid = run {
     val osName = System.getProperty("os.name").lowercase()
     val arch = when (System.getProperty("os.arch").lowercase()) {
@@ -104,27 +92,12 @@ val stageNativeLibrary = tasks.register<Sync>("stageNativeLibrary") {
     into(layout.buildDirectory.dir("generated-resources/native/$nativeRid"))
 }
 
-// The same dev loop for the wasm32-wasip1 module the GraalWasm backend runs: a
-// `cargo wasm-module` in ../rust (from inside rust/, so its
-// .cargo/config.toml export flags apply) lands at /native/wasm32-wasip1/hyperuuid.wasm on
-// the classpath, beside the platform library. Same explicit-placement yield as above.
-val wasmPlaced = file("src/main/resources/native/wasm32-wasip1").exists()
-val stageWasmModule = tasks.register<Sync>("stageWasmModule") {
-    from("../rust/target/wasm32-wasip1/release") {
-        include("hyperuuid.wasm")
-        if (wasmPlaced) {
-            exclude("**")
-        }
-    }
-    into(layout.buildDirectory.dir("generated-resources/native/wasm32-wasip1"))
-}
-
 sourceSets.main {
     resources.srcDir(layout.buildDirectory.dir("generated-resources"))
 }
 
 tasks.processResources {
-    dependsOn(stageNativeLibrary, stageWasmModule)
+    dependsOn(stageNativeLibrary)
 }
 
 // sourcesJar packages the main source set, and `generated-resources` is one of its resource
@@ -135,7 +108,7 @@ tasks.processResources {
 // tasks.named("sourcesJar"): the sources and javadoc jars are registered by the vanniktech
 // publish plugin, so they don't exist yet at this point in configuration.
 tasks.withType<Jar>().configureEach {
-    dependsOn(stageNativeLibrary, stageWasmModule)
+    dependsOn(stageNativeLibrary)
 }
 
 // Ships the license text and this binding's README inside the jar, under META-INF/ (the
@@ -151,8 +124,7 @@ tasks.jar {
     // A stable module name for a consumer on the module path — without it the name is
     // derived from the jar's file name — and therefore something exact to hand
     // --enable-native-access (README.md's "Native access" section). Not a module-info.java:
-    // GraalWasm is an optional dependency this jar has to load without, and a module
-    // descriptor would have to declare it one way or the other.
+    // the automatic name is all a consumer on the module path needs from this jar.
     manifest {
         attributes("Automatic-Module-Name" to "io.github.skunkwerkx.hyperuuid")
     }
@@ -160,7 +132,7 @@ tasks.jar {
 
 // InspectionTest fills one version 7 batch of exactly UuidGenerator.MAX_V7_BATCH (1 GiB of
 // bytes), and refuses one a UUID past it from a caller array that size: past the test JVM's
-// 512 MiB default either way, on both backends.
+// 512 MiB default either way.
 tasks.withType<Test>().configureEach {
     maxHeapSize = "3g"
 }
@@ -174,28 +146,6 @@ tasks.test {
     // the core and the jar move together (prepare-release.yml bumps both), and the probe
     // exists to prove exactly that.
     systemProperty("hyperuuid.version", version)
-}
-
-// The identical suite, forced through the GraalWasm backend (-Dhyperuuid.backend=wasm), so
-// both interop paths are held to the same assertions on every build. --enable-native-access
-// is for Truffle's own System.load, not this binding; WarnInterpreterOnly=false silences the
-// engine's fallback-runtime notice on a non-GraalVM JDK, which is what CI and most dev boxes
-// run — the numbers in README.md say what that fallback costs, this just keeps the test log
-// readable.
-val testWasm = tasks.register<Test>("testWasm") {
-    description = "Runs the test suite against the bundled wasm32-wasip1 module via GraalWasm."
-    group = "verification"
-    testClassesDirs = sourceSets.test.get().output.classesDirs
-    classpath = sourceSets.test.get().runtimeClasspath
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Dpolyglot.engine.WarnInterpreterOnly=false")
-    systemProperty("hyperuuid.backend", "wasm")
-    systemProperty("hyperuuid.version", version)
-    shouldRunAfter(tasks.test)
-}
-
-tasks.check {
-    dependsOn(testWasm)
 }
 
 java {

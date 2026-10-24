@@ -118,30 +118,14 @@ support is target-specific, not universal —
   is exactly this setup, and CI runs it in headless Chrome on every PR (`wasm-pack test
   --headless --chrome` there).
 
-One wasm build of this crate is not left to the consumer, because the Java binding in this
-repo ships it: the `cdylib` for `wasm32-wasip1`, built from inside this directory so that
-`.cargo/config.toml` applies —
-
-```sh
-cargo wasm-module
-# rust/target/wasm32-wasip1/release/hyperuuid.wasm
-```
-
-Unlike the native library, the module is built with std: its allocator exports come from
-wasi-libc by way of std's allocator, and a `no_std` module does not link wasi-libc at all.
-
-That config adds two linker flags for this target only, `--export=malloc` and
-`--export=free`, so the module's exports are the twelve `uuid_*` functions and
-`hyperuuid_version` from `ffi.rs` plus wasi-libc's allocator. A wasm host cannot hand this library a pointer into its own
-memory, so every embedder — GraalWasm inside the Java binding here — asks the guest for the
-buffer it will fill and reads the result back out of the exported `memory`. The exported allocator is what makes that safe: dlmalloc
-claims the tail of the initial linear memory on its first use, so a host-chosen offset past
-the data segments is not free, and a batch written there was observed corrupted by the next
-allocation. The module imports five `wasi_snapshot_preview1` functions (`random_get`, plus
-wasi-libc's `environ_*`, `fd_write` and `proc_exit`) and nothing else; there is no clock,
-because `now_v7` is compiled out on `wasm32` and every other door takes the host's
-timestamp. `ffi.rs` itself is untouched by any of this; on every native target the C ABI is
-still exactly those thirteen exports.
+A `wasm32-wasip1` build of the crate (`cargo rustc --release --crate-type cdylib --target
+wasm32-wasip1`, from inside this directory) imports five `wasi_snapshot_preview1` functions
+(`random_get`, plus wasi-libc's `environ_*`, `fd_write` and `proc_exit`) and nothing else;
+there is no clock, because `now_v7` is compiled out on `wasm32` and every other door takes
+the host's timestamp. Nothing in this repo ships that module: the Go and Swift bindings link
+the crate's `wasm32-wasip1` static archive instead ([WebAssembly](../README.md#webassembly)).
+`ffi.rs` itself is untouched by any of this; on every native target the C ABI is still
+exactly those thirteen exports.
 
 The C# binding's Blazor WebAssembly support takes a second wasm build, the
 `wasm32-unknown-emscripten` static library its NuGet package links into the app:

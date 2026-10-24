@@ -141,8 +141,6 @@ The musl libraries are built so that they depend on musl's libc and nothing else
 
 **Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is .NET 11, JDK 25, Go 1.26, Python 3.11, Ruby 3.3 and PHP 8.2, and the musl job runs the PHP, Ruby and Python suites on those oldest versions as well as the newest. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4. The crate's own floor is Rust 1.85 (`rust-version` in its manifest, edition 2024's own floor), and CI builds the library and the `no_std` shared library on exactly that toolchain.
 
-Every leg also builds the core as a `wasm32-wasip1` module and runs the Java suite a second time through its in-process GraalWasm backend — see [WebAssembly](#webassembly).
-
 **Published:** every binding. C#/Java/Ruby/PHP/Python/Rust all go through a real package registry (NuGet, Maven Central, RubyGems, Packagist, PyPI, crates.io); Go and Swift have no registry to publish to in the first place — both resolve dependencies straight from a git tag (`go get`, `.package(url:, from:)`), which *is* their real, complete publish story, not a placeholder for one. The JVM binding is plain Java, not Kotlin — `kotlin-stdlib` would otherwise be a real transitive dependency for every consumer, unlike every other binding here — and its AOT story is proven the same way C#'s is: a local GraalVM Native Image smoke test (`java/aot-smoke-test/`, `./gradlew :aot-smoke-test:nativeRun`) produces a genuine standalone native binary, no JVM required to run it. PHP's `composer.json` lives at [the repo root](composer.json) rather than `php/` — Packagist requires the manifest at the top of the git repository it watches, with no monorepo subdirectory support; Swift's root [`Package.swift`](Package.swift) exists for the identical reason. Ruby ships as real precompiled RubyGems "platform gems" (the Magnus native extension, auto-selected on seven RIDs — `x86_64-linux-gnu`, `aarch64-linux-gnu`, `x86_64-linux-musl`, `aarch64-linux-musl`, `arm64-darwin`, `x64-mingw-ucrt` and `aarch64-mingw-ucrt` — each gem fat across Ruby 3.4 and 4.0 since a Magnus extension is tied to one Ruby minor, and carrying no Fiddle library) with an automatic fallback to a universal, zero-compile pure-Fiddle gem for everything outside that grid — Ruby 3.3, a Ruby newer than the release, Intel macOS, and any other platform. A third kind, the `hyperuuid-wasm` gem, carries the same extension prebuilt for ruby.wasm, where `rbwasm build` links it into the interpreter ([Ruby in the browser](ruby/README.md#ruby-in-the-browser)). Go's and Swift's static libraries are committed straight into git — unlike every registry above (Ruby's own packing step included), a plain `go get`/`.package(url:)` consumer has no packing step of its own, so the binaries have to actually live in the tree the consumer's tool reads.
 
 ## Provenance
@@ -190,11 +188,9 @@ the command on its own artifact: [Rust](rust/#verifying-provenance),
 
 WebAssembly meets a binding in one of two directions, and they share nothing mechanically:
 
-- **The core runs as wasm inside the binding.** The process stays native. The Rust core
-  arrives as a `wasm32-wasip1` module, `hyperuuid.wasm`, and a wasm engine the ecosystem
-  already has runs it in-process: no `dlopen`, no per-platform binary, the same C-ABI
-  exports (the twelve `uuid_*` functions and `hyperuuid_version`). The engine is an optional dependency the consumer adds only if they want
-  this path.
+- **The core runs as wasm inside the binding.** The process stays native, and a wasm engine
+  the ecosystem already has runs the core as a `wasm32-wasip1` module in-process. No binding
+  ships this today: the column says, per binding, why not.
 - **The binding is compiled to wasm.** The whole consumer app becomes a wasm module
   (Blazor, a `wasm32` Rust crate, Python under Pyodide) and the Rust core has to be linked
   into that build by the ecosystem's own toolchain.
@@ -203,9 +199,9 @@ Where each of the eight stands, today:
 
 | Binding | Core as wasm inside the binding | Binding compiled to wasm |
 | --- | --- | --- |
-| Rust | Not applicable: the crate *is* the core, and the wasip1 build of it is the module everyone else embeds. | **Yes.** Runs under [wasmtime](https://wasmtime.dev/) on `wasm32-wasip1` with real WASI randomness (`random_get`), not merely "compiles for the target." No clock: `now_v7` is compiled out on `wasm32`, and every v7 door takes the host's timestamp. `wasm32-unknown-unknown` needs `getrandom`'s `wasm_js` feature on the consumer's side; see [`rust/README.md`](rust/README.md#webassembly). |
+| Rust | Not applicable: the crate *is* the core. | **Yes.** Runs under [wasmtime](https://wasmtime.dev/) on `wasm32-wasip1` with real WASI randomness (`random_get`), not merely "compiles for the target." No clock: `now_v7` is compiled out on `wasm32`, and every v7 door takes the host's timestamp. `wasm32-unknown-unknown` needs `getrandom`'s `wasm_js` feature on the consumer's side; see [`rust/README.md`](rust/README.md#webassembly). |
 | C# | Not built. | **Yes, on .NET 11+.** `dotnet add package HyperUuid` into a Blazor WebAssembly project is enough, given the `wasm-tools` workload (the build stops with `HYPERUUID002` without it): no `<NativeFileReference>`, no hand-written P/Invoke, and the shipped `.targets` also applies the exception-handling translation .NET 11 needs. Proven in headless Chromium by `csharp/HyperUuid.WasmSmokeTest`; see [`csharp/README.md`](csharp/README.md#webassembly-blazor). |
-| Java | **Yes.** [GraalWasm](https://www.graalvm.org/webassembly/); `-Dhyperuuid.backend=wasm`, or automatic when the jar has no native build for the platform. | Blocked. No Java-to-wasm compiler supports the Foreign Function & Memory API this binding is built on: GraalVM's Web Image (`--tool:svm-wasm`) is labeled experimental and never lists it, and neither TeaVM nor CheerpJ has it. Loading the core as a module of its own and calling it through Web Image's JavaScript interop would work, but that is a second binding with its own glue, not this one; revisit when Web Image is mature and can call or link native code. |
+| Java | Not built. The jar reaches the core through FFM downcalls into the native library it bundles for the platform, and a JVM on a platform without one has no core. | Blocked. No Java-to-wasm compiler supports the Foreign Function & Memory API this binding is built on: GraalVM's Web Image (`--tool:svm-wasm`) is labeled experimental and never lists it, and neither TeaVM nor CheerpJ has it. Loading the core as a module of its own and calling it through Web Image's JavaScript interop would work, but that is a second binding with its own glue, not this one; revisit when Web Image is mature and can call or link native code. |
 | Ruby | Not built. The `wasmtime` gem ships precompiled only for platforms the universal gem already carries a native library for; anywhere else it compiles from source with a Rust toolchain, so a wasm backend would reach nothing the Fiddle backend does not. | **Yes, through `rbwasm build`.** ruby.wasm links extensions into the interpreter when it is built, so a browser app lists `hyperuuid-wasm` instead of `hyperuuid` in the Gemfile it hands `rbwasm build` (ruby_wasm 2.10+, Ruby 3.4 or 4.0). That gem carries the same Magnus extension prebuilt for `wasm32-wasip1`, one archive per Ruby minor, so the consumer needs no Rust toolchain, and it shares an interpreter with HyperCast's `hypercast-wasm`. CI links it into both minors' interpreters and runs a smoke test under Node and in headless Chrome; see [`ruby/README.md`](ruby/README.md#ruby-in-the-browser). |
 | Python | Not built. Only platform wheels are published, each carrying the PyO3 extension, and no sdist, so there is no install a wasm backend could fill in for. | **Yes, on [Pyodide](https://pyodide.org/) 314.x.** `await micropip.install("hyperuuid")` in the browser: the PyO3 extension built for Pyodide's Emscripten target ships to PyPI as a twenty-fifth wheel (`cp311-abi3-pyemscripten_2026_0_wasm32`, ~74 KB), the same native backend with no JavaScript bridge. CI runs the binding's whole pytest suite inside Pyodide, under Node and in headless Chrome. Each Pyodide ABI year needs its own wheel; see [`python/README.md`](python/README.md#in-the-browser-pyodide). |
 | Go | Not built. The binding links the core in on every platform it supports, so there is no platform for a wasm backend to fill in for. | **Yes, through [TinyGo](https://tinygo.org) 0.42+.** `tinygo build -target=wasm` links the core in from the module's own `staticlib/wasm` archive (the `wasm32-wasip1` build), about 43 KB with the binding at `-opt=z`, and TinyGo's `wasm_exec.js` supplies its randomness from `crypto.getRandomValues`; CI runs a smoke program in headless Chrome on every PR. Stock Go cannot: its wasm toolchain links Go code only, so `GOOS=wasip1`/`js` is a compile error. |
@@ -221,35 +217,8 @@ which loads a CPython extension module built as an Emscripten side module just a
 loads a native one, and so does ruby.wasm, whose `rbwasm build` links each gem's extension
 into the interpreter it makes. WordPress Playground's PHP does too — it loads a Zend
 extension built as an Emscripten side module — which is proven for PHP but not shipped (see
-its row); stock Go does not. Java's gap is different in kind: the loading mechanism is not the problem, the compilers that exist have no FFM. The
-in-process backend sidesteps all of that rather than climb it, because the engine is the
-loader, and it is what a JVM on a platform with no native build falls back to.
-
-### The in-process backend
-
-One artifact, `hyperuuid.wasm`, built from the same crate with wasi-libc's `malloc`/`free`
-exported (two linker flags in `rust/.cargo/config.toml`, no source change), ships beside the
-native libraries in the jar. CI builds it on every leg and runs the Java suite a second time
-through it. The numbers below were measured through the shipped binding, not a harness
-beside it, on the same linux-x64 box as the benchmarks below; [java/README](java/#webassembly-graalwasm) has the mechanics.
-
-| Binding | Engine dependency | `new_v7`, one call | 1000-UUID batch | Native, same box |
-| --- | --- | ---: | ---: | --- |
-| Java | `org.graalvm.polyglot:wasm`, `compileOnly`, never in the POM | 93 ns on GraalVM CE 25.4 (JIT); 163 ns under Native Image; 2.1 µs on Temurin 25 | 11.0 µs (JIT) | 36 ns / 3.6 µs |
-
-On a stock JDK GraalWasm has no JIT and runs the module interpreted, with a startup warning;
-the JIT numbers need a GraalVM JDK or a Native Image build, with the GraalWasm artifacts at
-the same release as that JDK.
-
-Two facts the backend is built on, both learned the hard way in the same afternoon.
-The host must take its buffers from the guest's own allocator: a host-picked offset past the
-data segments looked free and was not, because dlmalloc claims the tail of the initial
-memory on first use, and the next allocation overwrote a batch mid-buffer, intermittently,
-depending on what it read back as a chunk header. And every call is serialized under a lock,
-because a GraalWasm `Context` is not safe for concurrent use; the native backends stay
-lock-free. The per-call numbers are the engine's host-call overhead, not
-wasm execution, which is why the batch doors close most of the gap and the single-call doors
-do not.
+its row); stock Go does not. Java's gap is different in kind: the loading mechanism is not the problem, the compilers
+that exist have no FFM.
 
 ## Why not your platform's built-in UUID call?
 
@@ -356,10 +325,10 @@ That also explains why Go, C# and Swift barely move: they are already at or near
 - **SQL Server byte ordering** — `V7ToSqlOrder`/`v7_to_sql_order`, as an RFC 9562 version 8, computed once in the Rust core and exported to every binding, verified against the real `System.Data.SqlTypes.SqlGuid` comparator, and validated and read in place without converting back
 - **Inspection** — version, variant and a one-call RFC guard, in either layout, from the core
 - **One conformance corpus** — [`corpus/*.json`](corpus/) pins v5 derivation, the v7 field layout, the SQL Server layout and its refusals, timestamp extraction and inspection. The Rust suite and every binding's suite replay it, and `corpus/oracle.py` re-derives every vector from code that shares nothing with the core
-- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path. The one deliberate exception is opt-in: Java can run the same core as a `wasm32-wasip1` module inside the process (GraalWasm) for a platform with no native build, still the same exports, still the same test suite — see [WebAssembly](#webassembly)
+- **No runtime bridge** — direct FFI (`P/Invoke`, FFM, `cgo`, `Fiddle`, PHP `FFI`) or the Rust core linked directly into the VM as a native extension (PyO3, Magnus), never a serialization protocol — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path
 - **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
 - **AOT-friendly** — C# publishes cleanly under `PublishAot`, with the core linked into the executable rather than sitting beside it; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
-- **CI-proven, not CI-claimed** — 5 real-hardware platforms plus two musl RIDs in Alpine containers × 8 language/runtime targets (Intel macOS is cross-built and tested at the core only), each running that language's actual test suite against a freshly-built native library on every dispatch, and the Java suite a second time on every leg through a freshly-built `wasm32-wasip1` module
+- **CI-proven, not CI-claimed** — 5 real-hardware platforms plus two musl RIDs in Alpine containers × 8 language/runtime targets (Intel macOS is cross-built and tested at the core only), each running that language's actual test suite against a freshly-built native library on every dispatch
 
 ## Layout
 
@@ -367,7 +336,7 @@ That also explains why Go, C# and Swift barely move: they are already at or near
 rust/       the core: twelve uuid_* exports plus hyperuuid_version, allocation-free and no_std; a cdylib (and two for Android) and fifteen static archives (four for iOS and Mac Catalyst, two for Android)
 corpus/     the conformance vectors every suite replays, and the independent oracle that derives them
 csharp/     the .NET 11 binding: UuidGenerator over LibraryImport, AOT smoke test, Blazor wasm
-java/       the JDK 25+ binding: FFM + GraalWasm backends, Native Image smoke test
+java/       the JDK 25+ binding: FFM downcalls, Native Image smoke test
 python/     the 3.11+ binding: PyO3 native extension (abi3 and free-threaded wheels, Pyodide in the browser)
 swift/      the SwiftPM binding: the core linked in as a static library on every platform
 go/         the Go binding: the core linked in through cgo, and under TinyGo in the browser

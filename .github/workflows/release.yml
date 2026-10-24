@@ -129,7 +129,6 @@ jobs:
     with:
       crate: hyperuuid
       java_resources_dir: java/src/main/resources/native
-      wasip1_module: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
     secrets:
       MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
@@ -341,7 +340,6 @@ jobs:
     with:
       crate: hyperuuid
       java_resources_dir: java/src/main/resources/native
-      wasip1_module: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
       prepared_run_id: ${{ github.run_id }}
       prepared_artifact_name: verified-maven-central-package

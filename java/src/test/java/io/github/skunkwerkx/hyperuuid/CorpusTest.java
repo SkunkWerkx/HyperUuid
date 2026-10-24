@@ -27,9 +27,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Replays the shared conformance corpus ({@code corpus/*.json} at the repository root), the
- * same files the Rust core's own suite replays, through this binding's public API — on
- * whichever backend this run selected, so {@code test} and {@code testWasm} replay it once
- * each. Every value crosses as the {@link UUID} a caller would hold: its two longs are the
+ * same files the Rust core's own suite replays, through this binding's public API. Every
+ * value crosses as the {@link UUID} a caller would hold: its two longs are the
  * hex's sixteen bytes, most significant first, in either layout, exactly as
  * {@link UuidGenerator#v7ToSqlOrder(UUID)} returns a SQL-ordered value. A vector that fails
  * here is a break in the cross-language contract, and for {@code sql_order.json} a change to
@@ -156,7 +155,7 @@ class CorpusTest {
         }
     }
 
-    // The one refusal, exactly as both backends throw it.
+    // The one refusal, exactly as the binding throws it.
     private static final String WRONG_VERSION = "the value is not a UUID of the version this conversion takes";
 
     @Test

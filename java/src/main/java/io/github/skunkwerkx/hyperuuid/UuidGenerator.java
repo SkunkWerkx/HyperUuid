@@ -10,7 +10,6 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -39,16 +38,6 @@ import java.util.UUID;
  * either. This jar bundles a native build for every supported platform (see
  * {@link NativePlatform}) and picks the right one at runtime.
  *
- * <p>The same core also ships inside this jar as a {@code wasm32-wasip1} module, run by
- * <a href="https://www.graalvm.org/webassembly/">GraalWasm</a> when {@link #BACKEND_PROPERTY}
- * says so, when no native build exists for the running platform, or when the bundled one
- * will not load. That path needs
- * {@code org.graalvm.polyglot:polyglot} and {@code org.graalvm.polyglot:wasm} on the
- * classpath (optional dependencies, never pulled in transitively), serializes every call on
- * one lock, and costs several times a native downcall per operation; {@link #backend()}
- * reports which path is active. Everything else — every method, every exception, every
- * message — is identical between the two.
- *
  * <p>Nothing loads until the first call that needs the core. A consumer with a fallback of
  * its own gates on {@link #isAvailable()} first — the one probe that never throws — because
  * the generating methods do not fall back: a core that failed to load is thrown from every
@@ -70,14 +59,6 @@ public final class UuidGenerator {
 
         private Namespaces() {}
     }
-
-    /**
-     * Name of the system property that picks the interop path: {@code "native"} for the FFM
-     * downcalls into the bundled platform library, {@code "wasm"} for the bundled
-     * {@code wasm32-wasip1} module run by GraalWasm. Unset means native when this platform's
-     * library is bundled and loads, wasm otherwise.
-     */
-    public static final String BACKEND_PROPERTY = "hyperuuid.backend";
 
     /**
      * The downcall handles: one per C signature the core exports, none of them bound to an
@@ -180,59 +161,10 @@ public final class UuidGenerator {
     private static final class Core {
         private Core() {}
 
-        /**
-         * Non-null only when the wasm path was selected — see the static block below. Every
-         * public method checks this one {@code static final} against {@code null} before its
-         * FFM path; the JIT folds that check away, so the native path costs exactly what it
-         * did before a second backend existed.
-         */
-        private static final Backend WASM;
-
-        // Null on the wasm path: there is no library to look symbols up in, and the native
-        // linker is never asked for (Downcalls stays uninitialized) — a platform the JDK has
-        // no linker for can still run the module.
-        private static final SymbolLookup LOOKUP;
-
-        /*
-         * Decides the interop path once, at class init, and never again. BACKEND_PROPERTY set
-         * to "wasm" forces the GraalWasm backend; "native" forces FFM, and fails loudly when
-         * this platform has no bundled library or the library will not load. Unset takes FFM
-         * when this platform's native library is bundled and loads, and the wasm module
-         * otherwise — an OS, architecture or C library this jar ships no native build for
-         * still works, just through the module, and so does a bundled library that will not
-         * open (a temp directory mounted noexec, say). When that last fallback cannot start
-         * either, the failure thrown is the native one, with the wasm one suppressed on it.
-         */
-        static {
-            String choice = System.getProperty(BACKEND_PROPERTY);
-            if (choice != null && !"native".equals(choice) && !"wasm".equals(choice)) {
-                throw new IllegalStateException(
-                        BACKEND_PROPERTY + " must be \"native\" or \"wasm\"; got \"" + choice + "\"");
-            }
-            NativePlatform.Target target = NativePlatform.current();
-            Backend wasm = null;
-            SymbolLookup lookup = null;
-            if ("wasm".equals(choice)) {
-                wasm = startWasm(null);
-            } else if ("native".equals(choice)) {
-                lookup = loadLibrary(target);
-            } else if (target == null || UuidGenerator.class.getResource(target.resourcePath()) == null) {
-                wasm = startWasm(nativeMissing(target));
-            } else {
-                try {
-                    lookup = loadLibrary(target);
-                } catch (RuntimeException | LinkageError nativeFailure) {
-                    try {
-                        wasm = startWasm("the bundled native library would not load (" + nativeFailure + ")");
-                    } catch (RuntimeException wasmFailure) {
-                        nativeFailure.addSuppressed(wasmFailure);
-                        throw nativeFailure;
-                    }
-                }
-            }
-            WASM = wasm;
-            LOOKUP = lookup;
-        }
+        // The bundled library for this platform, loaded once at class init. A platform this
+        // jar ships no build for, or a library that will not open (a temp directory mounted
+        // noexec, say), fails this class's init with the reason, and isAvailable() says so.
+        private static final SymbolLookup LOOKUP = loadLibrary(NativePlatform.current());
 
         // Where each export lives in the loaded library — the leading argument of the
         // Downcalls handle with its signature. Looked up here, once, so an export missing from
@@ -251,10 +183,9 @@ public final class UuidGenerator {
         private static final MemorySegment UUID_V7_UNIX_MILLIS_IN = export("uuid_v7_unix_millis_in");
         private static final MemorySegment HYPERUUID_VERSION = export("hyperuuid_version");
 
-        // Null when the wasm backend is active — the addresses above are then never used, and
-        // there is no library to look symbols up in.
         private static MemorySegment export(String symbol) {
-            return LOOKUP == null ? null : LOOKUP.find(symbol).orElseThrow();
+            return LOOKUP.find(symbol)
+                    .orElseThrow(() -> new IllegalStateException("libhyperuuid does not export " + symbol));
         }
 
         // Why there is no native library to load, for the messages below: no build exists for
@@ -264,47 +195,6 @@ public final class UuidGenerator {
                     ? "hyperuuid: this jar carries no native library for " + NativePlatform.describe()
                     : target.resourcePath() + " classpath resource not found (this jar was built "
                             + "without a native library for this platform)";
-        }
-
-        /**
-         * Starts the GraalWasm backend. {@code nativeUnavailable} is why the native path was
-         * not taken, or {@code null} when wasm was asked for by name — it only shapes the
-         * message of a failure here.
-         *
-         * <p>{@link WasmBackend} is instantiated by name so that {@code org.graalvm.polyglot} is
-         * never loaded unless it is actually going to be used: it is a {@code compileOnly}
-         * dependency of this jar, present at runtime only if the consumer added it.
-         */
-        private static Backend startWasm(String nativeUnavailable) {
-            if (UuidGenerator.class.getResource(WasmBackend.RESOURCE_PATH) == null) {
-                throw new IllegalStateException(
-                        nativeUnavailable == null
-                                ? WasmBackend.RESOURCE_PATH + " classpath resource not found (this jar was built "
-                                        + "without the wasm module)"
-                                : nativeUnavailable + ", and " + WasmBackend.RESOURCE_PATH + " is not bundled either");
-            }
-            try {
-                return (Backend) Class.forName(UuidGenerator.class.getPackageName() + ".WasmBackend")
-                        .getDeclaredConstructor()
-                        .newInstance();
-            } catch (ReflectiveOperationException | LinkageError e) {
-                // The constructor is where GraalWasm is first touched, so its absence arrives
-                // wrapped: newInstance hands back whatever the constructor threw — an Error
-                // included — inside an InvocationTargetException.
-                Throwable cause = e instanceof InvocationTargetException && e.getCause() != null ? e.getCause() : e;
-                if (cause instanceof NoClassDefFoundError) {
-                    throw new IllegalStateException(
-                            WasmBackend.GRAALWASM_MISSING
-                                    + (nativeUnavailable == null
-                                            ? ""
-                                            : "; wasm was selected because " + nativeUnavailable),
-                            cause);
-                }
-                if (cause instanceof RuntimeException re) {
-                    throw re;
-                }
-                throw new IllegalStateException("hyperuuid: could not start the wasm backend", cause);
-            }
         }
 
         // The library must outlive every downcall made through it, so it's loaded into the
@@ -331,23 +221,10 @@ public final class UuidGenerator {
     }
 
     /**
-     * Which interop path this process is using: {@code "native"} (FFM downcalls into the
-     * bundled platform library) or {@code "wasm"} (the bundled {@code wasm32-wasip1} module run
-     * by GraalWasm). Decided once, when the core is first loaded; see
-     * {@link #BACKEND_PROPERTY}.
-     *
-     * @return {@code "native"} or {@code "wasm"}
-     */
-    public static String backend() {
-        return Core.WASM == null ? "native" : Core.WASM.name();
-    }
-
-    /**
-     * Whether the core resolved: the bundled platform library — or, on the wasm path, the
-     * module — loaded, and every export this binding was built against was found in it.
-     * Probed once, on first call, and cached; never throws. A library that will not open, a
-     * jar built without a core for this platform, GraalWasm absent when the wasm path was
-     * selected, an export missing from an older core — all come back {@code false}. This is
+     * Whether the core resolved: the bundled platform library loaded, and every export this
+     * binding was built against was found in it. Probed once, on first call, and cached;
+     * never throws. A library that will not open, a jar built without a core for this
+     * platform, an export missing from an older core — all come back {@code false}. This is
      * what a consumer with a fallback of its own ({@link UUID#randomUUID()}, say) gates on
      * before the first call: the generating methods themselves throw the load failure they
      * hit rather than quietly mint from somewhere else. {@code true} exactly when
@@ -382,8 +259,8 @@ public final class UuidGenerator {
     }
 
     /**
-     * The version of the core this process actually loaded — the bundled platform library
-     * or the wasm module — as {@code major.minor.patch}, decoded from the core's own
+     * The version of the core this process actually loaded — the bundled platform library —
+     * as {@code major.minor.patch}, decoded from the core's own
      * {@code hyperuuid_version} export. The probe a host uses to prove the library it
      * resolved is the one this binding was built against, before minting the first UUID.
      * Takes nothing and touches nothing; the only way it fails is the core not having
@@ -393,14 +270,10 @@ public final class UuidGenerator {
      */
     public static String nativeVersion() {
         int packed;
-        if (Core.WASM != null) {
-            packed = Core.WASM.version();
-        } else {
-            try {
-                packed = (int) Downcalls.VERSION.invokeExact(Core.HYPERUUID_VERSION);
-            } catch (Throwable t) {
-                throw new AssertionError("hyperuuid: hyperuuid_version downcall failed unexpectedly", t);
-            }
+        try {
+            packed = (int) Downcalls.VERSION.invokeExact(Core.HYPERUUID_VERSION);
+        } catch (Throwable t) {
+            throw new AssertionError("hyperuuid: hyperuuid_version downcall failed unexpectedly", t);
         }
         // major << 16 | minor << 8 | patch, per ffi.rs.
         return (packed >>> 16) + "." + ((packed >>> 8) & 0xFF) + "." + (packed & 0xFF);
@@ -444,9 +317,6 @@ public final class UuidGenerator {
      * @return a new random version 4 UUID
      */
     public static UUID newV4() {
-        if (Core.WASM != null) {
-            return Core.WASM.newV4();
-        }
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
@@ -495,9 +365,6 @@ public final class UuidGenerator {
      * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, byte[] name) {
-        if (Core.WASM != null) {
-            return Core.WASM.newV5(namespace, name);
-        }
         Scratch scratch = SCRATCH.get();
         MemorySegment nsSeg = writeUuid(scratch.in, namespace);
         // The caller's own array crosses pinned; a zero-length name is the ABI's NULL.
@@ -534,9 +401,6 @@ public final class UuidGenerator {
      *     within 48 bits
      */
     public static UUID newV7(long unixMillis) {
-        if (Core.WASM != null) {
-            return Core.WASM.newV7(unixMillis);
-        }
         MemorySegment out = SCRATCH.get().out;
         int rc;
         try {
@@ -577,9 +441,6 @@ public final class UuidGenerator {
      * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v7UnixMillis(UUID uuid) {
-        if (Core.WASM != null) {
-            return Core.WASM.v7UnixMillis(uuid);
-        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             return (long) Downcalls.UNIX_MILLIS.invokeExact(Core.UUID_V7_UNIX_MILLIS, seg);
@@ -635,9 +496,6 @@ public final class UuidGenerator {
      */
     public static Optional<Instant> getTimestamp(UUID uuid, UuidLayout layout) {
         int code = layoutCode(layout);
-        if (Core.WASM != null) {
-            return Core.WASM.getTimestamp(uuid, code);
-        }
         // One call: the core checks the variant and the version and reads the timestamp,
         // writing the millis into the out scratch only when it answers 7.
         Scratch scratch = SCRATCH.get();
@@ -707,9 +565,6 @@ public final class UuidGenerator {
     }
 
     private static int versionIn(UUID uuid, int layout) {
-        if (Core.WASM != null) {
-            return Core.WASM.uuidVersion(uuid, layout);
-        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         return versionNative(seg, layout);
     }
@@ -739,9 +594,6 @@ public final class UuidGenerator {
     }
 
     private static long v7UnixMillisIn(UUID uuid, int layout) {
-        if (Core.WASM != null) {
-            return Core.WASM.v7UnixMillisIn(uuid, layout);
-        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             return (long) Downcalls.UNIX_MILLIS_IN.invokeExact(Core.UUID_V7_UNIX_MILLIS_IN, seg, layout);
@@ -817,9 +669,6 @@ public final class UuidGenerator {
     public static int version(byte[] uuid, UuidLayout layout) {
         int code = layoutCode(layout);
         requireSingleUuid(uuid);
-        if (Core.WASM != null) {
-            return Core.WASM.uuidVersion(uuid, code);
-        }
         return versionNative(MemorySegment.ofArray(uuid), code);
     }
 
@@ -838,9 +687,6 @@ public final class UuidGenerator {
      * @return its variant
      */
     public static UuidVariant variant(UUID uuid) {
-        if (Core.WASM != null) {
-            return UuidVariant.of(Core.WASM.uuidVariant(uuid));
-        }
         return UuidVariant.of(variantNative(writeUuid(SCRATCH.get().in, uuid)));
     }
 
@@ -855,9 +701,6 @@ public final class UuidGenerator {
      */
     public static UuidVariant variant(byte[] uuid) {
         requireSingleUuid(uuid);
-        if (Core.WASM != null) {
-            return UuidVariant.of(Core.WASM.uuidVariant(uuid));
-        }
         return UuidVariant.of(variantNative(MemorySegment.ofArray(uuid)));
     }
 
@@ -900,9 +743,6 @@ public final class UuidGenerator {
     }
 
     private static boolean isRfcIn(UUID uuid, int version, int layout) {
-        if (Core.WASM != null) {
-            return Core.WASM.isRfc(uuid, version, layout);
-        }
         return isRfcNative(writeUuid(SCRATCH.get().in, uuid), version, layout);
     }
 
@@ -935,9 +775,6 @@ public final class UuidGenerator {
     public static boolean isRfc(byte[] uuid, int version, UuidLayout layout) {
         int code = layoutCode(layout);
         requireSingleUuid(uuid);
-        if (Core.WASM != null) {
-            return Core.WASM.isRfc(uuid, version, code);
-        }
         return isRfcNative(MemorySegment.ofArray(uuid), version, code);
     }
 
@@ -977,9 +814,6 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code uuid} isn't an RFC 9562 version 7 UUID
      */
     public static UUID v7ToSqlOrder(UUID uuid) {
-        if (Core.WASM != null) {
-            return Core.WASM.v7ToSqlOrder(uuid);
-        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         int rc;
         try {
@@ -1003,9 +837,6 @@ public final class UuidGenerator {
      *     from a version 7 — an RFC-ordered value included
      */
     public static UUID v7FromSqlOrder(UUID uuid) {
-        if (Core.WASM != null) {
-            return Core.WASM.v7FromSqlOrder(uuid);
-        }
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         int rc;
         try {
@@ -1035,9 +866,6 @@ public final class UuidGenerator {
     public static UUID[] newV7Batch(int count, long unixMillis) {
         requireBatchCount(count);
         requireV7BatchCount(count);
-        if (Core.WASM != null) {
-            return Core.WASM.newV7Batch(count, unixMillis);
-        }
         if (count == 0) {
             return new UUID[0];
         }
@@ -1096,8 +924,8 @@ public final class UuidGenerator {
         }
     }
 
-    // A batch export's non-zero return code as the exception it means, shared with the wasm
-    // backend so both paths say the same thing: 2 is the caller's timestamp, 3 a batch too
+    // A batch export's non-zero return code as the exception it means: 2 is the caller's
+    // timestamp, 3 a batch too
     // large to address on this platform (count * 16 overflowing the core's usize, a 32-bit
     // host only), 4 a v7 batch past MAX_V7_BATCH. Only 1 is the random source.
     static RuntimeException batchFailure(int rc, String fn, int count, String outOfRangeMessage) {
@@ -1110,8 +938,8 @@ public final class UuidGenerator {
         };
     }
 
-    // A SQL-order export's non-zero return code as the exception it means, shared with the
-    // wasm backend so both paths say the same thing. The only refusal is 5, a value that isn't
+    // A SQL-order export's non-zero return code as the exception it means. The only refusal
+    // is 5, a value that isn't
     // the version the conversion takes, and on it the core left the bytes as they were.
     static RuntimeException sqlOrderFailure(int rc, String fn) {
         return rc == 5
@@ -1123,9 +951,9 @@ public final class UuidGenerator {
     // int-sized array.
     static final int MAX_BATCH = Integer.MAX_VALUE / 16;
 
-    // Checked before either backend multiplies by 16. Unchecked, a count past MAX_BATCH wraps
-    // that product to a small or zero length while the core still writes count * 16 bytes —
-    // on the FFM path, straight past the end of a pinned Java array — and a negative one
+    // Checked before the core multiplies by 16. Unchecked, a count past MAX_BATCH wraps that
+    // product to a small or zero length while the core still writes count * 16 bytes —
+    // straight past the end of a pinned Java array — and a negative one
     // reaches the core as a count of billions.
     static void requireBatchCount(int count) {
         if (count < 0 || count > MAX_BATCH) {
@@ -1190,10 +1018,6 @@ public final class UuidGenerator {
     public static void fillV7(UUID[] destination, long unixMillis) {
         requireBatchCount(destination.length);
         requireV7BatchCount(destination.length);
-        if (Core.WASM != null) {
-            Core.WASM.fillV7(destination, unixMillis);
-            return;
-        }
         fillUuidArray(destination, unixMillis, Core.UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
     }
 
@@ -1235,10 +1059,6 @@ public final class UuidGenerator {
     public static void fillV7(byte[] destination, long unixMillis) {
         requireWholeUuids(destination.length);
         requireV7BatchCount(destination.length / 16);
-        if (Core.WASM != null) {
-            Core.WASM.fillV7(destination, unixMillis);
-            return;
-        }
         fillByteArray(destination, unixMillis, Core.UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
     }
 
@@ -1296,10 +1116,6 @@ public final class UuidGenerator {
      *     RFC 9562 version 7
      */
     public static void v7ToSqlOrder(byte[] uuid) {
-        if (Core.WASM != null) {
-            Core.WASM.v7ToSqlOrder(uuid);
-            return;
-        }
         sqlOrderBytes(uuid, Core.UUID_V7_TO_SQL_ORDER, "uuid_v7_to_sql_order");
     }
 
@@ -1312,10 +1128,6 @@ public final class UuidGenerator {
      *     SQL-ordered value converted from a version 7
      */
     public static void v7FromSqlOrder(byte[] uuid) {
-        if (Core.WASM != null) {
-            Core.WASM.v7FromSqlOrder(uuid);
-            return;
-        }
         sqlOrderBytes(uuid, Core.UUID_V7_TO_RFC_ORDER, "uuid_v7_to_rfc_order");
     }
 }

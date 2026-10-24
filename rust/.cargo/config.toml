@@ -14,22 +14,6 @@ rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 
-# wasm32-wasip1 is the one target where a host cannot hand this library a pointer into its
-# own memory: a wasm guest only sees its own linear memory, so every host that embeds the
-# module (GraalWasm in the Java binding) has to ask the guest for a buffer it can fill. wasi-libc's malloc/free are already linked in (Rust's std
-# allocator on this target is dlmalloc behind them); exporting them costs nothing and keeps
-# ffi.rs's "plain pointers, no allocator protocol" contract untouched for every native
-# platform. Linker flags rather than #[no_mangle] shims, so the C ABI surface stays exactly
-# the twelve uuid_* exports plus hyperuuid_version on every other target.
-#
-# Using the guest's allocator, rather than a host-picked offset past the data segments, is
-# load-bearing: dlmalloc claims the tail of the initial memory on first use, and a batch call
-# writing there was observed corrupting the host's buffer on the very next allocation.
-# Cargo only reads this file from the crate directory (`cargo wasm-module` run inside rust/), the
-# same way every other target section here already relies on.
-[target.wasm32-wasip1]
-rustflags = ["-C", "link-arg=--export=malloc", "-C", "link-arg=--export=free"]
-
 # musl (Alpine): every *-linux-musl target defaults to a statically linked C runtime, and
 # under that default rustc cannot produce a cdylib at all — `cargo cdylib` stops with "cannot
 # produce cdylib ... as the target does not support these crate types". Turning crt-static
@@ -69,14 +53,8 @@ rustflags = ["-C", "panic=abort"]
 # would reach the extension modules too — PyO3 and Magnus turn a panic into a host exception
 # only when it unwinds — and keeps the output in target/release/, where every binding's dev
 # loop looks for it. Extra arguments pass through: `cargo cdylib --target <triple>`. Not
-# for wasm32-wasip1 (`cargo wasm-module`, below), nor for an extension feature, which have
-# their own aliases.
+# for an extension feature, which has its own alias.
 cdylib = ["rustc", "--release", "--crate-type", "cdylib", "--no-default-features", "--features", "cdylib", "--config", 'profile.release.panic="abort"']
-# The hyperuuid.wasm module Java's GraalWasm backend runs, in
-# target/wasm32-wasip1/release/. Built with std, unlike the native library: its hosts allocate their buffers through the
-# module's own malloc/free (the wasm32-wasip1 section above), which come from wasi-libc by
-# way of std's allocator, and a no_std module does not link wasi-libc at all.
-wasm-module = "rustc --release --crate-type cdylib --target wasm32-wasip1"
 # Local-dev builds of the extension features, each in its own target dir. The ruby and php
 # features produce a differently-shaped libhyperuuid.so (Init_hyperuuid_native / the PHP module
 # entry point) at the same path as the plain cdylib that Fiddle, ctypes-free FFI, P/Invoke,

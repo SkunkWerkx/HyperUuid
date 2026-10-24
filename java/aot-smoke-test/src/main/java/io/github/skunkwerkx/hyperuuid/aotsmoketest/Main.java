@@ -32,9 +32,6 @@ public final class Main {
         // the core unloadable, and this is the probe a consumer would notice that through.
         System.out.println("available: " + UuidGenerator.isAvailable());
         require(UuidGenerator.isAvailable(), "the core did not load");
-        // Which interop path this binary took — "native" (FFM) or "wasm" (GraalWasm) — so a
-        // -Dhyperuuid.backend=wasm run is visibly proving the path it claims to.
-        System.out.println("backend: " + UuidGenerator.backend());
         // The version probe is the one export linked without the critical option, so it
         // needs its own downcall signature in reachability-metadata.json — this is what
         // proves the registration reached the binary.

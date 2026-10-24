@@ -14,6 +14,19 @@ the README's [Platform support](README.md#platform-support) table become a commi
 under Semantic Versioning: breaking or dropping either takes a new major version. Until then
 a minor release can still break both, as 0.9.0 did.
 
+### Removed
+
+- **Java — the GraalWasm backend.** The jar no longer carries the core a second time as a
+  `wasm32-wasip1` module, and `UuidGenerator.backend()`, `BACKEND_PROPERTY`, the
+  `hyperuuid.backend` property and the fall-back to the module on a platform without a
+  native build are gone: the binding is FFM downcalls into the bundled library, and a JVM
+  on a platform the jar has no build for has no core. It never ran Java in a browser, no
+  consumer asked for it, and replaying the suite through GraalWasm's interpreter on every
+  CI leg had become the longest step in each. `cargo wasm-module` and the `wasm32-wasip1`
+  export flags leave `rust/.cargo/config.toml` with it, as do `./gradlew testWasm`,
+  `-Pwasm` on the JMH and Native Image smoke tasks, and the GraalWasm rows of the Java
+  README's tables. *(Java)*
+
 ### Changed
 
 - **C# — `HyperUuid.targets` no longer lists an `EmccExportedFunction` per entry point.** The
