@@ -244,9 +244,13 @@ jobs:
     needs: build-static
     # Start when the static archives are ready; release mode only.
     if: github.event_name != 'pull_request'
-    # The .NET 11 RC2 ios and maccatalyst workloads (27.0.x) refuse any Xcode below 27.0, and
-    # macos-latest (macOS 26) tops out at Xcode 26.6. The xcode-27 image is macOS 27 with
-    # Xcode 27.0 as its default; .NET 11 GA will want Xcode 27 as well.
+    # The .NET 11 RC2 ios and maccatalyst workloads (27.0.x) are built against Xcode 27.0 and
+    # refuse any other version; macos-latest (macOS 26) tops out at Xcode 26.6. The xcode-27
+    # image tracks the Xcode 27 major, not a point release: since 2026-10-22 it ships 27.1 as
+    # its default and no longer carries 27.0, so the three dotnet builds below pass
+    # ValidateXcodeVersion=false (dotnet/macios, docs/building-apps/build-properties.md) and
+    # the smoke tests themselves prove the 27.0 to 27.1 skip is harmless. Drop the property
+    # once a .NET 11 workload accepts the image's Xcode.
     runs-on: xcode-27
     env:
       APP_ID: io.github.skunkwerkx.hyperuuid.applesmoketest
@@ -372,7 +376,7 @@ jobs:
         run: |
           set -euo pipefail
           want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-maccatalyst -r maccatalyst-arm64
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-maccatalyst -r maccatalyst-arm64 -p:ValidateXcodeVersion=false
           app=$(find "$SMOKE_BIN/net11.0-maccatalyst/maccatalyst-arm64" -maxdepth 1 -name '*.app')
           log="$TMPDIR/hyperuuid-smoke.log"
           rm -f "$log"
@@ -387,7 +391,7 @@ jobs:
           set -euo pipefail
           want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
           udid="${{ steps.sim.outputs.udid }}"
-          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r iossimulator-arm64
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r iossimulator-arm64 -p:ValidateXcodeVersion=false
           app=$(find "$SMOKE_BIN/net11.0-ios/iossimulator-arm64" -maxdepth 1 -name '*.app')
           xcrun simctl install "$udid" "$app"
           xcrun simctl launch "$udid" "$APP_ID"
@@ -405,7 +409,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r ios-arm64 -p:EnableCodeSigning=false
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r ios-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false
           app=$(find "$SMOKE_BIN/net11.0-ios/ios-arm64" -maxdepth 1 -name '*.app')
           nm -g "$app/HyperUuid.AppleSmokeTest" > device-symbols.txt
           for symbol in hyperuuid_version uuid_new_v4 uuid_new_v7 uuid_new_v7_batch; do
