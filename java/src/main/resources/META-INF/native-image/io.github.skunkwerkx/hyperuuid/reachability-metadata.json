@@ -4,17 +4,6 @@
       "glob": "native/*/*"
     }
   ],
-  "reflection": [
-    {
-      "type": "io.github.skunkwerkx.hyperuuid.WasmBackend",
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        }
-      ]
-    }
-  ],
   "foreign": {
     "downcalls": [
       {

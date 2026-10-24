@@ -479,8 +479,8 @@ alternative measured beside it — a ~90-line C extension over the `no_std` arch
 build already links, instead of ext-php-rs — also worked, at 12 KB a module and on 32-bit PHP
 too, but it is a second native implementation in a language the repo does not otherwise use.
 
-**Running the core as wasm inside PHP**, the way the Java binding does with GraalWasm: there
-is no maintained wasm engine PHP can embed, so there is nothing to stand that on. The root
+**Running the core as wasm inside PHP**: there is no maintained wasm engine PHP can embed, so
+there is nothing to stand that on. The root
 README's [WebAssembly section](../README.md#webassembly) tracks both directions for every
 binding.
 

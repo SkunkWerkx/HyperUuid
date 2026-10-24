@@ -136,10 +136,6 @@ jobs:
       # the pipeline's explicit per-leg placement for in-repo testing.
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
-      # The core as a wasm32-wasip1 module too, and the Java suite a second time through its
-      # in-process GraalWasm backend. The module is what the jar carries beside the native
-      # libraries so a JVM on a platform with no native build still has a working backend.
-      wasip1_module: true
 
   # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
   # Architecture), so it's built on every PR too, not just at release time.
