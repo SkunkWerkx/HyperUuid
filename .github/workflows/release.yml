@@ -13,8 +13,11 @@ name: Release — prepare, verify, preserve, publish, finalize
 #
 # Recovery is the same dispatch, plus publication_run_id when registry receipts exist. It
 # never rebuilds the native matrix and never re-attests; it verifies the preserved bytes
-# against the attestations the tag run made. The job bodies live in the Forge
-# (SkunkWerkx/.github/.github/actions/*), called at the one Forge commit this run resolved.
+# against the attestations the tag run made. The job bodies live in the Forge: the composite
+# actions (SkunkWerkx/.github/.github/actions/*) run from the one Forge commit this run
+# resolved, checked out as .hyperforge; the five reusable workflows (the NuGet, crate and
+# Maven packing, the crate and Maven publishing) are called at master, which GitHub resolves
+# when the run is queued.
 on:
   push:
     tags: ["v*"]
@@ -143,6 +146,7 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: read
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -165,6 +169,7 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: read
+      actions: read
       id-token: write
       attestations: read
     steps:
@@ -307,8 +312,10 @@ jobs:
           publish: ${{ github.event_name == 'workflow_dispatch' }}
           token: ${{ github.token }}
 
-  # crates.io Trusted Publishing is registered against hyper-publish-crate.yml's publish job,
-  # and package_preparation.py matches this job's name in run history: don't rename it.
+  # crates.io Trusted Publishing is registered against this file, release.yml: crates.io
+  # matches the OIDC token's workflow_ref claim, which names the top-level workflow, not the
+  # Forge's hyper-publish-crate.yml that this job calls. The Forge's package_preparation.py
+  # finds this job in run history by its name ("pack-crates / publish"): don't rename it.
   pack-crates:
     needs: [find-ci-run, publication-gate]
     if: >-

@@ -35,7 +35,7 @@ let mut out = vec![0u8; 1000 * 16];
 v7::new_v7_batch(ts, 1000, &mut out)?;
 ```
 
-`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v7::unix_millis` recovers the embedded UTC timestamp from a version 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v7 — the variant is checked too, and a v1 or v6 from another generator gets `None` as well), and [`v7::new_v7_at`] accepts one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order. The converted value is an RFC 9562 version 8, the version §6.11 gives any byte order but network order: an 8 and the RFC variant sit where SQL Server's text form and a .NET `Guid` show them, and the other 122 bits fill the comparator's slots. That is the permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) uses for C#, with an 8 where SequentialGuid keeps the 7. A v7 and a v8 have the same 122 free bits, so every v7 converts and the conversion back is exact; [`SqlOrderError`] refuses only a value that isn't a v7 going in, or doesn't carry the layout's 8 and variant coming back. [`sql`](https://docs.rs/hyperuuid/latest/hyperuuid/sql/) has the bit layout. This crate's own test suite verifies the sort against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there `version_in` answers 7, the version the value was converted from, for the layout's 8 and variant, and 0 for anything else. `new_v7_batch` generates `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.5x faster on glibc and 3.5x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
+`v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v7::unix_millis` recovers the embedded UTC timestamp from a version 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v7 — the variant is checked too, and a v1 or v6 from another generator gets `None` as well), and [`v7::new_v7_at`] accepts one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order. The converted value is an RFC 9562 version 8, the version §6.11 gives any byte order but network order: an 8 and the RFC variant sit where SQL Server's text form and a .NET `Guid` show them, and the other 122 bits fill the comparator's slots. That is the permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) uses for C#, with an 8 where SequentialGuid keeps the 7. A v7 and a v8 have the same 122 free bits, so every v7 converts and the conversion back is exact; [`SqlOrderError`] refuses only a value that isn't a v7 going in, or doesn't carry the layout's 8 and variant coming back. [`sql`](https://docs.rs/hyperuuid/latest/hyperuuid/sql/) has the bit layout. This crate's own test suite verifies the sort against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there `version_in` answers 7, the version the value was converted from, for the layout's 8 and variant, and 0 for anything else. `new_v7_batch` generates `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.4x faster on glibc and 3.7x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
 
 `Timestamp::from_unix(seconds, subsec_nanos)` returns `Option<Timestamp>` and
 rejects a nanosecond component of one billion or more. Valid sub-millisecond digits
@@ -73,7 +73,7 @@ The honest trade-off: this crate's public surface is much narrower than `uuid`'s
 
 ## Benchmarks
 
-`cargo bench` from this directory (Criterion; HTML reports land in `target/criterion/report/index.html`). All numbers below are linux-x64 (an Intel Core i9-11900H), one run, reproducible on your own hardware with the same command.
+`cargo bench` from this directory (Criterion, which keeps each run's figures under `target/criterion/`). All numbers below are linux-x64 (an Intel Core i9-11900H), one run, reproducible on your own hardware with the same command.
 
 ### vs. the `uuid` crate (single-item)
 
@@ -127,8 +127,8 @@ support is target-specific, not universal —
   --headless --chrome` there).
 
 A `wasm32-wasip1` build of the crate (`cargo rustc --release --crate-type cdylib --target
-wasm32-wasip1`, from inside this directory) imports five `wasi_snapshot_preview1` functions
-(`random_get`, plus wasi-libc's `environ_*`, `fd_write` and `proc_exit`) and nothing else;
+wasm32-wasip1`, from inside this directory) imports one `wasi_snapshot_preview1` function,
+`random_get`, and nothing else;
 there is no clock, because `now_v7` is compiled out on `wasm32` and every other door takes
 the host's timestamp. Nothing in this repo ships that module: the Go and Swift bindings link
 the crate's `wasm32-wasip1` static archive instead ([WebAssembly](../README.md#webassembly)).
@@ -156,14 +156,16 @@ Default-on rather than unconditional for the crates.io consumer, the tests and t
 extensions. The artifacts this repository ships leave it out: the static libraries and the
 shared library every FFI binding loads (`cargo cdylib`, below) are all `#![no_std]`, each
 bringing the abort-on-panic handler std would otherwise supply — which takes the linux-x64
-shared library from 347 KB to 16 KB with the same exports and the same code behind them.
+shared library from 291,432 bytes to 25,944 with the same thirteen exports and the same code
+behind them (commit `0b57513`, measured 2026-10-25 with rustc 1.99.1 in the `rust:latest`
+image: `cargo rustc --release --crate-type cdylib` with std, `cargo cdylib` without).
 That library is not one of the manifest's crate types, so cargo never builds it for a consumer, and `default-features = false` yields a
 real `no_std` rlib on every target: your own machine, `wasm32-unknown-unknown`, and bare metal.
 CI builds a `default-features = false` consumer for the first two on every run, and checks the
 third:
 
 ```sh
-cargo check --no-default-features --target thumbv7em-none-eabi
+RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --no-default-features --target thumbv7em-none-eabi
 ```
 
 On a target with no operating system, two things are left to you, both of them things such a
@@ -248,15 +250,17 @@ crate itself, not just an in-repo checkout — `cargo rustc --release --crate-ty
 --features <one> --manifest-path` against the packaged crate (`cargo package`'s own
 output) produces the same three symbols above.
 
-**Local dev trap worth knowing:** "each produces `target/release/libhyperuuid.so`" means
-*the same file* — so a `--features python` build (or a `maturin build` in `python/`, which
-is one) silently replaces the plain cdylib that every other binding's dev loop loads. The
+**Local dev trap worth knowing:** the raw `--features` form, run in `rust/`, writes
+`target/release/libhyperuuid.{so,dylib}`, *the same file* `cargo cdylib` writes — so a
+`cargo rustc --release --crate-type cdylib --features python` (or `ruby`, or `php`) there
+silently replaces the plain cdylib that every other binding's dev loop loads. The
 extension build still exports the `uuid_*` symbols, but it also carries undefined
 interpreter symbols that only resolve inside a CPython (or Ruby, or PHP) process, so the
 next `./gradlew test` or `dotnet test` fails at native load with something unhelpful about a
 missing symbol. Nothing is broken; a plain `cargo cdylib` puts it back. The `cargo ruby-ext` and
 `cargo php-ext` aliases in `.cargo/config.toml` avoid it by building into `target/ruby/` and
-`target/php/`, and `python/.cargo/config.toml` does the same for maturin (`python/target/`).
+`target/php/`, and `python/.cargo/config.toml` does the same for maturin (`python/target/`), so
+neither the aliases nor a `maturin build` or `maturin develop` in `python/` hits it.
 CI never hits this — each leg builds in its own job.
 
 ## Verifying provenance
@@ -294,9 +298,9 @@ cargo add hyperuuid
 ```
 
 Requires Rust 1.85 or later (`rust-version` in the manifest, edition 2024's own floor); CI
-builds the library and the `no_std` shared library on exactly that toolchain on every PR.
+checks the library, with and without std, on exactly that toolchain on every PR.
 
-Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test`/`cargo bench` suite before every release (`.github/workflows/ci.yml`); `release.yml` doesn't retest anything itself — it finds that already-green run for the tagged commit and packs the crate from that same commit, with `cargo package`'s own verify build the only compile it does.
+Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test` suite (the benchmarks are compiled by clippy, not run) before every release (`.github/workflows/ci.yml`); `release.yml` doesn't retest anything itself — it finds that already-green run for the tagged commit and packs the crate from that same commit, with `cargo package`'s own verify build the only compile it does.
 
 ## License
 

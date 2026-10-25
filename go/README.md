@@ -204,7 +204,7 @@ through unchanged in both directions too, though `[]byte` then reads back revers
 
 ### Errors
 
-Every function returns an `error`; nothing in this package panics. The errors are the
+Every function that can fail returns an `error`; nothing in this package panics. The errors are the
 core's own failures and a caller's mistakes — never a failed load, since there is none. The
 sentinels, all matched with `errors.Is`:
 
@@ -220,9 +220,6 @@ sentinels, all matched with `errors.Is`:
 | `ErrBufferNotWholeUUIDs` | a `FillV7Bytes`/`FillV7BytesAt` destination isn't a multiple of 16 bytes long |
 | `ErrNotOneUUID` | a raw-byte SQL-order transform, or `VersionBytes`/`VariantBytes`/`IsRfcBytes`, was given a buffer that isn't exactly 16 bytes |
 | `ErrInvalidLayout` | a function that takes a `UuidLayout` was given `LayoutUnspecified` or an undefined value |
-
-`ErrNativeUnavailable` is deprecated and never returned; it stays so code that tests for it
-keeps compiling.
 
 ## Destination-buffer fills
 
@@ -270,10 +267,10 @@ three probes every binding carries are here so code written against them works u
 - `LoadError()` — always `nil`.
 - `NativeVersion()` — `"major.minor.patch"` as the linked core reports it about itself, read
   through the ABI rather than from this module, so a deployment can confirm which build of
-  the archive went into the binary. Its error is always `nil`.
+  the archive went into the binary. It cannot fail.
 
 ```go
-version, _ := hyperuuid.NativeVersion()
+log.Printf("hyperuuid core %s", hyperuuid.NativeVersion())
 ```
 
 [HyperCast](https://github.com/SkunkWerkx/HyperCast)'s Go binding has the same three entry
@@ -395,7 +392,10 @@ Linux and Windows on x64 and arm64, macOS on arm64 — and on Alpine.
 The `hyperuuid_local` build tag is for working on the core in a checkout of this repository:
 `go test -tags hyperuuid_local ./...` links the archive `.github/scripts/local-core.sh` builds
 from the checkout, under `rust/target/local-core/`, in place of the committed one. A module
-fetched with `go get` has no such archive, so the tag fails at link time there.
+fetched with `go get` has no such archive, so the tag fails at link time there. Without the
+tag, outside CI, the suite refuses to run when the checkout's `rust/` differs from the commit
+the committed archives were built from (`-count=1` after a core change, since `go test`
+replays a cached pass).
 
 ## Why not `google/uuid`'s own `NewV7`?
 
@@ -426,7 +426,7 @@ session, median of three runs:
 | `NewV5String` | 98 ns, 1 alloc |
 | `NewV7At` | 69 ns, 0 allocs |
 
-No call allocates (the one `NewV5String` keeps is Go's own `[]byte(name)` conversion).
+No call allocates but `NewV5String`, whose one allocation is Go's own `[]byte(name)` conversion.
 `go build -gcflags=-m` is right that any Go pointer handed to a cgo call is conservatively
 heap-allocated, so the shims never hand one over: the C side keeps the sixteen bytes on its
 own stack and returns them as a struct, and takes a UUID argument the same way, so nothing
@@ -456,7 +456,7 @@ genuine head-to-head, not a strawman. Same machine, same run:
 | --- | ---: | ---: |
 | v7 | 30 ns, 0 allocs | 1.8 ns, 0 allocs |
 
-`google/uuid`'s `Time()` wins outright, by roughly 20x — it's pure Go bit-shifting over
+`google/uuid`'s `Time()` wins outright, by roughly 17x — it's pure Go bit-shifting over
 bytes already in the process, with no FFI boundary to cross.
 `google/uuid.UUID.Time()` works on *any* RFC-conformant v7 value regardless of
 where it came from — it's pure bit math, not tied to how the value was minted — so

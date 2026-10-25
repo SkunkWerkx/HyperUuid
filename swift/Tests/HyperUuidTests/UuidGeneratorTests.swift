@@ -37,8 +37,8 @@ final class UuidGeneratorTests: XCTestCase {
 
     // MARK: - The native library itself
 
-    func testNativeVersionIsTheLoadedLibrarysOwn() throws {
-        let version = try UuidGenerator.nativeVersion()
+    func testNativeVersionIsTheLoadedLibrarysOwn() {
+        let version = UuidGenerator.nativeVersion()
         if let crateVersion = Self.crateVersion {
             XCTAssertEqual(version, crateVersion)
         } else {
@@ -48,9 +48,8 @@ final class UuidGeneratorTests: XCTestCase {
         }
     }
 
-    func testIsAvailableBecauseTheCoreIsLinkedIn() throws {
+    func testIsAvailableBecauseTheCoreIsLinkedIn() {
         XCTAssertTrue(UuidGenerator.isAvailable)
-        XCTAssertNoThrow(try UuidGenerator.nativeVersion())
     }
 
     func testGeneratorErrorsDescribeThemselvesThroughLocalizedDescription() {

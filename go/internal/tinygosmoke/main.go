@@ -32,9 +32,9 @@ func check(ok bool, what string) {
 }
 
 func main() {
-	version, err := hyperuuid.NativeVersion()
+	version := hyperuuid.NativeVersion()
 	fmt.Println("NativeVersion", version, "want", wantVersion)
-	check(err == nil && version != "" && version == wantVersion, "NativeVersion matches rust/Cargo.toml")
+	check(version != "" && version == wantVersion, "NativeVersion matches rust/Cargo.toml")
 
 	a, err := hyperuuid.NewV4()
 	b, err2 := hyperuuid.NewV4()

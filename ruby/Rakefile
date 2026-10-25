@@ -33,7 +33,7 @@ end
 # `build-native` job already builds the `ruby` feature's cdylib for Magnus testing
 # (hyper-build-native.yml), producing the exact same artifact this needs — so this task just
 # expects those binaries already staged at lib/hyperuuid/<minor>/hyperuuid_native.{so,bundle},
-# one per entry in ABIS below (by release.yml's packing step, or locally by `rake
+# one per entry in ABIS below (by the Forge's pack-gems action in release.yml, or locally by `rake
 # native:dev` under each Ruby), and packages a real platform gem around them directly via
 # plain RubyGems stdlib (Gem::Platform/Gem::Package), no extra build-tool dependency at all.
 namespace :native do

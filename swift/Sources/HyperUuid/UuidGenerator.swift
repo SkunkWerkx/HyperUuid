@@ -110,8 +110,8 @@ public enum UuidGenerator {
 
     // Foundation's UUID wraps `uuid_t`, sixteen bytes already in RFC 9562 order — so a
     // `uuid_t` on the stack is both the scratch every single-UUID door needs and the value
-    // the result is built from. No heap `[UInt8]` on either side of the call, which is
-    // what every door here used to allocate (one for the out-value, one more per input).
+    // the result is built from. No heap `[UInt8]` on either side of the call: none for the
+    // out-value, and none per input.
     private static let zero: uuid_t = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     private static func withOut<T>(_ body: (UnsafeMutablePointer<UInt8>) -> T) -> (T, uuid_t) {
@@ -158,15 +158,15 @@ public enum UuidGenerator {
         uuidVersion: uuid_version, uuidVariant: uuid_variant, uuidIsRfc: uuid_is_rfc,
         v7UnixMillisIn: uuid_v7_unix_millis_in, getTimestamp: uuid_get_timestamp)
 
-    // `throws` only so every door keeps one shape; the core is always there.
-    private static func loaded() throws -> LoadedLibrary {
+    // The core is linked in, so there is nothing to load and nothing that can fail.
+    private static func loaded() -> LoadedLibrary {
         library
     }
 
     /// Whether the native core is usable. Always `true`: the core is linked into the
     /// executable on every platform this package builds for, and a platform with no
-    /// prebuilt core fails to compile rather than at run time. Kept for callers that gated
-    /// on it when macOS and Windows loaded a shared library.
+    /// prebuilt core fails to compile rather than at run time. It keeps the probe every other
+    /// binding has under the same name, where the answer can be `false`.
     public static var isAvailable: Bool { true }
 
     /// Unix-epoch milliseconds off a `Date`, for the doors that take one. `UInt64(_:)` traps
@@ -183,7 +183,7 @@ public enum UuidGenerator {
 
     /// Creates a random UUID version 4 (RFC 9562 §5.4).
     public static func newV4() throws -> UUID {
-        let l = try loaded()
+        let l = loaded()
         let (rc, out) = withOut { l.newV4($0) }
         guard rc == 0 else { throw Error.randomSourceFailure(code: rc) }
         return UUID(uuid: out)
@@ -198,7 +198,7 @@ public enum UuidGenerator {
     /// See ``newV5(namespace:name:)-swift.type.method``; the name as a raw view of bytes — the
     /// primitive the `String` and `[UInt8]` forms wrap, for a caller already holding a buffer.
     public static func newV5(namespace: UUID, name: UnsafeRawBufferPointer) throws -> UUID {
-        let l = try loaded()
+        let l = loaded()
         // An empty buffer may carry a nil base address; the ABI never dereferences at len 0.
         let (rc, out) = withBytes(of: namespace) { ns in
             withOut { l.newV5(ns, name.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt32(name.count), $0) }
@@ -218,7 +218,7 @@ public enum UuidGenerator {
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond
     /// timestamp.
     public static func newV7(unixMillis: UInt64) throws -> UUID {
-        let l = try loaded()
+        let l = loaded()
         let (rc, out) = withOut { l.newV7(unixMillis, $0) }
         switch rc {
         case 0: return UUID(uuid: out)
@@ -245,7 +245,7 @@ public enum UuidGenerator {
     /// bit layout doesn't distinguish "not a v7 UUID" from "v7 UUID with a very early
     /// timestamp", so the caller is responsible for checking that first if it matters.
     public static func v7UnixMillis(_ uuid: UUID) throws -> UInt64 {
-        let l = try loaded()
+        let l = loaded()
         return withBytes(of: uuid) { l.v7UnixMillis($0) }
     }
 
@@ -328,14 +328,14 @@ public enum UuidGenerator {
     /// The conversion is exact, and ``v7FromSqlOrder(_:)`` inverts it. Every version 7
     /// converts; it throws ``Error/wrongVersion`` unless `uuid` is an RFC 9562 version 7.
     public static func v7ToSqlOrder(_ uuid: UUID) throws -> UUID {
-        try reorder(uuid, try loaded().v7ToSqlOrder)
+        try reorder(uuid, loaded().v7ToSqlOrder)
     }
 
     /// Inverse of ``v7ToSqlOrder(_:)`` — converts a SQL-ordered version 7 back to that RFC 9562
     /// version 7. Throws ``Error/wrongVersion`` for anything else, including an RFC-ordered
     /// value.
     public static func v7FromSqlOrder(_ uuid: UUID) throws -> UUID {
-        try reorder(uuid, try loaded().v7ToRfcOrder)
+        try reorder(uuid, loaded().v7ToRfcOrder)
     }
 
     // MARK: - Destination-buffer fills
@@ -391,7 +391,7 @@ public enum UuidGenerator {
         guard count > 0 else { return }
         if let limit, count > limit { throw Error.batchTooLarge(count: count) }
         guard let nativeCount = UInt32(exactly: count) else { throw Error.batchNotAddressable(count: count) }
-        let l = try loaded()
+        let l = loaded()
         let rc = pick(l)(
             unixMillis,
             nativeCount,
@@ -444,7 +444,7 @@ public enum UuidGenerator {
         _ pick: (LoadedLibrary) -> UuidV7ToSqlOrderFn
     ) throws {
         guard uuid.count == 16 else { throw Error.bufferNotWholeUUIDs(count: uuid.count) }
-        let l = try loaded()
+        let l = loaded()
         try checkSqlOrder(pick(l)(uuid.baseAddress?.assumingMemoryBound(to: UInt8.self)))
     }
 
@@ -474,7 +474,7 @@ public enum UuidGenerator {
     /// `layout: .sqlServer`: the default reads the wrong bytes there. There is deliberately no
     /// layout-agnostic form: the caller holding the value knows its order.
     public static func version(_ uuid: UUID, layout: UuidLayout = .rfc9562) throws -> Int {
-        let l = try loaded()
+        let l = loaded()
         return Int(withBytes(of: uuid) { l.uuidVersion($0, layout.rawValue) })
     }
 
@@ -483,7 +483,7 @@ public enum UuidGenerator {
     /// exactly 16 bytes. With the default layout the bytes are read as RFC 9562 order; SQL
     /// Server wire bytes need `layout: .sqlServer`.
     public static func version(bytes uuid: UnsafeRawBufferPointer, layout: UuidLayout = .rfc9562) throws -> Int {
-        let l = try loaded()
+        let l = loaded()
         return Int(try withSingleUuid(uuid) { l.uuidVersion($0, layout.rawValue) })
     }
 
@@ -496,7 +496,7 @@ public enum UuidGenerator {
     /// validate one of those use ``isRfc(_:version:layout:)`` with `layout: .sqlServer`, which
     /// checks the SQL layout's version and variant together.
     public static func variant(_ uuid: UUID) throws -> UuidVariant {
-        let l = try loaded()
+        let l = loaded()
         return variantOf(withBytes(of: uuid) { l.uuidVariant($0) })
     }
 
@@ -504,7 +504,7 @@ public enum UuidGenerator {
     /// ``variant(_:)``). Throws ``Error/bufferNotWholeUUIDs(count:)`` unless `uuid` is exactly
     /// 16 bytes.
     public static func variant(bytes uuid: UnsafeRawBufferPointer) throws -> UuidVariant {
-        let l = try loaded()
+        let l = loaded()
         return variantOf(try withSingleUuid(uuid) { l.uuidVariant($0) })
     }
 
@@ -520,7 +520,7 @@ public enum UuidGenerator {
     /// they happen to hold. There is deliberately no layout-agnostic form: the caller holding
     /// the value knows its order, and only the layout it names says which bytes to read.
     public static func isRfc(_ uuid: UUID, version: Int, layout: UuidLayout = .rfc9562) throws -> Bool {
-        let l = try loaded()
+        let l = loaded()
         guard let code = versionCode(version) else { return false }
         return withBytes(of: uuid) { l.uuidIsRfc($0, code, layout.rawValue) } != 0
     }
@@ -532,7 +532,7 @@ public enum UuidGenerator {
     public static func isRfc(
         bytes uuid: UnsafeRawBufferPointer, version: Int, layout: UuidLayout = .rfc9562
     ) throws -> Bool {
-        let l = try loaded()
+        let l = loaded()
         let answer = try withSingleUuid(uuid) { p in versionCode(version).map { l.uuidIsRfc(p, $0, layout.rawValue) } }
         return answer.map { $0 != 0 } ?? false
     }
@@ -544,7 +544,7 @@ public enum UuidGenerator {
     /// that layout; the variant is checked in either layout (see ``version(_:layout:)`` for why
     /// the layout is the caller's to track).
     public static func getTimestamp(_ uuid: UUID, layout: UuidLayout) throws -> Date? {
-        let l = try loaded()
+        let l = loaded()
         var millis: UInt64 = 0
         let version = withBytes(of: uuid) { l.getTimestamp($0, layout.rawValue, &millis) }
         return version == 0 ? nil : date(unixMillis: millis)
@@ -554,7 +554,7 @@ public enum UuidGenerator {
     /// value's bytes directly. Meaningful only for a genuine version 7 UUID in that
     /// layout; ``isRfc(_:version:layout:)`` is the check.
     public static func v7UnixMillis(_ uuid: UUID, layout: UuidLayout) throws -> UInt64 {
-        let l = try loaded()
+        let l = loaded()
         return withBytes(of: uuid) { l.v7UnixMillisIn($0, layout.rawValue) }
     }
 
@@ -594,10 +594,9 @@ public enum UuidGenerator {
     /// The version of the native `libhyperuuid` linked into this executable, as
     /// `major.minor.patch` — the library's own answer (`hyperuuid_version`), not this
     /// package's tag — so a caller can prove the two agree before minting the first UUID
-    /// and name the mismatch when they don't. Never throws in practice; `throws` is kept
-    /// from when macOS and Windows loaded a shared library at run time.
-    public static func nativeVersion() throws -> String {
-        let packed = try loaded().version()
+    /// and name the mismatch when they don't.
+    public static func nativeVersion() -> String {
+        let packed = loaded().version()
         return "\(packed >> 16).\(packed >> 8 & 0xFF).\(packed & 0xFF)"
     }
 }

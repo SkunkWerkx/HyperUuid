@@ -56,7 +56,7 @@ gets `BufferError` instead of freeing the memory underneath. A thread writing it
 time through a `memoryview`, which takes no lock, races on its contents and nothing more: the
 bytes are whichever write landed last. No call releases the GIL on a GIL build: each is nanoseconds to microseconds
 of pure Rust, less than the handoff would cost. CI runs the whole suite on free-threaded 3.15
-on every platform, and installs each wheel on its own interpreters before it is published.
+on linux-x64, linux-arm64, osx-arm64, win-x64 and win-arm64, and installs each wheel on its own interpreters before it is published.
 
 The package is typed: it ships `py.typed` and a stub for the extension module, so mypy and
 pyright see `uuid.UUID` and `datetime.datetime` rather than `Any`.
@@ -200,7 +200,6 @@ raw-bytes form; wrap 16 bytes in `uuid.UUID(bytes=...)` first, exactly as they a
 
 `hyperuuid.native_version()` names the core actually loaded, `"major.minor.patch"`, decoded
 from the same packed `hyperuuid_version` export every other binding probes.
-`hyperuuid.BACKEND` is always `"native"`, the PyO3 extension.
 
 ## Binding to SQL Server
 
@@ -235,7 +234,7 @@ hyperuuid.new_v7()
 hyperuuid.new_v5(uuid.NAMESPACE_DNS, "example.com")
 ```
 
-It is the native backend (`hyperuuid.BACKEND == "native"`), with the same API and no
+It is the same native extension, with the same API and no
 JavaScript bridge: randomness comes from Emscripten's `getentropy` (the browser's
 `crypto.getRandomValues`), and the clock is `Date.now()`, so v7 timestamps have
 millisecond resolution there, as everywhere. CI installs the wheel into Pyodide and runs this
@@ -258,7 +257,7 @@ hyperuuid.fill_v7(buf)                      # 1000 v7 UUIDs, one timestamp captu
 first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifier parameter
 ```
 
-**This is roughly 35x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
+**This is about 36x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
 
 | path | µs / 1000 UUIDs |
 | --- | ---: |
@@ -266,7 +265,7 @@ first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifi
 | `fill_v7(bytearray)` | **3.7** |
 | `fill_v7`, then build `uuid.UUID` objects in Python | 888 |
 
-`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the Go (3.6 µs) and C# (3.7 µs) bindings hit for identical work.
+`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the Go (3.7 µs) and C# (3.8 µs) bindings hit for identical work.
 
 The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is more than six times as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
 

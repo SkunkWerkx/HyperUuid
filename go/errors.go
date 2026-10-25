@@ -2,12 +2,6 @@ package hyperuuid
 
 import "errors"
 
-// ErrNativeUnavailable is never returned: the core is linked into the binary, so there is no
-// load that can fail.
-//
-// Deprecated: kept only so code that tests for it keeps compiling.
-var ErrNativeUnavailable = errors.New("hyperuuid: native library unavailable")
-
 // ErrRandomSource is returned when the native random source fails (return code 1 from
 // uuid_new_v4, uuid_new_v7 or uuid_new_v7_batch). Version 5 draws no
 // entropy, so NewV5 never returns it.

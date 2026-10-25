@@ -200,7 +200,7 @@ fn nil_and_max_round_trip_through_display_and_from_str() {
 #[test]
 fn from_str_rejects_a_misplaced_hyphen_instead_of_panicking() {
     // 36 bytes with the four fixed hyphens in place, plus a fifth that shifts the last
-    // group's digits; the old parser read one byte past the end of this string.
+    // group's digits; a parser that trusts the hyphen positions reads one byte past its end.
     for text in [
         "00000000-0000-0000-0000--00000000000",
         "-0000000-0000-0000-0000-000000000000",

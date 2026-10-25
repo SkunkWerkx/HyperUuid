@@ -114,9 +114,9 @@ def test_an_empty_batch_or_fill_still_checks_its_timestamp():
 @pytest.mark.parametrize("batch", [hyperuuid.new_v7_batch])
 @pytest.mark.parametrize("count", [-1, 2**32, 2**32 + 1, 2**60 + 1, 2**64])
 def test_a_batch_count_out_of_range_is_refused_not_narrowed(batch, count):
-    """The core's batch parameter is a u32. The extension used to take a usize and narrow it: 2**32
-    + 1 minted one UUID and 2**60 + 1 (whose byte length wraps to 16) did too, each returned as
-    if it were the batch that was asked for.
+    """The core's batch parameter is a u32. Taking a usize and narrowing it would mint one UUID for
+    2**32 + 1, and one for 2**60 + 1 (whose byte length wraps to 16), each returned as if it were
+    the batch that was asked for.
     """
     with pytest.raises(ValueError):
         batch(count, 1_645_557_742_000)

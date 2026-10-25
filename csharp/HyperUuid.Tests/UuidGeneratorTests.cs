@@ -289,7 +289,7 @@ public sealed class UuidGeneratorTests
 	{
 		// A race on the buffer's contents is the caller's to have, and must cost them the bytes,
 		// not the process. Windows' ProcessPrng fail-fasts the process when another thread writes
-		// the memory it is filling, which the core's batch fill used to hand it directly.
+		// the memory it is filling, so the core's batch fill does not hand it the caller's memory.
 		var buffer = new byte[16 * 100_000];
 		using var done = new ManualResetEventSlim();
 		var writers = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>

@@ -15,13 +15,6 @@ module HyperUuid
   # A Ruby gem's files are plain files on disk once installed, so native/{rid}/{lib} can be
   # dlopen'd directly, with no extraction step.
   module Runtime
-    # The package's two exceptions live on HyperUuid itself (errors.rb). These are the names
-    # they had through 0.3.0, kept as aliases of the very same classes so a
-    # `rescue HyperUuid::Runtime::TimestampOutOfRangeError` written against an earlier
-    # release still catches.
-    RandomSourceError = HyperUuid::RandomSourceError
-    TimestampOutOfRangeError = HyperUuid::TimestampOutOfRangeError
-
     # One copy of the out-of-range message for the Fiddle backend and for the doors' own
     # range check in hyperuuid.rb; the Magnus extension (rust/src/ruby_ext.rs) carries the
     # same text, and spec/native_backend_spec.rb pins that the two agree.

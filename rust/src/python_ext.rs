@@ -195,8 +195,8 @@ impl<'py> FromPyObject<'_, 'py> for Name<'py> {
 fn new_v5(py: Python<'_>, namespace: Bound<'_, PyAny>, name: Name<'_>) -> PyResult<Py<PyAny>> {
     let namespace = Uuid::from_bytes(uuid_bytes(&namespace)?);
     // to_str() borrows the str's own cached UTF-8 with no copy. It is in the limited API from
-    // 3.10, below this extension's floor (abi3-py311); under the old abi3-py39 build the
-    // only option was to_cow(), which encoded and copied the name on every call.
+    // 3.10, below this extension's floor (abi3-py311), where to_cow() would encode and copy
+    // the name on every call.
     let name_bytes: &[u8] = match &name {
         Name::Str(text) => text.to_str()?.as_bytes(),
         Name::Bytes(bytes) => bytes.as_bytes(),
@@ -239,7 +239,7 @@ fn batch_list<'py>(py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyList>> 
 ///
 /// `count` arrives as a `u32` because that is the core's own batch parameter: taking a
 /// `usize` and narrowing it mints a different number of UUIDs than the caller asked for
-/// (`2**32 + 1` used to come back as one). The allocation is fallible for the same reason
+/// (`2**32 + 1` would come back as one). The allocation is fallible for the same reason
 /// the count is typed — `vec![0; n]` aborts the whole interpreter when the allocator says
 /// no, where an oversized request is the caller's to hear about as a `MemoryError`.
 fn batch_buffer(count: u32) -> PyResult<Vec<u8>> {

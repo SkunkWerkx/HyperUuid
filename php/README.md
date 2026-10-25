@@ -208,7 +208,9 @@ does not see.
 Setting the `HYPERUUID_NATIVE_LIBRARY` environment variable to a path makes the binding load
 that library in place of the bundled one. It is there for running the suite against a core
 built from a checkout of this repository (`.github/scripts/local-core.sh` builds one and
-prints the command), and `nativeVersion()` reports whichever library answered.
+prints the command), and `nativeVersion()` reports whichever library answered. Without it,
+outside CI, the suite refuses to run when the checkout's `rust/` differs from the commit the
+committed libraries were built from.
 
 ## Bulk generation into bytes
 
@@ -310,13 +312,13 @@ is not the fastest thing this repo can produce.
 The same Rust core also links straight into a real Zend extension via
 [`ext-php-rs`](https://ext-php.rs) (`rust/src/php_ext.rs`, gated behind the crate's `php`
 Cargo feature) — the same move Python (PyO3) and Ruby (Magnus) get a shipped native backend
-for. PHP's didn't ship, for two reasons. The mechanism was never the bottleneck here the way
-ctypes and Fiddle were: the `ext-ffi` crossing measured ~105ns, so what a Zend extension
+for. PHP's does not ship, for two reasons. The mechanism is not the bottleneck here the way
+ctypes and Fiddle are: the `ext-ffi` crossing measured ~105ns, so what a Zend extension
 removes is the PHP-level wrapper around the call, not the call. And a Zend extension is
 pinned to one PHP ABI per build — the API number plus NTS or ZTS — with no Windows build on
 stable Rust, so shipping it means a binary per PHP version where the `ext-ffi` package ships
-one library per platform. CI builds the extension on every Linux and macOS leg, load-checks
-it, and uploads and attests the result, so it cannot silently bit-rot; no `phpunit` runs
+one library per platform. CI's weekly and release runs build the extension on linux-x64,
+linux-arm64 and osx-arm64, load-check it, and upload and attest the result, so it cannot silently bit-rot; no `phpunit` runs
 against it and nothing in the Composer package loads it. HyperCast carries the same spike on
 the same terms. If you want to chase the last bit of single-call latency anyway, here's how
 to build and load it yourself:
@@ -357,9 +359,7 @@ to build and load it yourself:
 
 Last measured on linux-arm64, PHP 8.5, `XDEBUG_MODE=off`, same 5-iterations × 1000-revs shape
 as the table above (min of the 5 iteration means). The comparison script that produced these
-numbers (`php/native/bench_compare.php`) was removed when the three language extensions
-consolidated into one Rust crate — these are the last real measurement taken, not something
-you can currently re-run from this repo as-is:
+numbers is not in this repository, so the table cannot be re-run from it as-is:
 
 | Call | `ext-ffi` (`Runtime.php`) | `ext-php-rs` native | Speedup |
 | --- | ---: | ---: | ---: |
@@ -389,7 +389,7 @@ out-of-range error. It is not shipped because of what shipping it costs, not bec
 not work: one module per supported PHP minor (each must match its PHP version exactly), a
 ~4 GB Docker image in CI to build them, and a distribution channel still to choose, for a
 binding whose Composer package is FFI only. If someone asks for it, the recipe below is
-everything that was needed.
+everything it takes.
 
 What it runs on, and the two upstream problems found on the way:
 
@@ -529,10 +529,9 @@ There are two `composer.json` files in this repo: this directory's own (what CI 
 which exists purely because Packagist requires `composer.json` at the top of the git
 repository it's watching, with no subdirectory support — confirmed against Packagist's own
 submission docs, not assumed. Its `autoload` PSR-4 mapping points into `php/src/`. A symlink
-from the root to this file was tried first and rejected: Composer resolves a symlinked
-`composer.json`'s relative autoload paths against where the symlink itself sits, not the real
-file's directory, so `"src/"` silently resolved to a nonexistent `<repo-root>/src/` instead of
-`php/src/`. Keep both in sync by hand when `require`/`autoload` change here.
+from the root to this file would not do: Composer resolves a symlinked `composer.json`'s
+relative autoload paths against where the symlink itself sits, not the real file's directory,
+so `"src/"` would resolve to a nonexistent `<repo-root>/src/` instead of `php/src/`. Keep both in sync by hand when `require`/`autoload` change here.
 
 The native libraries under `src/native/{rid}/` are committed to git, not built by Packagist —
 unlike NuGet/Maven Central/PyPI/crates.io, Packagist has no packing step of its own, so

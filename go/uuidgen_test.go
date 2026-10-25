@@ -27,11 +27,7 @@ func TestNativeVersionMatchesTheCrate(t *testing.T) {
 	// a release bump never leaves a stale literal here. A device run (Android, through
 	// .github/scripts/android_device_test.sh) has no source tree and is handed it.
 	if want := os.Getenv("HYPERUUID_CRATE_VERSION"); want != "" {
-		got, err := NativeVersion()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != want {
+		if got := NativeVersion(); got != want {
 			t.Fatalf("got %q, HYPERUUID_CRATE_VERSION says %q", got, want)
 		}
 		return
@@ -47,11 +43,7 @@ func TestNativeVersionMatchesTheCrate(t *testing.T) {
 				line = strings.TrimRight(line, "\r")
 				if rest, ok := strings.CutPrefix(line, "version = \""); ok {
 					want := rest[:strings.IndexByte(rest, '"')]
-					got, err := NativeVersion()
-					if err != nil {
-						t.Fatal(err)
-					}
-					if got != want {
+					if got := NativeVersion(); got != want {
 						t.Fatalf("got %q, rust/Cargo.toml says %q", got, want)
 					}
 					return

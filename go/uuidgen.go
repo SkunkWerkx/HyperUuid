@@ -164,7 +164,7 @@ func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	}
 	// Delegates to FillV7At: because a []uuid.UUID is already contiguous 16-byte records,
 	// the native call writes straight into result. No scratch byte buffer and no
-	// per-element copy — this used to allocate both and then copy between them.
+	// per-element copy.
 	result := make([]uuid.UUID, count)
 	if err := FillV7At(result, unixMillis); err != nil {
 		return nil, err

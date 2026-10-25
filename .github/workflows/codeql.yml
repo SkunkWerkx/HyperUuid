@@ -18,7 +18,7 @@ name: CodeQL
 # staging commit before tagging (.github/RELEASING.md), and the weekly run keeps the dashboard
 # current between releases. Swift alone is why: under CodeQL's tracer a Swift build of this
 # library costs 7-8½ minutes however it is invoked (`swift build --target` took 7m37s, `swiftc`
-# on the six sources directly 8m27s; untraced, either takes seconds), a fixed cost of the
+# on the library's sources directly 8m27s; untraced, either takes seconds), a fixed cost of the
 # extractor rather than of the code, and not one worth paying on every pull request.
 on:
   schedule:

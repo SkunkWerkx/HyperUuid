@@ -138,23 +138,20 @@ happens at most once per 2²⁶ UUIDs the process mints.
 
 ### Errors
 
-Two exceptions are this gem's own, and both carry the same message on every backend:
+Two exceptions describe a failed call, and both carry the same message on every backend:
 
 - `HyperUuid::TimestampOutOfRangeError` — the time cannot be embedded in a version 7: past
   its 48-bit millisecond field, or negative (a `Time` before the Unix epoch included).
 - `HyperUuid::RandomSourceError` — the operating system's random source failed.
 
-Through 0.3.0 these were reachable only as `HyperUuid::Runtime::TimestampOutOfRangeError` and
-`HyperUuid::Runtime::RandomSourceError`; those names remain, as aliases of the same classes.
-
 Everything else is a caller bug and raises Ruby's own error for it, checked once in the shared
 doors rather than left to whichever backend is live: a `TypeError` for a time that is not a
 `Time`, an Integer or `nil`, for a count that is not an Integer, for a namespace that is not a
 `Uuid` or a name that is not a `String`, for a version passed to `#rfc?` that is not an
-Integer; an `ArgumentError` for a count outside 0..`MAX_V7_BATCH`, for a layout other than
-`:rfc9562`/`:sql_server`, and for a batch too large for the platform to address (a 32-bit
-target such as ruby.wasm). The SQL Server conversions' one refusal (a value of the wrong
-version) comes from the core, as an `ArgumentError` worded the same on both backends.
+Integer; an `ArgumentError` for a count outside 0..`MAX_V7_BATCH` and for a layout other than
+`:rfc9562`/`:sql_server`. Two refusals come from the backend instead, each an `ArgumentError`
+worded the same on both: a batch too large for the platform to address (a 32-bit target such
+as ruby.wasm), and the SQL Server conversions' one refusal, a value of the wrong version.
 
 ### Is the native core there?
 
@@ -194,7 +191,7 @@ bytes = HyperUuid.new_v7_batch_bytes(1000)
 first = bytes[0, 16]        # ready for a BINARY(16) bind parameter
 ```
 
-**About 40x faster than `new_v7_batch`** for a 1000-UUID batch (4.9 µs versus 202 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
+**About 41x faster than `new_v7_batch`** for a 1000-UUID batch (4.9 µs versus 202 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `new_v7_batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
@@ -229,7 +226,7 @@ Batch generation still amortizes per-call cost on both backends — one native c
 | `new_v7` × 1000 (individual) | 3,742 |
 | `new_v7_batch(1000)` | 4,850 (**1.3x**) |
 
-The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on is building a thousand `Uuid` objects — the byte form above does the same native work in 5 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
+The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on (in this table's run; 202 µs in the bytes-versus-objects run above) is building a thousand `Uuid` objects — the byte form above does the same native work in 4.9 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
 
 ## Backends
 
@@ -256,8 +253,8 @@ backend where Ruby threads run the core truly in parallel — each through its o
 buffer, with the core's v7 counter shared and atomic. `spec/hyperuuid_spec.rb`'s "concurrent
 callers" examples run under both.
 
-**Ractors.** Main Ractor only, on every backend: called from another Ractor the doors raise
-`Ractor::UnsafeError`.
+**Ractors.** Main Ractor only, on every backend: called from another Ractor the doors raise a
+`Ractor::Error` (`Ractor::IsolationError`, or `Ractor::UnsafeError`, by door and backend).
 
 ## Verifying provenance
 

@@ -19,11 +19,19 @@
 # run on an emulator or device (.github/scripts/android_build_suite.sh).
 #
 # usage: .github/scripts/local-core.sh    (FORGE=<path> if the SkunkWerkx/.github checkout
-#                                          is not ../.github beside this repository)
+#                                          is not ../.github or ../HyperForge beside this
+#                                          repository)
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-forge="${FORGE:-$repo/../.github}/.github/actions/static-libs/build-static-libs.sh"
+build_static_libs=.github/actions/static-libs/build-static-libs.sh
+if [ -n "${FORGE:-}" ]; then
+  forge="$FORGE/$build_static_libs"
+elif [ -f "$repo/../.github/$build_static_libs" ]; then
+  forge="$repo/../.github/$build_static_libs"
+else
+  forge="$repo/../HyperForge/$build_static_libs"
+fi
 [ -f "$forge" ] || { echo "error: $forge not found; set FORGE to the SkunkWerkx/.github checkout" >&2; exit 1; }
 
 case "$(uname -s)-$(uname -m)" in

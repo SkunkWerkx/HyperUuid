@@ -16,7 +16,8 @@ name: Stage native binaries for release
 # output, verifies every byte of it, and commits it straight back as B with the run, A and
 # the Forge commit recorded as trailers release.yml reads. Scheduled runs are not staged.
 # workflow_dispatch stages from any already-green, release-mode ci.yml run by commit SHA.
-# The body lives in the Forge; the paths and targets come from .github/hyper.json.
+# The body lives in the Forge; its hyper_config.py derives the paths and targets from
+# .github/hyper.json.
 
 on:
   workflow_run:

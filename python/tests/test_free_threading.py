@@ -93,8 +93,9 @@ def test_fill_v7_survives_another_thread_resizing_its_buffer():
 def test_fill_v7_threads_sharing_one_buffer_survive():
     """Three threads filling the same bytearray take turns on its lock rather than writing it
     at once, and a thread writing it meanwhile through a memoryview, which takes no lock, races
-    on its contents and nothing else. On Windows either used to abort the process: the OS random
-    source fail-fasts when the memory it is filling is written underneath it."""
+    on its contents and nothing else. On Windows either would abort the process if the OS random
+    source were handed the buffer itself: it fail-fasts when the memory it is filling is written
+    underneath it."""
     buffer = bytearray(16 * 20_000)
     stop = threading.Event()
 
