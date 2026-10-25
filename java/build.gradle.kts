@@ -17,7 +17,7 @@ group = "io.github.skunkwerkx"
 // matches this line exactly). HYPERUUID_VERSION overrides it for a one-off build; nothing in
 // CI sets it for Gradle, so the Central bundle release.yml packs always carries the
 // committed version.
-version = System.getenv("HYPERUUID_VERSION") ?: "0.9.0"
+version = System.getenv("HYPERUUID_VERSION") ?: "1.0.0"
 
 repositories {
     mavenCentral()
