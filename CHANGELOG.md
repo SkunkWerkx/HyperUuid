@@ -14,6 +14,18 @@ the README's [Platform support](README.md#platform-support) table become a commi
 under Semantic Versioning: breaking or dropping either takes a new major version. Until then
 a minor release can still break both, as 0.9.0 did.
 
+### Changed
+
+- **Rust — `Timestamp::from_unix` returns `Option<Timestamp>`.** Nanoseconds must be
+  below one billion; an invalid subsecond component is rejected rather than
+  creating unequal timestamps for the same instant. Millisecond construction
+  and generated UUID bytes are unchanged.
+
+### Fixed
+
+- **Rust — `ParseUuidError` implements `core::error::Error`**, so ordinary UUID
+  parsing composes with `?` into a boxed standard error, including without `std`.
+
 ### Removed
 
 - **Java — the GraalWasm backend.** The jar no longer carries the core a second time as a

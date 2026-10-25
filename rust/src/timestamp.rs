@@ -6,7 +6,8 @@
 //! vocabulary here instead of passing a raw millisecond count around.
 
 /// Unix-epoch seconds and sub-second nanoseconds, mirroring the `uuid` crate's own
-/// `Timestamp::to_unix` shape.
+/// `Timestamp::to_unix` shape. The nanosecond component is always below one billion;
+/// [`Timestamp::from_unix`] returns `None` for an invalid component.
 ///
 /// This crate's own creation and extraction functions all work in whole milliseconds — the
 /// precision RFC 9562 v7 actually stores — so converting to and from that unit is exact;
@@ -20,13 +21,25 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    /// Builds a [`Timestamp`] from Unix-epoch seconds and sub-second nanoseconds — the same
-    /// two values [`Timestamp::to_unix`] returns, so the pair round-trips.
-    pub const fn from_unix(seconds: u64, subsec_nanos: u32) -> Self {
-        Self {
+    /// Builds a [`Timestamp`] from Unix-epoch seconds and sub-second nanoseconds.
+    /// Returns `None` unless `subsec_nanos` is below one billion; every accepted pair
+    /// round-trips through [`Timestamp::to_unix`] and has one canonical representation.
+    ///
+    /// ```
+    /// use hyperuuid::Timestamp;
+    /// let at = Timestamp::from_unix(1, 1_500).unwrap();
+    /// assert_eq!(at.to_unix(), (1, 1_500));
+    /// assert_eq!(at.to_unix_millis(), 1_000); // sub-millisecond digits are truncated
+    /// assert!(Timestamp::from_unix(1, 1_000_000_000).is_none());
+    /// ```
+    pub const fn from_unix(seconds: u64, subsec_nanos: u32) -> Option<Self> {
+        if subsec_nanos >= 1_000_000_000 {
+            return None;
+        }
+        Some(Self {
             seconds,
             subsec_nanos,
-        }
+        })
     }
 
     /// Returns the Unix-epoch seconds and sub-second nanoseconds this timestamp represents.

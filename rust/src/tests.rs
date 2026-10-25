@@ -157,7 +157,7 @@ fn v7_same_millisecond_batch_is_monotonically_ordered() {
 
 #[test]
 fn a_timestamp_past_u64_millis_is_out_of_range_not_wrapped() {
-    let far = Timestamp::from_unix(u64::MAX / 1000 + 1, 0);
+    let far = Timestamp::from_unix(u64::MAX / 1000 + 1, 0).unwrap();
     assert_eq!(far.to_unix_millis(), u64::MAX);
     assert_eq!(
         v7::new_v7_at(far).unwrap_err(),
@@ -470,7 +470,7 @@ fn get_timestamp_matches_v7_unix_millis() {
 fn timestamp_unix_millis_round_trips_through_from_unix() {
     let ts = Timestamp::from_unix_millis(RFC_TEST_VECTOR_MS);
     let (secs, subsec_nanos) = ts.to_unix();
-    assert_eq!(Timestamp::from_unix(secs, subsec_nanos), ts);
+    assert_eq!(Timestamp::from_unix(secs, subsec_nanos), Some(ts));
     assert_eq!(ts.to_unix_millis(), RFC_TEST_VECTOR_MS);
 }
 
@@ -479,7 +479,7 @@ fn timestamp_to_unix_millis_truncates_sub_millisecond_nanos() {
     // 1500 subsec_nanos is a real, valid sub-millisecond value that isn't itself a whole
     // millisecond — round-tripping through the millisecond-only creation/extraction API
     // truncates it, not rounds it.
-    let ts = Timestamp::from_unix(1, 1_500);
+    let ts = Timestamp::from_unix(1, 1_500).unwrap();
     assert_eq!(ts.to_unix_millis(), 1000);
 }
 
@@ -651,4 +651,29 @@ fn inspection_exports_speak_the_documented_codes() {
     assert_eq!(ffi::uuid_get_timestamp(ncs.as_ptr(), 1, &mut millis), 0);
     assert_eq!(millis, 42, "untouched on 0");
     assert_eq!(get_timestamp(&Uuid::from_bytes(ncs)), None);
+}
+
+#[test]
+fn timestamp_rejects_nanoseconds_outside_a_second() {
+    assert!(Timestamp::from_unix(0, 1_000_000_000).is_none());
+    assert!(Timestamp::from_unix(0, u32::MAX).is_none());
+    assert_eq!(
+        Timestamp::from_unix(u64::MAX, 999_999_999)
+            .unwrap()
+            .to_unix(),
+        (u64::MAX, 999_999_999)
+    );
+    assert_eq!(
+        Timestamp::from_unix(1, 0).unwrap(),
+        Timestamp::from_unix_millis(1000)
+    );
+}
+
+#[test]
+fn parse_errors_compose_with_standard_error_propagation() {
+    fn parse(text: &str) -> Result<Uuid, Box<dyn std::error::Error>> {
+        Ok(text.parse()?)
+    }
+    let error = parse("not-a-uuid").unwrap_err();
+    assert!(error.downcast_ref::<ParseUuidError>().is_some());
 }
