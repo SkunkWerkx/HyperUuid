@@ -7,15 +7,36 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] — 2026-10-25
 
-The next release is **1.0.0**, and with it every package's public API and the platforms in
-the README's [Platform support](README.md#platform-support) table become a commitment
-under Semantic Versioning: breaking or dropping either takes a new major version. Until then
-a minor release can still break both, as 0.9.0 did.
+The first stable release. Every package's public API and the platforms in the README's
+[Platform support](README.md#platform-support) table are now a commitment under Semantic
+Versioning: breaking or dropping either takes a new major version. To get there, what was
+deprecated or never used goes (Java's GraalWasm backend, Go's `ErrNativeUnavailable`, Swift's
+`NativeLibraryError`, Ruby's 0.3.0 aliases, Python's `BACKEND`), reading the core's version
+can no longer fail in Go or Swift, Rust's `Timestamp::from_unix` rejects an invalid
+subsecond, and every shipped file verifies from the release tag alone.
+
+### Added
+
+- **A core freshness check for the Go, Swift and PHP suites.** Outside CI they link the
+  binaries committed under `go/staticlib`, `swift/HyperUuidCore.artifactbundle` and
+  `php/src/native`, which are refreshed only at release, so a suite run after a core change
+  tested the core as it was at the last staging. Each suite now finds the commit that staging
+  was built from and, when `rust/` differs from it, stops (Go and PHP) or fails a named test
+  (Swift) with the command that runs it against the checkout's own core. CI, the local-core
+  switches, a tree holding freshly written binaries and a checkout without the history skip
+  it. `.github/scripts/local-core.sh` finds the Forge at `../HyperForge` when `../.github` is
+  not there. *(repository only)*
 
 ### Changed
 
+- **Swift — `UuidGenerator.nativeVersion()` does not throw.** It declared
+  `throws` and never threw, since the core is linked in. The generators keep `throws`: they
+  report a random source failure or a timestamp out of range. *(Swift)*
+- **Breaking — Go: `NativeVersion()` returns a `string`.** It returned `(string, error)`,
+  and the error was always nil: the core is linked into the binary, so reading its version
+  cannot fail. It now matches HyperCast's and HyperTabular's `NativeVersion()`. *(Go)*
 - **Rust — `Timestamp::from_unix` returns `Option<Timestamp>`.** Nanoseconds must be
   below one billion; an invalid subsecond component is rejected rather than
   creating unequal timestamps for the same instant. Millisecond construction
@@ -57,6 +78,10 @@ a minor release can still break both, as 0.9.0 did.
   the `xcode-27` image, which the .NET 11 iOS and Mac Catalyst workloads require. .NET 11
   reaches GA in November 2026. *(C#)*
 
+- **PHP — no API or behaviour change.** The package reaches 1.0.0 as 0.9.0 left it; its
+  committed libraries are restaged from this release's core, and the release attestation
+  names each one. *(PHP)*
+
 ### Removed
 
 - **Java — the GraalWasm backend.** The jar no longer carries the core a second time as a
@@ -69,11 +94,29 @@ a minor release can still break both, as 0.9.0 did.
   export flags leave `rust/.cargo/config.toml` with it, as do `./gradlew testWasm`,
   `-Pwasm` on the JMH and Native Image smoke tasks, and the GraalWasm rows of the Java
   README's tables. *(Java)*
+- **Go — `ErrNativeUnavailable`.** Deprecated and never returned since the core was linked
+  into every binary. *(Go)*
+- **Swift — `NativeLibraryError`.** Deprecated, case-less and never thrown since the core was
+  linked into the executable on every platform. `UuidGenerator.isAvailable` stays, always
+  `true`, as the probe every binding has under that name. *(Swift)*
+- **Ruby — `HyperUuid::Runtime::RandomSourceError` and
+  `HyperUuid::Runtime::TimestampOutOfRangeError`.** The aliases kept for code written against
+  0.3.0 and earlier; rescue `HyperUuid::RandomSourceError` and
+  `HyperUuid::TimestampOutOfRangeError`. `HyperUuid::BACKEND` stays. *(Ruby)*
+- **Python — `hyperuuid.BACKEND`.** It was always `"native"`, the only backend, so it told a
+  caller nothing; `hyperuuid.native_version()` still names the loaded core. *(Python)*
 
 ### Fixed
 
 - **Rust — `ParseUuidError` implements `core::error::Error`**, so ordinary UUID
   parsing composes with `?` into a boxed standard error, including without `std`. *(Rust)*
+- **Java — `UuidGenerator.isAvailable()` answers `false` when the core cannot load, rather
+  than throwing.** Every door wrapped the load failure (the jar carrying no core for the
+  platform, or native access denied with `--illegal-native-access=deny`) in an
+  `AssertionError`, which the probe did not catch, so it threw instead of answering, and the
+  generating methods threw that wrapper instead of the documented
+  `ExceptionInInitializerError` and then `NoClassDefFoundError`. The load failure now passes
+  through unwrapped, and a test runs a JVM with no core on its classpath to pin both. *(Java)*
 
 ## [0.9.0] — 2026-10-20
 
@@ -1459,11 +1502,15 @@ tag to go out through the repository's own release pipeline rather than by hand.
   input produces a byte-identical v5 UUID on all eight.
 - Go is a deliberate control group and is *slower* per call than `google/uuid`, which is pure
   compiled Go with no FFI boundary. Reported rather than omitted.
+- PHP's per-call cost roughly halved before this release (~570 ns to ~305 ns, where the diet was
+  measured) purely by deleting wrapper — static scratch reused across calls, inputs crossing as
+  zero-copy `const char *` strings — with no change of mechanism, which is what brought it level
+  with a naive inline v4.
 - Known gaps at this release: free-threaded CPython (3.13t/3.14t) unsupported; WebAssembly proven
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.9.0...HEAD
+[1.0.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.6.1...v0.7.0

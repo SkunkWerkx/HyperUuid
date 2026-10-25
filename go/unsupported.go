@@ -5,9 +5,8 @@
 // on anything but WebAssembly, and any platform there is no archive for (the iOS simulator
 // on amd64 among them, which the darwin constraint would otherwise let through). Go has no #error, so
 // the stop is a reference to an identifier that does not exist, named to read as the
-// explanation in the compiler's "undefined:" message. The alternative was a build that
-// compiles and then fails every call at run time, which is what this module used to do on
-// platforms it had no library for.
+// explanation in the compiler's "undefined:" message. The alternative, a build that compiles
+// and then fails every call at run time, would move the failure from the build to run time.
 //
 // Stock Go compiled to WebAssembly cannot use this module: its toolchain links Go code only,
 // with no cgo, so a foreign archive has nowhere to go. TinyGo can — it links with wasm-ld and

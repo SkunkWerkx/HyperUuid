@@ -357,12 +357,6 @@ RSpec.describe HyperUuid do
       expect(HyperUuid::RandomSourceError.superclass).to be(StandardError)
     end
 
-    it "keep their earlier names under Runtime as aliases of the same classes" do
-      expect(HyperUuid::Runtime::TimestampOutOfRangeError).to be(HyperUuid::TimestampOutOfRangeError)
-      expect(HyperUuid::Runtime::RandomSourceError).to be(HyperUuid::RandomSourceError)
-      expect { described_class.new_v7(2**60) }.to raise_error(HyperUuid::Runtime::TimestampOutOfRangeError)
-    end
-
     it "word a random-source failure the same way on every backend" do
       # The failure itself cannot be provoked from here; the message is built in one place
       # per backend, and this is the Ruby one the Fiddle backend raises.

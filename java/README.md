@@ -44,7 +44,7 @@ A batch is bounded by its own output: `count * 16` bytes has to be an array, so 
 
 ## Native access
 
-FFM downcalls are a *restricted* operation: the JDK wants the application, not a library on its classpath, to say that native code may run. Without that the first call still works, and prints a four-line warning naming `java.lang.foreign.SymbolLookup::libraryLookup` and ending "Restricted methods will be blocked in a future release unless native access is enabled". Grant it where the JVM is launched:
+FFM downcalls are a *restricted* operation: the JDK wants the application, not a library on its classpath, to say that native code may run. Without that the first call still works, and prints a four-line warning naming `java.lang.foreign.Linker::downcallHandle` and ending "Restricted methods will be blocked in a future release unless native access is enabled". Grant it where the JVM is launched:
 
 ```sh
 java --enable-native-access=ALL-UNNAMED -cp app.jar:hyperuuid.jar com.example.Main        # on the classpath
@@ -89,13 +89,13 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 | `fillV7(UUID[])` into an existing array | 12.3 µs | 48,088 |
 | `fillV7(byte[])` into an existing buffer | **3.6 µs** | **0** |
 
-The middle two rows are still the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation was never the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it now does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
+The middle two rows are the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation is not the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
 
 A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`.
 
 ### Raw-byte SQL-order transforms
 
-`v7ToSqlOrder(byte[])` and `v7FromSqlOrder(byte[])` apply the same native conversion in place on a caller's 16 bytes, and refuse the same values with the same `IllegalArgumentException`, leaving the bytes untouched. Bytes alone don't say which order they are in, so one case slips through: bytes already in SQL order pass for an RFC version 7 about one time in 16, and `v7ToSqlOrder(byte[])` then converts them again instead of refusing. Track which order a buffer holds. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same cross-check every binding here now makes against the one native implementation.
+`v7ToSqlOrder(byte[])` and `v7FromSqlOrder(byte[])` apply the same native conversion in place on a caller's 16 bytes, and refuse the same values with the same `IllegalArgumentException`, leaving the bytes untouched. Bytes alone don't say which order they are in, so one case slips through: bytes already in SQL order pass for an RFC version 7 about one time in 16, and `v7ToSqlOrder(byte[])` then converts them again instead of refusing. Track which order a buffer holds. Being pure byte-in/byte-out, they're the form a byte-level correctness oracle can be pointed at directly — the same cross-check every binding here makes against the one native implementation.
 
 ## Inspection and layouts
 
@@ -151,7 +151,7 @@ Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`
 | `UuidGenerator.newV5()` | 57.3 ns | 64 | **2.8x faster** |
 | `UuidGenerator.newV7()` | 35.8 ns | 32 | **4.5x faster** |
 
-**Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
+**Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall but the version probe's is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
 The FFM downcall doesn't lose to the JDK's own generator, and the reason is worth stating so the win isn't mistaken for a rigged comparison: `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default. How slow is the machine's business — what its random source costs sets the width of the gap, and a box where that is expensive shows a far larger multiple than this one does. Reported as measured, not adjusted to make the story better.
 
@@ -161,24 +161,24 @@ Batch generation vs. an equivalent loop:
 | --- | ---: | ---: | ---: |
 | v7 | 34.9 µs | 9.3 µs | **3.7x** |
 
-The batch multiplier is modest for the best reason available: the individual calls are cheap, so there is little waste left to amortize. The `byte[]` fill is where the rest goes: 3.6 µs, 9.8x over the loop.
+The batch multiplier is modest for the best reason available: the individual calls are cheap, so there is little waste left to amortize. The `byte[]` fill is where the rest goes: 3.6 µs, 9.7x over the loop.
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 
 ## AOT
 
-Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — the two SQL-order conversions share `(ADDRESS)int` with `uuid_new_v4` and `uuid_variant`, and a signature missing from the file is enough to build clean and crash at runtime; the generators, the inspection and the timestamp exports fill eight more, and the version probe's `()int`, the one downcall not linked critical, is a tenth entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: about 80 ns per `newV7` there (the table below).
+Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — the two SQL-order conversions share `(ADDRESS)int` with `uuid_new_v4` and `uuid_variant`, and a signature missing from the file is enough to build clean and crash at runtime; the generators, the inspection and the timestamp exports fill eight more, and the version probe's `()int`, the one downcall not linked critical, is a tenth entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: 57 ns per `newV7(long)` there (the table below).
 
 A native image still loads the core's shared library at startup, extracted from the jar as on the JVM, rather than linking the static archive into the executable the way C# Native AOT and Go do. Linking it in works on Linux, but only through GraalVM's internal builder API, with separate linker handling for each OS, so it is deliberately not done; the forge's [levers not pulled](https://github.com/SkunkWerkx/.github#levers-deliberately-not-pulled) table has the full reasoning, the proven recipe, and what would change the answer.
 
-**What it costs.** There is no JMH to run in an image, so these rows are a hand loop — warm up, then one million `newV7(long)` calls and three thousand of each fill, best of five rounds — built into a native image with the metadata the jar ships, on linux-x64 (an Intel Core i9-11900H), one session. The first row is the same loop on the JVM, and it lands on the JMH figures above, which is what makes the loop trustworthy for the row JMH cannot produce:
+**What it costs.** There is no JMH to run in an image, so these rows are a hand loop — warm up, then one million `newV7(long)` calls and three thousand of each fill, best of five rounds — built into a native image with the metadata the jar ships, on linux-x64 (an Intel Core i9-11900H), one session. The first row is the same loop on the JVM. Its `newV7(long)` and byte-fill columns land on the JMH figures above, which is what makes the loop trustworthy for the row JMH cannot produce; its `UUID[]` fill does not (7.9 µs against JMH's 12.3 µs), so that column compares the image with this loop on the JVM, not with JMH:
 
 | Runtime, hand loop | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
 | --- | ---: | ---: | ---: |
 | FFM downcall, GraalVM CE 25.4 JVM | 38 ns | 3.5 µs | 7.9 µs |
 | FFM downcall, Native Image | 57 ns | 3.7 µs | 19.5 µs |
 
-A native image costs more than the JVM, up to about twice, which is the ordinary price of an ahead-of-time compiler without a profile. The byte fill is the exception, level in both, because nearly all of it is native work.
+A native image costs more than the JVM, up to about two and a half times, which is the ordinary price of an ahead-of-time compiler without a profile. The byte fill is the exception, level in both, because nearly all of it is native work.
 
 FFM is compiled in the image, not interpreted, because the downcall handles are constants there: they are created from the C signature alone in a class that needs nothing from the library, take the export's address as their first argument, and `META-INF/native-image/.../native-image.properties` in the jar has that class initialized at image build time. A consumer's `native-image` build inherits it with no configuration.
 

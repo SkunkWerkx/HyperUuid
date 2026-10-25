@@ -4,10 +4,9 @@
 //! affects the library itself or its other consumers) and asserts zero allocations across
 //! 1000 calls to each single-item generator.
 //!
-//! The batch functions used to be the one deliberate exception, and this file used to assert
-//! they *did* allocate. They don't any more: each one's single entropy draw now fills the
-//! caller's own output buffer and the deterministic octets get written over the top, so there
-//! is no `count`-sized scratch buffer left to allocate. That's what lets the crate compile
+//! The batch functions are no exception: each one's single entropy draw fills the caller's
+//! own output buffer and the deterministic octets get written over the top, so there is no
+//! `count`-sized scratch buffer to allocate. That's what lets the crate compile
 //! without `alloc` at all, not just without `std` — so the assertions below cover the whole
 //! public API with no exception, and this test is what would catch a scratch buffer creeping
 //! back in on a target where `cargo check` alone would never notice.

@@ -16,6 +16,9 @@
 //! wrong version, does fail here, but only on the fraction of runs where the counter climbs
 //! past the seed before the store lands.
 
+// wasm32-wasip1 has no threads to contend with.
+#![cfg(not(target_os = "wasi"))]
+
 use std::collections::HashSet;
 use std::sync::{Arc, Barrier};
 

@@ -15,7 +15,7 @@ func versionNibble(_ uuid: UUID) -> UInt8 { uuid.uuid.6 >> 4 }
 
 do {
     check(UuidGenerator.isAvailable, "isAvailable")
-    let version = try UuidGenerator.nativeVersion()
+    let version = UuidGenerator.nativeVersion()
     check(version.split(separator: ".").count == 3, "nativeVersion is major.minor.patch, got \(version)")
 
     // v4

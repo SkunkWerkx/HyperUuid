@@ -73,8 +73,9 @@ staticlib = []
 # code either way — every one of them takes its timestamp from the caller, so `now_v7`'s
 # clock was never behind the C ABI, and getrandom reads the OS entropy source the same way
 # with or without std. What std added was its runtime — the unwinder, the backtrace
-# symbolizer and the allocator, ~327 KB of the 347 KB linux-x64 library, none of it
-# reachable from an export. Leaving it out leaves the library depending on libc alone (no
+# symbolizer and the allocator, ~265 KB of the linux-x64 library (291,432 bytes with std
+# against 25,944 without, rustc 1.99.1, measured 2026-10-25), none of it reachable from an
+# export. Leaving it out leaves the library depending on libc alone (no
 # libgcc_s on musl). Every export is proved panic-free (the `no-panic` feature), so the
 # abort handler is never even linked. Off by default, and never for an rlib consumer.
 cdylib = ["staticlib"]
@@ -90,7 +91,7 @@ php = ["dep:ext-php-rs", "std"]
 no-panic = ["dep:no-panic"]
 
 [dev-dependencies]
-criterion = "0.8.2"
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "v5", "v7"] }
 
@@ -119,7 +120,7 @@ required-features = ["no-panic"]
 #
 # Cargo only passes `-C lto` for a cdylib built as the invocation's one crate type, which is
 # what `cargo cdylib` is: the plain linux-x64 library was 356,440 bytes that way while it
-# still carried std (19,448 since), against 432,152 from a manifest that listed `["cdylib", "rlib"]`, at the same speed (v4/v5/v7
+# still carried std (25,944 without it, measured 2026-10-25), against 432,152 from a manifest that listed `["cdylib", "rlib"]`, at the same speed (v4/v5/v7
 # through the C ABI, alternating runs, within noise).
 #
 # strip drops the symbol table and debug info from what is linked, never the exports, and

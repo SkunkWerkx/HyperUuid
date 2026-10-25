@@ -15,7 +15,8 @@ name: Prepare release
 #   3. a human tags B; release.yml refuses a tag whose ci.yml run or committed libraries were
 #      built at a different version, then prepares, and a dispatch publishes (RELEASING.md).
 #
-# The manifests come from .github/hyper.json; the body lives in the Forge.
+# The Forge's hyper_config.py derives the manifest list from .github/hyper.json's crate and
+# project names; the body lives in the Forge.
 
 on:
   workflow_dispatch:

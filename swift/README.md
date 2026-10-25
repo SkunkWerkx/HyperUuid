@@ -248,12 +248,13 @@ and `android_device_test.sh`, which run the same way against a local emulator). 
 In a checkout of this repository, `HYPERUUID_LOCAL_CORE=1 swift test` run from `swift/` links
 the bundle `.github/scripts/local-core.sh` builds from the checkout's core in place of the
 committed one. The root `Package.swift`, the one a dependency resolves, has no such switch.
+Without it, outside CI, `CoreFreshnessTests` fails when the checkout's `rust/` differs from
+the commit the committed bundle was built from.
 
 Every call `throws` only `UuidGenerator.Error` — a native call that ran and was refused
-(`.timestampOutOfRange`, `.randomSourceFailure(code:)`, `.batchTooLarge(count:)`, …). `UuidGenerator.isAvailable` is
-always `true`, and the `NativeLibraryError` type is deprecated and has no cases: both are
-left from when macOS and Windows loaded a shared library, so existing code that checks
-them still compiles.
+(`.timestampOutOfRange`, `.randomSourceFailure(code:)`, `.batchTooLarge(count:)`, …).
+`UuidGenerator.isAvailable` is always `true`, because the core is linked into the executable on
+every platform; it keeps the probe every other binding has under the same name.
 
 On Swift 6.3 with `--build-system swiftbuild` (opt-in there), a package that depends on
 this one fails with `missing required module 'HyperUuidCore'`: that release's Swift Build

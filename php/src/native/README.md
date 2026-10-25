@@ -4,12 +4,13 @@ Populated per-RID with the platform's native `libhyperuuid` build (`native/{rid}
 committed to git — unlike every other registry this repo publishes to (NuGet, Maven Central,
 PyPI, crates.io), Packagist has no packing/build step of its own: whatever's literally in the
 git tree at a tagged commit *is* the published package, so the native binaries have to live
-here for real, not be staged in transiently by CI. Regenerate locally with
-`cargo cdylib` in `rust/` and copy the result in if you need to update one by hand;
-CI's own `build-native` job does the same per-leg during in-repo testing, overwriting whichever
-platform's file matches that leg — harmless, since it's the same build either way. When a
-platform's file is absent the binding falls back to `rust/target/release/`, so a development
-checkout can also just delete the stale one.
+here for real, not be staged in transiently by CI. They are committed by
+`stage-native-binaries.yml` and never edited by hand. CI's own `build-native` job places each
+leg's fresh build here in its own checkout for in-repo testing. To run the suite against a core
+built from your checkout, leave these alone: `.github/scripts/local-core.sh` builds one and
+prints the command, `HYPERUUID_NATIVE_LIBRARY=<that path> vendor/bin/phpunit`, and the binding
+loads the named library in place of the staged one. When a platform's file is absent the
+binding falls back to `rust/target/release/`.
 
 ## Which library loads
 

@@ -13,10 +13,10 @@ plugins {
 // token auth + GPG signing path end to end — that coordinate stays live on Central permanently
 // (no delete), this is where every publish from here on happens).
 group = "io.github.skunkwerkx"
-// CI overrides this (0.1.0-ci.<run_number>) via HYPERUUID_VERSION so repeated manual
-// workflow_dispatch runs during testing don't collide with an already-published version —
-// the real Maven Central publish (release.yml, tag-triggered) never sets that env var, so
-// it always uses this committed version as-is.
+// The committed version, which prepare-release.yml bumps (the Forge's hyper_config.py
+// matches this line exactly). HYPERUUID_VERSION overrides it for a one-off build; nothing in
+// CI sets it for Gradle, so the Central bundle release.yml packs always carries the
+// committed version.
 version = System.getenv("HYPERUUID_VERSION") ?: "0.9.0"
 
 repositories {
@@ -165,8 +165,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 // javadoc's own doclint already flags a missing comment/@param/@return as a WARNING by
-// default (that's how the 47 gaps that used to exist on this class's public surface were
-// found) — -Xwerror promotes those warnings to build-failing errors, so an undocumented
+// default — -Xwerror promotes those warnings to build-failing errors, so an undocumented
 // public member can't ship again silently. Central Portal requires a javadoc jar for every
 // artifact anyway (see mavenPublishing below), so this is enforcing a real publish
 // prerequisite, not just style.

@@ -24,14 +24,9 @@ from operator import index as _index
 
 from . import _native
 
-#: Which backend this process loaded: always ``"native"``, the PyO3 extension that links the
-#: Rust core straight into CPython — the only backend, and the one every published wheel ships.
-BACKEND: str = "native"
-
 _native._bind()
 
 __all__ = [
-    "BACKEND",
     "Layout",
     "Variant",
     "MAX_V7_BATCH",
@@ -451,12 +446,12 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     ``uuid.UUID`` objects are created at any point, which is the entire reason this exists.
 
     **Use this when bytes are what you actually want** — a database parameter, a wire format,
-    a bulk ``COPY``. It is roughly **35x faster** than :func:`new_v7_batch` for 1000 UUIDs
+    a bulk ``COPY``. It is about **36x faster** than :func:`new_v7_batch` for 1000 UUIDs
     (about 3.7 µs versus 132 µs), because :func:`new_v7_batch` spends nearly all its time
     building a thousand ``uuid.UUID`` instances rather than in the native call.
 
     **Do not use it if you need ``uuid.UUID`` objects.** Filling bytes and then constructing
-    UUIDs from them in Python is about *twice as slow* as calling :func:`new_v7_batch`, which
+    UUIDs from them in Python is more than *six times as slow* as calling :func:`new_v7_batch`, which
     builds them through a much faster path inside the extension. Reach for this only when the
     bytes are the destination, not a step on the way to objects.
 

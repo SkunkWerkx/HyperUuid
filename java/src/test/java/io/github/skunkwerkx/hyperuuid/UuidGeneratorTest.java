@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -299,8 +300,8 @@ class UuidGeneratorTest {
         assertRefused(
                 WRONG_VERSION,
                 () -> UuidGenerator.v7ToSqlOrder(UUID.fromString("0c07398f-dc0c-8c84-b30d-017f22e279b0")));
-        // A converted v7 with its 8 put back to the 7 an earlier form of this layout kept is
-        // no longer read as SQL order.
+        // A converted v7 with its 8 put back to a 7 (the layout as 0.8.0 wrote it) is not
+        // read as SQL order.
         UUID v7Sql = UuidGenerator.v7ToSqlOrder(UuidGenerator.newV7(RFC_TEST_VECTOR_MS));
         UUID sevenInsteadOfEight =
                 new UUID((v7Sql.getMostSignificantBits() & ~0xF0L) | 0x70L, v7Sql.getLeastSignificantBits());
@@ -360,7 +361,7 @@ class UuidGeneratorTest {
         // A race on the array's contents is the caller's to have, and must cost them the bytes,
         // not the process. The FFM backend hands the core the caller's own array (critical
         // linking), and Windows' ProcessPrng fail-fasts the process when another thread writes
-        // the memory it is filling, which the core's batch fill used to hand it directly.
+        // the memory it is filling, so the core's batch fill does not hand it the caller's memory.
         byte[] raw = new byte[16 * 20_000];
         AtomicBoolean done = new AtomicBoolean();
         ExecutorService writers = Executors.newFixedThreadPool(2);
@@ -506,6 +507,55 @@ class UuidGeneratorTest {
         // by the same crossing nativeVersion() makes, so the two cannot disagree.
         assertTrue(UuidGenerator.isAvailable());
         assertDoesNotThrow(UuidGenerator::nativeVersion);
+    }
+
+    @Test
+    void withoutACoreTheProbeAnswersFalseAndTheDoorsThrowTheLoadFailure() throws Exception {
+        // A second JVM with the compiled classes but no native library on its classpath: the
+        // README's contract is that isAvailable() answers false there and never throws, and
+        // that a generating method throws ExceptionInInitializerError, then
+        // NoClassDefFoundError, rather than anything wrapped around them.
+        var classes = String.join(
+                java.io.File.pathSeparator,
+                Path.of(UuidGenerator.class
+                                .getProtectionDomain()
+                                .getCodeSource()
+                                .getLocation()
+                                .toURI())
+                        .toString(),
+                Path.of(NoCore.class
+                                .getProtectionDomain()
+                                .getCodeSource()
+                                .getLocation()
+                                .toURI())
+                        .toString());
+        var java = ProcessHandle.current().info().command().orElse("java");
+        var process = new ProcessBuilder(
+                        java, "--enable-native-access=ALL-UNNAMED", "-cp", classes, NoCore.class.getName())
+                .redirectErrorStream(true)
+                .start();
+        var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+        assertTrue(
+                output.contains("doors: java.lang.ExceptionInInitializerError java.lang.NoClassDefFoundError"), output);
+        assertTrue(output.contains("probe: false"), output);
+    }
+
+    /** The second JVM's program: the doors first, so the first one meets the initializer. */
+    static final class NoCore {
+        public static void main(String[] args) {
+            var thrown = new StringBuilder("doors:");
+            for (int i = 0; i < 2; i++) {
+                try {
+                    UuidGenerator.newV4();
+                    thrown.append(" none");
+                } catch (Throwable t) {
+                    thrown.append(' ').append(t.getClass().getName());
+                }
+            }
+            System.out.println(thrown);
+            System.out.println("probe: " + UuidGenerator.isAvailable());
+        }
     }
 
     @Test

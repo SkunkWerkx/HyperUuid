@@ -1,5 +1,5 @@
 //! Criterion micro-benchmarks for the single-item and batch generation paths. Run with
-//! `cargo bench` from `rust/`; HTML reports land in `target/criterion/report/index.html`.
+//! `cargo bench` from `rust/`; Criterion keeps each run's figures under `target/criterion/`.
 //!
 //! This measures *time*, not allocations — see `tests/allocation_free.rs` for the
 //! allocation-count assertions that back this crate's "allocation-free" claim empirically

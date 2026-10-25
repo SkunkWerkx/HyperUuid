@@ -10,7 +10,6 @@ from typing import assert_type
 
 import hyperuuid
 
-assert_type(hyperuuid.BACKEND, str)
 assert_type(hyperuuid.native_version(), str)
 assert_type(hyperuuid.NIL, uuid.UUID)
 

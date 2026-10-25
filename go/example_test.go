@@ -153,9 +153,5 @@ func ExampleNewV7At_outOfRange() {
 
 func ExampleNativeVersion() {
 	// The version the linked core reports about itself, "major.minor.patch".
-	version, err := hyperuuid.NativeVersion()
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("hyperuuid core %s", version)
+	log.Printf("hyperuuid core %s", hyperuuid.NativeVersion())
 }

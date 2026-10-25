@@ -58,15 +58,17 @@ HyperTabular and move together.
 - The Forge is called at master, deliberately unpinned: a Forge merge reaches every consumer
   at once, and breakage it causes is fixed forward. `release.yml` resolves master to one
   commit per run (`find-ci-run`'s `forge_sha`), checks the Forge out at it as `.hyperforge`
-  and runs every job body as a composite action from there (`release-guard`, `pack-gems`,
-  `verify-wheels`, `release-gate`, `publish-*`, `finalize-release`); the inventory records
-  the commit and recovery requires it unchanged. Don't merge Forge changes while a release
+  and runs its composite actions from there (`release-guard`, `pack-gems`, `verify-wheels`,
+  `release-gate`, `publish-nuget`, `publish-rubygems`, `publish-pypi`, `finalize-release`);
+  the five reusable workflows (NuGet, crate and Maven packing; crate and Maven publishing)
+  are called at master and resolved when the run is queued. The inventory records the
+  commit and recovery requires it unchanged. Don't merge Forge changes while a release
   is in flight.
 - `prepare-release.yml`, `stage-native-binaries.yml` and ci.yml's `check-core` are one
   `uses:` each of a Forge reusable workflow; this repo keeps triggers, permissions and gates.
   `.github/hyper.json` is what the Forge knows about this project (crate and project names,
-  the export rule, the ABI probe, the cdylib smoke script; every other name is derived in
-  the Forge's `hyper_config.py`). `.github/scripts/tests` holds the workflow shape contracts
+  the export rule, the cdylib smoke script; the ABI probe is `.github/scripts/abi_probe.c`,
+  the Forge's default path, and every other name is derived in the Forge's `hyper_config.py`). `.github/scripts/tests` holds the workflow shape contracts
   and the probe tests; the generic release-guard tests live in the Forge.
 - The release is two acts at one tag: the tag push packs, attests (build provenance and the
   release attestation over every shipped file) and preserves without uploading; `gh workflow
@@ -82,10 +84,20 @@ HyperTabular and move together.
 
 ## Local loop
 
-Build `cargo cdylib` in `rust/` before running a binding's tests. A `--features python` or
-maturin build overwrites the same `target/release` library, and the other bindings then
-fail on missing symbols until `cargo cdylib` runs again (`rust/README.md`, "Local dev
-trap").
+Build `cargo cdylib` in `rust/` before running a binding's tests. A raw `cargo rustc
+--release --crate-type cdylib --features python` (or `ruby`, or `php`) in `rust/` overwrites
+the same `target/release` library, and the other bindings then fail on missing symbols until
+`cargo cdylib` runs again; maturin in `python/` and the `ruby-ext`/`php-ext` aliases build
+elsewhere and don't (`rust/README.md`, "Local dev trap").
+
+Go, Swift and PHP otherwise run against the committed binaries, which are refreshed only at
+release and so lag every core change: build the checkout's own with
+`.github/scripts/local-core.sh`, then `go test -tags hyperuuid_local ./...`,
+`HYPERUUID_LOCAL_CORE=1 swift test`, and PHP with `HYPERUUID_NATIVE_LIBRARY`. CI builds each
+leg's core before its suites, so it never sees the committed ones. Outside CI the three
+suites refuse to run against a committed core older than `rust/` (the core freshness check),
+and `local-core.sh` finds `../HyperForge` on its own. Go caches a pass from before a core
+change; `-count=1` runs the check again.
 
 ## Working with the owner
 

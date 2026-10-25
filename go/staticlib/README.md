@@ -21,8 +21,10 @@ cannot be one archive per libc; of the two builds, the musl one is the one that 
 library for nothing both do not have. CI runs the suite against it on Debian and on Alpine.
 
 The two Windows archives are the MSVC builds (`x86_64-pc-windows-msvc`,
-`aarch64-pc-windows-msvc`), byte for byte the ones the C# package links under Native AOT,
-renamed to the `libhyperuuid.a` every cgo line here uses. MinGW's linker reads MSVC's COFF
+`aarch64-pc-windows-msvc`), the same build the C# package links under Native AOT with any
+runtime-helper objects left out (Go's MinGW toolchain supplies its own, and `build-static-libs.sh`
+has why two copies of them fail the link), renamed to the `libhyperuuid.a` every cgo line here
+uses. MinGW's linker reads MSVC's COFF
 objects, and the archive carries its own import stub for `ProcessPrng`, Windows' entropy
 source, so nothing else goes on the link line.
 
@@ -45,26 +47,25 @@ asks for symbols under names Bionic does not promise.
 
 ## Building them yourself
 
-`go test` needs the archive for your platform. On a checkout that has none — a branch that
-has not been staged, or after changing `rust/` — build it with the forge's script, from a
-checkout of [SkunkWerkx/.github](https://github.com/SkunkWerkx/.github) beside this
-repository:
+These archives are committed by `stage-native-binaries.yml` and never edited by hand. To run
+the suite against a core built from your checkout instead (a branch that changes `rust/`, say),
+build it with `.github/scripts/local-core.sh` (`FORGE=<path>` names the forge checkout when it
+is not `../.github`) and link it with the `hyperuuid_local` tag:
 
 ```shell
-../.github/.github/actions/static-libs/build-static-libs.sh hyperuuid HyperUuid . x86_64-unknown-linux-musl
+.github/scripts/local-core.sh
+cd go && go test -tags hyperuuid_local ./...
 ```
 
-Name the Rust target for your platform (`aarch64-unknown-linux-musl`, `x86_64-apple-darwin`,
-`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`,
-`aarch64-linux-android`, `x86_64-linux-android`, or `wasm32-wasip1` for TinyGo); with no
-target
-it builds every one. A static library is compiled
-and never linked, so all of them cross-compile from any machine with `rustup`.
+The script runs the forge's `build-static-libs.sh` (from a checkout of
+[SkunkWerkx/.github](https://github.com/SkunkWerkx/.github) beside this repository) for your
+host's target only, and writes under `rust/target/local-core/`, which git ignores, so nothing
+here changes. `ANDROID=1` adds the two Android archives. A static library is compiled and never
+linked, so every target cross-compiles from any machine with `rustup`.
 
 Each archive is the crate's one object, with everything it uses from Rust's `core` already
-inside it — plus, on Windows, the few runtime-helper objects and the import stub a linker
-would have pulled, since MSVC supplies no 128-bit helpers — built without the standard library so that HyperUuid's and HyperCast's can both
-be linked into one program.
+inside it (plus, on Windows, the import stubs for the system random source), built without
+the standard library so that HyperUuid's and HyperCast's can both be linked into one program.
 
 ## Verifying provenance
 

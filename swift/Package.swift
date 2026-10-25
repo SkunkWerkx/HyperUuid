@@ -63,7 +63,11 @@ let package = Package(
         ),
         .testTarget(
             name: "HyperUuidTests",
-            dependencies: ["HyperUuid"]
+            dependencies: ["HyperUuid"],
+            // Compiles out the core freshness check, which asks whether the committed bundle is
+            // older than the checkout's rust/: the local bundle is built from it.
+            swiftSettings: Context.environment["HYPERUUID_LOCAL_CORE"] == nil
+                ? [] : [.define("HYPERUUID_LOCAL_CORE")]
         ),
     ] + appleCoreTargets
 )

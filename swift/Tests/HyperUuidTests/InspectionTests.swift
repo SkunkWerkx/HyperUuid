@@ -158,7 +158,7 @@ final class InspectionTests: XCTestCase {
         assertBatchTooLarge(tooMany) { _ = try UuidGenerator.newV7Batch(count: tooMany) }
 
         var one = [UInt8](repeating: 0, count: 16)
-        try one.withUnsafeMutableBytes { storage in
+        one.withUnsafeMutableBytes { storage in
             let claimed = UnsafeMutableRawBufferPointer(start: storage.baseAddress, count: tooMany * 16)
             assertBatchTooLarge(tooMany) { try UuidGenerator.fillV7(into: claimed, unixMillis: ms) }
             assertBatchTooLarge(tooMany) { try UuidGenerator.fillV7(into: claimed) }

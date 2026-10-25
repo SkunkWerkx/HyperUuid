@@ -23,7 +23,7 @@ go/staticlib/*/*.a
 # Gradle / Java
 **/.gradle/
 **/build/
-# Same story as csharp/HyperUuid/runtimes/ above: CI (build-nuget.yml's pack-maven job)
+# Same story as csharp/HyperUuid/runtimes/ above: CI (the Forge's hyper-pack-maven.yml)
 # bundles all platforms' natives here at pack time; regenerable locally via
 # `cargo cdylib` for local dev/test.
 java/src/main/resources/native/
@@ -109,8 +109,7 @@ python/src/hyperuuid/_native.cpython-*t-*.so
 python/src/hyperuuid/_native.pyd
 python/src/hyperuuid/_native.*.pyd
 # Staged Magnus extension for local dev/test (built from the core crate's `ruby` feature —
-# `cargo ruby` — since the satellite crate that used to live in
-# ruby/native/ was folded into it; platform gems carry the real artifact).
+# `cargo ruby`; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so
 ruby/lib/hyperuuid_native.bundle
 # The per-ABI staging the fat platform gem is packed from (lib/hyperuuid/<minor>/), written

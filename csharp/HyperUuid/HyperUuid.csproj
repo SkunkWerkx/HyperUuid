@@ -76,7 +76,7 @@
     <None Include="../../LICENSE" Pack="true" PackagePath="\" />
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
          .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time.
-         No runtimes/browser-wasm/lib/ asset needed anymore: one compiled assembly now covers
+         No runtimes/browser-wasm/lib/ asset is needed: one compiled assembly covers
          every platform (see UuidGenerator.cs's own remarks), so NuGet's plain lib/net11.0/
          fallback already is the browser-wasm build. Only
          runtimes/browser-wasm/nativeassets/net11.0/ (the Rust core's wasm32-unknown-emscripten

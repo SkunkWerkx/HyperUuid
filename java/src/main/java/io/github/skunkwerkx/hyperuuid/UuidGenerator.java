@@ -270,8 +270,15 @@ public final class UuidGenerator {
      */
     public static String nativeVersion() {
         int packed;
+        // Every door evaluates Core's address and Downcalls' handle inside its try, so a core
+        // that failed to load arrives here as Core's or Downcalls' initialization error
+        // (ExceptionInInitializerError, then NoClassDefFoundError). Those are rethrown as they
+        // are, never wrapped: they are what isAvailable() answers false for and what the
+        // generating methods document. Only the downcall itself is unexpected.
         try {
             packed = (int) Downcalls.VERSION.invokeExact(Core.HYPERUUID_VERSION);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: hyperuuid_version downcall failed unexpectedly", t);
         }
@@ -321,6 +328,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.NEW.invokeExact(Core.UUID_NEW_V4, out);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v4 downcall failed unexpectedly", t);
         }
@@ -373,6 +382,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.NEW_NAMED.invokeExact(Core.UUID_NEW_V5, nsSeg, nameSeg, name.length, out);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v5 downcall failed unexpectedly", t);
         }
@@ -405,6 +416,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.NEW_AT.invokeExact(Core.UUID_NEW_V7, unixMillis, out);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v7 downcall failed unexpectedly", t);
         }
@@ -444,6 +457,8 @@ public final class UuidGenerator {
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             return (long) Downcalls.UNIX_MILLIS.invokeExact(Core.UUID_V7_UNIX_MILLIS, seg);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_unix_millis downcall failed unexpectedly", t);
         }
@@ -503,6 +518,8 @@ public final class UuidGenerator {
         int version;
         try {
             version = (int) Downcalls.GET_TIMESTAMP.invokeExact(Core.UUID_GET_TIMESTAMP, seg, code, scratch.out);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_get_timestamp downcall failed unexpectedly", t);
         }
@@ -572,6 +589,8 @@ public final class UuidGenerator {
     private static int versionNative(MemorySegment seg, int layout) {
         try {
             return (int) Downcalls.VERSION_IN.invokeExact(Core.UUID_VERSION, seg, layout);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_version downcall failed unexpectedly", t);
         }
@@ -580,6 +599,8 @@ public final class UuidGenerator {
     private static int variantNative(MemorySegment seg) {
         try {
             return (int) Downcalls.VARIANT.invokeExact(Core.UUID_VARIANT, seg);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_variant downcall failed unexpectedly", t);
         }
@@ -588,6 +609,8 @@ public final class UuidGenerator {
     private static boolean isRfcNative(MemorySegment seg, int version, int layout) {
         try {
             return (int) Downcalls.IS_RFC.invokeExact(Core.UUID_IS_RFC, seg, version, layout) != 0;
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_is_rfc downcall failed unexpectedly", t);
         }
@@ -597,6 +620,8 @@ public final class UuidGenerator {
         MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
         try {
             return (long) Downcalls.UNIX_MILLIS_IN.invokeExact(Core.UUID_V7_UNIX_MILLIS_IN, seg, layout);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_unix_millis_in downcall failed unexpectedly", t);
         }
@@ -818,6 +843,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.REORDER.invokeExact(Core.UUID_V7_TO_SQL_ORDER, seg);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_to_sql_order downcall failed unexpectedly", t);
         }
@@ -841,6 +868,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.REORDER.invokeExact(Core.UUID_V7_TO_RFC_ORDER, seg);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
         }
@@ -874,6 +903,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.NEW_BATCH.invokeExact(Core.UUID_NEW_V7_BATCH, unixMillis, count, out);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
         }
@@ -916,6 +947,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.NEW_BATCH.invokeExact(export, unixMillis, count, out);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
         }
@@ -1099,6 +1132,8 @@ public final class UuidGenerator {
         int rc;
         try {
             rc = (int) Downcalls.REORDER.invokeExact(export, seg);
+        } catch (LinkageError unloaded) {
+            throw unloaded;
         } catch (Throwable t) {
             throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
         }

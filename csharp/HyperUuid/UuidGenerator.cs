@@ -33,7 +33,7 @@ namespace HyperUuid;
 /// specifically knows how
 /// to constant-fold per publish target (the same mechanism the BCL itself uses for
 /// platform-conditional code), so a trimmed/published build still only ships the branch that
-/// platform can actually reach, same as the old two-build split did — see
+/// platform can actually reach — see
 /// <c>HyperUuid.csproj</c>'s packaging targets for exactly how the single build lands in the
 /// NuGet package. Proven working end-to-end in a real headless-browser session — see this
 /// package's own README's WebAssembly (Blazor) section. WebAssembly is .NET 11 and later only.

@@ -18,9 +18,8 @@ func LoadError() error {
 
 // NativeVersion reports the linked core's own version as "major.minor.patch" — read from the
 // core itself, not from this module — so a deployment can confirm which build of the archive
-// went into the binary. The error is always nil; it stays in the signature so code written
-// against the load probe keeps compiling.
-func NativeVersion() (string, error) {
+// went into the binary. It cannot fail.
+func NativeVersion() string {
 	v := packedVersion()
-	return fmt.Sprintf("%d.%d.%d", v>>16, (v>>8)&0xFF, v&0xFF), nil
+	return fmt.Sprintf("%d.%d.%d", v>>16, (v>>8)&0xFF, v&0xFF)
 }

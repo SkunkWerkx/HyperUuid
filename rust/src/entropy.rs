@@ -245,8 +245,8 @@ mod pool {
         let mine = if mapped == libc::MAP_FAILED {
             UNAVAILABLE
         // Advice that does not exist has to be refused before advice that does can be believed:
-        // qemu's user-mode emulation used to answer every `madvise` with success and act on
-        // none, which would leave a forked child holding its parent's keystream. BoringSSL
+        // a qemu user-mode emulation that answers every `madvise` with success and acts on
+        // none would leave a forked child holding its parent's keystream. BoringSSL
         // makes the same check for the same reason.
         // SAFETY: advice on the mapping just made, of exactly its length.
         } else if unsafe { libc::madvise(mapped, POOL_BYTES, -1) } == 0

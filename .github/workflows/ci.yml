@@ -92,22 +92,11 @@ jobs:
       id-token: write
       attestations: write
     with:
-      static_libs_artifact: false
-      swift_static_tests: false
-      android_shared_artifact: false
-      php_extension_schedule: parallel
       # pr: every leg and suite, nothing only a release needs (see the forge's README).
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       project: HyperUuid
       crate: hyperuuid
       pure_env: HYPERUUID_PURE
-      # Four more static libraries in the static-libs artifact: iOS, the iOS simulator and
-      # Mac Catalyst (test-apple-mobile, below, is what links and runs them).
-      apple_mobile: true
-      # Android: the shared library for android-arm64 and android-x64 (what a C# app on
-      # CoreCLR loads out of its APK), and in static-libs their archives for C#'s Native AOT,
-      # Go's go/staticlib and Swift's bundle. test-android, below, is what runs them.
-      android: true
       # Turns the package's Native AOT claim into a per-platform receipt: publish on all five
       # legs, fail on any ILxxxx/AOTxxxx trim diagnostic, then actually run the produced
       # binary and require exit 0. The log uploads as aot-report-{rid}. The smoke test
@@ -117,15 +106,18 @@ jobs:
       # The forge's ruby_version default (4.0, the current release) is the primary ABI; this
       # adds a second Magnus build+suite against 3.4 so each platform gem can ship both. A
       # Magnus extension is bound to one Ruby minor — unlike PyO3's abi3 wheels, which is why
-      # Python needs no equivalent input. Keep this in step with ruby/Rakefile's ABIS and
-      # release.yml's own ABIS list; the rake task aborts naming the missing file if they
-      # drift. Ruby 3.4 goes EOL 2028-03-31 — clear this line then and 3.4 consumers fall
-      # back to the universal Fiddle gem, which is exactly what it's there for.
+      # Python needs no equivalent input. Keep this in step with ruby/Rakefile's ABIS, the
+      # Forge's ruby.abis default (RUBY_ABIS in hyper_config.py, which its pack-gems action
+      # packs) and hyper-build-wasm.yml's ruby_wasm_abis default; `rake native:gem` aborts
+      # naming the missing file if they drift. Ruby 3.4 goes EOL 2028-03-31 — clear this line
+      # then and 3.4 consumers fall back to the universal Fiddle gem, which is exactly what
+      # it's there for.
       ruby_compat_version: "3.4"
       # attest_native defaults to true in the forge — each native library gets SLSA
       # provenance tying it to this run and commit. It matters here specifically because the
-      # Rust build is deterministic locally but NOT bit-reproducible across machines (a local
-      # rustc build and a runner's differ in hash and size), so rebuild-and-compare isn't a
+      # Rust build is deterministic for one toolchain and build image but NOT bit-reproducible
+      # across images (with the same rustc and linker, a local build and a runner's differ in
+      # hash and size; csharp/README.md has the measurement), so rebuild-and-compare isn't a
       # check a consumer can actually perform. The permissions block above is what makes it
       # work; without those scopes the step fails rather than silently skipping.
       # .NET 11 is HyperUuid's floor, on every platform including Blazor WebAssembly; the forge
@@ -137,8 +129,8 @@ jobs:
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
 
-  # C#/NuGet's WASM support isn't optional or spike-only anymore (needed for real, for Norse
-  # Architecture), so it's built on every PR too, not just at release time.
+  # C#/NuGet's WASM support is a shipped surface (Norse Architecture needs it), so it's
+  # built on every PR, not just at release time.
   build-wasm:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
     # Handed down for the same reason as build-native's: the ruby.wasm job attests the
@@ -189,7 +181,7 @@ jobs:
   # (hyper-check-core.yml): no_std and no-panic proofs, the C ABI held to rust/src/ffi.rs
   # (.github/scripts/check_exports.py and the cdylib built on every RID, dlopen'd and called by
   # .github/scripts/cdylib_smoke.py), the conformance corpus re-derived by corpus/oracle.py, the
-  # release-guard tests, rustfmt and clippy, the MSRV, cargo-semver-checks against the last
+  # workflow-contract and ABI-probe tests in .github/scripts/tests, rustfmt and clippy, the MSRV, cargo-semver-checks against the last
   # crates.io release, and actionlint over this directory. The two inputs are what is HyperUuid
   # about it: off std there is no OS for `getrandom` to read, so the no_std builds name the custom
   # backend, and clippy also runs the Android configuration, whose entropy path (entropy.rs:
@@ -205,8 +197,8 @@ jobs:
 
 
   # iOS and Mac Catalyst, for the three bindings that reach them. Neither platform loads a
-  # library: the core is linked into the app, from the static libraries build-native's
-  # build-static-libs job cross-compiles and attests (the forge's apple_mobile input), which
+  # library: the core is linked into the app, from the static libraries build-static
+  # cross-compiles and attests (the forge's apple_mobile input), which
   # are the bytes stage-native-binaries.yml commits for Swift and release.yml packs for C#.
   # This job is the one place they are linked into something and run, and it needs what no
   # build-native leg carries: Xcode, a simulator, and the .NET ios and maccatalyst workloads.
@@ -214,11 +206,11 @@ jobs:
   #  * Swift takes them from swift/HyperUuidCoreApple.xcframework, which swift/Package.swift
   #    declares only when it is there. The binding's suite runs on an iOS simulator and as a
   #    Mac Catalyst process, and the package is built for an iOS device. It also runs once
-  #    more for macOS itself, and the root manifest is built: with the XCFramework present
-  #    the manifest declares a second binary target and puts a platform condition on the
-  #    first, which is the package a macOS consumer resolves from a tag and the one shape of
-  #    it build-native's macOS leg, whose tree has no XCFramework yet, never sees.
-  #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/HyperUuid.targets.
+  #    more for macOS itself, and the root manifest is built, both with this run's
+  #    XCFramework over the committed one: with the XCFramework present the manifest declares
+  #    a second binary target and puts a platform condition on the first, which is the
+  #    package a macOS consumer resolves from a tag.
+  #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/net11.0/HyperUuid.targets.
   #    HyperUuid.AppleSmokeTest is the Native AOT smoke test's SmokeTest.Run() as an app: run as a
   #    Mac Catalyst process, installed and launched in the simulator, and built for an iOS
   #    device with signing off. No runner has a device, so that last one is proved as far as
@@ -242,8 +234,8 @@ jobs:
     if: github.event_name != 'pull_request'
     # The .NET 11 RC2 ios and maccatalyst workloads (27.0.x) are built against Xcode 27.0 and
     # refuse any other version; macos-latest (macOS 26) tops out at Xcode 26.6. The xcode-27
-    # image tracks the Xcode 27 major, not a point release: since 2026-10-22 it ships 27.1 as
-    # its default and no longer carries 27.0, so the three dotnet builds below pass
+    # image tracks the Xcode 27 major, not a point release: it ships 27.1 as its default and
+    # does not carry 27.0, so the three dotnet builds below pass
     # ValidateXcodeVersion=false (dotnet/macios, docs/building-apps/build-properties.md) and
     # the smoke tests themselves prove the 27.0 to 27.1 skip is harmless. Drop the property
     # once a .NET 11 workload accepts the image's Xcode.
@@ -416,14 +408,14 @@ jobs:
 
   # Android, in an emulator, for the three bindings that reach it: C#, Go and Swift.
   #
-  # C#: HyperUuid.AndroidSmokeTest, which runs the Native
-  # AOT smoke test's Program.cs from an Activity, against the package as a MAUI app would
-  # take it — packed here from build-native's Android libraries and static-libs archives, and
+  # C#: HyperUuid.AndroidSmokeTest, which runs the Native AOT smoke test's SmokeTest.Run()
+  # from an Activity, against the package as a MAUI app would take it — packed here from
+  # build-android's shared libraries and build-static's static-libs archives, and
   # restored from a local folder, so that what is proven is the .nupkg's own layout (NuGet's
   # runtimes/{rid}/native/ into the APK's lib/{abi}/, and build/net11.0/HyperUuid.targets
   # handing a Native AOT publish its archive), not a project reference's.
   #
-  # Four APKs: CoreCLR (.NET 11's Android runtime; Mono is no longer supported there) and
+  # Four APKs: CoreCLR (.NET 11's Android runtime; Mono is not supported there) and
   # Native AOT, each for android-x64 and android-arm64. The x64 pair runs in an x86_64
   # emulator whose image uses 16 KB pages, as Android 15 devices may, so a library aligned
   # for 4 KB would fail to load there; nothing hosted runs arm64 Android, so the arm64 pair is
@@ -480,22 +472,17 @@ jobs:
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
 
       - name: Install the .NET android workload
         run: dotnet workload install android
 
-      # The restore also reads the .NET 11 daily feed: the android workload this SDK resolves
-      # (37.0.0-rc.1) was built against runtime 11.0.0-rc.1.26428.117, a build newer than the
-      # RC1 on nuget.org, and a Native AOT publish restores that runtime's NativeAOT and
-      # ILCompiler packs by exact version. Drop it once the workload and the SDK agree again
-      # (by .NET 11 GA at the latest).
       - name: Pack HyperUuid into a local feed
         run: |
           set -euo pipefail
           version="0.0.0-android.${{ github.run_id }}"
           echo "HYPERUUID_VERSION=$version" >> "$GITHUB_ENV"
-          echo "HYPERUUID_FEED=$RUNNER_TEMP/feed%3Bhttps://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet11/nuget/v3/index.json" >> "$GITHUB_ENV"
+          echo "HYPERUUID_FEED=$RUNNER_TEMP/feed" >> "$GITHUB_ENV"
           dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o "$RUNNER_TEMP/feed" -p:Version="$version"
           unzip -l "$RUNNER_TEMP/feed/HyperUuid.$version.nupkg" | tee "$RUNNER_TEMP/nupkg.txt"
           for path in runtimes/android-arm64/native/libhyperuuid.so runtimes/android-x64/native/libhyperuuid.so \
