@@ -21,7 +21,7 @@
 #![deny(missing_docs)]
 // The crate publishes the `no-std` and `no-std::no-alloc` categories, and this is what makes
 // both compiler-enforced rather than claimed. Five things reached past `core` and none do
-// now: the two error types implement `core::error::Error` (stable since 1.81), `getrandom`'s
+// now: the error types implement `core::error::Error` (stable since 1.81), `getrandom`'s
 // std-only error impl rides the feature rather than being pinned on, `v7::now_v7` joins the
 // `wasm32` gate it already had (it's the one API needing an OS clock), `v7`'s monotonic
 // counter trades std's `OnceLock` for a lock-free seed fold over `core::sync::atomic` (see

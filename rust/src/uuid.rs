@@ -168,6 +168,9 @@ impl fmt::Debug for Uuid {
 }
 
 /// The input string wasn't a valid 8-4-4-4-12 hyphenated hex UUID.
+///
+/// Implements [`core::error::Error`] so UUID parsing composes with ordinary `?`
+/// error propagation, including into a boxed standard error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseUuidError;
 
@@ -176,6 +179,8 @@ impl fmt::Display for ParseUuidError {
         f.write_str("invalid UUID string; expected 8-4-4-4-12 hyphenated hex")
     }
 }
+
+impl core::error::Error for ParseUuidError {}
 
 impl FromStr for Uuid {
     type Err = ParseUuidError;
