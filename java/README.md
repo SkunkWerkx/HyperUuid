@@ -64,7 +64,7 @@ The honest answer for v5 and v7 is that there's no comparison to make — the JD
 5. **Cross-language consistency.** The same Rust core mints v5/v7 UUIDs for every other binding in this repo — a Java service and a Python or Go service produce byte-identical v5 UUIDs for the same `(namespace, name)`, which no per-language reimplementation can structurally guarantee.
 6. **SQL Server byte ordering.** `UuidGenerator.v7ToSqlOrder(id3)` converts a version 7 UUID to an RFC 9562 version 8 (§5.8, the version for custom layouts) that `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — sorts by creation order. The 8 and the RFC variant sit where SQL Server's text form shows them, and the other 122 bits hold all of the version 7's, so every version 7 converts and `v7FromSqlOrder` gives back the exact original. Both directions throw `IllegalArgumentException` for a value of the wrong version: anything but an RFC 9562 version 7 going in, anything without the layout's 8 and variant coming back. The layout is computed in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. Bind the result as bytes, never with `setObject(UUID)`: [Binding to SQL Server](#binding-to-sql-server) has why and how.
 
-The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar, or the wasm module below on a platform without one) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
+The honest trade-off: this is a native library dependency (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll` bundled per-RID inside the jar) instead of a type that's always sitting in `java.util`. If plain v4 randomness is all you need, `UUID.randomUUID()` is simpler and that's a completely reasonable choice.
 
 ## Destination-buffer fills
 
@@ -198,9 +198,9 @@ gh attestation verify hyperuuid-<version>.jar --repo SkunkWerkx/HyperUuid \
 Its build provenance is the second check. The bundle is assembled by `hyper-pack-maven.yml`,
 a reusable workflow that lives in `SkunkWerkx/.github`, and that is the identity Fulcio
 records as the signer, so `--repo` alone is not enough there: add `--signer-repo`, or use
-`--owner` in place of both. The native libraries and the `wasm32-wasip1` module inside the jar
-carry their own, from the Forge's build workflows at the preparation commit on master, and the
-pack job verifies each of them before it goes into the jar.
+`--owner` in place of both. The native libraries inside the jar carry their own, from the
+Forge's build workflows at the preparation commit on master, and the pack job verifies each of
+them before it goes into the jar.
 
 ```sh
 gh attestation verify hyperuuid-<version>.jar \

@@ -19,8 +19,8 @@ import java.util.stream.Stream;
  * runtime instead.
  *
  * <p>Nothing here rounds to the nearest RID. An architecture that is neither x64 nor arm64,
- * or an OS that is none of Linux, macOS and Windows, resolves to no target — which is what
- * sends {@link UuidGenerator} to the bundled wasm module — because the nearest-looking
+ * or an OS that is none of Linux, macOS and Windows, resolves to no target — and
+ * {@link UuidGenerator} refuses to load, naming the platform — because the nearest-looking
  * library would only fail to load. Linux resolves to one of two families: glibc
  * ({@code linux-x64}) or musl ({@code linux-musl-x64}, Alpine's), told apart by the loader
  * this very process has mapped.

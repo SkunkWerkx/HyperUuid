@@ -491,7 +491,7 @@ class UuidGeneratorTest {
     @Test
     void nativeVersionIsThisBindingsOwn() {
         // The probe decodes the packed major.minor.patch of the core actually loaded — the
-        // platform library or the wasm module — which must be the one this binding is built
+        // platform library — which must be the one this binding is built
         // against: build.gradle.kts hands its own version to the test JVM, and rust/Cargo.toml
         // moves with it.
         // A CI override may append a prerelease tag (a -ci.N suffix, per build.gradle.kts); the

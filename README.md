@@ -162,10 +162,9 @@ and there the flags depend on where the signing workflow lives, not on the regis
 `inventory.json` and the published NuGet package are signed inside this repository's
 `release.yml` and verify with plain `--repo SkunkWerkx/HyperUuid`. The crate, the jar, the
 wheels, the pre-push NuGet package, every native library (the whole story for Go, Swift and
-PHP, which have no package of their own) and the `wasm32-wasip1` module inside the jar are
-signed by reusable workflows in `SkunkWerkx/.github`: the crate and the Maven files at the
-tagged commit, the wheels, the natives and the module at the preparation commit on master they
-were built from. Add `--signer-repo SkunkWerkx/.github` (and `--source-digest <commit>` to pin
+PHP, which have no package of their own) are signed by reusable workflows in
+`SkunkWerkx/.github`: the crate and the Maven files at the tagged commit, the wheels and the
+natives at the preparation commit on master they were built from. Add `--signer-repo SkunkWerkx/.github` (and `--source-digest <commit>` to pin
 either), or `--owner SkunkWerkx` in place of both. Get the
 signer wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which reads like a
 bad signature but is only an identity mismatch. PyPI additionally holds a

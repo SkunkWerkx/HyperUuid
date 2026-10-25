@@ -11,7 +11,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Platform resolution as a pure function of what the JVM reports, so every platform's
  * answer is pinned from whichever one the suite happens to run on — including the ones
- * whose answer is "no native build", which is what routes them to the wasm module.
+ * whose answer is "no native build", which the loader reports as such rather than trying
+ * the nearest-looking library.
  */
 class NativePlatformTest {
 
