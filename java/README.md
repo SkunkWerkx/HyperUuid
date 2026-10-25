@@ -51,7 +51,7 @@ java --enable-native-access=ALL-UNNAMED -cp app.jar:hyperuuid.jar com.example.Ma
 java --enable-native-access=io.github.skunkwerkx.hyperuuid -p mods -m com.example.app     # on the module path
 ```
 
-The jar's manifest carries `Automatic-Module-Name: io.github.skunkwerkx.hyperuuid`, so the module-path form has a stable name to grant rather than one derived from the jar's file name. An executable jar can make the same grant in its own manifest (`Enable-Native-Access: ALL-UNNAMED`). Under `--illegal-native-access=deny` with no grant the library cannot be loaded at all: `isAvailable()` is `false` and the generating methods throw. The wasm path wants the same flag, for Truffle's own native library rather than this one.
+The jar's manifest carries `Automatic-Module-Name: io.github.skunkwerkx.hyperuuid`, so the module-path form has a stable name to grant rather than one derived from the jar's file name. An executable jar can make the same grant in its own manifest (`Enable-Native-Access: ALL-UNNAMED`). Under `--illegal-native-access=deny` with no grant the library cannot be loaded at all: `isAvailable()` is `false` and the generating methods throw.
 
 ## Why not `java.util.UUID`?
 
@@ -161,7 +161,7 @@ Batch generation vs. an equivalent loop:
 | --- | ---: | ---: | ---: |
 | v7 | 34.9 µs | 9.3 µs | **3.7x** |
 
-The batch multiplier is smaller than it was before the carrier rewrite, for the best reason available: the individual calls got faster, so there is less waste left to amortize. The `byte[]` fill is where the rest goes: 3.6 µs, 9.8x over the loop.
+The batch multiplier is modest for the best reason available: the individual calls are cheap, so there is little waste left to amortize. The `byte[]` fill is where the rest goes: 3.6 µs, 9.8x over the loop.
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 

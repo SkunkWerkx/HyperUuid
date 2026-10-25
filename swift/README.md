@@ -184,9 +184,9 @@ Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmar
 | `UuidGenerator.newV5(namespace:name:)` | 122 ns | **11x faster** | 0 |
 | `UuidGenerator.newV7()` | 107 ns | **12x faster** | 0 |
 
-Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the call path is cheap, a direct call to a linked-in symbol — and none of them allocates. Each used to: a heap `[UInt8]` for the out-value and one more per input, neither of which this shape needs. Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
+Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the call path is cheap, a direct call to a linked-in symbol — and none of them allocates: no heap `[UInt8]` for the out-value or for any input. Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
 
-Batch generation amortizes the native call over the whole batch, and no longer pays a per-element construction on top:
+Batch generation amortizes the native call over the whole batch, with no per-element construction on top:
 
 | Call | p50 | Per UUID |
 |---|---:|---:|
@@ -304,8 +304,8 @@ CI builds the smoke executable for WebAssembly on Swift 6.4 and runs it this way
 Chrome on every PR, failing unless it exits 0. An executable that imports Foundation is
 large (tens of MB, most of it ICU data); `-c release` and `wasm-opt` bring that down.
 
-The other direction — running the core as wasm *inside* a native Swift process, the way the
-Java binding does — is not built: no wasm engine ships as a Swift
+The other direction — running the core as wasm *inside* a native Swift process — is not
+built: no wasm engine ships as a Swift
 package with a stable API, and nothing here needs one, since every platform this binding
 supports has the core natively. The root README's
 [WebAssembly section](../README.md#webassembly) tracks both directions for every binding.

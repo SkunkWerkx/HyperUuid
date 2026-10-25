@@ -93,7 +93,7 @@ The honest trade-off: this crate's public surface is much narrower than `uuid`'s
 | --- | ---: | ---: | ---: |
 | v7 | 0.66 ns | 5.94 ns | **8.99x faster** |
 
-The two APIs used to return different shapes — this crate hands back a plain `u64` millisecond count, `uuid`'s `Option<Timestamp>` wraps 100ns Gregorian-epoch ticks — but both are doing the same underlying job (bit-shifting the embedded time back out of 16 bytes already in hand), so timing them head-to-head is fair. This crate wins here for the same reason it's competitive on generation: no allocation, no indirection beyond what the bit math itself needs. This crate now also exposes an `Option<Timestamp>`-returning [`get_timestamp`] matching `uuid`'s own shape (see the Quick start example above) — it's a thin pass-through over the exact `unix_millis` calls benchmarked here, so these numbers describe its cost too, not a separate, unmeasured path.
+The two APIs return different shapes — this crate hands back a plain `u64` millisecond count, `uuid`'s `Option<Timestamp>` wraps 100ns Gregorian-epoch ticks — but both are doing the same underlying job (bit-shifting the embedded time back out of 16 bytes already in hand), so timing them head-to-head is fair. This crate wins here for the same reason it's competitive on generation: no allocation, no indirection beyond what the bit math itself needs. This crate also exposes an `Option<Timestamp>`-returning [`get_timestamp`] matching `uuid`'s own shape (see the Quick start example above) — it's a thin pass-through over the exact `unix_millis` calls benchmarked here, so these numbers describe its cost too, not a separate, unmeasured path.
 
 ### Batch generation vs. an equivalent loop (this crate only — `uuid` has no batch API)
 

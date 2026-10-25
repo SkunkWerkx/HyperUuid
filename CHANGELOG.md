@@ -19,28 +19,8 @@ a minor release can still break both, as 0.9.0 did.
 - **Rust — `Timestamp::from_unix` returns `Option<Timestamp>`.** Nanoseconds must be
   below one billion; an invalid subsecond component is rejected rather than
   creating unequal timestamps for the same instant. Millisecond construction
-  and generated UUID bytes are unchanged.
-
-### Fixed
-
-- **Rust — `ParseUuidError` implements `core::error::Error`**, so ordinary UUID
-  parsing composes with `?` into a boxed standard error, including without `std`.
-
-### Removed
-
-- **Java — the GraalWasm backend.** The jar no longer carries the core a second time as a
-  `wasm32-wasip1` module, and `UuidGenerator.backend()`, `BACKEND_PROPERTY`, the
-  `hyperuuid.backend` property and the fall-back to the module on a platform without a
-  native build are gone: the binding is FFM downcalls into the bundled library, and a JVM
-  on a platform the jar has no build for has no core. It never ran Java in a browser, no
-  consumer asked for it, and replaying the suite through GraalWasm's interpreter on every
-  CI leg had become the longest step in each. `cargo wasm-module` and the `wasm32-wasip1`
-  export flags leave `rust/.cargo/config.toml` with it, as do `./gradlew testWasm`,
-  `-Pwasm` on the JMH and Native Image smoke tasks, and the GraalWasm rows of the Java
-  README's tables. *(Java)*
-
-### Changed
-
+  (`Timestamp::from_unix_millis`) stays infallible, and generated UUID bytes are
+  unchanged. *(Rust)*
 - **C# — `HyperUuid.targets` no longer lists an `EmccExportedFunction` per entry point.** The
   `NativeFileReference` is the whole Blazor WebAssembly wiring: the SDK's generated pinvoke
   table calls each native function by symbol, so the link resolves them against the archive
@@ -76,6 +56,24 @@ a minor release can still break both, as 0.9.0 did.
   The smoke tests follow (`net11.0-ios`, `net11.0-maccatalyst`), and CI's Apple job runs on
   the `xcode-27` image, which the .NET 11 iOS and Mac Catalyst workloads require. .NET 11
   reaches GA in November 2026. *(C#)*
+
+### Removed
+
+- **Java — the GraalWasm backend.** The jar no longer carries the core a second time as a
+  `wasm32-wasip1` module, and `UuidGenerator.backend()`, `BACKEND_PROPERTY`, the
+  `hyperuuid.backend` property and the fall-back to the module on a platform without a
+  native build are gone: the binding is FFM downcalls into the bundled library, and a JVM
+  on a platform the jar has no build for has no core. It never ran Java in a browser, no
+  consumer asked for it, and replaying the suite through GraalWasm's interpreter on every
+  CI leg had become the longest step in each. `cargo wasm-module` and the `wasm32-wasip1`
+  export flags leave `rust/.cargo/config.toml` with it, as do `./gradlew testWasm`,
+  `-Pwasm` on the JMH and Native Image smoke tasks, and the GraalWasm rows of the Java
+  README's tables. *(Java)*
+
+### Fixed
+
+- **Rust — `ParseUuidError` implements `core::error::Error`**, so ordinary UUID
+  parsing composes with `?` into a boxed standard error, including without `std`. *(Rust)*
 
 ## [0.9.0] — 2026-10-20
 

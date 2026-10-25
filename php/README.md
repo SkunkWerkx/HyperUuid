@@ -537,10 +537,9 @@ file's directory, so `"src/"` silently resolved to a nonexistent `<repo-root>/sr
 The native libraries under `src/native/{rid}/` are committed to git, not built by Packagist —
 unlike NuGet/Maven Central/PyPI/crates.io, Packagist has no packing step of its own, so
 whatever's literally in the git tree at a tagged commit is what a real `composer require`
-ships. (Found the hard way: an earlier tag published cleanly but threw a real
-`RuntimeException` on install because the native lib wasn't actually in git — see
-`src/native/README.md`.) Verified for real end to end since the fix: a fresh scratch project's
-`composer require skunkwerkx/hyperuuid` pulling straight from Packagist, generating real UUIDs.
+ships ([`src/native/README.md`](src/native/README.md) has which library loads where).
+Verified end to end: a fresh scratch project's `composer require skunkwerkx/hyperuuid`
+pulling straight from Packagist, generating real UUIDs.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

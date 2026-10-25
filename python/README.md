@@ -272,7 +272,7 @@ The third row is the catch, and it inverts the advice: **if you need `uuid.UUID`
 
 `len(buffer)` must be a multiple of 16, a zero-length buffer writes nothing, and it takes at most `MAX_V7_BATCH` UUIDs' worth ([above](#version-7-batches)). It takes an optional `datetime` or Unix-epoch millisecond timestamp, same as the rest of the API.
 
-One deliberate limitation: these take a `bytearray`, not any writable buffer. Supporting `memoryview`, `mmap` or NumPy arrays needs `Py_buffer`, which entered CPython's stable ABI in 3.11. That is this extension's floor as of this release (`abi3-py311`), so the wider buffer protocol is no longer ruled out; it is simply not built yet.
+One deliberate limitation: these take a `bytearray`, not any writable buffer. Supporting `memoryview`, `mmap` or NumPy arrays needs `Py_buffer`, which entered CPython's stable ABI in 3.11. That is this extension's floor (`abi3-py311`), so the wider buffer protocol is not ruled out; it is simply not built yet.
 
 ## Why not stdlib `uuid`?
 

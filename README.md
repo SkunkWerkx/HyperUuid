@@ -59,7 +59,7 @@ Cutting to the chase, by language — real numbers, no adjustment for story, ful
 - **[Java](java/)** — 2.8-5.1x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5 or v7. Proven under GraalVM Native Image too, not just the JVM.
 - **[Rust](rust/)** — this *is* the engine. 1.7-2.4x faster than the `uuid` crate on v4, v5 and v7, and 9x at reading a timestamp back out, allocation-free, asserted by a real counting-allocator test, not just claimed.
 - **[Swift](swift/)** — every call beats `Foundation.UUID()` by 11-16x, while also being the only way to get v5/v7 in Swift at all — Foundation only ever does v4.
-- **[Python](python/)** — every call ahead of stdlib's own C-accelerated ones since the PyO3 native backend: 3.4x faster than `uuid.uuid4()`, 4.2x faster than `uuid.uuid5()`, 3.8x faster than 3.14's own `uuid.uuid7()`, and timestamp extraction 1.6x faster than `UUID.time` as a `datetime`, 2.4x as a plain integer. On 3.11-3.13, where stdlib has no v7 at all, it's not even a comparison.
+- **[Python](python/)** — every call ahead of stdlib's own C-accelerated ones through the PyO3 native extension: 3.4x faster than `uuid.uuid4()`, 4.2x faster than `uuid.uuid5()`, 3.8x faster than 3.14's own `uuid.uuid7()`, and timestamp extraction 1.6x faster than `UUID.time` as a `datetime`, 2.4x as a plain integer. On 3.11-3.13, where stdlib has no v7 at all, it's not even a comparison.
 - **[Ruby](ruby/)** — the same mechanism swap as Python, same result: **5.5x faster than `SecureRandom.uuid`** for v4, 3.8-4.0x for v7, 2.1x for v5 — and `SecureRandom.uuid` only ever does random v4 anyway.
 - **[PHP](php/)** — a v4 costs less than a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation), by 1.4x, and a v7 by 1.2x — the whole native round trip for less than the price of PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 45x. Still the only zero-Composer-dependency way to generate v4, v5 and v7 in PHP at all.
 
@@ -263,11 +263,11 @@ The "high-performance, allocation-free" claim is measured, not just asserted —
 | `UuidGenerator.NewV5()` | 69.27 ns (4.23x faster) | 0 B |
 | `UuidGenerator.NewV7()` | 38.88 ns (7.53x faster) | 0 B |
 
-Every one of these is genuinely zero-allocation now — including `NewV5(Guid, string)`, which used to allocate 40 B encoding the name to UTF-8. Fixed by UTF-8-encoding into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique already used by the batch methods (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library).
+Every one of these is genuinely zero-allocation — including `NewV5(Guid, string)`, which UTF-8-encodes the name into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods use (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library).
 
 ### The interpreted tier, after the mechanism swap
 
-The headline single-call numbers from the [Ruby](ruby/) and [PHP](php/) READMEs, worth restating here because they used to be this README's asterisks:
+The headline single-call numbers from the [Ruby](ruby/) and [PHP](php/) READMEs, worth restating here:
 
 | Call | Time | The platform comparison |
 | --- | ---: | --- |
@@ -276,7 +276,7 @@ The headline single-call numbers from the [Ruby](ruby/) and [PHP](php/) READMEs,
 | PHP `HyperUuid::newV4()` | 224 ns | naive inline `random_bytes` v4 308 ns — **1.4x faster** |
 | PHP `->timestamp()` (v7) | 293 ns | `ramsey/uuid` `getDateTime()` 13.2 µs — **45x faster** |
 
-The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any platform without a prebuilt Magnus gem) keeps its own honest numbers in the [Ruby README](ruby/) — slower, mechanism-bound, and still fully supported. Python's own `ctypes` fallback is gone entirely; PyO3's `abi3` wheels made it redundant.
+The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any platform without a prebuilt Magnus gem) keeps its own honest numbers in the [Ruby README](ruby/) — slower, mechanism-bound, and still fully supported. Python has no `ctypes` fallback at all; PyO3's `abi3` wheels leave nothing for one to cover.
 
 ### Batch generation vs. an equivalent loop
 
@@ -290,7 +290,7 @@ The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any pla
 
 Go's batch win is the largest of the three because its per-call toll is the largest: nearly all of a single call is `runtime.cgocall` (see [the control group](#the-control-group-go)), and a batch pays it once for 1000 UUIDs. The individual calls allocate nothing (v5 aside, which pays for Go's own `[]byte(name)`), so the win is time alone — and batch is exactly where the control group stops being the exception.
 
-Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v7 and around the batch function, and asserts zero allocations for all of them. Batches used to be the one documented exception; they now draw their entropy through the caller's own buffer, which is what lets the crate build without `alloc` at all.
+Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v7 and around the batch function, and asserts zero allocations for all of them. Batches draw their entropy through the caller's own buffer, which is what lets the crate build without `alloc` at all.
 
 ### Skipping object construction entirely
 
@@ -310,7 +310,7 @@ Read the right-hand column, not the speedup column: **every binding converges on
 
 Java is the instructive middle. It is not an interpreted language, yet it gains 2.6x where C# gains 1.6x and Swift nothing, and the reason is visible in its own numbers: filling a `UUID[]` measures 12.3 µs against `newV7Batch`'s 9.3 µs, no cheaper for skipping the array allocation, because `java.util.UUID` is two `long`s and every element has to be rebuilt regardless of who allocated the array. Only its `byte[]` form escapes that. The dividing line is not compiled-versus-interpreted; it is whether the language's UUID type is already RFC-ordered bytes.
 
-That also explains why Go, C# and Swift barely move: they are already at or near the floor. (Swift was not, through 0.2: `newV7Batch` paid for a scratch buffer and a per-element `UUID(rfcBytes:)` construction, and cost five times what it has since 0.3.0's carrier rewrite.) Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
+That also explains why Go, C# and Swift barely move: they are already at or near the floor. Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
 
 **One caveat, and it inverts the advice** — documented on every method in the three dynamic bindings, because getting it wrong is a pessimization: this is only faster if bytes are the *destination*. In Python, filling a buffer and then building `uuid.UUID` objects from it measures ~890 µs, more than six times as slow as `new_v7_batch`, because the extension constructs them through a faster path internally than anything callable from Python. Use the byte forms for a bind parameter, a wire format, or a bulk `COPY` — not as a step on the way to objects.
 
