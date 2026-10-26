@@ -65,21 +65,36 @@ pyright see `uuid.UUID` and `datetime.datetime` rather than `Any`.
 
 ```python
 import uuid
+
 import hyperuuid
 
-hyperuuid.new_v4()
-hyperuuid.new_v5(uuid.NAMESPACE_DNS, "example.com")
+id1 = hyperuuid.new_v4()
+id2 = hyperuuid.new_v5(uuid.NAMESPACE_DNS, "example.com")
 id4 = hyperuuid.new_v7()
+print("v4:", id1)
+print("v5:", id2)
+print("v7:", id4)
 
-hyperuuid.v7_timestamp(id4) # recover the embedded UTC datetime.datetime
-hyperuuid.v7_unix_millis(id4) # the same instant as Unix-epoch milliseconds, an int
-hyperuuid.get_timestamp(id4) # the same datetime, or None for any value that isn't an RFC 9562 v7
-hyperuuid.is_rfc(id4, 7) # True: the RFC 9562 variant and version 7, in one call
-stored = hyperuuid.v7_to_sql_order(id4) # byte order SQL Server's uniqueidentifier needs to sort by creation order
-hyperuuid.v7_unix_millis(stored, hyperuuid.Layout.SQL_SERVER) # read in place, no conversion back
+# recover the embedded UTC datetime.datetime
+print("timestamp:", hyperuuid.v7_timestamp(id4))
+# the same instant as Unix-epoch milliseconds, an int
+print("unix millis:", hyperuuid.v7_unix_millis(id4))
+# the same datetime, or None for any value that isn't an RFC 9562 v7
+print("checked timestamp:", hyperuuid.get_timestamp(id4))
+# True: the RFC 9562 variant and version 7, in one call
+print("is v7:", hyperuuid.is_rfc(id4, 7))
+
+# byte order SQL Server's uniqueidentifier needs to sort by creation order
+stored = hyperuuid.v7_to_sql_order(id4)
+print("sql order:", stored)
+# read in place, no conversion back
+print("sql is v7:", hyperuuid.is_rfc(stored, 7, hyperuuid.Layout.SQL_SERVER))
+print("sql timestamp:", hyperuuid.get_timestamp(stored, hyperuuid.Layout.SQL_SERVER))
+print("sql unix millis:", hyperuuid.v7_unix_millis(stored, hyperuuid.Layout.SQL_SERVER))
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
 batch = hyperuuid.new_v7_batch(1000)
+print("batch:", len(batch))
 ```
 
 Returns stdlib `uuid.UUID` objects — built through the
@@ -156,16 +171,16 @@ the same way. It happens at most once per `MAX_V7_BATCH` UUIDs the process mints
 
 ```python
 import hyperuuid
-from hyperuuid import Layout, Variant
+from hyperuuid import Layout
 
-hyperuuid.version(id4)                     # 7: the version nibble, 0-15
-hyperuuid.variant(id4)                     # Variant.RFC9562
-hyperuuid.is_rfc(id4, 7)                   # True: the guard before trusting v7 fields
+hyperuuid.version(id4)  # 7: the version nibble, 0-15
+hyperuuid.variant(id4)  # Variant.RFC9562
+hyperuuid.is_rfc(id4, 7)  # True: the guard before trusting v7 fields
 
 stored = hyperuuid.v7_to_sql_order(id4)
-hyperuuid.version(stored, Layout.SQL_SERVER)       # 7
-hyperuuid.is_rfc(stored, 7, Layout.SQL_SERVER)     # True
-hyperuuid.get_timestamp(stored, Layout.SQL_SERVER) # the embedded datetime, read in place
+hyperuuid.version(stored, Layout.SQL_SERVER)  # 7
+hyperuuid.is_rfc(stored, 7, Layout.SQL_SERVER)  # True
+hyperuuid.get_timestamp(stored, Layout.SQL_SERVER)  # the embedded datetime, read in place
 ```
 
 `version`, `variant` and `is_rfc` are answered by the native core, the same functions every
@@ -206,7 +221,8 @@ from the same packed `hyperuuid_version` export every other binding probes.
 Bind `v7_to_sql_order`'s result as its `.bytes`, not as the `uuid.UUID`. pyodbc 5.3,
 mssql-python 1.15 and pymssql 2.4 all send a `uuid.UUID`, and a `str`, in SQL Server's
 mixed-endian text order, which stores the first three groups byte-reversed and loses the
-creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). `bytes` go in as binary and land byte for byte:
+creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). `bytes` go in as binary and land byte for byte (`cursor` is an open DB-API cursor on the
+database):
 
 ```python
 stored = hyperuuid.v7_to_sql_order(id4)
@@ -227,9 +243,11 @@ it the way pip finds the native wheels:
 
 ```python
 import micropip
+
 await micropip.install("hyperuuid")
 
 import uuid, hyperuuid
+
 hyperuuid.new_v7()
 hyperuuid.new_v5(uuid.NAMESPACE_DNS, "example.com")
 ```
@@ -253,8 +271,8 @@ and the next line is covered by the release that adds its build.
 import hyperuuid
 
 buf = bytearray(1000 * 16)
-hyperuuid.fill_v7(buf)                      # 1000 v7 UUIDs, one timestamp capture
-first = bytes(buf[0:16])                    # ready for a BYTEA / uniqueidentifier parameter
+hyperuuid.fill_v7(buf)  # 1000 v7 UUIDs, one timestamp capture
+first = bytes(buf[0:16])  # ready for a BYTEA / uniqueidentifier parameter
 ```
 
 **This is about 36x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:

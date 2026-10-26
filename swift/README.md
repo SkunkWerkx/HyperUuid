@@ -18,13 +18,28 @@ import HyperUuid
 let id = try UuidGenerator.newV4()
 let id2 = try UuidGenerator.newV5(namespace: Namespaces.dns, name: "example.com")
 let id3 = try UuidGenerator.newV7()
+print("v4:", id)
+print("v5:", id2)
+print("v7:", id3)
 
-let created = try UuidGenerator.v7Timestamp(id3) // recover the embedded UTC Date
-let maybeCreated = try UuidGenerator.getTimestamp(id3) // Date?, nil instead of assuming id3 is a v7
-let sqlOrdered = try UuidGenerator.v7ToSqlOrder(id3) // the version 8 layout SQL Server's uniqueidentifier sorts by creation order
+let created = try UuidGenerator.v7Timestamp(id3)  // recover the embedded UTC Date
+print("timestamp:", created)
+let millis = try UuidGenerator.v7UnixMillis(id3)  // the same instant as Unix-epoch milliseconds
+print("unix millis:", millis)
+let maybeCreated = try UuidGenerator.getTimestamp(id3)  // Date?, nil instead of assuming id3 is a v7
+print("checked timestamp:", String(describing: maybeCreated))
+try print("is v7:", UuidGenerator.isRfc(id3, version: 7))  // the RFC 9562 variant and version 7, in one call
+
+// The version 8 layout SQL Server's uniqueidentifier sorts by creation order:
+let sqlOrdered = try UuidGenerator.v7ToSqlOrder(id3)
+print("sql order:", sqlOrdered)
+try print("sql is v7:", UuidGenerator.isRfc(sqlOrdered, version: 7, layout: .sqlServer))
+let sqlCreated = try UuidGenerator.getTimestamp(sqlOrdered, layout: .sqlServer)  // read in place
+print("sql timestamp:", String(describing: sqlCreated))
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
 let batch = try UuidGenerator.newV7Batch(count: 1000)
+print("batch:", batch.count)
 ```
 
 Returns Foundation's `UUID`. `Namespaces.dns`/`url`/`oid`/`x500` are RFC 9562
@@ -56,10 +71,10 @@ UUID — see [Linking and deployment](#linking-and-deployment).
 call each with no bit-reading in Swift:
 
 ```swift
-try UuidGenerator.version(id3)                // 7: the version nibble, 0-15 (0 for Nil, 15 for Max)
-try UuidGenerator.variant(id3)                // .rfc9562 (UuidVariant: .ncs, .rfc9562, .microsoft, .future)
-try UuidGenerator.isRfc(id3, version: 7)      // true: the RFC variant and that version, the guard to
-                                              // run before trusting version-specific fields
+try print(UuidGenerator.version(id3))  // 7: the version nibble, 0-15 (0 for Nil, 15 for Max)
+try print(UuidGenerator.variant(id3))  // .rfc9562 (UuidVariant: .ncs, .rfc9562, .microsoft, .future)
+// true: the RFC variant and that version, the guard to run before trusting version-specific fields
+try print(UuidGenerator.isRfc(id3, version: 7))
 ```
 
 A `version` outside 0–15 is never matched; it is `false`, not an error. `variant` reads
@@ -76,11 +91,12 @@ the value is held in: `.rfc9562` (the default, and what every other method takes
 it is, with no conversion back first:
 
 ```swift
-let stored = try UuidGenerator.v7ToSqlOrder(id3)            // what goes in the uniqueidentifier column
-try UuidGenerator.version(stored, layout: .sqlServer)       // 7, the version it was converted from
-try UuidGenerator.isRfc(stored, version: 7, layout: .sqlServer)
-try UuidGenerator.v7UnixMillis(stored, layout: .sqlServer)  // the same millis as v7UnixMillis(id3)
-try UuidGenerator.getTimestamp(stored, layout: .sqlServer)  // Date?, nil unless the bytes form a SQL-ordered RFC 9562 v7
+let stored = try UuidGenerator.v7ToSqlOrder(id3)  // what goes in the uniqueidentifier column
+try print(UuidGenerator.version(stored, layout: .sqlServer))  // 7, the version it was converted from
+try print(UuidGenerator.isRfc(stored, version: 7, layout: .sqlServer))
+try print(UuidGenerator.v7UnixMillis(stored, layout: .sqlServer))  // the same millis as v7UnixMillis(id3)
+// Date?, nil unless the bytes form a SQL-ordered RFC 9562 v7:
+try print(String(describing: UuidGenerator.getTimestamp(stored, layout: .sqlServer)))
 ```
 
 `v7Timestamp(_:layout:)` completes the set. In SQL Server order the version is the one the
@@ -125,6 +141,8 @@ order, and every driver tested in the other languages sends its UUID type the sa
 `CAST(id AS binary(16))` for the same reason.
 
 ```swift
+import Foundation
+
 let stored = try UuidGenerator.v7ToSqlOrder(id3)
 let bytes = withUnsafeBytes(of: stored.uuid) { Data($0) }  // bind this as varbinary(16)
 ```
@@ -146,8 +164,8 @@ The honest trade-off: this package links a prebuilt native library per platform 
 
 ```swift
 var dst = [UUID](repeating: UUID(), count: 1000)
-try UuidGenerator.fillV7(into: &dst, unixMillis: ms)   // reuse dst; nothing allocated
-try UuidGenerator.fillV7(into: &dst)                    // the same, at the current time
+try UuidGenerator.fillV7(into: &dst, unixMillis: millis)  // reuse dst; nothing allocated
+try UuidGenerator.fillV7(into: &dst)  // the same, at the current time
 ```
 
 Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uuid_t` — 16 bytes already in RFC 9562 order — so the native core writes the whole batch straight into the array's storage with **no per-element conversion**. (C# and Java must rebuild every element, because their UUID types aren't RFC byte order.) That soundness condition is checked with a `precondition` on `MemoryLayout<UUID>`'s size and stride rather than assumed.
@@ -354,13 +372,13 @@ uses it:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/SkunkWerkx/HyperUuid", from: "<version>"),   // the tag on the badge above
+    .package(url: "https://github.com/SkunkWerkx/HyperUuid", from: "<version>")  // the tag on the badge above
 ],
 targets: [
     .target(
         name: "MyTarget",
         dependencies: [.product(name: "HyperUuid", package: "HyperUuid")]
-    ),
+    )
 ]
 ```
 

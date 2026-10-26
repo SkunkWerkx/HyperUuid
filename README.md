@@ -21,6 +21,8 @@ And the scoreboard, measured rather than asserted: **in every language in this r
 
 ```csharp
 // C# — dotnet add package HyperUuid (nuget.org)
+using HyperUuid;
+
 var id = UuidGenerator.NewV7();                     // time-sortable, RFC 9562 §6.2
 var ts = UuidGenerator.V7Timestamp(id);              // recover the embedded timestamp
 var batch = UuidGenerator.NewV7Batch(1000);          // 1000 IDs, one native call
@@ -28,12 +30,16 @@ var batch = UuidGenerator.NewV7Batch(1000);          // 1000 IDs, one native cal
 
 ```go
 // Go — go get github.com/SkunkWerkx/HyperUuid/go@latest
+import hyperuuid "github.com/SkunkWerkx/HyperUuid/go"
+
 id, err := hyperuuid.NewV7()
 ts, err := hyperuuid.V7Timestamp(id)
 ```
 
 ```ruby
 # Ruby — gem "hyperuuid" (rubygems.org)
+require "hyperuuid"
+
 id = HyperUuid.new_v7
 id.timestamp
 ```

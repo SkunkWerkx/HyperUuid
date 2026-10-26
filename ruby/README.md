@@ -23,15 +23,24 @@ require "hyperuuid"
 id = HyperUuid.new_v4
 id2 = HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "example.com")
 id3 = HyperUuid.new_v7
+puts "v4: #{id}"
+puts "v5: #{id2}"
+puts "v7: #{id3}"
 
-id3.timestamp # recover the embedded UTC Time
-id3.timestamp(raise_on_mismatch: false) # nil instead of raising if id3 isn't an RFC 9562 v7
-id3.rfc?(7) # the RFC 9562 variant and version 7, the guard before trusting its fields
+puts "timestamp: #{id3.timestamp}" # recover the embedded UTC Time
+# nil instead of raising if id3 isn't an RFC 9562 v7:
+puts "checked timestamp: #{id3.timestamp(raise_on_mismatch: false)}"
+# the RFC 9562 variant and version 7, the guard before trusting its fields:
+puts "is v7: #{id3.rfc?(7)}"
+
 sql = id3.to_sql_order # a version 8 laid out so SQL Server's uniqueidentifier sorts by creation order
-sql.timestamp(layout: :sql_server) # read straight from SQL order, no round trip
+puts "sql order: #{sql}"
+puts "sql is v7: #{sql.rfc?(7, layout: :sql_server)}"
+puts "sql timestamp: #{sql.timestamp(layout: :sql_server)}" # read straight from SQL order, no round trip
 
 # One native call, one random-bytes fetch, one counter reservation for the whole batch:
 batch = HyperUuid.new_v7_batch(1000)
+puts "batch: #{batch.length}"
 ```
 
 ## The doors
@@ -107,14 +116,14 @@ one time in 16, and is then converted a second time rather than refused.
 Send `#to_sql_order`'s result as its raw `#bytes`, not as UUID text. SQL Server stores a UUID
 string's first three groups byte-reversed, which loses the creation order
 ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)); tiny_tds 3.4 and an ActiveRecord `:uuid` attribute both send text. A binary
-literal lands byte for byte:
+literal lands byte for byte (`client` is a connected `TinyTds::Client`):
 
 ```ruby
 sql = HyperUuid.new_v7.to_sql_order
 client.execute("INSERT INTO orders (id) VALUES (0x#{sql.bytes.unpack1('H*')})").do
 
 row = client.execute("SELECT CAST(id AS binary(16)) AS id FROM orders").first
-sql = HyperUuid::Uuid.new(row["id"])  # read with layout: :sql_server
+sql = HyperUuid::Uuid.new(row["id"]) # read with layout: :sql_server
 ```
 
 In ActiveRecord, map the column as `:binary`, which quotes as `0x…`. Reading needs the `CAST`
@@ -188,7 +197,7 @@ The honest trade-off: this gem is native code, not pure Ruby — a precompiled e
 
 ```ruby
 bytes = HyperUuid.new_v7_batch_bytes(1000)
-first = bytes[0, 16]        # ready for a BINARY(16) bind parameter
+first = bytes[0, 16] # ready for a BINARY(16) bind parameter
 ```
 
 **About 41x faster than `new_v7_batch`** for a 1000-UUID batch (4.9 µs versus 202 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.

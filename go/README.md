@@ -15,20 +15,74 @@ binary runs from a read-only filesystem or a `scratch` image. `go get` is the wh
 a C compiler at build time is the one requirement (see [Requirements](#requirements)).
 
 ```go
+package main
+
 import (
+	"fmt"
+	"log"
 	"time"
 
 	hyperuuid "github.com/SkunkWerkx/HyperUuid/go"
 )
 
-id, err := hyperuuid.NewV4()
-id, err = hyperuuid.NewV5String(hyperuuid.NamespaceDNS, "example.com")
-id, err = hyperuuid.NewV7()
-unixMillis := uint64(time.Now().UnixMilli())
-batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
-sqlOrdered, err := hyperuuid.V7ToSqlOrder(id) // a version 8 SQL Server's uniqueidentifier sorts by creation order
+func main() {
+	id, err := hyperuuid.NewV4()
+	if err != nil {
+		log.Fatal(err)
+	}
+	id2, err := hyperuuid.NewV5String(hyperuuid.NamespaceDNS, "example.com")
+	if err != nil {
+		log.Fatal(err)
+	}
+	id3, err := hyperuuid.NewV7()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("v4:", id)
+	fmt.Println("v5:", id2)
+	fmt.Println("v7:", id3)
 
-created, err := hyperuuid.GetTimestamp(id) // ErrNotTimeBased unless id is an RFC 9562 v7
+	ts, err := hyperuuid.V7Timestamp(id3) // recover the embedded UTC time.Time
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("timestamp:", ts)
+	millis, err := hyperuuid.V7UnixMillis(id3) // the same instant as Unix-epoch milliseconds
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("unix millis:", millis)
+	created, err := hyperuuid.GetTimestamp(id3) // ErrNotTimeBased unless id3 is an RFC 9562 v7
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("checked timestamp:", created)
+	fmt.Println("is v7:", hyperuuid.IsRfc(id3, 7)) // the RFC 9562 variant and version 7, in one call
+
+	sqlOrdered, err := hyperuuid.V7ToSqlOrder(id3) // a version 8 SQL Server's uniqueidentifier sorts by creation order
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("sql order:", sqlOrdered)
+	sqlIsV7, err := hyperuuid.IsRfcIn(sqlOrdered, 7, hyperuuid.LayoutSqlServer)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("sql is v7:", sqlIsV7)
+	sqlCreated, err := hyperuuid.GetTimestampIn(sqlOrdered, hyperuuid.LayoutSqlServer) // read in place
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("sql timestamp:", sqlCreated)
+
+	// One native call, one random-bytes fetch, one counter reservation for the whole batch:
+	unixMillis := uint64(time.Now().UnixMilli())
+	batch, err := hyperuuid.NewV7BatchAt(1000, unixMillis)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("batch:", len(batch))
+}
 ```
 
 ## Install
@@ -162,9 +216,9 @@ A SQL-ordered value can be inspected where it is, without converting it back fir
 `V7ToSqlOrder` returns, and what a `uniqueidentifier` column holds):
 
 ```go
-sql, _ := hyperuuid.V7ToSqlOrder(id)
-v, err := hyperuuid.VersionIn(sql, hyperuuid.LayoutSqlServer)          // 7
-ok, err := hyperuuid.IsRfcIn(sql, 7, hyperuuid.LayoutSqlServer)        // true
+sql, _ := hyperuuid.V7ToSqlOrder(id3)
+v, err := hyperuuid.VersionIn(sql, hyperuuid.LayoutSqlServer)   // 7
+ok, err := hyperuuid.IsRfcIn(sql, 7, hyperuuid.LayoutSqlServer) // true
 created, err := hyperuuid.GetTimestampIn(sql, hyperuuid.LayoutSqlServer)
 millis, err := hyperuuid.V7UnixMillisIn(sql, hyperuuid.LayoutSqlServer) // also V7TimestampIn
 ```
@@ -188,10 +242,12 @@ Bind `V7ToSqlOrder`'s result as a `[]byte`. go-mssqldb 1.11 sends an `mssql.Uniq
 and a string, in SQL Server's mixed-endian text order by default, which stores the first three
 groups byte-reversed and loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). A `[]byte` goes in as
 binary and lands byte for byte, and scanning the column into a `[]byte` reads it back
-untouched:
+untouched (`db` is a `*sql.DB` opened with go-mssqldb):
 
 ```go
-sqlOrdered, err := hyperuuid.V7ToSqlOrder(id)
+import "github.com/google/uuid"
+
+sqlOrdered, err := hyperuuid.V7ToSqlOrder(id3)
 _, err = db.Exec("INSERT INTO orders (id) VALUES (@p1)", sqlOrdered[:])
 
 var raw []byte
@@ -226,10 +282,14 @@ sentinels, all matched with `errors.Is`:
 `FillV7`/`FillV7At` write into a slice you already own instead of allocating a fresh one per call:
 
 ```go
+import "github.com/google/uuid"
+
 dst := make([]uuid.UUID, 1000)
 for {
-    if err := hyperuuid.FillV7(dst); err != nil { /* ... */ }
-    // reuse dst next iteration — nothing allocated
+	if err := hyperuuid.FillV7(dst); err != nil {
+		log.Fatal(err)
+	}
+	// reuse dst next iteration — nothing allocated
 }
 ```
 

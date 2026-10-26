@@ -8,31 +8,44 @@
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, plus the version 8 layout SQL Server sorts a v7 by. Genuinely `#![no_std]` under `default-features = false` (see [below](#no_std)) — compiler-enforced against a real bare-metal target, not just a `no_std`-friendly dependency set (`getrandom`, `sha1`, both `default-features = false`, and `chacha20` on Linux and Android) — zero unsafe in the public API, and empirically zero-allocation across the whole public API, batch calls included — not just claimed, asserted by a real counting-allocator test (`tests/allocation_free.rs`).
 
 ```rust
-use hyperuuid::{v4, v5, v7};
+use hyperuuid::{Layout, v4, v5, v7};
 
-let id = v4::new_v4()?;
-let id2 = v5::new_v5(v5::namespace::DNS, b"example.com");
-let id4 = v7::now_v7()?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let id = v4::new_v4()?;
+    let id2 = v5::new_v5(v5::namespace::DNS, b"example.com");
+    let id4 = v7::now_v7()?;
+    println!("v4: {id}");
+    println!("v5: {id2}");
+    println!("v7: {id4}");
 
-let ts = v7::unix_millis(&id4); // recover the embedded timestamp
-let sql_ordered = v7::to_sql_order(&id4)?; // the version 8 layout SQL Server's uniqueidentifier sorts by creation order
+    let ts = v7::unix_millis(&id4); // recover the embedded timestamp
+    println!("unix millis: {ts}");
 
-// The same Option<Timestamp> shape the `uuid` crate's own get_timestamp() returns — works on
-// any Uuid, no need to already know (or separately check) the version:
-let ts2: Option<hyperuuid::Timestamp> = hyperuuid::get_timestamp(&id4);
-let id5 = v7::new_v7_at(ts2.unwrap())?; // pulls the millis back off Timestamp, same as new_v7
+    // The same Option<Timestamp> shape the `uuid` crate's own get_timestamp() returns — works on
+    // any Uuid, no need to already know (or separately check) the version:
+    let ts2: Option<hyperuuid::Timestamp> = hyperuuid::get_timestamp(&id4);
+    println!("checked timestamp: {ts2:?}");
+    let id5 = v7::new_v7_at(ts2.ok_or("not an RFC 9562 v7")?)?; // pulls the millis back off Timestamp, same as new_v7
+    println!("v7 at: {id5}");
 
-// Inspection: is this an RFC 9562 UUID of version 7? And the same questions of a value
-// still in SQL Server order, read from its permuted bytes in place:
-use hyperuuid::{Layout, Variant};
-assert!(id4.is_rfc(7) && id4.variant() == Variant::Rfc9562);
-assert_eq!(sql_ordered.version_in(Layout::SqlServer), 7);
-let ts3 = hyperuuid::get_timestamp_in(&sql_ordered, Layout::SqlServer);
+    // Inspection: is this an RFC 9562 UUID of version 7? And the same questions of a value
+    // still in SQL Server order, read from its permuted bytes in place:
+    println!("is v7: {}", id4.is_rfc(7));
+    println!("variant: {:?}", id4.variant()); // Variant::Rfc9562
+    let sql_ordered = v7::to_sql_order(&id4)?; // the version 8 layout SQL Server's uniqueidentifier sorts by creation order
+    println!("sql order: {sql_ordered}");
+    println!("sql is v7: {}", sql_ordered.is_rfc_in(7, Layout::SqlServer));
+    println!("sql version: {}", sql_ordered.version_in(Layout::SqlServer)); // 7
+    let ts3 = hyperuuid::get_timestamp_in(&sql_ordered, Layout::SqlServer);
+    println!("sql timestamp: {ts3:?}");
 
-// One random-bytes fetch, one counter reservation for the whole batch (at most
-// v7::MAX_BATCH, the 26-bit counter space; always strictly increasing):
-let mut out = vec![0u8; 1000 * 16];
-v7::new_v7_batch(ts, 1000, &mut out)?;
+    // One random-bytes fetch, one counter reservation for the whole batch (at most
+    // v7::MAX_BATCH, the 26-bit counter space; always strictly increasing):
+    let mut out = vec![0u8; 1000 * 16];
+    v7::new_v7_batch(ts, 1000, &mut out)?;
+    println!("batch: {}", out.len() / 16);
+    Ok(())
+}
 ```
 
 `v5::namespace::{DNS, URL, OID, X500}` are RFC 9562 Section 6.6's well-known namespaces. `v7::unix_millis` recovers the embedded UTC timestamp from a version 7 UUID as a plain `u64` millisecond count; [`get_timestamp`]/[`Timestamp`] wrap that same value into the `uuid` crate's own `Option<Timestamp>` shape (`None` for anything but an RFC 9562 v7 — the variant is checked too, and a v1 or v6 from another generator gets `None` as well), and [`v7::new_v7_at`] accepts one straight back — both are thin, `#[inline]`-eligible pass-throughs over `unix_millis`/`new_v7`, not a second implementation, so they carry no measurable overhead beyond those. `v7::to_sql_order`/`v7::to_rfc_order` convert a version 7 UUID to and from the byte order SQL Server's `uniqueidentifier` needs on the wire to sort by creation order. The converted value is an RFC 9562 version 8, the version §6.11 gives any byte order but network order: an 8 and the RFC variant sit where SQL Server's text form and a .NET `Guid` show them, and the other 122 bits fill the comparator's slots. That is the permutation this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) uses for C#, with an 8 where SequentialGuid keeps the 7. A v7 and a v8 have the same 122 free bits, so every v7 converts and the conversion back is exact; [`SqlOrderError`] refuses only a value that isn't a v7 going in, or doesn't carry the layout's 8 and variant coming back. [`sql`](https://docs.rs/hyperuuid/latest/hyperuuid/sql/) has the bit layout. This crate's own test suite verifies the sort against a comparator replicating `SqlGuid`'s documented byte order. [`Uuid::version`]/[`Uuid::variant`]/[`Uuid::is_rfc`] inspect a value: `is_rfc(n)` is the one-call guard, true only for the RFC variant with version `n`. [`Uuid::version_in`]/[`Uuid::is_rfc_in`]/[`get_timestamp_in`] and `v7::unix_millis_in` ask the same of a value held in a given [`Layout`]. In `Layout::SqlServer`, they read a value straight from `to_sql_order` (or a `uniqueidentifier` column) without converting it back; there `version_in` answers 7, the version the value was converted from, for the layout's 8 and variant, and 0 for anything else. `new_v7_batch` generates `count` UUIDs into a caller-owned `&mut [u8]` sharing one timestamp capture, one counter reservation, and one entropy draw, instead of `count` of each. A v7 batch takes at most `v7::MAX_BATCH` (2^26) and is always strictly increasing: one that crosses the process-wide counter's wrap stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)). The draw is one `getrandom` call, except that on Linux and Android a batch of 32 UUIDs or more takes one 32-byte `getrandom` draw and stretches it with a SIMD ChaCha20 keystream, the construction the kernel uses behind `getrandom` itself. That is 2.4x faster on glibc and 3.7x on musl; Windows and wasm, where it was no faster, keep `getrandom` throughout. That entropy is drawn into the front of the caller's own buffer and moved out to each item's octets as the batch is written backwards, so there is no scratch buffer to allocate — not on the heap and not on the stack — and these are allocation-free like everything else here.
@@ -50,11 +63,16 @@ millisecond count with `Timestamp::from_unix_millis` remains infallible.
 Bind `to_sql_order`'s result as bytes, not as a `uuid::Uuid`. tiberius 0.13 sends a `Uuid`, and a
 string, in SQL Server's mixed-endian text order, which stores the first three groups
 byte-reversed and loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). A `&[u8]` goes in as binary and
-lands byte for byte:
+lands byte for byte (in an async fn, with `client` a connected `tiberius::Client`):
 
 ```rust
 let stored = v7::to_sql_order(&id4)?;
-client.execute("INSERT INTO orders (id) VALUES (@P1)", &[&&stored.as_bytes()[..]]).await?;
+client
+    .execute(
+        "INSERT INTO orders (id) VALUES (@P1)",
+        &[&&stored.as_bytes()[..]],
+    )
+    .await?;
 ```
 
 Reading has the same trap: tiberius returns a `uniqueidentifier` as a `Uuid` with those groups

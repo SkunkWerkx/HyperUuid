@@ -16,20 +16,41 @@ floor. Bundles a native build for every supported platform (see
 per-platform native selection, so the package carries them all and resolves at load.
 
 ```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
 use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
+use HyperUuid\UuidLayout;
 
 $id = HyperUuid::newV4();
 $id2 = HyperUuid::newV5(Namespaces::dns(), 'example.com');
 $id3 = HyperUuid::newV7();
+echo 'v4: ' . $id . PHP_EOL;
+echo 'v5: ' . $id2 . PHP_EOL;
+echo 'v7: ' . $id3 . PHP_EOL;
 
-$id3->timestamp(); // recover the embedded UTC DateTimeImmutable
-$id3->timestamp(throwOnMismatch: false); // null instead of throwing if $id3 isn't an RFC 9562 v7
-$id3->isRfc(7); // true: the RFC 9562 variant and version 7, in one native call
-$id3->toSqlOrder(); // byte order SQL Server's uniqueidentifier needs to sort by creation order
+// recover the embedded UTC DateTimeImmutable
+echo 'timestamp: ' . $id3->timestamp()->format(DATE_RFC3339_EXTENDED) . PHP_EOL;
+// the same instant as Unix-epoch milliseconds
+echo 'unix millis: ' . $id3->unixMillis() . PHP_EOL;
+// null instead of throwing if $id3 isn't an RFC 9562 v7
+$checked = $id3->timestamp(throwOnMismatch: false);
+echo 'checked timestamp: ' . ($checked?->format(DATE_RFC3339_EXTENDED) ?? 'null') . PHP_EOL;
+// true: the RFC 9562 variant and version 7, in one native call
+echo 'is v7: ' . var_export($id3->isRfc(7), true) . PHP_EOL;
+
+// byte order SQL Server's uniqueidentifier needs to sort by creation order
+$sql = $id3->toSqlOrder();
+echo 'sql order: ' . $sql . PHP_EOL;
+echo 'sql is v7: ' . var_export($sql->isRfc(7, UuidLayout::SqlServer), true) . PHP_EOL;
+$sqlCreated = $sql->timestamp(throwOnMismatch: false, layout: UuidLayout::SqlServer); // read in place
+echo 'sql timestamp: ' . ($sqlCreated?->format(DATE_RFC3339_EXTENDED) ?? 'null') . PHP_EOL;
 
 // One native call, one random-bytes fetch, one counter reservation for the whole batch:
 $batch = HyperUuid::newV7Batch(1000);
+echo 'batch: ' . count($batch) . PHP_EOL;
 ```
 
 Returns `HyperUuid\Uuid`, a minimal value object (`->bytes()`, `->__toString()`,
@@ -106,9 +127,12 @@ the guard for those.
 
 Bind `->toSqlOrder()`'s result as its raw `->bytes()`, as binary. pdo_sqlsrv 5.13 sends a string
 in SQL Server's mixed-endian text order, which stores the first three groups byte-reversed and
-loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). Binary lands byte for byte:
+loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). Binary lands byte for byte (`$pdo` is a
+`PDO` connection through pdo_sqlsrv):
 
 ```php
+use HyperUuid\Uuid;
+
 $sql = HyperUuid::newV7()->toSqlOrder();
 $insert = $pdo->prepare('INSERT INTO orders (id) VALUES (?)');
 $bytes = $sql->bytes();
@@ -170,6 +194,8 @@ change it):
   ```
 
   ```php
+  <?php
+
   // preload.php
   foreach (glob(__DIR__ . '/vendor/skunkwerkx/hyperuuid/php/src/*.php') as $file) {
       opcache_compile_file($file);
@@ -189,12 +215,13 @@ worker's lifetime.
 throws: a missing `ext-ffi`, an `ffi.enable` that restricts FFI for this SAPI, a missing or
 unloadable library, an unsupported platform, and a stale library lacking a symbol this
 binding declares all answer `false`. It attempts the same load every generator makes and
-caches the answer for the request, so it is what a consumer with a fallback gates on:
+caches the answer for the request, so it is what a consumer with a fallback gates on (here
+`$fallback` is a ramsey/uuid `UuidFactory`):
 
 ```php
 $id = HyperUuid::isAvailable()
     ? (string) HyperUuid::newV7()
-    : $fallback->uuid7();
+    : (string) $fallback->uuid7();
 ```
 
 `HyperUuid::nativeVersion()` returns the loaded library's own `"major.minor.patch"` — a

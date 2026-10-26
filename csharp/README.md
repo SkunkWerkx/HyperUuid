@@ -8,41 +8,63 @@
 
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, plus v7's SQL Server order as an RFC 9562 version 8, calling directly into the native `libhyperuuid` shared library via source-generated [`LibraryImport`](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/pinvoke-source-generation) P/Invoke — no runtime bridge, no reflection, AOT/trim-friendly. Ships as RID-specific native assets inside the package the standard NuGet way.
 
+```sh
+dotnet add package HyperUuid
+```
+
 ```csharp
 using HyperUuid;
 
 var id = UuidGenerator.NewV4();
 var id2 = UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "example.com");
 var id4 = UuidGenerator.NewV7();
+Console.WriteLine($"v4: {id}");
+Console.WriteLine($"v5: {id2}");
+Console.WriteLine($"v7: {id4}");
 
 // A v7 round-trips its embedded timestamp:
 DateTimeOffset created = UuidGenerator.V7Timestamp(id4);
+Console.WriteLine($"timestamp: {created}");
+long unixMillis = UuidGenerator.V7UnixMillis(id4); // the same instant as Unix-epoch milliseconds
+Console.WriteLine($"unix millis: {unixMillis}");
 
 // Version-agnostic: null instead of assuming id4 is a v7:
 DateTimeOffset? maybeCreated = UuidGenerator.GetTimestamp(id4);
+Console.WriteLine($"checked timestamp: {maybeCreated}");
 
 // Same thing as an extension property on Guid itself — works on any Guid, whatever made it:
 DateTimeOffset? created7 = id4.Timestamp;              // the creation time
 DateTimeOffset? none = Guid.NewGuid().Timestamp;       // null — a v4 UUID carries no time
+Console.WriteLine($"extension timestamp: {created7}");
+Console.WriteLine($"v4 timestamp: {none?.ToString() ?? "null"}");
+
+// Inspection: the one-call guard (RFC variant and version 7):
+bool isV7 = UuidGenerator.IsRfc(id4, 7);
+Console.WriteLine($"is v7: {isV7}");
 
 // The layout SQL Server's uniqueidentifier sorts by creation order, an RFC 9562 version 8
 // (throws ArgumentException for anything but a v7):
 Guid sqlOrdered = UuidGenerator.V7ToSqlOrder(id4);
+Console.WriteLine($"sql order: {sqlOrdered}");
 
 // The wire bytes are ToByteArray(), not the string form: this is the hex the corpus's
 // sql_order.json vectors hold. sqlOrdered.ToString() prints .NET's mixed-endian reading of them.
 string sqlHex = Convert.ToHexStringLower(sqlOrdered.ToByteArray());
+Console.WriteLine($"sql hex: {sqlHex}");
 
-// Inspection: the one-call guard (RFC variant and version 7), in either layout, so a value
-// read back from a uniqueidentifier column is validated and dated without converting it back:
-bool isV7 = UuidGenerator.IsRfc(id4, 7);
+// The same guard in either layout, so a value read back from a uniqueidentifier column is
+// validated and dated without converting it back:
 bool fromV7 = UuidGenerator.IsRfc(sqlOrdered, 7, UuidLayout.SqlServer); // true: converted from a v7
 bool isV8 = UuidGenerator.IsRfc(sqlOrdered, 8);                         // true: what it is now
 DateTimeOffset? fromSql = UuidGenerator.GetTimestamp(sqlOrdered, UuidLayout.SqlServer);
+Console.WriteLine($"sql is v7: {fromV7}");
+Console.WriteLine($"is v8: {isV8}");
+Console.WriteLine($"sql timestamp: {fromSql}");
 
 // Bulk generation shares one timestamp capture, one random-bytes fetch, and (v7) one
 // contiguous counter reservation across the whole batch (at most MaxV7Batch per call):
 Guid[] batch = UuidGenerator.NewV7Batch(1000);
+Console.WriteLine($"batch: {batch.Length}");
 ```
 
 Returns plain `System.Guid` — this binding does no byte-order conversion of its own beyond the `bigEndian: true` `Guid` constructor overload (.NET 8+), since that's already the correct, direct RFC 9562 mapping. `UuidGenerator.Namespaces.Dns`/`Url`/`Oid`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.Nil`/`Max` are the §5.9/§5.10 special values (`Nil` is literally `Guid.Empty`). `NewV7` also accepts a `DateTimeOffset` directly (`NewV7(DateTimeOffset)`), not just a raw millisecond count; `GetTimestamp` is the version-agnostic counterpart to `V7Timestamp` — it checks the version itself, the RFC variant included, and returns `null` for anything but a genuine RFC 9562 v7 `Guid`, instead of assuming the caller already knows. A v1 or v6 minted elsewhere reports its version and has no timestamp here.
@@ -57,7 +79,7 @@ A version 7 batch (`FillV7`, `TryFillV7`, `NewV7Batch`) takes at most `UuidGener
 
 `Guid.Timestamp` is that same call spelled as an extension property, via a C# 14 `extension` block (`GuidExtensions`). It exists because the classic `this Guid` extension form can only express *methods*, and a timestamp recovered from bits the value already holds is a projection, not an action — so it wants to read as a property, the way every comparable accessor on a .NET value type does. It is a re-spelling, not a second implementation: `GetTimestamp` holds the logic and a test pins the two to identical results across every version, so they cannot drift. Nothing about it is package-specific either — it reads a `Guid.CreateVersion7()` value from the BCL just as happily, since both write the same RFC 9562 layout. Extension members lower to ordinary static calls, so this adds no allocation and nothing for the trimmer or Native AOT to chase.
 
-Before the first UUID, `UuidGenerator.IsAvailable` says whether the native library resolved and `UuidGenerator.NativeVersion` names the core it loaded — the probe a consumer with a managed fallback (`Guid.NewGuid()`, `Guid.CreateVersion7()`) gates on, instead of catching `DllNotFoundException` around its first real call. It is probed once and never throws; every other member lets a load failure propagate, the `Try*` forms included, which report the native layer's own return codes and nothing else. A library that loaded but predates the probe (0.3.0 and earlier) reads as unavailable too: a stale binary beside a newer binding is exactly the mismatch it exists to name.
+Before the first UUID, `UuidGenerator.IsAvailable` says whether the native library resolved and `UuidGenerator.NativeVersion` names the core it loaded, as a `System.Version` (`null` when nothing loaded) — the probe a consumer with a managed fallback (`Guid.NewGuid()`, `Guid.CreateVersion7()`) gates on, instead of catching `DllNotFoundException` around its first real call. It is probed once and never throws; every other member lets a load failure propagate, the `Try*` forms included, which report the native layer's own return codes and nothing else. A library that loaded but predates the probe (0.3.0 and earlier) reads as unavailable too: a stale binary beside a newer binding is exactly the mismatch it exists to name.
 
 ## Why not `Guid.NewGuid()` / `Guid.CreateVersion7()`?
 

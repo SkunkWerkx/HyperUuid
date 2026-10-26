@@ -9,25 +9,46 @@
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with v7's version 8 SQL Server order, calling directly into the native `libhyperuuid` shared library via `java.lang.foreign` (FFM) downcalls — no runtime bridge, no extra runtime dependency (plain Java, not Kotlin: see the root README for why that matters). JDK 25 is the floor: the first long-term-support release with the final FFM API (JEP 454 finalized it in JDK 22, and 22 through 24 are past end of life). The jar bundles a native build for every supported platform (Linux glibc, Linux musl, macOS, Windows × x64/arm64) under `/native/{rid}/` and picks the right one at runtime.
 
 ```java
+package com.example;
+
 import io.github.skunkwerkx.hyperuuid.UuidGenerator;
+import io.github.skunkwerkx.hyperuuid.UuidLayout;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-UUID id = UuidGenerator.newV4();
-UUID id2 = UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, "example.com");
-UUID id3 = UuidGenerator.newV7();
+public class Main {
+    public static void main(String[] args) {
+        UUID id = UuidGenerator.newV4();
+        UUID id2 = UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, "example.com");
+        UUID id3 = UuidGenerator.newV7();
+        System.out.println("v4: " + id);
+        System.out.println("v5: " + id2);
+        System.out.println("v7: " + id3);
 
-Instant created = UuidGenerator.v7Timestamp(id3);
+        Instant created = UuidGenerator.v7Timestamp(id3);
+        System.out.println("timestamp: " + created);
+        long unixMillis = UuidGenerator.v7UnixMillis(id3); // the same instant as Unix-epoch milliseconds
+        System.out.println("unix millis: " + unixMillis);
 
-// Checked first: Optional.empty() for anything that isn't an RFC 9562 v7:
-Optional<Instant> maybeCreated = UuidGenerator.getTimestamp(id3);
+        // Checked first: Optional.empty() for anything that isn't an RFC 9562 v7:
+        Optional<Instant> maybeCreated = UuidGenerator.getTimestamp(id3);
+        System.out.println("checked timestamp: " + maybeCreated);
 
-// Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
-UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id3);
+        // The RFC 9562 variant and version 7, in one call:
+        System.out.println("is v7: " + UuidGenerator.isRfc(id3, 7));
 
-// One downcall, one random-bytes fetch, one counter reservation for the whole batch:
-UUID[] batch = UuidGenerator.newV7Batch(1000);
+        // Byte order SQL Server's uniqueidentifier needs on the wire to sort by creation order:
+        UUID sqlOrdered = UuidGenerator.v7ToSqlOrder(id3);
+        System.out.println("sql order: " + sqlOrdered);
+        System.out.println("sql is v7: " + UuidGenerator.isRfc(sqlOrdered, 7, UuidLayout.SQL_SERVER));
+        System.out.println("sql timestamp: " + UuidGenerator.getTimestamp(sqlOrdered, UuidLayout.SQL_SERVER));
+
+        // One downcall, one random-bytes fetch, one counter reservation for the whole batch:
+        UUID[] batch = UuidGenerator.newV7Batch(1000);
+        System.out.println("batch: " + batch.length);
+    }
+}
 ```
 
 Returns plain `java.util.UUID` — no wrapper type, so it works everywhere a `UUID` already does (equality, hashing, `Comparable`, JPA/Hibernate entity IDs, `toString()`). `UuidGenerator.Namespaces.DNS`/`URL`/`OID`/`X500` are RFC 9562 §6.6's well-known namespaces; `UuidGenerator.NIL`/`MAX` are the §5.9/§5.10 special values. `newV7` also accepts an `Instant` directly (`newV7(Instant)`), not just a raw millisecond count; `getTimestamp` is the checked counterpart to `v7Timestamp`: it checks first, in one call into the core, and returns `Optional.empty()` for anything that isn't an RFC 9562 version 7 UUID, instead of assuming the caller already knows. The variant is checked as well as the version, so a 7 nibble under the NCS, Microsoft or future variant has no timestamp, and only version 7 timestamps are read: a version 1 or 6 from another generator has none. It also reads SQL-ordered values in place; see [Inspection and layouts](#inspection-and-layouts).
@@ -72,10 +93,10 @@ The honest trade-off: this is a native library dependency (a platform-specific `
 
 ```java
 UUID[] dst = new UUID[1000];
-UuidGenerator.fillV7(dst);          // reuse dst across batches
+UuidGenerator.fillV7(dst); // reuse dst across batches
 
 byte[] raw = new byte[1000 * 16];
-UuidGenerator.fillV7(raw);          // RFC-ordered bytes, no UUID objects at all
+UuidGenerator.fillV7(raw); // RFC-ordered bytes, no UUID objects at all
 ```
 
 Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID` is two `long`s rather than 16 RFC-ordered bytes, so the `UUID[]` form still rebuilds every element from the native output — it removes the allocation, not the conversion. **The `byte[]` form is the one that removes real work**, since the native core already writes RFC-ordered bytes contiguously.
@@ -102,14 +123,14 @@ A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`
 The core answers what a UUID is, so nothing here reads bits in Java:
 
 ```java
-UuidGenerator.version(id);                 // the version nibble, 0-15 (agrees with id.version())
-UuidGenerator.variant(id);                 // UuidVariant.NCS / RFC_9562 / MICROSOFT / FUTURE
-UuidGenerator.isRfc(id, 7);                // the RFC variant and version 7, in one call
+UuidGenerator.version(id3); // the version nibble, 0-15 (agrees with id3.version())
+UuidGenerator.variant(id3); // UuidVariant.NCS / RFC_9562 / MICROSOFT / FUTURE
+UuidGenerator.isRfc(id3, 7); // the RFC variant and version 7, in one call
 
-UUID sql = UuidGenerator.v7ToSqlOrder(id);
-UuidGenerator.version(sql, UuidLayout.SQL_SERVER);        // 7
-UuidGenerator.isRfc(sql, 7, UuidLayout.SQL_SERVER);       // true
-UuidGenerator.getTimestamp(sql, UuidLayout.SQL_SERVER);   // read in place, no conversion back; variant checked
+UUID sql = UuidGenerator.v7ToSqlOrder(id3);
+UuidGenerator.version(sql, UuidLayout.SQL_SERVER); // 7
+UuidGenerator.isRfc(sql, 7, UuidLayout.SQL_SERVER); // true
+UuidGenerator.getTimestamp(sql, UuidLayout.SQL_SERVER); // read in place, no conversion back; variant checked
 ```
 
 `isRfc` is the guard to run before trusting a value's version-specific fields, such as `v7UnixMillis`. A version outside 0-15 (or negative) is simply `false`. `UuidVariant` covers the four RFC 9562 §4.1 variants. `variant` never returns its `UNSPECIFIED`, which is there only so each constant's `code()` matches the core's. `variant` reads RFC 9562 order only, and has no layout form. Don't feed it a SQL-ordered value or a `uniqueidentifier` read-back. To validate one of those, use `isRfc` with `UuidLayout.SQL_SERVER`, which checks the variant where that layout puts it.
@@ -124,9 +145,12 @@ Bind `v7ToSqlOrder`'s result with `setBytes`, never `setObject(UUID)`. mssql-jdb
 `UUID`, with or without `microsoft.sql.Types.GUID`, and a `String`, in SQL Server's mixed-endian
 text order, which stores the first three groups byte-reversed and loses the creation order
 ([details](https://github.com/SkunkWerkx/HyperUuid#sql-server-ordering)). It has no connection property that changes that. Bytes go in as binary and
-land byte for byte, and `getBytes` on the column reads them back untouched:
+land byte for byte, and `getBytes` on the column reads them back untouched (`insert` is a
+`PreparedStatement`, `rows` a `ResultSet` positioned on a row):
 
 ```java
+import java.nio.ByteBuffer;
+
 UUID stored = UuidGenerator.v7ToSqlOrder(id3);
 byte[] bytes = ByteBuffer.allocate(16)
         .putLong(stored.getMostSignificantBits())
@@ -134,8 +158,8 @@ byte[] bytes = ByteBuffer.allocate(16)
         .array();
 insert.setBytes(1, bytes);
 
-byte[] raw = rows.getBytes("id");                          // the uniqueidentifier's own bytes
-UuidGenerator.version(raw, UuidLayout.SQL_SERVER);         // 7
+byte[] raw = rows.getBytes("id"); // the uniqueidentifier's own bytes
+UuidGenerator.version(raw, UuidLayout.SQL_SERVER); // 7
 ```
 
 `getObject(…, UUID.class)` and `getString` both return the value with those groups reversed.
