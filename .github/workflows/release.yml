@@ -54,7 +54,7 @@ jobs:
       run_id: ${{ steps.guard.outputs.run_id }}
       source_sha: ${{ steps.guard.outputs.source_sha }}
       version: ${{ steps.guard.outputs.version }}
-      forge_sha: ${{ steps.forge.outputs.sha }}
+      forge_sha: ${{ steps.forge.outputs.revision }}
     permissions:
       contents: read
       actions: read
@@ -69,6 +69,10 @@ jobs:
       # inventory's forge_sha use that commit, so the actions and scripts match the reusable
       # workflows. A recovery run verifies the preserved inventory against it, so recovery needs
       # the Forge's master unchanged since the packaging run.
+      # The output is `revision`, not `sha`: CodeQL reads a checkout ref whose step, job or output
+      # name contains head, sha, commit, branch or ref as a pull request head, and in this
+      # read-only job (the write-permission jobs fall outside that query) it reports the release
+      # guard as a cache-poisoning step (actions/cache-poisoning/poisonable-step).
       - name: Resolve the Forge commit this run uses
         id: forge
         env:
@@ -78,12 +82,12 @@ jobs:
           shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --jq '[.referenced_workflows[] | select(.path | startswith("SkunkWerkx/.github/")) | .sha] | unique | .[]')
           [[ "$shas" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected one Forge commit in this run, got: ${shas:-none}"; exit 1; }
-          echo "sha=$shas" >> "$GITHUB_OUTPUT"
+          echo "revision=$shas" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: SkunkWerkx/.github
-          ref: ${{ steps.forge.outputs.sha }}
+          ref: ${{ steps.forge.outputs.revision }}
           path: .hyperforge
           persist-credentials: false
 
@@ -92,7 +96,7 @@ jobs:
         with:
           ci_run_id: ${{ inputs.ci_run_id }}
           prepared_run_id: ${{ inputs.prepared_run_id }}
-          forge_sha: ${{ steps.forge.outputs.sha }}
+          forge_sha: ${{ steps.forge.outputs.revision }}
           token: ${{ github.token }}
 
   nuget-org-pack:
@@ -302,15 +306,29 @@ jobs:
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/publish-pypi
+      - id: pypi
+        uses: ./.hyperforge/.github/actions/publish-pypi
         with:
           version: ${{ needs.find-ci-run.outputs.version }}
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
           publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
-          publish: ${{ github.event_name == 'workflow_dispatch' }}
           token: ${{ github.token }}
+      # A step of this workflow, never of the Forge's action: pypa/gh-action-pypi-publish runs
+      # its own container image, which it finds through github.action_repository, and nested in
+      # a composite action that is empty (actions/runner#2473), so it looked for
+      # ghcr.io/<this repo>:<tag> and both v1.0.0 uploads failed before sending anything. The
+      # action cannot make the OIDC exchange without uploading, so only a publish dispatch runs
+      # it, and its PEP 740 publish attestations name this file, as every release's must.
+      - name: Publish only missing preserved wheels (Trusted Publishing)
+        if: steps.pypi.outputs.pending == 'true' && github.event_name == 'workflow_dispatch'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pending-pypi
+      - name: Verify every public wheel matches the prepared bytes
+        if: github.event_name == 'workflow_dispatch'
+        run: python3 "$FORGE_SCRIPTS/release_inventory.py" registry-confirm --registry pypi
 
   # crates.io Trusted Publishing is registered against this file, release.yml: crates.io
   # matches the OIDC token's workflow_ref claim, which names the top-level workflow, not the

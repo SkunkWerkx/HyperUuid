@@ -50,8 +50,31 @@ class ReleaseFlowTests(unittest.TestCase):
         self.assertIn('cancel-in-progress: false', self.text)
         for publisher in PUBLISHERS:
             with self.subTest(publisher=publisher):
-                self.assertIn(PUBLISH_GATE, self.jobs[publisher])
+                if publisher == 'pypi-publish':
+                    # Gated by its own upload and wait steps (test_pypi_upload_is_a_step_of_this_workflow).
+                    self.assertNotIn(PUBLISH_GATE, self.jobs[publisher])
+                else:
+                    self.assertIn(PUBLISH_GATE, self.jobs[publisher])
         self.assertIn("github.event_name == 'workflow_dispatch'", header(self.jobs['finalize-release']))
+
+    def test_pypi_upload_is_a_step_of_this_workflow(self):
+        # Nested in the Forge's composite action, pypa/gh-action-pypi-publish looks for its image
+        # at ghcr.io/<this repo>:<tag> (actions/runner#2473): v1.0.0's upload failed that way and
+        # its wheels went up from another workflow, which PyPI shows as a change of provenance.
+        # The PEP 740 publish attestations must name this file, so the upload is a step here.
+        job = self.jobs['pypi-publish']
+        steps = [job.index('uses: ./.hyperforge/.github/actions/publish-pypi'),
+                 job.index('- name: Publish only missing preserved wheels (Trusted Publishing)'),
+                 job.index('- name: Verify every public wheel matches the prepared bytes')]
+        self.assertEqual(steps, sorted(steps))
+        self.assertIn('      - id: pypi\n        uses: ./.hyperforge/.github/actions/publish-pypi', job)
+        self.assertEqual(job.count('uses: pypa/gh-action-pypi-publish@'), 1)
+        self.assertRegex(job, r"if: steps\.pypi\.outputs\.pending == 'true' && github\.event_name == 'workflow_dispatch'\n"
+                              r" +uses: pypa/gh-action-pypi-publish@[0-9a-f]{40} # v[0-9.]+\n +with:\n +packages-dir: pending-pypi\n")
+        self.assertRegex(job, r"Verify every public wheel matches the prepared bytes\n"
+                              r" +if: github\.event_name == 'workflow_dispatch'\n"
+                              r' +run: python3 "\$FORGE_SCRIPTS/release_inventory\.py" registry-confirm --registry pypi\n')
+        self.assertNotIn('pypa/', '\n'.join(j for name, j in self.jobs.items() if name != 'pypi-publish'))
 
     def test_every_registry_publisher_requires_the_global_gate(self):
         for publisher in PUBLISHERS:
@@ -73,7 +96,11 @@ class ReleaseFlowTests(unittest.TestCase):
                  find.index('path: .hyperforge'), find.index('uses: ./.hyperforge/.github/actions/release-guard')]
         self.assertEqual(order, sorted(order))
         self.assertIn('referenced_workflows', find)
-        self.assertIn('forge_sha: ${{ steps.forge.outputs.sha }}', find)
+        # The job's forge_sha output and the guard's input, the .hyperforge checkout, the one write.
+        for line, count in (('forge_sha: ${{ steps.forge.outputs.revision }}', 2),
+                            ('ref: ${{ steps.forge.outputs.revision }}', 1),
+                            ('echo "revision=$shas" >> "$GITHUB_OUTPUT"', 1)):
+            self.assertEqual(find.count(line), count, line)
         for job, action in ACTION_JOBS.items():
             with self.subTest(job=job):
                 body = self.jobs[job]
@@ -85,6 +112,20 @@ class ReleaseFlowTests(unittest.TestCase):
                 if job not in ('find-ci-run', 'ruby-pack', 'pypi-pack'):
                     # The actions that write the inventory or publish record the Forge commit.
                     self.assertIn('forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
+
+    def test_read_only_checkouts_are_not_named_like_a_pull_request_head(self):
+        # CodeQL's actions/cache-poisoning/poisonable-step reads a checkout ref whose step id, needed
+        # job or output name contains one of these words as a pull request head, and flags a job
+        # without write permissions that then runs the checked-out code.
+        heuristic = re.compile(r'head|sha|commit|branch|ref')
+        for name, job in self.jobs.items():
+            if re.search(r'^      [a-z-]+: write$', header(job), re.M):
+                continue
+            for expr in re.findall(r'^ +ref: \$\{\{ *(.*?) *\}\}', job, re.M):
+                with self.subTest(job=name, ref=expr):
+                    context, *parts = expr.split('.')
+                    self.assertIn(context, ('steps', 'needs'))
+                    self.assertFalse([p for p in parts if p != 'outputs' and heuristic.search(p)])
 
     def test_least_privilege(self):
         self.assertIn('\npermissions:\n  contents: read\n', self.text)
@@ -120,8 +161,33 @@ class PreparationFlowTests(unittest.TestCase):
                        "github.event.workflow_run.event == 'workflow_dispatch'"):
             self.assertIn(clause, header(job))
         self.assertIn('source_sha: ${{ github.event_name == \'workflow_run\' && github.event.workflow_run.head_sha || inputs.head_sha }}', job)
-        self.assertIn('event_run_id: ${{ github.event.workflow_run.id }}', job)
+        self.assertIn('event_run_id: ${{ github.event.workflow_run.id || inputs.ci_run_id }}', job)
+        self.assertRegex(text, r'\n      ci_run_id:\n(?:        .*\n)*        required: false\n')
         self.assertIn('group: release-source-${{ github.repository }}', text)
+
+    def test_release_mode_ci_on_master_requests_staging_of_its_own_run(self):
+        # prepare-release dispatches ci.yml with a GITHUB_TOKEN, and GitHub raises no
+        # workflow_run for that run, so the run itself has to ask for staging.
+        ci = jobs(WORKFLOWS / 'ci.yml')
+        request = ci['request-staging']
+        needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
+        self.assertEqual(set(re.split(r'[\s,]+', needs.strip())), set(ci) - {'request-staging'},
+                         'staging is requested only once every other job is green')
+        self.assertIn("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'\n", header(request))
+        self.assertNotRegex(header(request), r'always\(\)|failure\(\)|cancelled\(\)')
+        self.assertEqual(re.findall(r'^      ([a-z-]+): (\w+)$', header(request), re.M), [('actions', 'write')])
+        command = ' '.join(request.split('        run: >-\n')[1].split())
+        self.assertEqual(command, 'gh workflow run stage-native-binaries.yml --repo "$GITHUB_REPOSITORY" --ref master '
+                                  '-f head_sha="$GITHUB_SHA" -f ci_run_id="$GITHUB_RUN_ID"')
+
+    def test_only_request_staging_may_start_a_workflow(self):
+        text = (WORKFLOWS / 'ci.yml').read_text()
+        self.assertIn('\npermissions:\n  contents: read\n', text)
+        for name, job in jobs(WORKFLOWS / 'ci.yml').items():
+            with self.subTest(job=name):
+                grants = set(re.findall(r'^      ([a-z-]+): write$', header(job), re.M))
+                allowed = {'actions'} if name == 'request-staging' else {'id-token', 'attestations'}
+                self.assertLessEqual(grants, allowed)
 
 
 class CiTests(unittest.TestCase):

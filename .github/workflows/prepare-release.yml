@@ -10,8 +10,8 @@ name: Prepare release
 # onto it as B. The order of a release:
 #
 #   1. this workflow: bump every manifest, push A, dispatch ci.yml on A;
-#   2. ci.yml goes green on A, and its completion triggers stage-native-binaries.yml, which
-#      commits that run's libraries on top as B;
+#   2. ci.yml goes green on A, its last job dispatches stage-native-binaries.yml, which
+#      waits for the run to complete and commits that run's libraries on top as B;
 #   3. a human tags B; release.yml refuses a tag whose ci.yml run or committed libraries were
 #      built at a different version, then prepares, and a dispatch publishes (RELEASING.md).
 #

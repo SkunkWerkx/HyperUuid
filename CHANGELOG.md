@@ -7,6 +7,35 @@ entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Python — PyPI shows a change of provenance on 1.0.0.** Its 25 wheels were uploaded by a
+  one-off workflow, `pypi-recovery.yml`, not by `release.yml` as every earlier release was.
+  `release.yml` at `v1.0.0` calls `pypa/gh-action-pypi-publish` from inside the Forge's
+  `publish-pypi` composite action, and nested there the action cannot find its own container
+  image (the runner leaves `github.action_repository` empty, actions/runner#2473), so the
+  release's PyPI upload failed before sending anything. The recovery workflow uploaded the same
+  bytes the `v1.0.0` tag run had packed and attested, after the same checks the release runs:
+  the inventory, every wheel's build provenance and the release attestation. Only the workflow
+  named in the wheels' PEP 740 publish attestations differs, and a tag's workflow cannot be
+  replaced, so PyPI flags 1.0.0 (`release.yml` → `pypi-recovery.yml`) and will flag the next
+  release once more, the other way, when `release.yml` uploads again (below). Every wheel still
+  verifies from the tag:
+  `gh attestation verify <wheel> --repo SkunkWerkx/HyperUuid --source-ref refs/tags/v1.0.0
+  --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1`. *(Python)*
+
+### Changed
+
+- **The release flow, after its first run.** `release.yml` uploads the wheels as a step of
+  its own `pypi-publish` job again, so their PEP 740 publish attestations name it; staging
+  starts by itself once the release-mode CI on the preparation commit is green (that run's
+  last job, `request-staging`, dispatches it, since GitHub raises no `workflow_run` for a
+  run a `GITHUB_TOKEN` started), and a second request for a commit already staged is skipped
+  with a notice; the Forge commit's step output is `revision`, which clears CodeQL's
+  `actions/cache-poisoning/poisonable-step`; and `pypi-recovery.yml` is gone. *(repository only)*
+
 ## [1.0.0] — 2026-10-25
 
 The first stable release. Every package's public API and the platforms in the README's
@@ -1510,6 +1539,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...v0.8.0

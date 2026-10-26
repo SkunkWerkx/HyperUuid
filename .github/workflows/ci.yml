@@ -38,8 +38,9 @@ on:
 
 # Least privilege for the whole board: every job below reads the repository and nothing more.
 # The five HyperForge build jobs need id-token and attestations on top of that (SLSA provenance
-# for what they build), and each declares those itself — a job-level `permissions:` replaces this
-# block rather than adding to it, so the writes never reach a local job. This is also what
+# for what they build), and request-staging needs actions to start stage-native-binaries.yml;
+# each declares those itself — a job-level `permissions:` replaces this block rather than
+# adding to it, so the writes never reach another job. This is also what
 # quietens CodeQL's actions/missing-workflow-permissions, which otherwise fires once per job.
 permissions:
   contents: read
@@ -567,3 +568,25 @@ jobs:
             .github/scripts/android_smoke.sh "$APP_ID" "$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)" apks/coreclr-android-x64.apk apks/aot-android-x64.apk
             .github/scripts/android_device_test.sh stage/go-x86_64 ./hyperuuid.test -test.v -test.short
             .github/scripts/android_device_test.sh stage/swift-x86_64 ./HyperUuidPackageTests.xctest
+
+  # A release's run is dispatched by prepare-release.yml with a GITHUB_TOKEN, and GitHub raises
+  # no workflow_run for a run that token started, so stage-native-binaries.yml would never hear
+  # that it finished. workflow_dispatch is one of the two events the token may raise: once every
+  # job above is green, this asks staging for this exact run. Staging waits for the run to
+  # complete and holds it to the same checks as ever; a run a human dispatched also raises
+  # workflow_run, and whichever staging request comes second finds A staged and skips. Pull
+  # requests and the weekly schedule never stage, and only this job may start a workflow.
+  request-staging:
+    needs: [build-static, build-android, test-swift-static, build-native, build-wasm, build-wheels,
+            check-core, test-apple-mobile, test-android]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: write
+    steps:
+      - name: Ask stage-native-binaries.yml to stage this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run stage-native-binaries.yml --repo "$GITHUB_REPOSITORY" --ref master
+          -f head_sha="$GITHUB_SHA" -f ci_run_id="$GITHUB_RUN_ID"

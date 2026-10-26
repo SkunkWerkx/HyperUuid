@@ -12,10 +12,14 @@ name: Stage native binaries for release
 # leg builds and links its own), so they only have to be right at the tagged commit.
 #
 # The trigger is a release's version bump: prepare-release.yml pushes A and dispatches ci.yml
-# (release mode) against it, and when that run completes on master this pulls its attested
-# output, verifies every byte of it, and commits it straight back as B with the run, A and
-# the Forge commit recorded as trailers release.yml reads. Scheduled runs are not staged.
-# workflow_dispatch stages from any already-green, release-mode ci.yml run by commit SHA.
+# (release mode) against it, and once every job of that run is green its request-staging job
+# dispatches this with the run's id (GitHub raises no workflow_run for a run a GITHUB_TOKEN
+# started). This waits for the run to complete, pulls its attested output, verifies every byte
+# of it, and commits it straight back as B with the run, A and the Forge commit recorded as
+# trailers release.yml reads. workflow_run still fires for a ci.yml run a human dispatched;
+# the second request for an A already staged is skipped with a notice, not a second B.
+# Scheduled runs are not staged. workflow_dispatch by hand stages from any already-green,
+# release-mode ci.yml run by commit SHA.
 # The body lives in the Forge; its hyper_config.py derives the paths and targets from
 # .github/hyper.json.
 
@@ -30,6 +34,11 @@ on:
         description: "Commit SHA to pull native-* artifacts from (must have a successful ci.yml run) and to stage/commit onto master"
         required: true
         type: string
+      ci_run_id:
+        description: "The ci.yml run to stage (ci.yml's request-staging job passes its own); empty looks up a successful release-mode run for head_sha"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: release-source-${{ github.repository }}
@@ -53,4 +62,4 @@ jobs:
       actions: read
     with:
       source_sha: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.head_sha }}
-      event_run_id: ${{ github.event.workflow_run.id }}
+      event_run_id: ${{ github.event.workflow_run.id || inputs.ci_run_id }}
