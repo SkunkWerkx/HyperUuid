@@ -167,6 +167,52 @@ jobs:
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           token: ${{ github.token }}
 
+  # The npm tarballs and the R source tarball are attested here for the same reason: npmjs.com
+  # registers this repository's OIDC identity, and the inventory records both groups as signed
+  # by this repository at B. The CRAN tarball is preserved and never uploaded by any job.
+  npm-pack:
+    needs: find-ci-run
+    if: inputs.prepared_run_id == ''
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-npm
+        with:
+          run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          token: ${{ github.token }}
+
+  r-pack:
+    needs: find-ci-run
+    if: inputs.prepared_run_id == ''
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-r
+        with:
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+
   pypi-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
@@ -195,12 +241,13 @@ jobs:
   # shipped file and whose predicate is the inventory. Preserved for 90 days as
   # release-packages; a recovery run verifies the preserved bytes and never re-attests.
   publication-gate:
-    needs: [find-ci-run, nuget-org-pack, ruby-pack, pypi-pack, crate-pack, maven-pack]
+    needs: [find-ci-run, nuget-org-pack, ruby-pack, pypi-pack, npm-pack, r-pack, crate-pack, maven-pack]
     if: >-
       always() && !cancelled() && needs.find-ci-run.result == 'success' &&
       (inputs.prepared_run_id != '' ||
        (needs.nuget-org-pack.result == 'success' && needs.ruby-pack.result == 'success' &&
-        needs.pypi-pack.result == 'success' && needs.crate-pack.result == 'success' &&
+        needs.pypi-pack.result == 'success' && needs.npm-pack.result == 'success' &&
+        needs.r-pack.result == 'success' && needs.crate-pack.result == 'success' &&
         needs.maven-pack.result == 'success'))
     runs-on: ubuntu-26.04
     permissions:
@@ -224,6 +271,8 @@ jobs:
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
           prepared_run_id: ${{ inputs.prepared_run_id }}
           token: ${{ github.token }}
+          npm_packages: true
+          cran_packages: true
 
   # Every publisher below runs on the tag push with publish off: it plans the upload from the
   # preserved inventory and, where the registry allows it, completes the Trusted Publisher
@@ -278,6 +327,35 @@ jobs:
           path: .hyperforge
           persist-credentials: false
       - uses: ./.hyperforge/.github/actions/publish-rubygems
+        with:
+          version: ${{ needs.find-ci-run.outputs.version }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
+          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          token: ${{ github.token }}
+
+  npm-publish:
+    needs: [find-ci-run, publication-gate]
+    if: >-
+      !cancelled() && needs.find-ci-run.result == 'success' &&
+      needs.publication-gate.result == 'success'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/publish-npm
         with:
           version: ${{ needs.find-ci-run.outputs.version }}
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
@@ -380,12 +458,13 @@ jobs:
   # The go/vX.Y.Z tag and the GitHub Release (notes from the CHANGELOG's section plus the
   # verification commands), only once every registry has the bytes, and only on a dispatch.
   finalize-release:
-    needs: [find-ci-run, publication-gate, nuget-org-publish, rubygems-publish, pypi-publish, pack-crates, maven-publish]
+    needs: [find-ci-run, publication-gate, nuget-org-publish, rubygems-publish, pypi-publish, npm-publish, pack-crates, maven-publish]
     if: >-
       !cancelled() && github.event_name == 'workflow_dispatch' &&
       needs.find-ci-run.result == 'success' && needs.publication-gate.result == 'success' &&
       needs.nuget-org-publish.result == 'success' && needs.rubygems-publish.result == 'success' &&
-      needs.pypi-publish.result == 'success' && needs.pack-crates.result == 'success' && needs.maven-publish.result == 'success'
+      needs.pypi-publish.result == 'success' && needs.npm-publish.result == 'success' &&
+      needs.pack-crates.result == 'success' && needs.maven-publish.result == 'success'
     runs-on: ubuntu-26.04
     permissions:
       contents: write

@@ -26,6 +26,8 @@ The core matches the oracle byte for byte, and the RFC 9562 Appendix A vectors a
 | `timestamp.json` | `uuid`, `layout`, `version` (as `version_in(layout)` reads it), `unix_millis` | every binding, through its generic timestamp getter, its per-version millisecond getter, and its layout-aware doors |
 | `inspect.json` | `uuid`, `layout`, `version`, `is_rfc` (`is_rfc_in(version, layout)`), and in RFC layout also `variant` (`ncs`/`rfc9562`/`microsoft`/`future`) | every binding, through its version, variant and IsRfc doors. Also check that `is_rfc_in` is false for every other version. `note` is for people reading the file |
 
+The TypeScript and R suites replay the five "every binding" files in `typescript/tests/corpus.test.ts` and `r/tests/testthat/test-corpus.R`. Under `R CMD check` an R package's tests see only the package's own tree, so `r/tools/vendor.sh` stages a copy of those five under `r/tests/testthat/corpus/` (gitignored) for the tarball to carry; a checkout without the copy reads this directory.
+
 Every `sql` value is an RFC 9562 version 8 read in `Guid` order. In SQL Server layout, `version` is the version the value was converted from, 7; bytes without the layout's 8 and variant read as version 0 with no timestamp. Whether a value really is in SQL order is the caller's knowledge, not the value's: RFC-order bytes can carry the 8 and the variant where the layout puts them, and a random v4 does one time in 16. A value 0.8.0 converted, which carries a 7 where the 8 is, reads as version 0 until its nibble is changed. That is why the `sql_server` rows for values that aren't SQL-ordered use fixed vectors, and why `inspect.json` pins RFC A.4's v5, which happens to read as a SQL-ordered v7.
 
 ## Changing the corpus

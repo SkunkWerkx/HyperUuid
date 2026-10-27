@@ -1,8 +1,8 @@
 # Changelog
 
-All eight packages in this repository — the `hyperuuid` crate and the C#, Java, Go, Python, Ruby,
-PHP and Swift bindings — share one coordinated version, so one changelog covers all of them. Each
-entry marks which packages it actually affects.
+All ten packages in this repository — the `hyperuuid` crate and the C#, Java, Go, Python, Ruby,
+PHP, Swift, TypeScript and R bindings — share one coordinated version, so one changelog covers
+all of them. Each entry marks which packages it actually affects.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -25,6 +25,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verifies from the tag:
   `gh attestation verify <wheel> --repo SkunkWerkx/HyperUuid --source-ref refs/tags/v1.0.0
   --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1`. *(Python)*
+
+### Added
+
+- **A TypeScript binding for Node and Bun, on npm as `hyperuuid`.** A Node-API addon built
+  with napi-rs, the core linked into the `.node` file, published as eight platform packages
+  (`@skunkwerkx/hyperuuid-<platform>`, one per RID) that the root package picks through
+  `optionalDependencies`, so nothing compiles at install. Node 22 or newer and Bun, CommonJS
+  and ESM, ids in and out as strings or 16-byte `Uint8Array`s, and the doors every binding
+  has: v4, v5 and v7, v7 batches and buffer fills, the SQL Server order, inspection in either
+  layout, and `isAvailable()`/`nativeVersion()`. A platform without an addon still loads the
+  package and says so through `isAvailable()`. No WebAssembly fallback yet. *(TypeScript)*
+- **An R binding, as the source package `hyperuuid`.** A C shim over the core's C ABI,
+  reached through `.Call`, with the core built as a static library from the Rust crates
+  vendored into the tarball, so an install needs Rust but no network. Every function is
+  vectorised and propagates `NA` element-wise through character, integer, logical and
+  `POSIXct` results; arguments and the raw doors are strict and error. R 4.2 or newer.
+  *(R)*
+- **Release plumbing for npm and CRAN.** The tag run packs, attests and preserves nine npm
+  tarballs (the root package, its `optionalDependencies` injected at pack time, and the eight
+  platform packages) and the R source tarball; the publish dispatch uploads the npm packages
+  through Trusted Publishing, platform packages before the root. No job uploads the R tarball:
+  it is submitted to CRAN by hand from the preserved bytes. CI builds the addon on every RID
+  and runs its suite on Node there, and on Bun on every RID but win-arm64 and osx-x64 (the
+  cross-build leg runs Node alone), and runs `R CMD check --as-cran` on linux-x64,
+  linux-arm64, osx-arm64 and win-x64. Dependabot covers the TypeScript binding's npm and
+  cargo manifests (the R wrapper crate's only dependency is the staged core, and its lock is
+  derived from `rust/Cargo.lock` by `r/tools/vendor.sh --stage`, never committed), and
+  `.gitattributes` keeps `r/` and `typescript/` out of the archive Packagist serves.
+  *(repository only)*
 
 ### Changed
 

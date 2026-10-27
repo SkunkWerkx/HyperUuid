@@ -1,0 +1,8 @@
+# Copied to $(CARGO_HOME)/config.toml (src/.cargo) by the Makevars when vendor.tar.xz is
+# present. Cargo resolves a relative path in a config file against the parent of the
+# directory holding it (src/.cargo -> src/), so this is src/rust/vendor.
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "rust/vendor"

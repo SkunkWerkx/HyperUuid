@@ -1,0 +1,31 @@
+Package: hyperuuid
+Type: Package
+Title: RFC 9562 UUIDs: Versions 4, 5 and 7 and a 'SQL Server' Ordering
+Version: 1.0.0
+Authors@R: c(
+    person("Brian", "Buvinghausen", email = "buvinghausen@gmail.com",
+           role = c("aut", "cre")),
+    person("Skunk Werkx", role = "cph"),
+    person("Authors of the vendored Rust crates", role = c("ctb", "cph"),
+           comment = "see inst/AUTHORS")
+  )
+Description: Generates RFC 9562 version 4 (random), version 5 (name-based) and
+    version 7 (time-ordered) UUIDs, inspects their version, variant and timestamp,
+    and converts version 7 values to and from a version 8 layout that sorts by
+    creation time in 'SQL Server' indexes. The work is done by a compiled 'Rust'
+    core shared with the project's bindings for other languages. Every function
+    is vectorised: character, integer, logical and POSIXct results propagate NA
+    element-wise, while the raw conversions and every argument are strict and
+    error.
+License: MIT + file LICENSE
+URL: https://github.com/SkunkWerkx/HyperUuid
+BugReports: https://github.com/SkunkWerkx/HyperUuid/issues
+Depends: R (>= 4.2)
+Suggests:
+    testthat (>= 3.0.0),
+    jsonlite
+SystemRequirements: Cargo (Rust's package manager), rustc
+Config/testthat/edition: 3
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.1

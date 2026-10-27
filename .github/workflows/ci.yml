@@ -129,6 +129,11 @@ jobs:
       # the pipeline's explicit per-leg placement for in-repo testing.
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
+      # The TypeScript addon (uploaded and attested as node-{rid} for release.yml's npm-pack)
+      # and R CMD check --as-cran. Both default false in the Forge until the siblings carry
+      # these bindings; the Node, Bun and R versions are the Forge's defaults.
+      node: true
+      r: true
 
   # C#/NuGet's WASM support is a shipped surface (Norse Architecture needs it), so it's
   # built on every PR, not just at release time.
@@ -195,6 +200,8 @@ jobs:
     with:
       no_std_rustflags: --cfg getrandom_backend="custom"
       clippy_targets: aarch64-linux-android
+      lint_node: true
+      lint_r: true
 
 
   # iOS and Mac Catalyst, for the three bindings that reach them. Neither platform loads a

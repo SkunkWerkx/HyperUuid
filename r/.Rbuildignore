@@ -1,0 +1,10 @@
+^src/rust/target$
+^src/rust/vendor$
+^src/\.cargo$
+^README\.md$
+^LICENSE\.md$
+^cran-comments\.md$
+^bench$
+^\.lintr$
+^\.gitignore$
+^\.clang-format$

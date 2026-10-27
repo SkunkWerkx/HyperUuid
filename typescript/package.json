@@ -1,0 +1,57 @@
+{
+  "name": "hyperuuid",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "binding.js",
+    "binding.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SkunkWerkx/HyperUuid.git"
+  },
+  "napi": {
+    "binaryName": "hyperuuid",
+    "packageName": "@skunkwerkx/hyperuuid",
+    "constEnum": false,
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --release --platform --js binding.js --dts binding.d.ts",
+    "build:debug": "napi build --platform --js binding.js --dts binding.d.ts",
+    "test": "node --test \"tests/*.test.ts\" \"tests/*.test.mts\"",
+    "test:bun": "bun test tests/",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "bench": "node bench/bench.ts",
+    "bench:bun": "bun bench/bench.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@napi-rs/cli": "3.10.9",
+    "@types/node": "26.6.5",
+    "mitata": "1.0.34",
+    "typescript": "7.0.2",
+    "uuid": "14.0.3"
+  }
+}

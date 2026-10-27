@@ -1,0 +1,31 @@
+#!/bin/sh
+# Checks for the Rust toolchain the package builds with and prints its versions (CRAN's
+# Rust policy). rustup installs to ~/.cargo/bin, which is often not on R's PATH.
+export PATH="$PATH:$HOME/.cargo/bin"
+
+if ! command -v cargo > /dev/null 2>&1 || ! command -v rustc > /dev/null 2>&1; then
+  cat << 'MSG'
+------------------------------------------------------------------------
+hyperuuid needs Cargo (Rust's package manager) and rustc to build.
+Install the Rust toolchain from https://rustup.rs and try again.
+------------------------------------------------------------------------
+MSG
+  exit 1
+fi
+
+cargo --version
+rustc --version
+
+# rustc 1.85 is the core crate's rust-version.
+RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)
+RUSTC_MAJOR=$(echo "$RUSTC_VERSION" | cut -d. -f1)
+RUSTC_MINOR=$(echo "$RUSTC_VERSION" | cut -d. -f2)
+if [ "$RUSTC_MAJOR" -lt 1 ] || { [ "$RUSTC_MAJOR" -eq 1 ] && [ "$RUSTC_MINOR" -lt 85 ]; }; then
+  cat << MSG
+------------------------------------------------------------------------
+hyperuuid needs rustc 1.85 or newer; found $RUSTC_VERSION.
+Update the Rust toolchain (rustup update, see https://rustup.rs).
+------------------------------------------------------------------------
+MSG
+  exit 1
+fi
