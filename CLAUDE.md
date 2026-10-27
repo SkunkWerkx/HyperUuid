@@ -87,6 +87,12 @@ HyperTabular and move together.
   are called at master and resolved when the run is queued. The inventory records the
   commit and recovery requires it unchanged. Don't merge Forge changes while a release
   is in flight.
+- Fail fast: in the Forge's `hyper-build-native.yml` a new binding's steps go immediately
+  after the Rust compile steps, ahead of every binding that has already shipped, in the
+  desktop job and in the musl suite list alike. The newest code is where a run fails, and a
+  failure in the first minutes lets the owner cancel the rest of the tree and re-run. Once a
+  binding has been through a release, the next new one goes in front of it (today TypeScript
+  and R lead).
 - `prepare-release.yml`, `stage-native-binaries.yml` and ci.yml's `check-core` are one
   `uses:` each of a Forge reusable workflow; this repo keeps triggers, permissions and gates.
   `.github/hyper.json` is what the Forge knows about this project (crate and project names,
