@@ -19,16 +19,15 @@ pip install hyperuuid
 
 Real platform-specific wheels, so it lands at native speed with nothing to compile, the same
 way numpy or cryptography does — no compiler needed and no dependencies at all; the PyO3
-extension *is* the package. Each platform gets three wheels, which between them cover every
-CPython from the 3.11 floor up, with the GIL or without it:
+extension *is* the package. Each platform gets two wheels, both stable-ABI, which between
+them cover every CPython from the 3.11 floor up, with the GIL or without it:
 
 | Wheel | Interpreters |
 | --- | --- |
 | `cp311-abi3` | CPython 3.11 and newer, with the GIL |
-| `cp314-cp314t` | free-threaded CPython 3.14 |
 | `cp315-abi3.abi3t` | CPython 3.15 and newer, free-threaded or not ([PEP 803](https://peps.python.org/pep-0803/)) |
 
-on each of eight platforms, plus a twenty-fifth wheel for Pyodide in the browser
+on each of eight platforms, plus a seventeenth wheel for Pyodide in the browser
 ([below](#in-the-browser-pyodide)):
 
 | | x64 | arm64 |
@@ -39,8 +38,10 @@ on each of eight platforms, plus a twenty-fifth wheel for Pyodide in the browser
 | Windows | ✓ | ✓ |
 
 **Only wheels are published — there is no sdist.** An interpreter none of the wheels matches
-(a glibc older than 2.28, PyPy, free-threaded 3.13) gets `No matching distribution found`
-from pip, not a source build.
+(a glibc older than 2.28, PyPy, free-threaded 3.13 or 3.14) gets `No matching distribution
+found` from pip, not a source build. Free-threaded CPython older than 3.15 has no stable ABI,
+so its wheel would serve one interpreter version, too narrow an ABI to ship; free-threading
+starts at 3.15, where `abi3t` covers it.
 
 On Alpine the musl wheel needs nothing beyond the base image — it carries its own copy of
 `libgcc_s` — and the whole suite passes on a bare `python:3.14-alpine`.

@@ -18,8 +18,9 @@ license-files = ["LICENSE"]
 authors = [{ name = "Brian Buvinghausen" }]
 # 3.11 floor: 3.9 reached end of life in October 2025 and 3.10 does on 2026-10-31. The
 # extension is built abi3-py311, so one wheel per platform covers the whole floor-and-up range
-# with the GIL — the same floor HyperCast has. Free-threaded CPython takes a cp314t wheel and,
-# from 3.15, the abi3t one (rust/Cargo.toml's abi3t-py315).
+# with the GIL — the same floor HyperCast has. Free-threaded CPython is served from 3.15 by
+# the abi3t wheel (rust/Cargo.toml's abi3t-py315); 3.13t and 3.14t have no stable ABI and get
+# no wheel.
 requires-python = ">=3.11"
 dependencies = []
 keywords = ["uuid", "rfc9562", "guid", "identifier", "pyo3"]

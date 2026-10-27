@@ -11,7 +11,7 @@ name: CI — build native, build wasm, test every binding
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
-# Magnus extension) get uploaded here for later reuse, as do the 25 PyPI wheels, which
+# Magnus extension) get uploaded here for later reuse, as do the 17 PyPI wheels, which
 # are built, installed and called into on every run (build-wheels below). The .nupkg and
 # the gems are still packed in release.yml, at tag time, from this run's libraries.
 #
@@ -162,7 +162,7 @@ jobs:
       go_tinygo_smoke: go/internal/tinygosmoke
       ruby_wasm_smoke: ruby/wasm-smoke
 
-  # The 25 PyPI wheels, on every run rather than only at the tag: built by maturin,
+  # The 17 PyPI wheels, on every run rather than only at the tag: built by maturin,
   # installed on their own platform and on each interpreter they serve, free-threaded ones
   # included (the musl ones on Alpine, osx-x64 under Rosetta, the Pyodide one in Pyodide
   # under Node and in headless Chrome, where the whole pytest suite runs too), called
