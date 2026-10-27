@@ -78,10 +78,27 @@ php/.phpunit.result.cache
 /vendor/
 /composer.lock
 
-# Node. The one npm project this repo had (python/wasm-smoke-test, which proved the Pyodide
-# path) went away with the ctypes fallback it existed to justify — nothing here builds
-# against node today. The rule stays so a stray local install can't get committed.
+# Node: the TypeScript binding and ruby/wasm-smoke's test harness.
 **/node_modules/
+# The napi-rs addon `npm run build` writes for this machine, and the per-platform package
+# directories `napi create-npm-dirs` writes (the Forge's pack-npm action runs it on a copy of
+# typescript/ at release time); never committed.
+typescript/*.node
+typescript/npm/
+
+# R. vendor.sh stages the core and the corpus, derives the wrapper crate's lock from
+# rust/Cargo.lock and vendors the crates into these at release time, in CI and for the
+# local loop; R CMD INSTALL leaves the objects and the library. All generated, never
+# committed. r/.gitignore and typescript/.gitignore repeat their entries for their own trees.
+r/src/rust/core/
+r/src/rust/vendor/
+r/src/rust/vendor.tar.xz
+r/src/rust/Cargo.lock
+r/src/.cargo/
+r/tests/testthat/corpus/
+r/src/*.o
+r/src/*.so
+r/src/*.dll
 
 # BenchmarkDotNet
 # Writes output relative to the process's working directory when invoked via `dotnet run`

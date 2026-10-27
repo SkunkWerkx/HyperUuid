@@ -11,12 +11,13 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / '.github/workflows'
 FORGE = ROOT.parent / 'HyperForge'
-PUBLISHERS = ('nuget-org-publish', 'rubygems-publish', 'pypi-publish', 'pack-crates', 'maven-publish')
-PACKERS = ('nuget-org-pack', 'ruby-pack', 'pypi-pack', 'crate-pack', 'maven-pack')
+PUBLISHERS = ('nuget-org-publish', 'rubygems-publish', 'pypi-publish', 'npm-publish', 'pack-crates', 'maven-publish')
+PACKERS = ('nuget-org-pack', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack', 'crate-pack', 'maven-pack')
 ACTION_JOBS = {'find-ci-run': 'release-guard', 'ruby-pack': 'pack-gems', 'pypi-pack': 'verify-wheels',
+               'npm-pack': 'pack-npm', 'r-pack': 'pack-r',
                'publication-gate': 'release-gate', 'nuget-org-publish': 'publish-nuget',
                'rubygems-publish': 'publish-rubygems', 'pypi-publish': 'publish-pypi',
-               'finalize-release': 'finalize-release'}
+               'npm-publish': 'publish-npm', 'finalize-release': 'finalize-release'}
 FORGE_WORKFLOW = re.compile(r'SkunkWerkx/\.github/\.github/workflows/([\w-]+\.yml)@(\S+)')
 PUBLISH_GATE = "publish: ${{ github.event_name == 'workflow_dispatch' }}"
 
@@ -86,7 +87,20 @@ class ReleaseFlowTests(unittest.TestCase):
         for packer in PACKERS:
             with self.subTest(packer=packer):
                 self.assertIn("if: inputs.prepared_run_id == ''", header(self.jobs[packer]))
+        # The gate waits for every packer, and on a tag run for each one's success; a publish
+        # dispatch skips the packers and takes the preserved packages instead.
+        gate = header(self.jobs['publication-gate'])
+        gate_needs = set(re.split(r'[\s,]+', re.search(r'^    needs: \[([^]]*)\]', gate, re.M)[1].strip()))
+        self.assertEqual(gate_needs, {'find-ci-run', *PACKERS})
+        self.assertIn("(inputs.prepared_run_id != '' ||", gate)
+        for packer in PACKERS:
+            self.assertIn(f"needs.{packer}.result == 'success'", gate)
+        self.assertEqual({k: v for k, v in re.findall(r'^          (npm_packages|cran_packages): (.*)$',
+                                                        self.jobs['publication-gate'], re.M)},
+                         {'npm_packages': 'true', 'cran_packages': 'true'})
         finalize = header(self.jobs['finalize-release'])
+        finalize_needs = set(re.split(r'[\s,]+', re.search(r'^    needs: \[([^]]*)\]', finalize, re.M)[1].strip()))
+        self.assertEqual(finalize_needs, {'find-ci-run', 'publication-gate', *PUBLISHERS})
         for publisher in PUBLISHERS:
             self.assertIn(f"needs.{publisher}.result == 'success'", finalize)
 
@@ -109,7 +123,7 @@ class ReleaseFlowTests(unittest.TestCase):
                 self.assertIn('persist-credentials: false', body)
                 if job != 'find-ci-run':
                     self.assertIn('ref: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
-                if job not in ('find-ci-run', 'ruby-pack', 'pypi-pack'):
+                if job not in ('find-ci-run', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack'):
                     # The actions that write the inventory or publish record the Forge commit.
                     self.assertIn('forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
 
@@ -205,11 +219,19 @@ class CiTests(unittest.TestCase):
         self.assertIn('needs: [build-static, build-android]', self.jobs['test-android'])
         self.assertIn('needs: build-static', self.jobs['test-swift-static'])
 
-    def test_static_checks_run_in_the_forge_with_this_repositorys_two_inputs(self):
+    def test_typescript_and_r_legs_are_on(self):
+        # The Forge's node and r inputs default false until the siblings carry the bindings.
+        self.assertEqual(re.findall(r'^      (node|r): (.*)$', self.jobs['build-native'], re.M),
+                         [('node', 'true'), ('r', 'true')])
+
+    def test_static_checks_run_in_the_forge_with_this_repositorys_four_inputs(self):
         core = self.jobs['check-core']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master', core)
+        self.assertEqual(with_block(core), {'no_std_rustflags', 'clippy_targets', 'lint_node', 'lint_r'})
         self.assertIn('no_std_rustflags: --cfg getrandom_backend="custom"', core)
         self.assertIn('clippy_targets: aarch64-linux-android', core)
+        self.assertIn('lint_node: true', core)
+        self.assertIn('lint_r: true', core)
         inline = [name for name in self.jobs if re.match(r'(check|lint|format)-', name) and name != 'check-core']
         self.assertEqual(inline, [], 'static checks live in hyper-check-core.yml, once')
 

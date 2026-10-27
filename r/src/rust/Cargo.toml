@@ -1,0 +1,19 @@
+[package]
+name = "rcore"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+hyperuuid = { path = "core", default-features = false, features = ["staticlib"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[workspace]
+exclude = ["core"]

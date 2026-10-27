@@ -7,10 +7,10 @@ binding, and an extra one means the binding still declares a function the core d
 renamed. Both of those otherwise surface late, in one binding's suite on whichever leg
 calls it.
 
-The Python and Ruby extensions are not C ABI consumers: they link the core as a Rust crate
-and register its functions under their language's spelling, so their sites map each export
-to that spelling. The PHP extension (rust/src/php_ext.rs) is a benchmark spike that php/src
-never calls, so it is not checked.
+The Python and Ruby extensions and the TypeScript addon are not C ABI consumers: they link
+the core as a Rust crate and register its functions under their language's spelling, so their
+sites map each export to that spelling. The PHP extension (rust/src/php_ext.rs) is a benchmark
+spike that php/src never calls, so it is not checked.
 
 No dependencies and no build: CI runs it in a job of its own, and so can a dev loop.
 
@@ -48,6 +48,50 @@ def ruby_spelling(export):
     if export == VERSION:
         return "packed_version"
     return export.removeprefix("uuid_")
+
+
+TS_EXTRA = ("new_v4_bytes", "new_v7_bytes", "new_v7_batch_bytes", "fill_v7", "v7_timestamp")
+
+
+def ts_spelling(export):
+    """The TypeScript addon's snake_case name: Python's, except that the layout pair is one
+    function there (`v7_unix_millis` takes the optional layout), so its second half has no
+    name of its own."""
+    if export == "uuid_v7_unix_millis_in":
+        return None
+    return python_spelling(export)
+
+
+def camel(name):
+    """napi-rs exposes a Rust `snake_case` function as `camelCase` in the generated .d.ts."""
+    head, *rest = name.split("_")
+    return head + "".join(part[:1].upper() + part[1:] for part in rest)
+
+
+def ts_camel(export):
+    """binding.d.ts's name for an export, or None for the merged half of the layout pair."""
+    name = ts_spelling(export)
+    return camel(name) if name else None
+
+
+def napi_catch_unwind(path):
+    """Every napi function must carry `catch_unwind`: without it a panic in the core unwinds
+    into Node-API and aborts the process instead of throwing. Attributes above consts and
+    enums are not functions and are skipped."""
+    path = Path(path)
+    if not path.is_absolute():
+        path = ROOT / path
+    lines = path.read_text(encoding="utf-8").splitlines()
+    bad = []
+    for number, line in enumerate(lines):
+        if not re.match(r"#\[napi(?:\(.*\))?\]\s*$", line.strip()) or "catch_unwind" in line:
+            continue
+        following = next((l for l in lines[number + 1 :] if l.strip()), "")
+        match = re.match(r"pub fn (\w+)", following)
+        if match:
+            bad.append(f"{match.group(1)} (line {number + 1})")
+    if bad:
+        sys.exit(f"check_exports: {path.name} has napi functions without catch_unwind: " + ", ".join(bad))
 
 
 C_PROTOTYPE = r"(?m)^(?:u?int\d+_t|void) (\w+)\("
@@ -97,6 +141,7 @@ SITES = [
         "all",
         (),
     ),
+    ("R (core.h)", [("r/src/core.h", C_PROTOTYPE)], "all", ()),
     (
         "PHP (FFI cdef)",
         [("php/src/Runtime.php", r"'(?:int|u?int\d+_t|void) (\w+)\(")],
@@ -122,6 +167,20 @@ SITES = [
         python_spelling,
         PYTHON_EXTRA,
     ),
+    # The addon is checked at both ends, as Python's is: the Rust source is what registers a
+    # function, binding.d.ts is what TypeScript callers see, and either can drift alone.
+    (
+        "TypeScript (napi)",
+        [("typescript/src/lib.rs", r'(?m)^#\[napi\((?:[^)\n]*)\)\]\s*\npub fn (\w+)(?:<[^>]*>)?\(')],
+        ts_spelling,
+        TS_EXTRA,
+    ),
+    (
+        "TypeScript (binding.d.ts)",
+        [("typescript/binding.d.ts", r"(?m)^export declare function (\w+)\(")],
+        ts_camel,
+        tuple(camel(name) for name in TS_EXTRA),
+    ),
     # The no-panic proof links every export but the version probe by symbol; that one it
     # calls through the crate.
     ("no-panic example", [("rust/examples/no_panic.rs", r"(?m)^    fn (\w+)\(")], "doors", ()),
@@ -146,6 +205,7 @@ def main():
     if VERSION not in exports or len(exports) < 2:
         sys.exit(f"check_exports: read {sorted(exports)} from {CORE}, which is not the core's ABI")
     print(f"core: {len(exports)} exports")
+    napi_catch_unwind("typescript/src/lib.rs")
     failed = False
     for binding, sources, wants, extra in SITES:
         if wants == "all":

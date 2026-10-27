@@ -1,0 +1,24 @@
+[package]
+name = "hyperuuid-napi"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hyperuuid = { path = "../rust" }
+napi = { version = "3", default-features = false, features = ["napi5"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+# catch_unwind on every #[napi] function needs an unwinder to catch with, so this stays
+# explicit rather than inherited. The core is proven no-panic, so nothing reaches it in practice.
+panic = "unwind"
+lto = true
+codegen-units = 1
+strip = "symbols"

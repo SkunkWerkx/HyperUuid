@@ -7,7 +7,8 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
 
 1. Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] — <date>` with a bullet for
    every package the diff touched; the tag run refuses a CHANGELOG without that section,
-   and the GitHub Release notes are generated from it.
+   and the GitHub Release notes are generated from it. Set `r/NEWS.md`'s heading to
+   `# hyperuuid X.Y.Z` to match.
 2. Dispatch `prepare-release.yml` with the version. It bumps every manifest, pushes A and
    runs `ci.yml` on it; `stage-native-binaries.yml` then commits the verified natives as B.
 3. CodeQL runs weekly and on demand, not on pull requests: run it on B
@@ -23,9 +24,17 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
    gh workflow run release.yml --repo SkunkWerkx/HyperUuid --ref vX.Y.Z -f prepared_run_id=<tag run id>
    ```
 
-   This is the recovery path, so every release exercises it. After all five publishers
-   succeed it creates `go/vX.Y.Z` and the GitHub Release.
-6. Verify one file of each kind from the tag alone, exactly as a consumer would:
+   This is the recovery path, so every release exercises it. After all six publishers
+   succeed it creates `go/vX.Y.Z` and the GitHub Release. An npm package that does not exist
+   yet (the first release, or a new platform) has no trusted publisher to accept the upload,
+   so before this dispatch the owner bootstraps it as the shared runbook says: a placeholder
+   `0.0.1` under each new name, published by hand with a granular token, then `release.yml`
+   registered as its trusted publisher and the token revoked. The release version itself is
+   never published by hand, so its first real version is this run's Trusted Publishing
+   upload and carries npm provenance.
+6. Submit the R package to CRAN by hand: download `release-packages` from the tag run and
+   upload its `cran/hyperuuid_X.Y.Z.tar.gz`, the attested bytes. No job uploads it.
+7. Verify one file of each kind from the tag alone, exactly as a consumer would:
 
    ```sh
    gh attestation verify <file> --repo SkunkWerkx/HyperUuid --source-ref refs/tags/vX.Y.Z \

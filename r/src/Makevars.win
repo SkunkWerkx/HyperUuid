@@ -1,0 +1,28 @@
+# Windows build: as src/Makevars, plus --target $(TARGET) from tools/rustarch.R (rustup's
+# gnu target; Rtools ships no Rust). An explicit --target makes Cargo write to
+# $(TARGET_DIR)/$(TARGET)/release, so LIBDIR here differs from the Unix file's
+# $(TARGET_DIR)/release on purpose: do not make them agree. $(shell) is allowed here only.
+TARGET_DIR = ./rust/target
+TARGET = $(shell "$(R_HOME)/bin$(R_ARCH_BIN)/Rscript.exe" ../tools/rustarch.R)
+LIBDIR = $(TARGET_DIR)/$(TARGET)/release
+STATLIB = $(LIBDIR)/librcore.a
+PKG_LIBS = -L$(LIBDIR) -lrcore
+# Not needed: the core is no_std, so it pulls in none of std's Windows libraries.
+# PKG_LIBS += -lws2_32 -luserenv -lbcrypt -lntdll
+CARGO_HOME_DIR = $(CURDIR)/.cargo
+
+all: $(SHLIB) rust_clean
+
+$(SHLIB): $(STATLIB)
+
+$(STATLIB):
+	if [ -f rust/vendor.tar.xz ]; then \
+	  tar xf rust/vendor.tar.xz -C rust && mkdir -p $(CARGO_HOME_DIR) && \
+	  cp rust/vendor-config.toml $(CARGO_HOME_DIR)/config.toml && OFFLINE=--offline; \
+	else OFFLINE=; fi; \
+	export CARGO_HOME=$(CARGO_HOME_DIR); export PATH="$(PATH):$(HOME)/.cargo/bin"; \
+	rustc --version; \
+	cargo build -j 2 --lib --release --target $(TARGET) $$OFFLINE --manifest-path rust/Cargo.toml --target-dir $(TARGET_DIR)
+
+rust_clean: $(SHLIB)
+	rm -rf $(STATLIB) $(CARGO_HOME_DIR) rust/vendor $(TARGET_DIR)
