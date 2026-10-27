@@ -401,7 +401,7 @@ jobs:
       # it, and its PEP 740 publish attestations name this file, as every release's must.
       - name: Publish only missing preserved wheels (Trusted Publishing)
         if: steps.pypi.outputs.pending == 'true' && github.event_name == 'workflow_dispatch'
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pending-pypi
       - name: Verify every public wheel matches the prepared bytes
