@@ -84,7 +84,10 @@ test_that("counter exhaustion errors", {
           "needs an installed hyperuuid; the child process loads it")
   script <- tempfile(fileext = ".R")
   on.exit(unlink(script), add = TRUE)
+  # The child is told the library paths in its script, not through system2(env =), which
+  # Windows does not apply to Rscript.
   writeLines(c(
+    paste0(".libPaths(", paste(deparse(.libPaths()), collapse = ""), ")"),
     "library(hyperuuid)",
     "msg <- paste0('version 7 counter exhausted: the stream cannot advance without running ',",
     "  'more than 1000 ms ahead of the supplied timestamp or past its last millisecond')",
@@ -108,8 +111,7 @@ test_that("counter exhaustion errors", {
   ), script)
   out <- suppressWarnings(system2(
     file.path(R.home("bin"), "Rscript"), c("--vanilla", shQuote(script)),
-    stdout = TRUE, stderr = TRUE,
-    env = paste0("R_LIBS=", paste(.libPaths(), collapse = .Platform$path.sep))
+    stdout = TRUE, stderr = TRUE
   ))
   expect_null(attr(out, "status"), info = paste(out, collapse = "\n"))
   expect_identical(out[length(out)], "OK")

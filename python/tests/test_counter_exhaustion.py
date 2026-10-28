@@ -9,6 +9,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+# Pyodide cannot spawn a process, and run in-process the script would poison the stream for
+# every test after it. The core's own wasm32-wasip1 suite runs the same exhaustion end to end.
+pytestmark = pytest.mark.skipif(sys.platform == "emscripten", reason="Pyodide has no subprocesses")
+
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 
 SCRIPT = r"""
