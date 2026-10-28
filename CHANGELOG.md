@@ -64,6 +64,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `InvalidOperationException` (the `Try` forms return false) and Swift
   `UuidGenerator.Error.counterExhausted`. *(C#, Java, Go, Python, Ruby, PHP, Swift,
   TypeScript, R)*
+- **Rust — `uuid1` feature.** `From<uuid::Uuid> for Uuid`, `From<Uuid> for uuid::Uuid`,
+  `From<&Uuid> for uuid::Uuid` and `==` across the two types, behind an off-by-default feature
+  that adds `uuid` 1.29 or newer without its default features. The bodies carry `#[no_panic]`
+  and are linked into the no-panic proof. *(Rust)*
 
 ### Changed
 
@@ -112,6 +116,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   run a `GITHUB_TOKEN` started), and a second request for a commit already staged is skipped
   with a notice; the Forge commit's step output is `revision`, which clears CodeQL's
   `actions/cache-poisoning/poisonable-step`; and `pypi-recovery.yml` is gone. *(repository only)*
+- **Rust, R — minimum Rust is now 1.89** (was 1.85), the floor of current `uuid` 1.x. Source
+  installs of the R package and builds from this repository need `rustc` 1.89. *(Rust, R)*
 
 ### Fixed
 

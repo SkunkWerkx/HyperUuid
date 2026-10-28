@@ -62,3 +62,12 @@ Eight findings, each verified against the code and folded in:
 8. **Rust:** separate controls for the no_std compile proof and for dependency isolation.
 
 Also: **C#'s `HYPERUUID003` ordering claim** is narrowed to the case with the workload installed.
+
+## Plans (written 2026-10-28)
+- 1 Rust: `docs/superpowers/plans/2026-10-28-rust-uuid1-msrv.md`. Done, in the tree, uncommitted.
+- 2 Python/PHP: `…/2026-10-28-python-sdist-php83.md`. Forge work is in Tasks 3-5.
+- 3 C#: `…/2026-10-28-csharp-net10.md`. Forge work is in Task 4. Tasks 2 and 6 ship together after the Forge merges, because either alone hits NETSDK1129.
+- 4 Java: `…/2026-10-28-java21-jni.md`. Forge work is in Task 8.
+- 5 Apple entropy: `…/2026-10-28-apple-entropy.md`. It needs no Forge change.
+
+The Forge tasks of plans 2, 3 and 4, together with plan 1's `forge-gate.patch`, make up the one Forge PR, merged first. Each plan's repo-only tasks run before it. Each plan's wiring task (`ci.yml`, `hyper.json`) runs after the merge, because `ForgeInterfaceTests` reads `../HyperForge`.

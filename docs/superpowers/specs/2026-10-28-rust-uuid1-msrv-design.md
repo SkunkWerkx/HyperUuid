@@ -71,9 +71,11 @@ or `bytemuck` and is out of scope).
 `Hash` and `Eq`. Both types derive `Eq` and `Hash` over `[u8; 16]`, so each is internally
 consistent, and `PartialEq<Other>` carries no `Hash` requirement of its own. A cross-type
 `HashMap` lookup would need `Borrow`, which we do not implement, so the two key types cannot be
-mixed in one map and the contract cannot be violated through us. `uuid` does not promise its
-hash matches ours; a test pins that they currently agree (std `DefaultHasher`), labelled
-empirical, and the docs say not to mix them as keys.
+mixed in one map and the contract cannot be violated through us. The two hashes differ today (measured 2026-10-28, corrected
+during implementation): `uuid` 1.29 hashes with one `state.write(&self.0)` (`lib.rs:951-955`),
+while our derived `Hash` over `[u8; 16]` writes a length prefix first. A test,
+`hashes_differ_today`, pins that and is labelled empirical. The docs say not to mix the types
+as map keys.
 
 ### The no-panic proof
 
@@ -99,9 +101,13 @@ empirical, and the docs say not to mix them as keys.
 
 ### `extra_features` wiring
 
-`ci.yml` `check-core` `with:` gains `extra_features: uuid1`. In the Forge that yields
-`cargo test --features uuid1` (hyper-check-core.yml:247-248), clippy with the feature (:459) and,
-in `check-msrv`, `cargo check --lib --features uuid1` on the manifest's `rust-version` (:487-492).
+`ci.yml` `check-core` `with:` gains `extra_features: uuid1`. In the Forge that puts the feature
+into clippy `--all-targets` (compile only, hyper-check-core.yml:459) and, in `check-msrv`, into
+`cargo check --lib --features uuid1` on the manifest's `rust-version` (:487-492); the
+`no_panic_command` override links the impls into the no-panic proof. CI does not run
+`cargo test --features uuid1`: that Forge step sits in the `check-core` job, gated
+`if: inputs.core_script != ''`, and HyperUuid sets no `core_script`. So `uuid1_interop` runs
+locally only, until a two-line Forge gate change lands, offered to the owner separately.
 The semver job is unchanged (see below).
 
 ### docs.rs
@@ -211,8 +217,7 @@ with." Add one sentence there: "Enable the `uuid1` feature to convert both ways.
 > ```
 >
 > The name carries the major version of `uuid`; a future `uuid2` feature would sit beside it.
-> The two types hash the same today, but `uuid` does not promise it, so do not use one as a map
-> key and look up with the other.
+> The two types do not hash alike, so do not use one as a map key and look up with the other.
 
 The example is run by hand in the implementation pass (`?` needs a `Result` main). The features
 list (README around :248) gains `uuid1`. Do **not** claim the conversions are panic-free beyond
@@ -233,9 +238,9 @@ toolchain." `README.md:155`: "needs Rust 1.89 or newer".
 > - **Rust — `uuid1` feature.** `From<uuid::Uuid> for Uuid`, `From<Uuid> for uuid::Uuid`,
 >   `From<&Uuid> for uuid::Uuid` and `==` across the two types, behind an off-by-default feature
 >   that adds `uuid` 1.29 or newer without its default features. The bodies carry `#[no_panic]`
->   and are linked into the no-panic proof.
-> - **Rust, R, Python — minimum Rust is now 1.89** (was 1.85), the floor of current `uuid` 1.x.
->   Source installs of the R package and builds from source need `rustc` 1.89.
+>   and are linked into the no-panic proof. *(Rust)*
+> - **Rust, R — minimum Rust is now 1.89** (was 1.85), the floor of current `uuid` 1.x. Source
+>   installs of the R package and builds from this repository need `rustc` 1.89. *(Rust, R)*
 
 (Pre-1.0 wording rules do not apply: it is 1.x, a plain entry, no upgrade hand-wringing.)
 `ROADMAP.md:59` Rust row is ticked.
@@ -307,8 +312,8 @@ The Python item's sdist sentence and this spec both say 1.89; either merges firs
    installed): `cargo build --release --example no_panic --features no-panic,uuid1` must pass,
    and with a `panic!` branch in one body it must fail with `ERROR[no-panic]`.
 
-**CI-only:** `check-core` (x64, arm64) running `cargo test --features uuid1`, clippy and the
-Android clippy leg; the `no_panic` job on ubuntu and windows with the new command; `check-msrv`
+**CI-only:** `check-core` (x64, arm64) running clippy `--all-targets --features uuid1` (compile
+only; `uuid1_interop` does not run in CI, see `extra_features` wiring) and the Android clippy leg; the `no_panic` job on ubuntu and windows with the new command; `check-msrv`
 on 1.89 with `--features uuid1`; `check-semver` (default group, a no-op for this feature).
 
 **Release-time:** `cargo package --features uuid1` dry run; after publish, open the docs.rs page
@@ -320,11 +325,11 @@ nightly spelling change is the risk). First CRAN and source-install builds run o
 | Hole | Closure |
 | --- | --- |
 | "Panic-free" for conversions not in the proof | The `ci.yml` override and example call sites put all five in the link-time proof; on a Mac the control cannot run, so Linux/CI is named as the proof |
-| `PartialEq` across types without `Hash` agreement | Argued above: no `Borrow`, so no mixed map; README tells readers not to mix keys; a test pins current agreement, labelled empirical |
+| `PartialEq` across types without `Hash` agreement | Argued above: no `Borrow`, so no mixed map. The hashes differ today (`hashes_differ_today`, empirical), and the README says not to mix keys |
 | Cargo.toml says `uuid` 1.29 but a user has older | `version = "1.29"` makes Cargo resolve at least 1.29; stated in README |
 | docs.rs breaks on nightly attribute churn | Only `feature(doc_cfg)` and the module gate; verified on nightly 2026-10-26; release-time docs.rs check |
 | `uuid1` leaks into other builds | `cargo tree` loop with control; R vendoring check with control |
-| MSRV 1.89 hits R and Python source builds that never use `uuid` | Real and accepted by the owner; CHANGELOG, READMEs and `configure` messages say 1.89. CRAN's machines checked against eitsupi/cran-rust-version's 2026-10-25 snapshot (lowest 1.91.1, macOS oldrel arm64); re-checked before the hand submission |
+| MSRV 1.89 hits R source builds, and the Python sdist once it ships, that never use `uuid` | Real and accepted by the owner; CHANGELOG, READMEs and `configure` messages say 1.89. CRAN's machines checked against eitsupi/cran-rust-version's 2026-10-25 snapshot (lowest 1.91.1, macOS oldrel arm64); re-checked before the hand submission |
 | Dependabot ignoring `rust-version` | Unverified; `check-msrv` on the PR catches it |
 | "uuid1 works in no_std" | Passes locally (thumbv7em, wasm32); CI's no_std jobs do not enable `uuid1`, so the README makes no such claim |
 | `uuid` 2.0 | A new `uuid2` feature; `uuid1` never changes meaning |
@@ -338,5 +343,5 @@ after v1.1.
 
 ## Open items
 
-1. Drop the `r/` and Python 1.89 mentions' wording from the CHANGELOG bullet if the R item
-   prefers its own entry. Recommended: keep the single combined bullet, since the cause is one.
+1. Resolved 2026-10-28: one combined CHANGELOG bullet, tagged *(Rust, R)*. Python is not named
+   until its sdist ships; the Python item adds its own 1.89 line.

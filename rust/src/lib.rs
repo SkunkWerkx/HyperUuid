@@ -17,8 +17,11 @@
 //! - [`Uuid::version`] / [`Uuid::variant`] / [`Uuid::is_rfc`] — inspection, and
 //!   [`Uuid::version_in`] / [`Uuid::is_rfc_in`] / [`get_timestamp_in`] for a value still in
 //!   SQL Server order ([`Layout`])
+//! - the `uuid1` feature (off by default) — `From` and `==` between [`Uuid`] and the `uuid`
+//!   crate's 1.x `Uuid`
 
 #![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // The crate publishes the `no-std` and `no-std::no-alloc` categories, and this is what makes
 // both compiler-enforced rather than claimed. Five things reached past `core` and none do
 // now: the error types implement `core::error::Error` (stable since 1.81), `getrandom`'s
@@ -132,6 +135,8 @@ pub mod sql;
 mod stream;
 mod timestamp;
 mod uuid;
+#[cfg(feature = "uuid1")]
+mod uuid1;
 pub mod v4;
 pub mod v5;
 pub mod v7;

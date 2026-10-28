@@ -87,7 +87,26 @@ handing it to the `Layout::SqlServer` reads.
 2. **v4, v5 and v7 generation are about twice as fast here.** v4: 23.4 ns against `uuid`'s 40.6 ns (~1.7x). v5: 49.6 ns against `uuid`'s 97.6 ns (~2.0x). v7: 30.9 ns against `uuid`'s 72.8 ns (~2.4x; the v7 figures here measured before the per-millisecond re-seed, core change, 2026-10-27). On Linux, v4 and v7 draw their random bits from a user-space ChaCha20 pool rather than a `getrandom` call per UUID; it is built like the kernel's own vDSO generator, with fast key erasure, and its memory is wiped in a forked child. Each slot takes a fresh OS key every megabyte, and no key is used for more than a second of wall-clock time: every draw checks the key's age first, which is what keeps a process restored from a snapshot (a cloned virtual machine, AWS Lambda SnapStart, a CRaC or CRIU checkpoint) from replaying bytes its other copies also hold. What that leaves open is a snapshot taken within a second of a key being drawn and restored onto a clock nothing has moved on, where the copies share bytes until the second runs out; the kernel's own generator, which is told about a restore, has no such window. The check is a coarse clock read, 3 to 4 ns. `new_v7` skips it when the timestamp it is handed is the current time, as a `now` door's is: 27.8 ns (`single_item/v7_current_timestamp`), where the tables below pass a timestamp that is not the current time (2022 when they were measured, a synthetic timeline in the harness now) and pay for the read. Elsewhere every call still goes to `getrandom`. One caveat for fairness on v7: `uuid`'s `Uuid::now_v7` captures the current time itself (an internal clock read) inside the timed region, while this benchmark calls this crate's `new_v7` with a pre-supplied timestamp. What that read costs is a property of the machine, not of either crate: it is cheap on the x64 box these numbers come from, and on a machine with a slow clock it swamps everything else in the call — so the comparison isn't perfectly apples-to-apples and is reported that way rather than smoothed over.
 3. **Verified zero-allocation, with no exceptions.** `tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v7 and the batch function, and asserts zero heap allocations for all of them. The crate doesn't so much as link `alloc`, which is why it carries the `no-std::no-alloc` category and not merely `no-std`. `uuid`'s docs don't make an allocation claim either way.
 
-The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v6, and v8 only as the SQL Server layout. If you need any of that, or you're not chasing v5/v7 throughput, timestamp extraction or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with.
+The honest trade-off: this crate's public surface is much narrower than `uuid`'s — no `Builder`, no `fmt` customization, no `serde`/`arbitrary`/`zerocopy` integrations, no v1/v3/v6, and v8 only as the SQL Server layout. If you need any of that, or you're not chasing v5/v7 throughput, timestamp extraction or batch generation specifically, `uuid` is the better default and is what most of the Rust ecosystem already expects to interoperate with. Enable the `uuid1` feature to convert both ways.
+
+### Interoperating with the `uuid` crate
+
+The `uuid1` feature (off by default) adds `From` conversions between `hyperuuid::Uuid` and
+`uuid::Uuid` 1.x, in both directions and from `&Uuid`, and `==` across the two types. It pulls
+in `uuid` 1.29 or newer with default features off, nothing else, and the conversions are a
+copy of the 16 bytes with no `unsafe`.
+
+```toml
+hyperuuid = { version = "<version>", features = ["uuid1"] }
+```
+
+```rust
+let id: uuid::Uuid = hyperuuid::v7::now_v7()?.into();
+assert_eq!(id, hyperuuid::Uuid::from(id));
+```
+
+The name carries the major version of `uuid`; a future `uuid2` feature would sit beside it.
+The two types do not hash alike, so do not use one as a map key and look up with the other.
 
 ## Benchmarks
 
@@ -223,8 +242,13 @@ remove fails that link and names the function:
 cargo build --release --example no_panic --features no-panic
 ```
 
+Adding `,uuid1` to the features also links the `uuid` conversions, as CI does.
+
 The proof needs optimization, so build it with `--release`. A debug build fails the link for
 most of the functions, because the checks the optimizer would have proven dead are still in.
+
+The proof is checked on current stable. Older toolchains, the MSRV 1.89 included, can leave panic
+paths in and fail the link.
 
 To run the same proof from your own crate, turn on fat LTO and a single codegen unit in its
 release profile. Cargo ignores a dependency's profile, so a consumer's stock `--release` build
@@ -264,6 +288,9 @@ cargo rustc --release --crate-type cdylib --features python  # -> PyInit__native
 cargo ruby-ext                  # -> Init_hyperuuid_native, in target/ruby/release/ (ruby/'s `rake native:dev` runs this and stages the result)
 cargo php-ext                   # -> get_module, in target/php/release/
 ```
+
+One more optional feature, `uuid1`, adds no entry point: it adds the conversions in
+[Interoperating with the `uuid` crate](#interoperating-with-the-uuid-crate).
 
 `cargo cdylib` is an alias in `.cargo/config.toml` for `cargo rustc --release --crate-type
 cdylib` with the `cdylib` feature in place of `std` and panics set to abort. The manifest
@@ -327,8 +354,8 @@ artifacts are signed from where, and the gates every byte passes before publicat
 cargo add hyperuuid
 ```
 
-Requires Rust 1.85 or later (`rust-version` in the manifest, edition 2024's own floor); CI
-checks the library, with and without std, on exactly that toolchain on every PR.
+Requires Rust 1.89 or later (`rust-version` in the manifest, the floor of the current `uuid`
+1.x); CI checks the library, with and without std, on exactly that toolchain on every PR.
 
 Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test` suite (the benchmarks are compiled by clippy, not run) before every release (`.github/workflows/ci.yml`); `release.yml` doesn't retest anything itself — it finds that already-green run for the tagged commit and packs the crate from that same commit, with `cargo package`'s own verify build the only compile it does.
 

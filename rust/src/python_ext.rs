@@ -228,9 +228,8 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
 
 fn batch_list<'py>(py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyList>> {
     let list = PyList::empty(py);
-    // chunks_exact rather than as_chunks: rust-version is 1.85, and as_chunks is 1.88.
-    for chunk in raw.chunks_exact(16) {
-        let bytes: [u8; 16] = chunk.try_into().expect("chunks_exact(16) yields 16 bytes");
+    let (chunks, _) = raw.as_chunks::<16>();
+    for &bytes in chunks {
         list.append(make_uuid(py, bytes)?)?;
     }
     Ok(list)

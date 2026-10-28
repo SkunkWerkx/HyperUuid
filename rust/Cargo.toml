@@ -2,7 +2,7 @@
 name = "hyperuuid"
 version = "1.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a version 8 SQL Server ordering — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."
 license = "MIT"
 readme = "README.md"
@@ -26,6 +26,8 @@ pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311", "abi3t-
 magnus = { version = "0.9", features = ["rb-sys"], optional = true }
 ext-php-rs = { version = "0.16", optional = true }
 no-panic = { version = "0.1", optional = true }
+# Only for the `uuid1` feature: conversions to and from `uuid::Uuid`. Core-only, nothing else.
+uuid = { version = "1.29", optional = true, default-features = false }
 
 # `now_v7` reads the clock with `clock_gettime` itself rather than through std, whose
 # `SystemTime::now` unwraps the call (see v7.rs). Already in the graph through getrandom.
@@ -89,11 +91,21 @@ php = ["dep:ext-php-rs", "std"]
 # so it is run by building `examples/no_panic.rs` (CI's check-no-panic job, on Linux and
 # Windows, since `now_v7` reads the clock differently on each).
 no-panic = ["dep:no-panic"]
+# `From` conversions and `==` between `hyperuuid::Uuid` and `uuid::Uuid` 1.x. Named for the
+# major version of `uuid`, so a `uuid2` could sit beside it; `uuid` itself is not a feature.
+uuid1 = ["dep:uuid"]
 
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "v5", "v7"] }
+
+# docs.rs builds with the one feature that adds public API, and `docsrs` turns on the
+# "Available on crate feature" banners (lib.rs). Never `all-features`: that would enable the
+# staticlib, cdylib and extension features.
+[package.metadata.docs.rs]
+features = ["uuid1"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [[bench]]
 name = "uuid_benchmarks"

@@ -29,7 +29,7 @@ The package builds a Rust static library from the vendored crates in
 `src/rust/vendor.tar.xz` (14 crates, authors in `inst/AUTHORS`), offline, with `cargo
 build -j 2`, `CARGO_HOME` under `src/`, and removes the Rust build directory after
 linking. `configure` prints the `cargo` and `rustc` versions and stops with a pointer to
-https://rustup.rs when either is missing or `rustc` is older than 1.85.
+https://rustup.rs when either is missing or `rustc` is older than 1.89.
 
 The Rust library is `no_std` with `panic = "abort"`. In the built `hyperuuid.so`,
 `nm -g` finds no `abort` symbol (`_abort`: 0), and the check reports no calls to `abort`,

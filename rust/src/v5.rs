@@ -60,13 +60,9 @@ pub fn new_v5(namespace: Uuid, name: &[u8]) -> Uuid {
     let mut filled = 16 + head.len();
     if filled == 64 {
         compress(&mut state, &[block]);
-        let mut chunks = rest.chunks_exact(64);
-        for chunk in &mut chunks {
-            if let Ok(chunk) = <&[u8; 64]>::try_from(chunk) {
-                compress(&mut state, core::slice::from_ref(chunk));
-            }
-        }
-        rest = chunks.remainder();
+        let (blocks, tail) = rest.as_chunks::<64>();
+        compress(&mut state, blocks);
+        rest = tail;
         block = [0u8; 64];
         block[..rest.len()].copy_from_slice(rest);
         filled = rest.len();
@@ -85,8 +81,9 @@ pub fn new_v5(namespace: Uuid, name: &[u8]) -> Uuid {
 
     // The UUID is the digest's first 16 bytes: the first four state words, big-endian.
     let mut bytes = [0u8; 16];
-    for (out, word) in bytes.chunks_exact_mut(4).zip(state) {
-        out.copy_from_slice(&word.to_be_bytes());
+    let (words, _) = bytes.as_chunks_mut::<4>();
+    for (out, word) in words.iter_mut().zip(state) {
+        *out = word.to_be_bytes();
     }
 
     let mut uuid = Uuid::from_bytes(bytes);

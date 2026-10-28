@@ -56,7 +56,7 @@ C# and Java are the floors that lock out the financial and insurance buyers; the
 | Ruby | Add 3.3 to the Magnus fat-gem grid until its end of life | The supported floor currently lands on slow Fiddle |
 | Python | Publish an sdist via maturin | FreeBSD, ppc64le and s390x (Linux on IBM Z at banks) can build from source |
 | PHP | Floor moves to 8.3 | 8.2 reaches end of life Dec 31, 2026 |
-| Rust | `uuid` crate `From`/`Into` behind a feature flag | Most Rust code already holds `uuid::Uuid` |
+| [x] Rust | `uuid` crate `From`/`Into` behind a feature flag | Most Rust code already holds `uuid::Uuid` |
 
 ## Phase 2: Binaries out of git
 

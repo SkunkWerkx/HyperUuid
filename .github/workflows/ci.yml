@@ -188,10 +188,12 @@ jobs:
   # (.github/scripts/check_exports.py and the cdylib built on every RID, dlopen'd and called by
   # .github/scripts/cdylib_smoke.py), the conformance corpus re-derived by corpus/oracle.py, the
   # workflow-contract and ABI-probe tests in .github/scripts/tests, rustfmt and clippy, the MSRV, cargo-semver-checks against the last
-  # crates.io release, and actionlint over this directory. The two inputs are what is HyperUuid
+  # crates.io release, and actionlint over this directory. The inputs below are what is HyperUuid
   # about it: off std there is no OS for `getrandom` to read, so the no_std builds name the custom
-  # backend, and clippy also runs the Android configuration, whose entropy path (entropy.rs:
-  # ChaCha20 for batches, no pool) nothing else compiles. Static analysis only, so none of it
+  # backend, clippy also runs the Android configuration, whose entropy path (entropy.rs:
+  # ChaCha20 for batches, no pool) nothing else compiles, and `extra_features: uuid1` with the
+  # `no_panic_command` override put the `uuid` interop feature through clippy, the MSRV check
+  # and the no-panic link. Static analysis only, so none of it
   # waits on build-native.
   check-core:
     uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master
@@ -199,6 +201,8 @@ jobs:
       contents: read
     with:
       no_std_rustflags: --cfg getrandom_backend="custom"
+      extra_features: uuid1
+      no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1
       clippy_targets: aarch64-linux-android
       lint_node: true
       lint_r: true

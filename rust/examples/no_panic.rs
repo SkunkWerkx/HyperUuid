@@ -4,6 +4,7 @@
 //! inputs the optimizer cannot see through, and building it is the whole check:
 //!
 //!     cargo build --release --example no_panic --features no-panic
+//!     cargo build --release --example no_panic --features no-panic,uuid1
 //!
 //! A panic path left in any of them fails the link with `ERROR[no-panic]` naming the
 //! function. Running the binary proves nothing further.
@@ -57,6 +58,16 @@ fn main() {
     black_box(get_timestamp(&id));
     black_box(get_timestamp_in(&id, layout));
     black_box(hyperuuid_version());
+
+    #[cfg(feature = "uuid1")]
+    {
+        // The `uuid` 1.x interop impls, which the `uuid1` feature adds.
+        let u1: ::uuid::Uuid = black_box(id).into();
+        let u2: ::uuid::Uuid = (&black_box(id)).into();
+        let back: Uuid = black_box(u1).into();
+        black_box(back == u2);
+        black_box(u1 == back);
+    }
 
     let ptr = out.as_mut_ptr();
     // SAFETY: `out` holds `count` UUIDs, at least one, since args[0] always exists.

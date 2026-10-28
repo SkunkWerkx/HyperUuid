@@ -564,8 +564,8 @@ fn corpus_v7_layout() {
 fn batch_items_match_the_pinned_single_item_layout() {
     let mut out = vec![0u8; 64 * 16];
     v7::new_v7_batch(RFC_TEST_VECTOR_MS, 64, &mut out).unwrap();
-    for item in out.chunks_exact(16) {
-        let item: [u8; 16] = item.try_into().unwrap();
+    let (items, _) = out.as_chunks::<16>();
+    for &item in items {
         let counter = ((item[6] as u32 & 0x0F) << 22)
             | ((item[7] as u32) << 14)
             | ((item[8] as u32 & 0x3F) << 8)

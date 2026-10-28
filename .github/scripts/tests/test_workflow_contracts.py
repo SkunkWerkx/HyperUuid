@@ -224,11 +224,14 @@ class CiTests(unittest.TestCase):
         self.assertEqual(re.findall(r'^      (node|r): (.*)$', self.jobs['build-native'], re.M),
                          [('node', 'true'), ('r', 'true')])
 
-    def test_static_checks_run_in_the_forge_with_this_repositorys_four_inputs(self):
+    def test_static_checks_run_in_the_forge_with_this_repositorys_six_inputs(self):
         core = self.jobs['check-core']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master', core)
-        self.assertEqual(with_block(core), {'no_std_rustflags', 'clippy_targets', 'lint_node', 'lint_r'})
+        self.assertEqual(with_block(core), {'no_std_rustflags', 'extra_features', 'no_panic_command',
+                                             'clippy_targets', 'lint_node', 'lint_r'})
         self.assertIn('no_std_rustflags: --cfg getrandom_backend="custom"', core)
+        self.assertIn('extra_features: uuid1', core)
+        self.assertIn('no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1', core)
         self.assertIn('clippy_targets: aarch64-linux-android', core)
         self.assertIn('lint_node: true', core)
         self.assertIn('lint_r: true', core)

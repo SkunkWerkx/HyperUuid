@@ -39,7 +39,7 @@
 2. **Byte order.** A conversion must not reverse or reorder bytes. That covers a v7, a v5 and a SQL Server-layout v8, whose layout is persisted data. Both types' `Display` strings must be identical. Pinned in Task 2's `display_matches_for_every_layout`.
 3. **v5 after the `as_chunks` rewrite.** Every name length 0–300, plus 1000 and 4096, across four namespaces must give bytes identical to `uuid`'s own `new_v5`. Pinned by Task 1's extension of `every_name_length_matches_the_uuid_crate`.
 4. **Borrowing.** `From<&Uuid>` leaves the original usable, and two converted `now_v7` ids keep their order. Pinned in Task 2's `borrow_conversion_keeps_the_original` and `v7_order_survives_conversion`.
-5. **Hash.** Both types hash the same under std's `DefaultHasher`. This is labelled empirical: `uuid` does not promise it. Pinned in Task 2's `hashes_agree_today`.
+5. **Hash.** The two types hash differently today: `uuid` writes the 16 bytes with no length prefix. This is labelled empirical. Pinned in Task 2's `hashes_differ_today`; the README says not to mix them as map keys.
 
 ---
 
@@ -121,7 +121,7 @@
   - `display_matches_for_every_layout`: a v7, a v5, and the SQL Server form of that v7 (`v7::to_sql_order(&v7)?`). `id.to_string() == uuid::Uuid::from(id).to_string()`.
   - `v7_order_survives_conversion`: take two `v7::now_v7()?` ids in sequence. Both orders, `a < b` and `uuid::Uuid::from(a) < uuid::Uuid::from(b)`, must hold.
   - `inequality_is_detected`: ids differing in the last byte compare `!=` in both directions.
-  - `hashes_agree_today`: `DefaultHasher` over each type gives equal `finish()`. The comment says it is empirical, since `uuid` does not promise it.
+  - `hashes_differ_today`: `DefaultHasher` over each type gives *different* `finish()`, labelled empirical (corrected during implementation).
 - [ ] **Step 3: Run, expecting RED on the traits.**
   ```
   cargo test --features uuid1 --test uuid1_interop

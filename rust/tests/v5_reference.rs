@@ -14,7 +14,7 @@ fn every_name_length_matches_the_uuid_crate() {
         (v5::namespace::OID, uuid::Uuid::NAMESPACE_OID),
         (v5::namespace::X500, uuid::Uuid::NAMESPACE_X500),
     ];
-    for len in 0..=300usize {
+    for len in (0..=300usize).chain([1000, 4096]) {
         let name: Vec<u8> = (0..len).map(|i| (i * 31 + 7) as u8).collect();
         for (ours, theirs) in namespaces {
             assert_eq!(

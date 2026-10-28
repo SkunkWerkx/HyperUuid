@@ -18,7 +18,7 @@ install.packages("hyperuuid")
 CRAN ships the source package and compiles it per platform, so its binaries for Windows and
 macOS need no Rust; a source install (Linux, or `type = "source"`) does.
 
-From a source tarball, which needs Rust (`cargo` and `rustc` 1.85 or newer, from
+From a source tarball, which needs Rust (`cargo` and `rustc` 1.89 or newer, from
 [rustup](https://rustup.rs)):
 
 ```sh
@@ -28,7 +28,7 @@ R CMD INSTALL hyperuuid_<version>.tar.gz
 The tarball is what `R CMD build r` makes from a checkout after `tools/vendor.sh` (see
 [Local loop](#local-loop)). It carries every Rust dependency in `src/rust/vendor.tar.xz` and
 builds offline. `configure` prints the `cargo` and `rustc` versions it found, and stops with
-a pointer to rustup when either is missing or `rustc` is older than 1.85.
+a pointer to rustup when either is missing or `rustc` is older than 1.89.
 
 ## Usage
 

@@ -627,9 +627,8 @@ mod tests {
     const MS: u64 = 1_750_000_000_123;
 
     fn items(out: &[u8]) -> Vec<Uuid> {
-        out.chunks_exact(16)
-            .map(|c| Uuid::from_bytes(c.try_into().unwrap()))
-            .collect()
+        let (chunks, _) = out.as_chunks::<16>();
+        chunks.iter().map(|&c| Uuid::from_bytes(c)).collect()
     }
 
     fn counter_of(id: &Uuid) -> u32 {
@@ -753,12 +752,8 @@ mod tests {
     fn a_batch_of_the_whole_counter_space_is_strictly_increasing() {
         let mut out = vec![0u8; MAX_BATCH as usize * 16];
         new_v7_batch(MS, MAX_BATCH, &mut out).unwrap();
-        assert!(
-            out.chunks_exact(16)
-                .collect::<Vec<_>>()
-                .windows(2)
-                .all(|w| w[0] < w[1])
-        );
+        let (chunks, _) = out.as_chunks::<16>();
+        assert!(chunks.windows(2).all(|w| w[0] < w[1]));
         let last = Uuid::from_bytes(out[out.len() - 16..].try_into().unwrap());
         assert!(unix_millis(&last) <= MS + 1);
     }
