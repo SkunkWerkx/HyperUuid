@@ -1,10 +1,11 @@
 """Pins the typed surface: ``py.typed`` ships, ``_native.pyi`` describes what the loaded
 extension actually has, and a consumer's code type-checks against the package as shipped.
-The last one needs mypy and is skipped without it."""
+The last one needs mypy and is skipped without it, and on PyPy, where mypy refuses to run."""
 
 import ast
 import inspect
 import os
+import platform
 import sysconfig
 from pathlib import Path
 
@@ -47,6 +48,8 @@ def test_the_stub_and_the_loaded_backend_agree_on_parameter_names():
 
 def test_a_consumer_type_checks_against_the_package(monkeypatch):
     """mypy --strict accepts a consumer of the package."""
+    if platform.python_implementation() == "PyPy":
+        pytest.skip("mypy does not run on PyPy")
     api = pytest.importorskip("mypy.api")
     # The package as this checkout has it, the way conftest.py puts it on sys.path. --strict
     # follows the import, so hyperuuid's own annotations are checked against the stub too.

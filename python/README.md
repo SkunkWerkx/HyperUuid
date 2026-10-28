@@ -49,7 +49,9 @@ too, or install your platform's `py-maturin` and use `--no-build-isolation`.
 
 Free-threaded CPython older than 3.15 has no stable ABI,
 so its wheel would serve one interpreter version, too narrow an ABI to ship; free-threading
-starts at 3.15, where `abi3t` covers it.
+starts at 3.15, where `abi3t` covers it. Free-threaded 3.14 builds the sdist (a report-only CI
+job builds and tests it there); free-threaded 3.13 cannot, since PyO3 0.30 refuses free-threaded
+CPython below 3.14.
 
 On Alpine the musl wheel needs nothing beyond the base image — it carries its own copy of
 `libgcc_s` — and the whole suite passes on a bare `python:3.14-alpine`.

@@ -119,8 +119,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shipped three, `cp311-abi3` for CPython 3.11 and newer with the GIL and `cp315-abi3.abi3t`
   for 3.15 and newer with or without it: 17 wheels a release where 1.0.0 had 25. The
   free-threaded 3.14 wheel proved the GIL-free path, and it was bound to one interpreter
-  version, too narrow an ABI to carry. Free-threaded 3.13 and 3.14 now get no wheel, and pip
-  falls back to the sdist (see Added); free-threading starts at 3.15. *(Python)*
+  version, too narrow an ABI to carry. Free-threaded 3.14 now gets no wheel, and pip builds
+  the sdist (see Added), which a report-only CI job builds and tests there; free-threaded 3.13
+  cannot build it, since PyO3 0.30 refuses free-threaded CPython below 3.14. Free-threading
+  starts at 3.15. *(Python)*
 - **The release flow, after its first run.** `release.yml` uploads the wheels as a step of
   its own `pypi-publish` job again, so their PEP 740 publish attestations name it; staging
   starts by itself once the release-mode CI on the preparation commit is green (that run's
