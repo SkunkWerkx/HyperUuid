@@ -27,17 +27,8 @@ module HyperUuid
   private_constant :U32_MAX
 
   # The most UUIDs one version 7 batch (#new_v7_batch, #new_v7_batch_bytes) mints:
-  # 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. A larger
-  # count is refused with ArgumentError before anything is allocated.
-  #
-  # Every batch up to this size is in strictly increasing order: the counter is one
-  # process-wide sequence, so a batch can straddle the point where it wraps back to 0, and the
-  # UUIDs from there on carry a timestamp one millisecond later than the one supplied.
-  # The roll-forward orders one batch, not the stream: the next batch or single #new_v7 in
-  # the same real millisecond starts its counter just past the wrap and carries the supplied
-  # timestamp, so it sorts before this batch's tail, which was stamped a millisecond later.
-  # Two single #new_v7 calls either side of the wrap in one millisecond sort in reverse the
-  # same way. It happens at most once per 2**26 UUIDs the process mints.
+  # 67,108,864. A larger count is refused with ArgumentError before anything is allocated.
+  # See #new_v7_batch for the ordering a batch carries.
   MAX_V7_BATCH = Runtime::MAX_V7_BATCH
 
   # Creates a random UUID version 4 (RFC 9562 §5.4).
@@ -106,30 +97,37 @@ module HyperUuid
   # an explicit `Time` or Unix-epoch millisecond integer (non-negative, fitting in 48 bits) to
   # embed a specific time instead.
   #
+  # Every call reserves the next step of one process-wide stream: see #new_v7_batch for the
+  # ordering and the embedded timestamp.
+  #
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
+  # @raise [CounterExhaustedError] if the stream cannot advance without running more than
+  #   1000 ms ahead of the supplied time or past its last millisecond; nothing is reserved.
   # @raise [TypeError] if +unix_millis+ isn't a Time, an Integer or nil.
   def self.new_v7(unix_millis = nil)
     Uuid.new(Runtime.new_v7(unix_millis_from(unix_millis, Runtime::V7_TIMESTAMP_OUT_OF_RANGE)), true)
   end
 
   # Creates `count` time-sortable version 7 UUIDs sharing one timestamp capture and one
-  # contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
+  # contiguous block of the v7 stream — one FFI call and one random-bytes fetch
   # instead of `count` of each. Defaults to the current time; pass an explicit `Time` or
   # Unix-epoch millisecond integer to embed a specific time instead.
   #
-  # Every batch is in strictly increasing order. The counter is one process-wide sequence, so
-  # a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a
-  # timestamp one millisecond later than the one supplied rather than sorting before the ones
-  # ahead of them. That is also why one batch takes at most MAX_V7_BATCH.
+  # A batch is always in strictly increasing order, and takes at most MAX_V7_BATCH.
   #
-  # The roll-forward orders one batch, not the stream: the next batch or single #new_v7 in
-  # the same real millisecond starts its counter just past the wrap and carries the supplied
-  # timestamp, so it sorts before this batch's tail, which was stamped a millisecond later.
-  # Two single #new_v7 calls either side of the wrap in one millisecond sort in reverse the
-  # same way. It happens at most once per 2**26 UUIDs the process mints.
+  # Every call reserves from one process-wide stream, re-seeded at random whenever a timestamp
+  # moves it forward: a single call consumes one of a millisecond's 2**20 steps and a batch of
+  # n consumes ceil(n / 64). For timestamps up to 2**44 - 2 (the year 2527), a call whose
+  # timestamp is within 10 s of the newest stream timestamp either raises CounterExhaustedError
+  # or sorts strictly after every UUID from a reservation that completed before it began. The
+  # embedded timestamp is at most 11 s ahead of the one supplied, and a split's tail carries the
+  # millisecond after it (at most 1000 ms ahead). A timestamp more than 11 s behind the stream,
+  # or past 2**44 - 2, is minted at itself, outside the stream and ordered against nothing.
   #
   # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
+  # @raise [CounterExhaustedError] if the stream cannot advance without running more than
+  #   1000 ms ahead of the supplied time or past its last millisecond; nothing is reserved.
   def self.new_v7_batch(count, unix_millis = nil)
     bytes = new_v7_batch_bytes(count, unix_millis)
     Array.new(count) { |i| Uuid.new(bytes[i * 16, 16], true) }
@@ -149,10 +147,12 @@ module HyperUuid
   # String into them yourself just moves the same allocations into your own code.
   #
   # Slice it with `bytes[i * 16, 16]`, which is what #new_v7_batch does internally. The
-  # order, the possible extra millisecond and the MAX_V7_BATCH limit are #new_v7_batch's.
+  # ordering, embedded timestamp and the MAX_V7_BATCH limit are #new_v7_batch's.
   #
   # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
   # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
+  # @raise [CounterExhaustedError] if the stream cannot advance without running more than
+  #   1000 ms ahead of the supplied time or past its last millisecond; nothing is reserved.
   def self.new_v7_batch_bytes(count, unix_millis = nil)
     # First, so any count past the limit (2**32 and beyond included) names the limit itself.
     raise ArgumentError, Runtime::V7_BATCH_TOO_LARGE if count.is_a?(Integer) && count > MAX_V7_BATCH

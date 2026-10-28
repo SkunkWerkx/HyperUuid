@@ -4,6 +4,11 @@ import XCTest
 @testable import HyperUuid
 
 final class UuidGeneratorTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        _ = TestStream.primed
+    }
+
     /// The core crate's own `version = "..."` from `rust/Cargo.toml`, found by walking up
     /// from this file — so the version assertion follows a release bump instead of going
     /// stale on it. `nil` only under WASI, where the test module runs sandboxed with no view
@@ -161,7 +166,10 @@ final class UuidGeneratorTests: XCTestCase {
     }
 
     func testV7SameMillisecondBatchIsMonotonicallyOrdered() throws {
-        let ids = try (0..<100).map { _ in try UuidGenerator.newV7(unixMillis: rfcTestVectorMs) }
+        // Ordering is a property of the stream, so mint at the present: the fixed 2022 vector is
+        // out of stream and carries its timestamp exactly, ordered against nothing.
+        let now = TestStream.now()
+        let ids = try (0..<100).map { _ in try UuidGenerator.newV7(unixMillis: now) }
         XCTAssertEqual(ids, ids.sorted { $0.uuidString < $1.uuidString })
     }
 
@@ -175,7 +183,8 @@ final class UuidGeneratorTests: XCTestCase {
         for i in 0..<6 {
             embeddedMs = (embeddedMs << 8) | UInt64(bytes[i])
         }
-        XCTAssertTrue(embeddedMs >= before && embeddedMs <= after)
+        // The stream may stamp a later ms that an earlier test moved it to.
+        XCTAssertTrue(embeddedMs >= before && embeddedMs <= after + 1_000)
     }
 
     func testV7TimestampRecoversTheExactMillisecond() throws {
@@ -258,12 +267,39 @@ final class UuidGeneratorTests: XCTestCase {
     }
 
     func testV7BatchContinuesTheSameCounterSequenceAsIndividualCalls() throws {
-        let before = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
-        let batch = try UuidGenerator.newV7Batch(count: 10, unixMillis: rfcTestVectorMs)
-        let after = try UuidGenerator.newV7(unixMillis: rfcTestVectorMs)
+        let now = TestStream.now()
+        let before = try UuidGenerator.newV7(unixMillis: now)
+        let batch = try UuidGenerator.newV7Batch(count: 10, unixMillis: now)
+        let after = try UuidGenerator.newV7(unixMillis: now)
 
         let ids = [before] + batch + [after]
         XCTAssertEqual(ids.map(\.uuidString), ids.map(\.uuidString).sorted())
+    }
+
+    // The C ABI's code 6 end to end is `cdylib_smoke.py`'s; here the mapping, at both sites.
+    func testCodeSixIsCounterExhausted() {
+        let message =
+            "hyperuuid: version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond"
+        for count in [1, 1000] {
+            let error = UuidGenerator.v7Error(6, count: count)
+            guard case .counterExhausted = error else {
+                XCTFail("expected counterExhausted, got \(error)")
+                continue
+            }
+            XCTAssertEqual(error.description, message)
+            XCTAssertEqual(error.localizedDescription, message)
+        }
+    }
+
+    func testOtherV7CodesKeepTheirMapping() {
+        guard case .timestampOutOfRange = UuidGenerator.v7Error(2, count: 1) else { return XCTFail("2") }
+        guard case .batchNotAddressable(let n) = UuidGenerator.v7Error(3, count: 7), n == 7 else {
+            return XCTFail("3")
+        }
+        guard case .batchTooLarge(let m) = UuidGenerator.v7Error(4, count: 9), m == 9 else { return XCTFail("4") }
+        guard case .randomSourceFailure(let code) = UuidGenerator.v7Error(1, count: 1), code == 1 else {
+            return XCTFail("1")
+        }
     }
 
     func testV7BatchCountZeroReturnsEmptyArray() throws {
@@ -309,13 +345,15 @@ final class UuidGeneratorTests: XCTestCase {
     }
 
     func testV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison() throws {
+        // At the present, within the stream's lead (no more than now + 500 ms).
+        let now = TestStream.now()
         var ids: [UUID] = []
         for i in UInt64(0)..<200 {
-            ids.append(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs + i))
+            ids.append(try UuidGenerator.newV7(unixMillis: now + i))
         }
         // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
         for _ in 0..<200 {
-            ids.append(try UuidGenerator.newV7(unixMillis: rfcTestVectorMs + 1_000_000))
+            ids.append(try UuidGenerator.newV7(unixMillis: now + 500))
         }
 
         let sqlOrdered = try ids.map { try UuidGenerator.v7ToSqlOrder($0).rfcBytes }
@@ -401,7 +439,8 @@ final class UuidGeneratorTests: XCTestCase {
         let after = UInt64(Date().timeIntervalSince1970 * 1000)
         for id in v7 {
             XCTAssertEqual(id.rfcBytes[6] >> 4, 7)
-            XCTAssertTrue((before...after).contains(try UuidGenerator.v7UnixMillis(id)))
+            // The stream may stamp a later ms that an earlier test moved it to.
+            XCTAssertTrue((before...(after + 1_000)).contains(try UuidGenerator.v7UnixMillis(id)))
         }
     }
 

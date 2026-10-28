@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace HyperUuid\Tests;
 
+use HyperUuid\CounterExhaustedException;
 use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
 use HyperUuid\TimestampOutOfRangeException;
@@ -11,6 +12,7 @@ use HyperUuid\Uuid;
 use HyperUuid\UuidLayout;
 use HyperUuid\UuidVariant;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 final class HyperUuidTest extends TestCase
@@ -98,9 +100,10 @@ final class HyperUuidTest extends TestCase
 
     public function testV7SameMillisecondBatchIsMonotonicallyOrdered(): void
     {
+        $now = self::nowMillis();
         $ids = [];
         for ($i = 0; $i < 100; $i++) {
-            $ids[] = (string) HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+            $ids[] = (string) HyperUuid::newV7($now);
         }
         $sorted = $ids;
         sort($sorted, SORT_STRING);
@@ -122,9 +125,10 @@ final class HyperUuidTest extends TestCase
 
     public function testV7BatchContinuesTheSameCounterSequenceAsIndividualCalls(): void
     {
-        $before = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
-        $batch = HyperUuid::newV7Batch(10, self::RFC_TEST_VECTOR_MS);
-        $after = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+        $now = self::nowMillis();
+        $before = HyperUuid::newV7($now);
+        $batch = HyperUuid::newV7Batch(10, $now);
+        $after = HyperUuid::newV7($now);
 
         $ids = [(string) $before, ...array_map(fn ($id) => (string) $id, $batch), (string) $after];
         $sorted = $ids;
@@ -151,7 +155,8 @@ final class HyperUuidTest extends TestCase
 
         $embedded = self::embeddedMillis($id);
         self::assertGreaterThanOrEqual($before, $embedded);
-        self::assertLessThanOrEqual($after, $embedded);
+        // The stream may stamp a later ms that an earlier test moved it to.
+        self::assertLessThanOrEqual($after + 1000, $embedded);
     }
 
     public function testV7TimestampRecoversTheExactMillisecond(): void
@@ -290,6 +295,11 @@ final class HyperUuidTest extends TestCase
         return ((int) $dt->format('U')) * 1000 + intdiv((int) $dt->format('u'), 1000);
     }
 
+    private static function nowMillis(): int
+    {
+        return (int) round(microtime(true) * 1000);
+    }
+
     /**
      * Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order — the
      * correctness oracle this project's C# test suite checks directly against the real type;
@@ -308,13 +318,17 @@ final class HyperUuidTest extends TestCase
 
     public function testV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(): void
     {
+        // Current-time stamps, 500 ms ahead at most: a fixed old timestamp is minted outside the
+        // v7 stream, which orders nothing, and one far ahead would drag the stream away from the clock.
+        // No test supplies more than now + 500 ms, and current-time bounds allow + 1000 ms.
+        $now = self::nowMillis();
         $ids = [];
         for ($i = 0; $i < 200; $i++) {
-            $ids[] = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS + $i);
+            $ids[] = HyperUuid::newV7($now + $i);
         }
         // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
         for ($i = 0; $i < 200; $i++) {
-            $ids[] = HyperUuid::newV7(self::RFC_TEST_VECTOR_MS + 1_000_000);
+            $ids[] = HyperUuid::newV7($now + 500);
         }
 
         $sqlOrdered = array_map(static fn (Uuid $id): string => $id->toSqlOrder()->bytes(), $ids);
@@ -383,11 +397,12 @@ final class HyperUuidTest extends TestCase
 
     public function testNewV7BatchBytesAgreesWithTheObjectForm(): void
     {
+        $now = self::nowMillis();
         // Two separate batches, so the values differ — what must agree is everything the
         // two doors share: the layout, the embedded timestamp, and one counter sequence
         // (the object batch, minted second, continues above the byte batch).
-        $bytes = HyperUuid::newV7BatchBytes(16, self::RFC_TEST_VECTOR_MS);
-        $fromObjects = HyperUuid::newV7Batch(16, self::RFC_TEST_VECTOR_MS);
+        $bytes = HyperUuid::newV7BatchBytes(16, $now);
+        $fromObjects = HyperUuid::newV7Batch(16, $now);
         $previous = '';
         for ($i = 0; $i < 16; $i++) {
             $fromBytes = new Uuid(substr($bytes, $i * 16, 16));
@@ -504,6 +519,49 @@ final class HyperUuidTest extends TestCase
         $dt = new \DateTimeImmutable('2022-02-22T19:22:22.123456Z');
         $expected = $dt->getTimestamp() * 1000 + 123;
         self::assertSame($expected, self::embeddedMillis(HyperUuid::newV7($dt)));
+    }
+
+    /**
+     * Drives the real stream to its ceiling, which poisons the process-wide v7 state for
+     * everything after it, so the whole script runs in a process of its own.
+     */
+    #[RunInSeparateProcess]
+    public function testCounterExhaustion(): void
+    {
+        $m = 17_592_186_044_414; // 2**44 - 2, the last millisecond the stream holds
+        $message = 'version 7 counter exhausted: the stream cannot advance without running more than '
+            . '1000 ms ahead of the supplied timestamp or past its last millisecond';
+        $exhausted = static function (callable $call) use ($message): bool {
+            try {
+                $call();
+            } catch (CounterExhaustedException $e) {
+                self::assertSame($message, $e->getMessage());
+                return true;
+            }
+            return false;
+        };
+
+        // 1. One single v7 at M succeeds.
+        HyperUuid::newV7($m);
+
+        // 2. Batches of 65,536 at M until the first error: the batch site.
+        $batchExhausted = false;
+        for ($i = 0; $i < 1025 && !$batchExhausted; $i++) {
+            $batchExhausted = $exhausted(static fn () => HyperUuid::newV7BatchBytes(65536, $m));
+        }
+        self::assertTrue($batchExhausted, 'no batch exhausted the stream');
+
+        // 3. Singles at M until the first error: the single site.
+        $singleExhausted = false;
+        for ($i = 0; $i < 1024 && !$singleExhausted; $i++) {
+            $singleExhausted = $exhausted(static fn () => HyperUuid::newV7($m));
+        }
+        self::assertTrue($singleExhausted, 'no single exhausted the stream');
+
+        // 4. Every other v7 door now fails at once.
+        self::assertTrue($exhausted(static fn () => HyperUuid::newV7($m)), 'newV7');
+        self::assertTrue($exhausted(static fn () => HyperUuid::newV7Batch(1, $m)), 'newV7Batch');
+        self::assertTrue($exhausted(static fn () => HyperUuid::newV7BatchBytes(1, $m)), 'newV7BatchBytes');
     }
 
     public function testNativeVersionNamesTheLoadedLibrary(): void

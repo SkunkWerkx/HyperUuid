@@ -152,7 +152,7 @@ let bytes = withUnsafeBytes(of: stored.uuid) { Data($0) }  // bind this as varbi
 There's no real comparison to make for v5/v7 — Foundation's `UUID` type has never generated anything but random v4:
 
 1. **Full RFC 9562 coverage.** v4, v5 (SHA-1 namespace-based, verified in CI to match Python's own `uuid.uuid5` byte-for-byte) and v7 — neither of which `UUID()` can produce at all.
-2. **A real monotonic counter for v7.** A process-global counter (RFC 9562 §6.2 Method 1) guarantees strict creation order under concurrency — not something `UUID()` needs, since it has no v7 to order in the first place.
+2. **A real monotonic stream for v7.** A process-global stream (RFC 9562 §6.2 Method 1) guarantees strict creation order under concurrency, across both individual and batch calls within 10 s of the stream's newest timestamp ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)) — not something `UUID()` needs, since it has no v7 to order in the first place.
 3. **Batch generation.** `newV7Batch(count:unixMillis:)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch instead of paying per-item overhead N times.
 4. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, Ruby, and every other binding in this repo — a Swift service and a service written in any of those languages agree byte-for-byte on the same `(namespace, name)` pair.
 
@@ -174,18 +174,22 @@ Swift gets the good version of this, alongside Go. Foundation's `UUID` wraps `uu
 
 | Benchmark | p50 | mallocs |
 | --- | ---: | ---: |
-| `newV7` x1000 individually | 57 µs | 0 |
-| `newV7Batch(count: 1000)` | **3.7 µs** | 1 |
-| `fillV7(into: [UUID])` | 5.3 µs | 1 |
-| `fillV7(into: raw bytes)` | **3.8 µs** | 1 |
+| `newV7` x1000 individually † | 57 µs | 0 |
+| `newV7Batch(count: 1000)` † | **3.7 µs** | 1 |
+| `fillV7(into: [UUID])` † | 5.3 µs | 1 |
+| `fillV7(into: raw bytes)` † | **3.8 µs** | 1 |
 
-`newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work — and lands with the raw-bytes fill. The `[UUID]` fill measures 1.5 µs more here.
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
+
+`newV7Batch` allocates its result array and fills it in place through the same path `fillV7(into:)` uses — one native call, one allocation, no per-element work — and lands with the raw-bytes fill. The `[UUID]` fill measures 1.5 µs more here. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 The raw-buffer overload is for callers who want RFC-ordered bytes rather than `UUID` values — a wire buffer or a database parameter. A destination whose length isn't a whole multiple of 16 throws `Error.bufferNotWholeUUIDs`.
 
 ### The v7 batch limit
 
-One v7 batch or fill — `newV7Batch` or `fillV7`, either destination — mints at most `UuidGenerator.maxV7Batch` UUIDs: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. Every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it throws `Error.batchTooLarge(count:)` before anything is allocated or written. The roll-forward orders one batch, not the stream: the next batch or `newV7` call in the same real millisecond starts its counter just past the wrap and carries the supplied timestamp, so it sorts before the previous batch's tail, stamped a millisecond later. Two single calls either side of the wrap in one millisecond sort in reverse the same way. It happens at most once per 67,108,864 UUIDs the process mints.
+One v7 batch or fill — `newV7Batch` or `fillV7`, either destination — mints at most `UuidGenerator.maxV7Batch` UUIDs: 67,108,864, which is 2^20 steps' worth: a batch of n consumes ⌈n/64⌉ steps, so the largest batch takes exactly one millisecond of the stream. A larger batch would have to reuse counter values within one millisecond, so it throws `Error.batchTooLarge(count:)` before anything is allocated or written. Every batch is strictly increasing; one that outruns a millisecond's steps splits into the next and stamps the UUIDs from there on a millisecond later ([v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely)).
+
+Every v7 call reserves the next step of one process-wide stream. A call whose timestamp is within 10 s of the newest the stream has reserved at sorts after every UUID from a call that completed before it began, on any thread. A timestamp more than 11 s behind the stream, or past 2^44 − 2, is minted at itself, outside the stream, and is ordered against nothing: backfill and fixed test timestamps work, but one call far in the future leaves real-time calls out of stream until the clock catches up. A split that would take the stream more than 1000 ms ahead of the supplied timestamp, or past 2^44 − 2, throws `Error.counterExhausted` (`hyperuuid: version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond`) and reserves nothing, so it is a state error and not an argument error. A call whose timestamp is past the stream's millisecond succeeds.
 
 ### Raw-byte SQL-order transforms
 
@@ -200,7 +204,9 @@ Measured with [`package-benchmark`](https://github.com/ordo-one/package-benchmar
 | `Foundation.UUID()` | 1,325 ns | baseline | 0 |
 | `UuidGenerator.newV4()` | 85 ns | **16x faster** | 0 |
 | `UuidGenerator.newV5(namespace:name:)` | 122 ns | **11x faster** | 0 |
-| `UuidGenerator.newV7()` | 107 ns | **12x faster** | 0 |
+| `UuidGenerator.newV7()` † | 107 ns | **12x faster** | 0 |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 Every HyperUuid call here is faster than `Foundation.UUID()` on this machine — the call path is cheap, a direct call to a linked-in symbol — and none of them allocates: no heap `[UInt8]` for the out-value or for any input. Foundation's `UUID` wraps `uuid_t`, sixteen bytes already in RFC 9562 order, so a `uuid_t` on the stack is both the scratch every door needs and the value the result is built from. The v5 name crosses as a view of the string's own UTF-8 (`withUTF8`) rather than an `Array` copy, and `newV5(namespace:name:)` takes an `UnsafeRawBufferPointer` as the primitive the `String` and `[UInt8]` forms wrap. Zero mallocs per call, measured by the harness rather than claimed.
 
@@ -208,10 +214,12 @@ Batch generation amortizes the native call over the whole batch, with no per-ele
 
 | Call | p50 | Per UUID |
 |---|---:|---:|
-| `newV7()` × 1000 (individual) | 57 µs | 57 ns |
-| `newV7Batch(count: 1000)` | **3.7 µs** | 3.7 ns |
+| `newV7()` × 1000 (individual) † | 57 µs | 57 ns |
+| `newV7Batch(count: 1000)` † | **3.7 µs** | 3.7 ns |
 
-**≈15x** — one native call, one clock read and one allocation instead of a thousand of each, with the batch doors landing on the same floor the fills reach. The multiple is the machine's as much as the binding's: the individual calls each read the wall clock, so where a clock read is expensive the loop costs far more and the batch, which reads it once, does not.
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
+
+**≈15x** — one native call, one clock read and one allocation instead of a thousand of each, with the batch doors landing on the same floor the fills reach. The multiple is the machine's as much as the binding's: the individual calls each read the wall clock, so where a clock read is expensive the loop costs far more and the batch, which reads it once, does not. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 ## Requirements
 
@@ -270,7 +278,7 @@ Without it, outside CI, `CoreFreshnessTests` fails when the checkout's `rust/` d
 the commit the committed bundle was built from.
 
 Every call `throws` only `UuidGenerator.Error` — a native call that ran and was refused
-(`.timestampOutOfRange`, `.randomSourceFailure(code:)`, `.batchTooLarge(count:)`, …).
+(`.timestampOutOfRange`, `.randomSourceFailure(code:)`, `.batchTooLarge(count:)`, `.counterExhausted`, …).
 `UuidGenerator.isAvailable` is always `true`, because the core is linked into the executable on
 every platform; it keeps the probe every other binding has under the same name.
 

@@ -248,23 +248,45 @@ $bytes = HyperUuid::newV7BatchBytes(1000);
 $first = substr($bytes, 0, 16);   // ready for a BINARY(16) bind parameter
 ```
 
-**About 16x faster than `newV7Batch`** for a 1000-UUID batch (4.2 µs versus 67.1 µs), and 64x faster than a thousand `newV7()` calls. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects and 1000 substrings on top of it.
+**About 16x faster than `newV7Batch`** for a 1000-UUID batch (4.2 µs versus 67.1 µs), and 64x faster than a thousand `newV7()` calls. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects and 1000 substrings on top of it. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `newV7Batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
 Slice it with `substr($bytes, $i * 16, 16)` — which is exactly what `newV7Batch` does internally.
 
 A batch count below 0 is an `InvalidArgumentException` on both batch methods; 0 returns
-an empty array or an empty string. A batch takes at most `HyperUuid::MAX_V7_BATCH` (67,108,864, the 26-bit counter that orders UUIDs within a
-millisecond); a larger count is an `InvalidArgumentException` naming the limit, thrown before
-anything is allocated. Every batch is in strictly increasing order: the counter is
-one process-wide sequence, so a batch can straddle the point where it wraps back to 0, and
-the UUIDs from there on carry the supplied timestamp plus one millisecond rather than sorting
-before the ones ahead of them. That orders one batch, not the stream: the next batch or
-`newV7()` call in the same real millisecond starts its counter just past the wrap and carries
-the supplied timestamp, so it sorts before the previous batch's tail, stamped a millisecond
-later. Two single `newV7()` calls either side of the wrap in one millisecond sort in reverse
-the same way. It happens at most once per 67,108,864 UUIDs the process mints.
+an empty array or an empty string. A batch takes at most `HyperUuid::MAX_V7_BATCH` (67,108,864);
+a larger count is an `InvalidArgumentException` naming the limit, thrown before
+anything is allocated.
+
+### Version 7 ordering
+
+Every batch is in strictly increasing order, and every v7 call, single or batch, reserves
+from one process-wide stream that is re-seeded at random whenever a timestamp moves it
+forward. A single call consumes one of a millisecond's 2^20 steps and a batch of n consumes
+⌈n/64⌉. For timestamps up to 2^44 − 2 (the year 2527):
+
+- **Ordering.** A call whose timestamp is within 10 s of the newest stream timestamp either
+  throws `CounterExhaustedException` (below) or reserves from the stream, and its UUIDs then
+  sort strictly after every UUID from a reservation that completed before it began.
+  Overlapping reservations are ordered by reservation, which need not be completion order.
+- **Embedded timestamp.** At most 11 s ahead of the one supplied: a timestamp up to 11 s
+  behind the stream is clamped onto the stream's millisecond, and a millisecond whose steps
+  run out splits into the next, so a split's tail carries the millisecond after it (at most
+  1000 ms ahead of the supplied timestamp). An out-of-stream call carries its own timestamp
+  exactly.
+- **Backfill and future-dated calls.** A timestamp more than 11 s behind the stream, or past
+  2^44 − 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone and
+  is ordered against nothing. One call far in the future therefore advances the stream, and
+  until the clock catches up, real-time calls are minted out of stream, unordered among
+  themselves.
+- **Exhaustion.** A split that would take the stream more than 1000 ms ahead of the supplied
+  timestamp, or past 2^44 − 2, throws `HyperUuid\CounterExhaustedException` (a
+  `\RuntimeException`) with the message `version 7 counter exhausted: the stream cannot
+  advance without running more than 1000 ms ahead of the supplied timestamp or past its last
+  millisecond`, before anything is reserved. It is a state error, not an argument error, and
+  a call whose timestamp is past the stream's millisecond succeeds. The random source failing
+  is `RandomSourceException`; a timestamp past 48 bits is `TimestampOutOfRangeException`.
 
 ## Why not `ramsey/uuid`?
 
@@ -290,8 +312,10 @@ actually costs:
 | --- | --- | --- |
 | Naive inline v4 (`random_bytes`, no RFC validation) | 308ns | — |
 | `newV4()` | 224ns | **1.4x faster** |
-| `newV7()` | 265ns | **1.2x faster** |
+| `newV7()` † | 265ns | **1.2x faster** |
 | `newV5()` | 502ns | 1.6x slower — a SHA-1 the baseline has no equivalent of |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 Read that top row again: the full RFC-complete v4 — real entropy, correct version and
 variant bits, crossing into native code and back — costs **less than the naive pure-PHP
@@ -307,7 +331,9 @@ which is most of what is left:
 
 | Call | Individual × 1000 | Batch → `Uuid[]` | Batch → bytes |
 | --- | ---: | ---: | ---: |
-| v7 | 267.0µs | 67.1µs (**4.0x**) | 4.2µs (**64x**) |
+| v7 † | 267.0µs | 67.1µs (**4.0x**) | 4.2µs (**64x**) |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 ### Timestamp extraction vs. `ramsey/uuid`'s `getDateTime()`
 
@@ -392,15 +418,17 @@ numbers is not in this repository, so the table cannot be re-run from it as-is:
 | --- | ---: | ---: | ---: |
 | `newV4` | 223ns | 135ns | **1.65x** |
 | `newV5` | 244ns | 175ns | 1.40x |
-| `newV7` | 210ns | 107ns | **1.98x** |
-| `newV7Batch(1000)` | 16.0µs | 15.8µs | 1.02x |
+| `newV7` † | 210ns | 107ns | **1.98x** |
+| `newV7Batch(1000)` † | 16.0µs | 15.8µs | 1.02x |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 Worth it for single-item calls (the ~105ns FFI floor is real, but so is a further ~100ns of
 PHP-level `Runtime::` call overhead around it that a native extension skips entirely — nearly
 2x on `newV7`); not worth it for batch calls, where 1000 UUIDs' worth of native
 computation dwarfs the one-time crossing cost either way — which, with the per-PHP-version
 packaging cost above, is why this stays a spike rather than a second shipped backend. See
-[`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning.
+[`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 The same extension is also the route to PHP in the browser, proven and documented under
 [WebAssembly](#webassembly).

@@ -152,9 +152,9 @@ RSpec.describe "UUID inspection" do
         .to raise_error(ArgumentError, HyperUuid::Runtime::V7_BATCH_TOO_LARGE)
     end
 
-    # Exactly the counter space: 1 GiB of bytes (2 GiB at peak), in strictly increasing order
-    # end to end, and at most a millisecond past the supplied timestamp (the roll-forward over
-    # the counter's wrap). Opt-in for its memory and its minute of Ruby-loop comparison.
+    # Exactly the limit: 1 GiB of bytes (2 GiB at peak), in strictly increasing order end to
+    # end, and at most 1000 ms past the supplied timestamp (a split's tail carries the
+    # millisecond after it). Opt-in for its memory and its minute of Ruby-loop comparison.
     it "mints a batch of exactly the limit in strictly increasing order" do
       skip "set HYPERUUID_BIG_BATCH=1 to run the 1 GiB batch" unless ENV["HYPERUUID_BIG_BATCH"]
 
@@ -169,7 +169,7 @@ RSpec.describe "UUID inspection" do
       end
       expect(out_of_order).to eq(0)
       last = HyperUuid::Uuid.new(previous)
-      expect((last.timestamp.to_r * 1000).to_i).to be_between(ms, ms + 1)
+      expect((last.timestamp.to_r * 1000).to_i).to be_between(ms, ms + 1000)
     end
   end
 end

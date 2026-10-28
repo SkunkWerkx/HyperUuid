@@ -15,28 +15,39 @@ use PhpBench\Attributes as Bench;
  * (~0.7 ms: the cdef parse and the dlopen). With one unwarmed revolution that load was
  * inside every figure here and larger than any of them; the warmup revolution takes it out.
  */
+#[Bench\BeforeMethods('readClock')]
 #[Bench\Iterations(5)]
 #[Bench\Revs(100)]
 #[Bench\Warmup(1)]
 #[Bench\OutputTimeUnit('microseconds', precision: 1)]
 final class UuidBatchBench
 {
-    private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
+    /**
+     * The present, read once per iteration process, outside the timed revolutions: every call
+     * is then minted through the v7 stream. A fixed timestamp held long enough would split the
+     * stream forward until it failed with CounterExhaustedException.
+     */
+    private int $nowMs = 0;
+
+    public function readClock(): void
+    {
+        $this->nowMs = (int) (microtime(true) * 1000);
+    }
 
     public function benchNewV7Batch1000(): void
     {
-        HyperUuid::newV7Batch(1000, self::RFC_TEST_VECTOR_MS);
+        HyperUuid::newV7Batch(1000, $this->nowMs);
     }
 
     public function benchNewV7Individualx1000(): void
     {
         for ($i = 0; $i < 1000; $i++) {
-            HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+            HyperUuid::newV7($this->nowMs);
         }
     }
 
     public function benchNewV7BatchBytes1000(): void
     {
-        HyperUuid::newV7BatchBytes(1000, self::RFC_TEST_VECTOR_MS);
+        HyperUuid::newV7BatchBytes(1000, $this->nowMs);
     }
 }

@@ -19,7 +19,6 @@ namespace HyperUuid.Benchmarks;
 [MemoryDiagnoser]
 public class BatchBenchmarks
 {
-	const long RfcTestVectorMs = 1_645_557_742_000;
 	const int Count = 1000;
 
 	Guid[] _guidDestination = [];
@@ -36,15 +35,15 @@ public class BatchBenchmarks
 	public void V7Individual()
 	{
 		for (var i = 0; i < Count; i++)
-			UuidGenerator.NewV7(RfcTestVectorMs);
+			UuidGenerator.NewV7(BenchClock.Ms);
 	}
 
 	[Benchmark(Description = "NewV7Batch(1000) -> new Guid[]")]
-	public Guid[] V7Batch() => UuidGenerator.NewV7Batch(Count, RfcTestVectorMs);
+	public Guid[] V7Batch() => UuidGenerator.NewV7Batch(Count, BenchClock.Ms);
 
 	[Benchmark(Description = "FillV7(Span<Guid>) into existing array")]
-	public void V7Fill() => UuidGenerator.FillV7(_guidDestination, RfcTestVectorMs);
+	public void V7Fill() => UuidGenerator.FillV7(_guidDestination, BenchClock.Ms);
 
 	[Benchmark(Description = "FillV7(Span<byte>) into existing buffer")]
-	public void V7FillBytes() => UuidGenerator.FillV7(_byteDestination, RfcTestVectorMs);
+	public void V7FillBytes() => UuidGenerator.FillV7(_byteDestination, BenchClock.Ms);
 }

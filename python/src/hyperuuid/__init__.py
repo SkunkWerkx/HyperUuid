@@ -55,16 +55,8 @@ NIL = _uuid.UUID(bytes=bytes(16))
 MAX = _uuid.UUID(bytes=b"\xff" * 16)
 
 #: The most UUIDs one version 7 batch (:func:`new_v7_batch`, :func:`fill_v7`) mints:
-#: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond. A batch
-#: any larger would have to wrap that counter twice and could not stay in order, so it is
-#: refused with ``ValueError`` before anything is allocated or written.
-#:
-#: The roll-forward over the counter wrap (see :func:`new_v7_batch`) orders one batch, not the
-#: stream. The next batch or :func:`new_v7` call in the same real millisecond starts its
-#: counter just past the wrap and carries the supplied timestamp, so it sorts before the
-#: previous batch's tail, which was stamped a millisecond later; two single :func:`new_v7`
-#: calls either side of the wrap in one millisecond sort in reverse the same way. It happens
-#: at most once per ``MAX_V7_BATCH`` UUIDs the process mints.
+#: 67,108,864. A larger batch is refused with ``ValueError`` before anything is allocated or
+#: written. See :func:`new_v7_batch` for the ordering a batch carries.
 MAX_V7_BATCH: int = _native.MAX_V7_BATCH
 
 
@@ -212,9 +204,16 @@ def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
     millisecond timestamp (non-negative, fitting in 48 bits) to embed a specific time instead.
 
+    Every call reserves the next step of one process-wide stream, re-seeded at random each
+    millisecond: see :func:`new_v7_batch` for the ordering and the embedded timestamp.
+
     :raises TypeError: if ``unix_millis`` is not an int, a ``datetime.datetime`` or ``None``.
     :raises ValueError: if ``unix_millis`` is negative or does not fit the 48-bit
         ``unix_ts_ms`` field.
+    :raises RuntimeError: ``version 7 counter exhausted``, when the stream cannot advance
+        without running more than 1000 ms ahead of ``unix_millis`` or past its last
+        millisecond (2**44 - 2). It reserves nothing, and a call whose timestamp is past the
+        stream's millisecond succeeds. The random source failing is a ``RuntimeError`` too.
     """
     # The common arguments — nothing, or a plain int in range — need none of the conversion
     # below, and calling it costs more than a third of the whole mint.
@@ -365,30 +364,43 @@ def new_v7_batch(
     count: int, unix_millis: int | datetime.datetime | None = None
 ) -> list[_uuid.UUID]:
     """Create ``count`` time-sortable version 7 UUIDs sharing one timestamp capture and one
-    contiguous block of the monotonic counter — one native call and one random-bytes fetch
+    contiguous block of the v7 stream — one native call and one random-bytes fetch
     instead of ``count`` of each.
 
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
     millisecond timestamp to embed a specific time instead.
 
-    The batch is always in strictly increasing order. The counter is one process-wide sequence
-    that wraps every 2**26 values, so a batch can straddle the wrap; the UUIDs from the wrap on
-    carry ``unix_millis + 1`` rather than sorting before the ones ahead of them, so an embedded
-    timestamp can be one millisecond past the one supplied, never more. That is also why a
-    batch holds at most :data:`MAX_V7_BATCH` UUIDs.
+    Every call reserves from one process-wide stream, re-seeded at random whenever a timestamp
+    moves it forward; a single call consumes one step of a millisecond's 2**20 and a batch of
+    ``n`` consumes ``ceil(n / 64)``. For timestamps up to 2**44 - 2 (the year 2527):
 
-    The roll-forward orders one batch, not the stream. The next batch or :func:`new_v7` call
-    in the same real millisecond starts its counter just past the wrap and carries the supplied
-    timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond
-    later; two single :func:`new_v7` calls either side of the wrap in one millisecond sort in
-    reverse the same way. It happens at most once per :data:`MAX_V7_BATCH` UUIDs the process
-    mints.
+    * **Ordering.** A call whose timestamp is within 10 s of the newest stream timestamp either
+      fails with ``RuntimeError`` (exhaustion, below) or reserves from the stream, and its UUIDs
+      then sort strictly after every UUID from a reservation that completed before it began, on
+      any thread. A batch is strictly increasing. Overlapping reservations are ordered by
+      reservation, which need not be completion order.
+    * **Embedded timestamp.** At most 11 s ahead of the one supplied: a timestamp up to 11 s
+      behind the stream is clamped onto the stream's millisecond, and a millisecond whose steps
+      run out splits into the next, so a split's tail carries the millisecond after it (at most
+      1000 ms ahead of the supplied timestamp).
+    * **Backfill and future-dated calls.** A timestamp more than 11 s behind the stream, or past
+      2**44 - 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone
+      and is ordered against nothing. One call far in the future therefore advances the stream,
+      and until the clock catches up, real-time calls are minted out of stream, unordered among
+      themselves.
+    * **Exhaustion.** A split that would take the stream more than 1000 ms ahead of the supplied
+      timestamp, or past 2**44 - 2, raises ``RuntimeError`` (``version 7 counter exhausted``)
+      before anything is reserved: a state error, not an argument error. A call whose timestamp
+      is past the stream's millisecond succeeds. A batch holds at most :data:`MAX_V7_BATCH`
+      UUIDs.
 
     :raises TypeError: if ``count`` is not an int, or ``unix_millis`` is not an int, a
         ``datetime.datetime`` or ``None``.
     :raises ValueError: if ``count`` is outside 0 to :data:`MAX_V7_BATCH` (checked before
         anything is allocated), or ``unix_millis`` is negative or does not fit the 48-bit
-        ``unix_ts_ms`` field — including a batch that would roll forward past it.
+        ``unix_ts_ms`` field.
+    :raises RuntimeError: ``version 7 counter exhausted`` (see above), or the random source
+        failing. The batch is not returned and the stream is left as it was.
     :raises MemoryError: if a batch of ``count`` UUIDs cannot be allocated.
     """
     return _native.new_v7_batch(
@@ -442,7 +454,7 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     """Fill ``buffer`` with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID.
 
     One native call writes straight into the ``bytearray`` you pass, sharing one timestamp
-    capture and one contiguous block of the monotonic counter across the whole batch. No
+    capture and one contiguous block of the v7 stream across the whole batch. No
     ``uuid.UUID`` objects are created at any point, which is the entire reason this exists.
 
     **Use this when bytes are what you actually want** — a database parameter, a wire format,
@@ -460,9 +472,9 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     zero-length buffer writes nothing (the timestamp is still checked, as it is for a batch of
     zero). Defaults to the current time; pass a ``datetime.datetime`` or a Unix-epoch
     millisecond timestamp to embed a specific time instead. The UUIDs are in strictly
-    increasing order, with the same possible one-millisecond roll-forward as
-    :func:`new_v7_batch`, which likewise orders this one fill, not the stream: the next batch,
-    fill or :func:`new_v7` call in the same millisecond can sort before its tail.
+    increasing order, with the ordering, embedded timestamp and exhaustion of
+    :func:`new_v7_batch`. On ``RuntimeError`` treat the buffer as clobbered: the stream is left
+    as it was, but the front of ``buffer`` may hold entropy.
 
     ``bytearray`` specifically, not ``memoryview`` or NumPy arrays, for now: the general
     writable buffer protocol needs ``Py_buffer``, which entered CPython's stable ABI in 3.11.
@@ -474,5 +486,7 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     :raises ValueError: if ``len(buffer)`` is not a multiple of 16 or holds more than
         :data:`MAX_V7_BATCH` UUIDs, or ``unix_millis`` is negative or does not fit the 48-bit
         ``unix_ts_ms`` field.
+    :raises RuntimeError: ``version 7 counter exhausted`` (see :func:`new_v7_batch`), or the
+        random source failing.
     """
     _native.fill_v7_bytes(buffer, _unix_millis_from(unix_millis, _V7_OUT_OF_RANGE))

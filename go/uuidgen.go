@@ -80,13 +80,35 @@ func V7Timestamp(id uuid.UUID) (time.Time, error) {
 	return time.UnixMilli(int64(millis)).UTC(), nil
 }
 
-// NewV7 creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.
+// NewV7 creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time. See
+// NewV7At for the ordering contract and for ErrCounterExhausted.
 func NewV7() (uuid.UUID, error) {
 	return NewV7At(uint64(time.Now().UnixMilli()))
 }
 
-// NewV7At creates a time-sortable UUID version 7 (RFC 9562 §6.2), embedding unixMillis
-// (milliseconds since the Unix epoch).
+// NewV7At creates a time-sortable UUID version 7 (RFC 9562 §6.2) at unixMillis (milliseconds
+// since the Unix epoch).
+//
+// Every v7 call reserves the next step of one process-wide stream, which is re-seeded at
+// random whenever a timestamp moves it forward, so counters do not count UUIDs across
+// milliseconds. For timestamps up to 2^44 − 2 (the year 2527), a unixMillis within 10 s of the
+// newest timestamp the stream has reserved at either fails with ErrCounterExhausted or sorts
+// strictly after every stream UUID whose call completed before this one began, on any
+// goroutine; overlapping calls are ordered by their reservation. A timestamp up to 11 s behind
+// the stream is clamped onto its millisecond, so the embedded timestamp can run up to 11 s
+// ahead of unixMillis (a millisecond whose steps run out splits into the next, at most 1000 ms
+// ahead).
+//
+// A unixMillis more than 11 s behind the stream, or past 2^44 − 2, is minted at itself, out of
+// stream: it succeeds, embeds unixMillis exactly, leaves the stream alone and is ordered
+// against nothing. One call far in the future therefore advances the stream, and until the
+// clock catches up, real-time calls are minted out of stream and unordered among themselves.
+//
+// A call that would take the stream more than 1000 ms ahead of unixMillis, or past 2^44 − 2,
+// returns ErrCounterExhausted and reserves nothing; a call whose timestamp is past the
+// stream's millisecond succeeds. A unixMillis that doesn't fit 48 bits returns
+// ErrTimestampOutOfRange. On a target without 64-bit atomics none of this applies: the core
+// keeps one never-reset 26-bit counter.
 func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 	out, rc := newV7(unixMillis)
 	switch rc {
@@ -94,13 +116,16 @@ func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 		return out, nil
 	case 2:
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v7 failed with code %d: %w", rc, ErrTimestampOutOfRange)
+	case 6:
+		return uuid.UUID{}, fmt.Errorf("uuid_new_v7 failed with code %d: %w", rc, ErrCounterExhausted)
 	default:
 		return uuid.UUID{}, fmt.Errorf("uuid_new_v7 failed with code %d: %w", rc, ErrRandomSource)
 	}
 }
 
 // NewV7AtTime creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a time.Time — pulls
-// the Unix-epoch milliseconds off t and mints it through NewV7At.
+// the Unix-epoch milliseconds off t and mints it through NewV7At, with its ordering contract
+// and its ErrCounterExhausted.
 func NewV7AtTime(t time.Time) (uuid.UUID, error) {
 	return NewV7At(uint64(t.UnixMilli()))
 }
@@ -117,21 +142,13 @@ func GetTimestamp(id uuid.UUID) (time.Time, error) {
 }
 
 // MaxV7Batch is the most UUIDs one version 7 batch (NewV7Batch, NewV7BatchAt and the FillV7
-// family) mints: 67,108,864, the size of the 26-bit counter that orders UUIDs within a
-// millisecond.
+// family) mints: 67,108,864, every one of the 2^20 steps a millisecond holds at 64 UUIDs to a
+// step.
 //
-// Every batch up to this size is in strictly increasing order. The counter is one
-// process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
-// UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
-// than sorting before the ones ahead of them. A larger batch would have to reuse counter
-// values within one millisecond, so it is refused with ErrBatchTooLarge before anything is
-// allocated or written.
-//
-// The roll-forward orders one batch, not the stream. The next batch or NewV7At call in the
-// same real millisecond starts its counter just past the wrap and carries the supplied
-// timestamp, so it sorts before the previous batch's tail, stamped a millisecond later; two
-// single calls either side of the wrap in one millisecond sort in reverse the same way. It
-// happens at most once per MaxV7Batch UUIDs the process mints.
+// A batch of n consumes ⌈n/64⌉ steps of the stream and is strictly increasing, including
+// across a split into the next millisecond (see NewV7At for the stream's ordering contract).
+// A larger batch would have to reuse counter values within one millisecond, so it is refused
+// with ErrBatchTooLarge before anything is allocated or written.
 const MaxV7Batch = 1 << 26
 
 // errV7BatchTooLarge is the ErrBatchTooLarge a v7 batch of count returns.
@@ -140,18 +157,20 @@ func errV7BatchTooLarge(count int) error {
 }
 
 // NewV7Batch creates count time-sortable version 7 UUIDs sharing one timestamp capture and
-// one contiguous block of the monotonic counter, using the current time — one native call and
-// one random-bytes fetch instead of count of each. Same order and limits as NewV7BatchAt.
+// one contiguous block of the stream, using the current time — one native call and one
+// random-bytes fetch instead of count of each. Same order, limits and errors as NewV7BatchAt.
 func NewV7Batch(count int) ([]uuid.UUID, error) {
 	return NewV7BatchAt(count, uint64(time.Now().UnixMilli()))
 }
 
 // NewV7BatchAt creates count time-sortable version 7 UUIDs sharing one unixMillis timestamp
-// capture and one contiguous block of the monotonic counter, in strictly increasing order: if
-// the batch straddles the counter's wrap, the UUIDs from the wrap on carry unixMillis + 1 (see
-// MaxV7Batch, which also covers how a following batch orders against them). A count of 0
-// returns a nil slice; a negative one returns ErrNegativeCount, and one past MaxV7Batch
-// ErrBatchTooLarge, before the result is allocated.
+// capture and one contiguous block of the stream, in strictly increasing order: a batch that
+// crosses a millisecond's last step splits into the next, so its tail carries a later
+// timestamp (at most 1000 ms past unixMillis) and still sorts after its head. The ordering
+// contract against other calls is NewV7At's. A batch the stream cannot hold within 1000 ms
+// of unixMillis returns ErrCounterExhausted and reserves nothing. A count of 0 returns a nil
+// slice; a negative one returns ErrNegativeCount, and one past MaxV7Batch ErrBatchTooLarge,
+// before the result is allocated.
 func NewV7BatchAt(count int, unixMillis uint64) ([]uuid.UUID, error) {
 	if count < 0 {
 		return nil, fmt.Errorf("%w: got %d", ErrNegativeCount, count)
@@ -256,6 +275,8 @@ func errBatch(fn string, rc int32) error {
 		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrBatchUnaddressable)
 	case 4:
 		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrBatchTooLarge)
+	case 6:
+		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrCounterExhausted)
 	default:
 		return fmt.Errorf("%s failed with code %d: %w", fn, rc, ErrRandomSource)
 	}
@@ -291,17 +312,17 @@ func fillBytes(dst []byte, unixMillis uint64, fn string,
 }
 
 // FillV7 fills dst with time-sortable version 7 UUIDs sharing one timestamp capture and one
-// contiguous block of the monotonic counter, using the current time. Same order and limits
-// as FillV7At.
+// contiguous block of the stream, using the current time. Same order, limits and errors as
+// FillV7At.
 func FillV7(dst []uuid.UUID) error {
 	return FillV7At(dst, uint64(time.Now().UnixMilli()))
 }
 
 // FillV7At fills dst with version 7 UUIDs sharing the given unixMillis timestamp capture and
-// one contiguous block of the monotonic counter, in strictly increasing order: if the batch
-// straddles the counter's wrap, the UUIDs from the wrap on carry unixMillis + 1 (see
-// MaxV7Batch, which also covers how a following batch orders against them). A dst longer than
-// MaxV7Batch returns ErrBatchTooLarge with nothing written.
+// one contiguous block of the stream, in strictly increasing order (see NewV7BatchAt and
+// NewV7At). A dst longer than MaxV7Batch returns ErrBatchTooLarge with nothing written. A batch
+// the stream cannot hold within 1000 ms of unixMillis returns ErrCounterExhausted and reserves
+// nothing, but dst may then hold entropy from the draw: treat it as clobbered.
 func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
 	if len(dst) > MaxV7Batch {
 		return errV7BatchTooLarge(len(dst))
@@ -318,9 +339,9 @@ func FillV7Bytes(dst []byte) error {
 }
 
 // FillV7BytesAt fills dst with raw RFC 9562-ordered version 7 UUID bytes sharing the given
-// unixMillis timestamp capture and one contiguous block of the monotonic counter, in strictly
+// unixMillis timestamp capture and one contiguous block of the stream, in strictly
 // increasing order (see FillV7At). A dst of more than MaxV7Batch UUIDs returns
-// ErrBatchTooLarge with nothing written.
+// ErrBatchTooLarge with nothing written; ErrCounterExhausted is FillV7At's.
 func FillV7BytesAt(dst []byte, unixMillis uint64) error {
 	if len(dst)%16 == 0 && len(dst)/16 > MaxV7Batch {
 		return errV7BatchTooLarge(len(dst) / 16)

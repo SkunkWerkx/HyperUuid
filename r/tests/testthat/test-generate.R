@@ -63,13 +63,56 @@ test_that("bad arguments error with pinned messages", {
 })
 
 test_that("uuid_v7_raw matches the string form's shape", {
-  r <- uuid_v7_raw(2, time = t)
+  # Earlier tests moved the process-wide stream to t + 1 s; a time over 11 s behind it is
+  # minted out of stream and carries its own millisecond exactly.
+  r <- uuid_v7_raw(2, time = t - 60)
   expect_identical(dim(r), c(16L, 2L))
   hex <- apply(r, 2L, function(col) paste(sprintf("%02x", as.integer(col)), collapse = ""))
-  expect_identical(substr(hex, 1, 12), rep("017f22e279b0", 2L))
+  expect_identical(substr(hex, 1, 12), rep("017f22e18f50", 2L))
   expect_identical(substr(hex, 13, 13), c("7", "7"))
 })
 
 test_that("uuid_v7_max_batch is the 26-bit counter space", {
   expect_identical(uuid_v7_max_batch, 67108864L)
+})
+
+test_that("counter exhaustion errors", {
+  # base::, because load_all shims system.file() to answer for the source tree. The child
+  # loads whatever copy is installed, so install this checkout first: an older copy runs the
+  # loop below without an error and fails as "batch site: got NULL".
+  skip_if(!nzchar(base::system.file(package = "hyperuuid", lib.loc = .libPaths())),
+          "needs an installed hyperuuid; the child process loads it")
+  script <- tempfile(fileext = ".R")
+  on.exit(unlink(script), add = TRUE)
+  # The child is told the library paths in its script, not through system2(env =), which
+  # Windows does not apply to Rscript.
+  writeLines(c(
+    paste0(".libPaths(", paste(deparse(.libPaths()), collapse = ""), ")"),
+    "library(hyperuuid)",
+    "msg <- paste0('version 7 counter exhausted: the stream cannot advance without running ',",
+    "  'more than 1000 ms ahead of the supplied timestamp or past its last millisecond')",
+    "m <- .POSIXct(17592186044.414, tz = 'UTC')",
+    "fails <- function(expr) tryCatch({ expr; NULL }, error = function(e) conditionMessage(e))",
+    "must <- function(got, where) {",
+    "  if (!identical(got, msg)) stop(where, ': got ', deparse(got), call. = FALSE)",
+    "}",
+    "invisible(uuid_v7(time = m))",
+    "got <- NULL",
+    "for (i in 1:1025) if (!is.null(got <- fails(uuid_v7_raw(65536, time = m)))) break",
+    "must(got, 'batch site')",
+    "got <- NULL",
+    "for (i in 1:1024) if (!is.null(got <- fails(uuid_v7(time = m)))) break",
+    "must(got, 'batch site, count 1')",
+    "must(fails(uuid_v7(2, time = c(m, m))), 'single site, uuid_v7 per-element')",
+    "must(fails(uuid_v7_raw(2, time = c(m, m))), 'single site, uuid_v7_raw per-element')",
+    "must(fails(uuid_v7(3, time = m)), 'uuid_v7 batch')",
+    "must(fails(uuid_v7_raw(1, time = m)), 'uuid_v7_raw')",
+    "cat('OK\\n')"
+  ), script)
+  out <- suppressWarnings(system2(
+    file.path(R.home("bin"), "Rscript"), c("--vanilla", shQuote(script)),
+    stdout = TRUE, stderr = TRUE
+  ))
+  expect_null(attr(out, "status"), info = paste(out, collapse = "\n"))
+  expect_identical(out[length(out)], "OK")
 })

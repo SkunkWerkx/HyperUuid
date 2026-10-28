@@ -28,6 +28,7 @@ use crate::{Layout, Variant};
 struct Cached {
     random_source_error: Opaque<ExceptionClass>,
     timestamp_out_of_range_error: Opaque<ExceptionClass>,
+    counter_exhausted_error: Opaque<ExceptionClass>,
 }
 
 static CACHED: OnceLock<Cached> = OnceLock::new();
@@ -89,6 +90,13 @@ fn timestamp_out_of_range(ruby: &Ruby, message: &'static str) -> Error {
     )
 }
 
+fn counter_exhausted(ruby: &Ruby, e: core::v7::NewV7Error) -> Error {
+    Error::new(
+        exception_class(ruby, |c| c.counter_exhausted_error),
+        e.to_string(),
+    )
+}
+
 /// Borrows the RString's bytes only long enough to copy/parse them — no Ruby calls happen
 /// inside the borrow, so the slice cannot be invalidated mid-use.
 fn uuid_arg(ruby: &Ruby, bytes: RString) -> Result<core::Uuid, Error> {
@@ -129,6 +137,7 @@ fn new_v7(ruby: &Ruby, unix_millis: u64) -> Result<RString, Error> {
         Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
             Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
+        Err(e @ core::v7::NewV7Error::CounterExhausted) => Err(counter_exhausted(ruby, e)),
         Err(core::v7::NewV7Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v7")),
     }
 }
@@ -155,6 +164,7 @@ fn new_v7_batch(ruby: &Ruby, count: u32, unix_millis: u64) -> Result<RString, Er
         Err(e @ core::v7::NewV7Error::BufferTooSmall) => {
             Err(Error::new(ruby.exception_arg_error(), e.to_string()))
         }
+        Err(e @ core::v7::NewV7Error::CounterExhausted) => Err(counter_exhausted(ruby, e)),
         Err(core::v7::NewV7Error::Random(_)) => Err(random_source_error(ruby, "uuid_new_v7_batch")),
     }
 }
@@ -233,11 +243,14 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     let random_source_error: ExceptionClass = hyperuuid.const_get("RandomSourceError")?;
     let timestamp_out_of_range_error: ExceptionClass =
         hyperuuid.const_get("TimestampOutOfRangeError")?;
+    let counter_exhausted_error: ExceptionClass = hyperuuid.const_get("CounterExhaustedError")?;
     ruby.gc_register_mark_object(random_source_error);
     ruby.gc_register_mark_object(timestamp_out_of_range_error);
+    ruby.gc_register_mark_object(counter_exhausted_error);
     let _ = CACHED.set(Cached {
         random_source_error: Opaque::from(random_source_error),
         timestamp_out_of_range_error: Opaque::from(timestamp_out_of_range_error),
+        counter_exhausted_error: Opaque::from(counter_exhausted_error),
     });
     runtime.define_singleton_method("new_v4", function!(new_v4, 0))?;
     runtime.define_singleton_method("new_v5", function!(new_v5, 2))?;

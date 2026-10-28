@@ -186,7 +186,8 @@ public sealed class InspectionTests
 	}
 
 	// Exactly the counter space: 1 GiB of bytes, in strictly increasing order end to end, and
-	// at most a millisecond past the supplied timestamp (the roll-forward over the wrap).
+	// stamped with the supplied timestamp exactly: Ms is far behind the stream, so the batch is minted
+	// out of stream and never splits.
 	[Fact]
 	void A_v7_batch_of_exactly_the_counter_space_is_strictly_increasing()
 	{
@@ -200,6 +201,6 @@ public sealed class InspectionTests
 			previous = current;
 		}
 		var last = new Guid(previous, bigEndian: true);
-		UuidGenerator.V7UnixMillis(last).ShouldBeInRange(Ms, Ms + 1);
+		UuidGenerator.V7UnixMillis(last).ShouldBe(Ms);
 	}
 }

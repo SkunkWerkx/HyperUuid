@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -22,9 +23,11 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
@@ -76,6 +79,19 @@ class UuidGeneratorTest {
     // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
     private static final long RFC_TEST_VECTOR_MS = 1_645_557_742_000L;
 
+    // Moves the v7 stream to the present, so the fixed-vector calls below are minted out of it
+    // and carry their timestamp exactly whatever the test order. The rule: no test
+    // supplies more than now + 500 ms, and current-time bounds allow + 1000 ms.
+    @BeforeAll
+    static void primeStream() {
+        UuidGenerator.newV7();
+    }
+
+    // The v7 stream is process-global and follows the clock, so a test of ordering mints at
+    // the present: the fixed vector above is years behind the stream and is minted out of it,
+    // unordered, though it carries its timestamp exactly. No test supplies more than
+    // now + 500 ms, and current-time bounds allow + 1000 ms.
+
     @Test
     void nilIsAllZeroBits() {
         assertEquals("00000000-0000-0000-0000-000000000000", UuidGenerator.NIL.toString());
@@ -107,9 +123,9 @@ class UuidGeneratorTest {
 
     @Test
     void v7SameMillisecondBatchIsMonotonicallyOrdered() {
-        List<UUID> ids = IntStream.range(0, 100)
-                .mapToObj(i -> UuidGenerator.newV7(RFC_TEST_VECTOR_MS))
-                .collect(Collectors.toList());
+        long now = System.currentTimeMillis();
+        List<UUID> ids =
+                IntStream.range(0, 100).mapToObj(i -> UuidGenerator.newV7(now)).collect(Collectors.toList());
         List<UUID> sorted = ids.stream().sorted().collect(Collectors.toList());
         assertEquals(sorted, ids);
     }
@@ -121,7 +137,8 @@ class UuidGeneratorTest {
         long after = System.currentTimeMillis();
 
         long embeddedMs = (id.getMostSignificantBits() >>> 16) & 0xFFFF_FFFF_FFFFL;
-        assertTrue(embeddedMs >= before && embeddedMs <= after);
+        // The stream may stamp a later ms that an earlier test moved it to.
+        assertTrue(embeddedMs >= before && embeddedMs <= after + 1_000);
     }
 
     @Test
@@ -180,9 +197,10 @@ class UuidGeneratorTest {
 
     @Test
     void v7BatchContinuesTheSameCounterSequenceAsIndividualCalls() {
-        UUID before = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
-        UUID[] batch = UuidGenerator.newV7Batch(10, RFC_TEST_VECTOR_MS);
-        UUID after = UuidGenerator.newV7(RFC_TEST_VECTOR_MS);
+        long now = System.currentTimeMillis();
+        UUID before = UuidGenerator.newV7(now);
+        UUID[] batch = UuidGenerator.newV7Batch(10, now);
+        UUID after = UuidGenerator.newV7(now);
 
         List<UUID> ids = new ArrayList<>();
         ids.add(before);
@@ -240,12 +258,13 @@ class UuidGeneratorTest {
     @Test
     void v7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison() {
         List<UUID> ids = new ArrayList<>();
+        long now = System.currentTimeMillis();
         for (long i = 0; i < 200; i++) {
-            ids.add(UuidGenerator.newV7(RFC_TEST_VECTOR_MS + i));
+            ids.add(UuidGenerator.newV7(now + i));
         }
         // Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
         for (int i = 0; i < 200; i++) {
-            ids.add(UuidGenerator.newV7(RFC_TEST_VECTOR_MS + 1_000_000));
+            ids.add(UuidGenerator.newV7(now + 200));
         }
 
         List<byte[]> sqlOrdered = ids.stream()
@@ -337,7 +356,7 @@ class UuidGeneratorTest {
     @Test
     void fillV7IsStrictlyIncreasing() {
         UUID[] dst = new UUID[256];
-        UuidGenerator.fillV7(dst, RFC_TEST_VECTOR_MS);
+        UuidGenerator.fillV7(dst, System.currentTimeMillis());
         for (int i = 1; i < dst.length; i++) {
             assertTrue(dst[i - 1].compareTo(dst[i]) < 0, "items " + (i - 1) + "/" + i + " out of order");
         }
@@ -539,6 +558,101 @@ class UuidGeneratorTest {
         assertTrue(
                 output.contains("doors: java.lang.ExceptionInInitializerError java.lang.NoClassDefFoundError"), output);
         assertTrue(output.contains("probe: false"), output);
+    }
+
+    @Test
+    void counterExhaustionInAChildJvm() throws Exception {
+        // The stream is process-global, so driving it to exhaustion happens in a JVM of its
+        // own: this one's stream stays where the other tests left it. The child gets this
+        // JVM's classpath, which carries the freshly staged core, and its native-access flag.
+        var java = ProcessHandle.current().info().command().orElse("java");
+        var log = Files.createTempFile("hyperuuid-exhaustion", ".log");
+        try {
+            var process = new ProcessBuilder(
+                            java,
+                            "--enable-native-access=ALL-UNNAMED",
+                            "-cp",
+                            System.getProperty("java.class.path"),
+                            ExhaustionMain.class.getName())
+                    .redirectErrorStream(true)
+                    .redirectOutput(log.toFile())
+                    .start();
+            // Output goes to a file, not a pipe, so a wait with a deadline cannot deadlock on a
+            // full pipe; on expiry the child is killed and the test fails.
+            if (!process.waitFor(120, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new AssertionError("the exhaustion child JVM did not finish in 120 s");
+            }
+            var output = Files.readString(log, StandardCharsets.UTF_8);
+            assertEquals(0, process.exitValue(), output);
+            assertTrue(output.contains("exhaustion script done"), output);
+        } finally {
+            Files.deleteIfExists(log);
+        }
+    }
+
+    /**
+     * The child JVM's program: the exhaustion script every binding runs. Exits 0 only when each
+     * step ends in an {@link IllegalStateException} with the exact message.
+     */
+    static final class ExhaustionMain {
+        private static final long M = 17_592_186_044_414L; // 2^44 - 2
+        private static final String MESSAGE = "version 7 counter exhausted: the stream cannot advance without "
+                + "running more than 1000 ms ahead of the supplied timestamp or past its last millisecond";
+
+        private static void expectExhausted(String door, Runnable call) {
+            try {
+                call.run();
+            } catch (IllegalStateException e) {
+                if (!MESSAGE.equals(e.getMessage())) {
+                    throw new AssertionError(door + ": wrong message: " + e.getMessage(), e);
+                }
+                return;
+            }
+            throw new AssertionError(door + ": did not throw");
+        }
+
+        public static void main(String[] args) {
+            // 1. One single at M succeeds.
+            UuidGenerator.newV7(M);
+            // 2. Batches until the first error: the batch site (at most 1,025 of them).
+            boolean batchFailed = false;
+            for (int i = 0; i < 1_025 && !batchFailed; i++) {
+                try {
+                    UuidGenerator.newV7Batch(65_536, M);
+                } catch (IllegalStateException e) {
+                    if (!MESSAGE.equals(e.getMessage())) {
+                        throw new AssertionError("batch site: wrong message: " + e.getMessage(), e);
+                    }
+                    batchFailed = true;
+                }
+            }
+            if (!batchFailed) {
+                throw new AssertionError("1,025 batches never exhausted the stream");
+            }
+            // 3. Singles until the first error: the single site (a failed batch can leave up to
+            // 1,023 steps).
+            boolean singleFailed = false;
+            for (int i = 0; i < 1_024 && !singleFailed; i++) {
+                try {
+                    UuidGenerator.newV7(M);
+                } catch (IllegalStateException e) {
+                    if (!MESSAGE.equals(e.getMessage())) {
+                        throw new AssertionError("single site: wrong message: " + e.getMessage(), e);
+                    }
+                    singleFailed = true;
+                }
+            }
+            if (!singleFailed) {
+                throw new AssertionError("1,024 singles never exhausted the stream");
+            }
+            // 4. Every other v7 door fails at once.
+            expectExhausted("newV7(Instant)", () -> UuidGenerator.newV7(Instant.ofEpochMilli(M)));
+            expectExhausted("newV7Batch(1, ms)", () -> UuidGenerator.newV7Batch(1, M));
+            expectExhausted("fillV7(UUID[], ms)", () -> UuidGenerator.fillV7(new UUID[1], M));
+            expectExhausted("fillV7(byte[], ms)", () -> UuidGenerator.fillV7(new byte[16], M));
+            System.out.println("exhaustion script done");
+        }
     }
 
     /** The second JVM's program: the doors first, so the first one meets the initializer. */

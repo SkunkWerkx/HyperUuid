@@ -185,7 +185,8 @@ final class InspectionTest extends TestCase
     /**
      * Exactly the counter space: 1 GiB of bytes (2 GiB peak, the native buffer plus the PHP
      * string), in strictly increasing order end to end, and at most a millisecond past the
-     * supplied timestamp (the roll-forward over the wrap). Opt-in through
+     * supplied timestamp: a batch this size takes a whole millisecond's steps, so on a stream
+     * already at MS it splits, and its tail carries MS + 1. Opt-in through
      * HYPERUUID_HUGE_TESTS=1, run with `-d memory_limit=-1`.
      */
     public function testAV7BatchOfExactlyTheCounterSpaceIsStrictlyIncreasing(): void

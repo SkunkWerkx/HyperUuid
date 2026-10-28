@@ -10,8 +10,9 @@ An integer, \code{67108864L}.
 uuid_v7_max_batch
 }
 \description{
-A scalar \code{time} generates one batch that shares a 26-bit monotonic counter, so a call
-holds at most this many ids (2^26). Ask for more and \code{\link[=uuid_v7]{uuid_v7()}} errors; split the
+A scalar \code{time} generates one batch, a contiguous run of the process-wide v7 stream's
+steps at 64 ids to a step, so a call holds at most this many ids (2^26, every step one
+millisecond holds). Ask for more and \code{\link[=uuid_v7]{uuid_v7()}} errors; split the
 request, or pass a \code{time} of length \code{n}.
 }
 \examples{

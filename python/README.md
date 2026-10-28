@@ -48,7 +48,7 @@ On Alpine the musl wheel needs nothing beyond the base image — it carries its 
 
 **Free-threaded CPython runs it without the GIL.** The extension declares it needs no GIL, so a
 free-threaded interpreter keeps the GIL off after `import hyperuuid` (no `RuntimeWarning`), and
-every function is safe to call from any number of threads at once: the v7 counter is one atomic
+every function is safe to call from any number of threads at once: the v7 stream is one atomic
 the threads share, so IDs from different threads stay unique and each thread's stay in order.
 The bindings are written once, for free-threading; a GIL build runs the same code. `fill_v7`
 holds the `bytearray`'s own lock and a buffer export on it while it writes, so two threads
@@ -130,7 +130,9 @@ wrong type is a `TypeError`; a timestamp no field can hold (negative, or past v7
 bits), a batch `count` outside 0 to `MAX_V7_BATCH` and a
 `layout` that is not a `Layout` are a `ValueError`, as is a refused SQL Server order
 conversion (below); a batch too large to allocate is a
-`MemoryError`, never a batch of some other size.
+`MemoryError`, never a batch of some other size. The v7 stream running out
+(see [Version 7 batches](#version-7-batches)) is a `RuntimeError`, as is the random source
+failing: the state is at fault, not the arguments.
 
 ### SQL Server order
 
@@ -153,20 +155,36 @@ converted from one (an RFC-ordered value included).
 
 ### Version 7 batches
 
-A v7 batch (`new_v7_batch`, `fill_v7`) is always in strictly increasing order. The 26-bit
-counter that orders UUIDs within a millisecond is one process-wide sequence that wraps every
-2^26 values, so a batch can straddle the wrap; the UUIDs from the wrap on carry
-`unix_millis + 1` rather than sorting before the ones ahead of them, so an embedded
-timestamp can be one millisecond past the one supplied, never more. For the same reason one
-batch holds at most `hyperuuid.MAX_V7_BATCH` (67,108,864) UUIDs: a larger `count`, or a
-`fill_v7` buffer of more than that many, is a `ValueError` naming the limit, raised before
-anything is allocated or written.
+A v7 batch (`new_v7_batch`, `fill_v7`) is always in strictly increasing order, and every v7
+call, single or batch, reserves from one process-wide stream that is re-seeded at random
+whenever a timestamp moves it forward. A single call consumes one of a millisecond's 2^20
+steps and a batch of n consumes ⌈n/64⌉. For timestamps up to 2^44 − 2 (the year 2527):
 
-The roll-forward orders one batch, not the stream. The next batch or `new_v7` call in the
-same real millisecond starts its counter just past the wrap and carries the supplied
-timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond
-later; two single `new_v7` calls either side of the wrap in one millisecond sort in reverse
-the same way. It happens at most once per `MAX_V7_BATCH` UUIDs the process mints.
+- **Ordering.** A call whose timestamp is within 10 s of the newest stream timestamp either
+  raises `RuntimeError` (exhaustion, below) or reserves from the stream, and its UUIDs then
+  sort strictly after every UUID from a reservation that completed before it began, on any
+  thread. Overlapping reservations are ordered by reservation, which need not be completion
+  order.
+- **Embedded timestamp.** At most 11 s ahead of the one supplied: a timestamp up to 11 s
+  behind the stream is clamped onto the stream's millisecond, and a millisecond whose steps
+  run out splits into the next, so a split's tail carries the millisecond after it (at most
+  1000 ms ahead of the supplied timestamp). An out-of-stream call carries its own timestamp
+  exactly.
+- **Backfill and future-dated calls.** A timestamp more than 11 s behind the stream, or past
+  2^44 − 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone and
+  is ordered against nothing. One call far in the future therefore advances the stream, and
+  until the clock catches up, real-time calls are minted out of stream, unordered among
+  themselves.
+- **Exhaustion.** A split that would take the stream more than 1000 ms ahead of the supplied
+  timestamp, or past 2^44 − 2, raises `RuntimeError` with the message `version 7 counter
+  exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied
+  timestamp or past its last millisecond`, before anything is reserved. It is a state error,
+  not an argument error (the random source failing is a `RuntimeError` too), and a call whose
+  timestamp is past the stream's millisecond succeeds. After a `RuntimeError` from `fill_v7`,
+  treat the buffer as clobbered.
+- **Batch size.** One batch holds at most `hyperuuid.MAX_V7_BATCH` (67,108,864) UUIDs: a
+  larger `count`, or a `fill_v7` buffer of more than that many, is a `ValueError` naming the
+  limit, raised before anything is allocated or written.
 
 ## Inspecting a UUID
 
@@ -276,15 +294,17 @@ hyperuuid.fill_v7(buf)  # 1000 v7 UUIDs, one timestamp capture
 first = bytes(buf[0:16])  # ready for a BYTEA / uniqueidentifier parameter
 ```
 
-**This is about 36x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all:
+**This is about 36x faster than `new_v7_batch`**, and the reason is worth understanding, because it decides whether you should use it at all: (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 | path | µs / 1000 UUIDs |
 | --- | ---: |
-| `new_v7_batch(1000)` → `list[UUID]` | 132 |
-| `fill_v7(bytearray)` | **3.7** |
-| `fill_v7`, then build `uuid.UUID` objects in Python | 888 |
+| `new_v7_batch(1000)` → `list[UUID]` † | 132 |
+| `fill_v7(bytearray)` † | **3.7** |
+| `fill_v7`, then build `uuid.UUID` objects in Python † | 888 |
 
-`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the Go (3.7 µs) and C# (3.8 µs) bindings hit for identical work.
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
+
+`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the Go (3.7 µs) and C# (3.8 µs) bindings hit for identical work. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is more than six times as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
 
@@ -310,7 +330,9 @@ Measured with [`pyperf`](https://github.com/psf/pyperf) (linux-x64 on an Intel C
 |---|---|---|
 | `hyperuuid.new_v4()` | 215 ns | `uuid.uuid4()`: 729 ns — **3.4x faster** |
 | `hyperuuid.new_v5(...)` | 372 ns | `uuid.uuid5(...)`: 1.58 µs — **4.2x faster** |
-| `hyperuuid.new_v7(...)` | 342 ns | `uuid.uuid7()` (3.14+): 1.29 µs — **3.8x faster** |
+| `hyperuuid.new_v7(...)` † | 342 ns | `uuid.uuid7()` (3.14+): 1.29 µs — **3.8x faster** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 Most of what a call costs is the `uuid.UUID` it hands back, so the extension builds that through the C API's own entry points — an instance allocated and its two slots set, no Python-level call — all of it inside the stable ABI, so one wheel still covers every CPython from 3.11.
 
@@ -318,7 +340,9 @@ Batch generation amortizes the rest of the per-call cost:
 
 | | Mean | vs. individual calls |
 |---|---|---|
-| `new_v7_batch(1000)` | 132 µs ± 3 µs | vs. 1000x `new_v7()`: 323 µs ± 9 µs — **2.4x** |
+| `new_v7_batch(1000)` † | 132 µs ± 3 µs | vs. 1000x `new_v7()`: 323 µs ± 9 µs — **2.4x** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 ### Timestamp extraction vs. stdlib's `.time` property
 

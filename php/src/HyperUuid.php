@@ -17,20 +17,12 @@ final class HyperUuid
 {
     /**
      * The most UUIDs one version 7 batch ({@see newV7Batch()}, {@see newV7BatchBytes()})
-     * mints: 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond.
+     * mints: 67,108,864, which is 2^20 steps' worth: a batch of n consumes ⌈n/64⌉ steps, so
+     * the largest batch takes exactly one millisecond of the stream.
      *
-     * Every batch up to this size is in strictly increasing order. The counter is one
-     * process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
-     * UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
-     * than sorting before the ones ahead of them. A larger batch would have to reuse counter
-     * values within one millisecond, so it is refused with an InvalidArgumentException before
-     * anything is allocated.
-     *
-     * The roll-forward orders one batch, not the stream. The next batch or {@see newV7()} call in
-     * the same real millisecond starts its counter just past the wrap and carries the supplied
-     * timestamp, so it sorts before the previous batch's tail, stamped a millisecond later; two
-     * single calls either side of the wrap in one millisecond sort in reverse the same way. It
-     * happens at most once per {@see MAX_V7_BATCH} UUIDs the process mints.
+     * Every batch up to this size is in strictly increasing order. A larger one is refused
+     * with an InvalidArgumentException before anything is allocated. The ordering contract,
+     * including what happens when the stream runs out, is on {@see newV7()}.
      */
     public const MAX_V7_BATCH = 1 << 26;
 
@@ -129,9 +121,32 @@ final class HyperUuid
      * pass an explicit DateTimeInterface or Unix-epoch millisecond timestamp (non-negative,
      * fitting in 48 bits) to embed a specific time instead.
      *
+     * Every v7 call, single or batch, reserves from one process-wide stream that is re-seeded
+     * at random whenever a timestamp moves it forward. A single call consumes one of a
+     * millisecond's 2^20 steps and a batch of n consumes ceil(n/64). For timestamps up to
+     * 2^44 - 2 (the year 2527):
+     *
+     * - Ordering: a call whose timestamp is within 10 s of the newest stream timestamp either
+     *   throws {@see CounterExhaustedException} or reserves from the stream, and its UUIDs
+     *   then sort strictly after every UUID from a reservation that completed before it began.
+     *   Overlapping reservations are ordered by reservation, which need not be completion order.
+     * - Embedded timestamp: at most 11 s ahead of the one supplied. A timestamp up to 11 s
+     *   behind the stream is clamped onto the stream's millisecond, and a millisecond whose
+     *   steps run out splits into the next (at most 1000 ms ahead of the supplied timestamp).
+     * - Backfill and future-dated calls: a timestamp more than 11 s behind the stream, or past
+     *   2^44 - 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone
+     *   and is ordered against nothing. One call far in the future advances the stream, and
+     *   until the clock catches up, real-time calls are minted out of stream, unordered among
+     *   themselves.
+     * - Exhaustion: a split that would take the stream more than 1000 ms ahead of the supplied
+     *   timestamp, or past 2^44 - 2, throws {@see CounterExhaustedException} before anything is
+     *   reserved.
+     *
      * @param \DateTimeInterface|int|null $unixMillis the timestamp to embed, or null for the
      *     current time
      * @return Uuid a new version 7 UUID
+     * @throws TimestampOutOfRangeException If the timestamp doesn't fit 48 bits.
+     * @throws CounterExhaustedException If the stream can't advance (see above).
      */
     public static function newV7(\DateTimeInterface|int|null $unixMillis = null): Uuid
     {
@@ -140,19 +155,19 @@ final class HyperUuid
 
     /**
      * Creates `count` time-sortable version 7 UUIDs sharing one timestamp capture and one
-     * contiguous block of the monotonic counter — one FFI call and one random-bytes fetch
+     * contiguous block of the v7 stream — one FFI call and one random-bytes fetch
      * instead of `count` of each. Defaults to the current time.
      *
-     * The batch is in strictly increasing order. If it crosses the point where the 26-bit
-     * counter wraps, the UUIDs from there on carry the supplied timestamp plus one millisecond
-     * (see {@see MAX_V7_BATCH}). That orders this batch, not the stream: the next batch or
-     * {@see newV7()} call in the same real millisecond sorts before its rolled-forward tail.
+     * The batch is in strictly increasing order, under the same stream contract as
+     * {@see newV7()}: a batch of n consumes ceil(n/64) of a millisecond's steps, and may
+     * carry timestamps up to 1000 ms past the one supplied.
      *
      * @param int $count how many UUIDs to create, 0 to {@see MAX_V7_BATCH}
      * @param \DateTimeInterface|int|null $unixMillis the shared timestamp to embed in each, or
      *     null for the current time
      * @return list<Uuid> `count` new version 7 UUIDs
      * @throws \InvalidArgumentException If `$count` is negative or above {@see MAX_V7_BATCH}.
+     * @throws CounterExhaustedException If the stream can't advance (see {@see newV7()}).
      */
     public static function newV7Batch(int $count, \DateTimeInterface|int|null $unixMillis = null): array
     {
@@ -185,6 +200,7 @@ final class HyperUuid
      *     null for the current time
      * @return string `$count * 16` bytes: `$count` version 7 UUIDs in RFC 9562 order
      * @throws \InvalidArgumentException If `$count` is negative or above {@see MAX_V7_BATCH}.
+     * @throws CounterExhaustedException If the stream can't advance (see {@see newV7()}).
      */
     public static function newV7BatchBytes(int $count, \DateTimeInterface|int|null $unixMillis = null): string
     {

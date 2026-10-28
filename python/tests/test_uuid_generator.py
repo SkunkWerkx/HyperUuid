@@ -109,8 +109,11 @@ def test_v7_overflow_timestamp_raises():
 
 
 def test_v7_same_millisecond_batch_is_monotonically_ordered():
-    """v7 UUIDs minted in one millisecond sort in minting order."""
-    ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS) for _ in range(100)]
+    """v7 UUIDs minted in one millisecond sort in minting order. The stream orders calls within
+    10 s of its newest timestamp, so the millisecond is the present one; an old one is minted
+    out of stream and ordered against nothing."""
+    ms = _now_ms()
+    ids = [hyperuuid.new_v7(ms) for _ in range(100)]
     assert ids == sorted(ids)
 
 
@@ -121,7 +124,8 @@ def test_v7_current_timestamp_is_embedded():
     after = _now_ms()
 
     embedded_ms = int.from_bytes(id_.bytes[0:6], "big")
-    assert before <= embedded_ms <= after
+    # The stream may stamp a later ms that an earlier test moved it to.
+    assert before <= embedded_ms <= after + 1_000
 
 
 def test_v7_timestamp_recovers_the_exact_millisecond():
@@ -221,9 +225,10 @@ def test_v7_batch_returns_count_uuids_sorted_and_sharing_the_timestamp():
 
 def test_v7_batch_continues_the_same_counter_sequence_as_individual_calls():
     """A v7 batch sorts between the single UUIDs minted before and after it."""
-    before = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
-    batch = hyperuuid.new_v7_batch(10, RFC_TEST_VECTOR_MS)
-    after = hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+    now = _now_ms()  # in stream: an old millisecond is minted out of stream, unordered
+    before = hyperuuid.new_v7(now)
+    batch = hyperuuid.new_v7_batch(10, now)
+    after = hyperuuid.new_v7(now)
 
     ids = [before, *batch, after]
     assert ids == sorted(ids)
@@ -273,9 +278,10 @@ def _sql_guid_key(uuid_value):
 
 def test_v7_to_sql_order_sorts_by_creation_order_under_sqlguid_comparison():
     """v7 UUIDs in SQL order sort by creation under SQL Server's uniqueidentifier order."""
-    ids = [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + i) for i in range(200)]
+    now = _now_ms()  # in stream: an old millisecond is minted out of stream, unordered
+    ids = [hyperuuid.new_v7(now + i) for i in range(200)]
     # Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
-    ids += [hyperuuid.new_v7(RFC_TEST_VECTOR_MS + 1_000_000) for _ in range(200)]
+    ids += [hyperuuid.new_v7(now + 200) for _ in range(200)]
 
     sql_ordered = [hyperuuid.v7_to_sql_order(id_) for id_ in ids]
     sorted_by_sqlguid = sorted(sql_ordered, key=_sql_guid_key)

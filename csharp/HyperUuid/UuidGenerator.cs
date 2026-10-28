@@ -203,7 +203,11 @@ public static partial class UuidGenerator
 				paramName);
 	}
 
-	static void ThrowOnBatchFailure(int rc, string entryPoint, string outOfRangeMessage, string countParamName)
+	// Return code 6 from either v7 entry point; the core's own words, shared with every binding.
+	internal const string CounterExhaustedMessage =
+		"version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond";
+
+	internal static void ThrowOnBatchFailure(int rc, string entryPoint, string outOfRangeMessage, string countParamName)
 	{
 		if (rc == 0)
 			return;
@@ -213,29 +217,34 @@ public static partial class UuidGenerator
 			3 => new ArgumentException("The batch is too large to address on this platform.", countParamName),
 			4 => new ArgumentOutOfRangeException(countParamName,
 				$"A single version 7 batch takes at most {MaxV7Batch} UUIDs (the 26-bit counter space)."),
+			6 => new InvalidOperationException(CounterExhaustedMessage),
 			_ => new InvalidOperationException($"{entryPoint} failed with code {rc} (random source failure)."),
 		};
 	}
 
 	/// <summary>
 	/// The most UUIDs one version 7 batch (<see cref="FillV7(Span{Guid}, long)"/>,
-	/// <see cref="NewV7Batch(int, long)"/> and their overloads) mints: 67,108,864, the size of
-	/// the 26-bit counter that orders UUIDs within a millisecond.
+	/// <see cref="NewV7Batch(int, long)"/> and their overloads) mints: 67,108,864, which is
+	/// 2^20 steps' worth: a batch of n consumes ⌈n/64⌉ steps, so the largest batch takes exactly
+	/// one millisecond of the stream.
 	/// </summary>
 	/// <remarks>
-	/// Every batch up to this size is in strictly increasing order. The counter is one
-	/// process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
-	/// UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
-	/// than sorting before the ones ahead of them. A larger batch would have to reuse counter
-	/// values within one millisecond, so it is refused: the throwing forms throw
-	/// <see cref="ArgumentOutOfRangeException"/> and the <c>Try</c> forms return
-	/// <see langword="false"/>.
+	/// Every batch up to this size is in strictly increasing order, even when it crosses a
+	/// millisecond whose steps run out: the UUIDs from there on carry the next millisecond. A
+	/// larger batch would have to reuse counter values within one millisecond, so it is
+	/// refused: the throwing forms throw <see cref="ArgumentOutOfRangeException"/> and the
+	/// <c>Try</c> forms return <see langword="false"/>.
 	/// <para>
-	/// The roll-forward orders one batch, not the stream. The next batch or <c>NewV7</c> call in
-	/// the same real millisecond starts its counter just past the wrap and carries the supplied
-	/// timestamp, so it sorts before the previous batch's tail, stamped a millisecond later; two
-	/// single calls either side of the wrap in one millisecond sort in reverse the same way.
-	/// It happens at most once per <see cref="MaxV7Batch"/> UUIDs the process mints.
+	/// Every v7 call reserves the next step of one process-wide stream, which is re-seeded at
+	/// random whenever a timestamp moves it forward. A call whose timestamp is within 10 s of
+	/// the newest the stream has reserved at sorts after every UUID from a call that completed
+	/// before it began, on any thread. A timestamp more than 11 s behind the stream, or past
+	/// 2^44 &#8722; 2, is minted at itself, outside the stream, and is ordered against nothing.
+	/// A split that would take the stream more than 1000 ms ahead of the supplied timestamp, or
+	/// past 2^44 &#8722; 2, fails with <see cref="InvalidOperationException"/> ("version 7
+	/// counter exhausted") and reserves nothing; the <c>Try</c> forms return
+	/// <see langword="false"/>. See
+	/// <see href="https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely">v7 ordering, precisely</see>.
 	/// </para>
 	/// </remarks>
 	public const int MaxV7Batch = 1 << 26;
@@ -414,26 +423,37 @@ public static partial class UuidGenerator
 	public static Guid NewV7(DateTimeOffset timestamp) => NewV7(timestamp.ToUnixTimeMilliseconds());
 
 	/// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond timestamp.</summary>
+	/// <exception cref="ArgumentOutOfRangeException">
+	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">
+	/// The random source failed, or the v7 stream is exhausted: it cannot advance without
+	/// running more than 1000 ms ahead of <paramref name="unixMilliseconds"/> or past its last
+	/// millisecond. Nothing is reserved, and a call whose timestamp is past the stream's
+	/// millisecond succeeds.
+	/// </exception>
 	public static Guid NewV7(long unixMilliseconds)
 	{
 		var rc = CoreNewV7(unixMilliseconds, out var result);
 		if (rc != 0)
-		{
-			throw rc switch
-			{
-				2 => new ArgumentOutOfRangeException(nameof(unixMilliseconds),
-					"Unix millisecond timestamp must be non-negative and fit within 48 bits."),
-				_ => new InvalidOperationException($"uuid_new_v7 failed with code {rc} (random source failure)."),
-			};
-		}
+			throw V7Failure(rc, "uuid_new_v7");
 		return result;
 	}
 
+	// The single-call mapping of a nonzero uuid_new_v7 return code to the exception it throws.
+	internal static Exception V7Failure(int rc, string entryPoint) => rc switch
+	{
+		2 => new ArgumentOutOfRangeException("unixMilliseconds",
+			"Unix millisecond timestamp must be non-negative and fit within 48 bits."),
+		6 => new InvalidOperationException(CounterExhaustedMessage),
+		_ => new InvalidOperationException($"{entryPoint} failed with code {rc} (random source failure)."),
+	};
+
 	/// <summary>
 	/// Non-throwing counterpart to <see cref="NewV7(long)"/> — returns <see langword="false"/> for
-	/// both failure modes the native layer reports (random-source failure, and a
-	/// <paramref name="unixMilliseconds"/> that is negative or doesn't fit 48 bits) rather than
-	/// throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
+	/// every failure mode the native layer reports (random-source failure, a
+	/// <paramref name="unixMilliseconds"/> that is negative or doesn't fit 48 bits, and an
+	/// exhausted v7 stream) rather than throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
 	/// <c>Result</c>-style call site.
 	/// </summary>
 	public static bool TryNewV7(long unixMilliseconds, out Guid result) =>
@@ -885,7 +905,7 @@ public static partial class UuidGenerator
 
 	/// <summary>
 	/// Fills <paramref name="destination"/> with time-sortable version 7 UUIDs sharing one
-	/// timestamp capture and one contiguous block of the monotonic counter — one native call
+	/// timestamp capture and one contiguous block of the v7 stream — one native call
 	/// and one random-bytes fetch instead of <paramref name="destination"/>'s length worth of
 	/// each. In strictly increasing order however it lands on the counter; see
 	/// <see cref="MaxV7Batch"/>.
@@ -893,6 +913,10 @@ public static partial class UuidGenerator
 	/// <exception cref="ArgumentOutOfRangeException">
 	/// <paramref name="destination"/> holds more than <see cref="MaxV7Batch"/> elements, or
 	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">
+	/// The random source failed, or the v7 stream is exhausted (see <see cref="MaxV7Batch"/>).
+	/// Nothing is reserved.
 	/// </exception>
 	public static void FillV7(Span<Guid> destination, long unixMilliseconds)
 	{
@@ -904,7 +928,7 @@ public static partial class UuidGenerator
 	/// <summary>
 	/// Non-throwing counterpart to <see cref="FillV7(Span{Guid}, long)"/> — returns
 	/// <see langword="false"/> instead of throwing when the native call reports a random-source
-	/// failure or an out-of-range <paramref name="unixMilliseconds"/>, and for a
+	/// failure, an exhausted v7 stream or an out-of-range <paramref name="unixMilliseconds"/>, and for a
 	/// <paramref name="destination"/> longer than <see cref="MaxV7Batch"/>. On failure
 	/// <paramref name="destination"/> is left untouched. See <see cref="TryNewV4"/> for why.
 	/// </summary>
@@ -936,6 +960,10 @@ public static partial class UuidGenerator
 	/// <exception cref="ArgumentOutOfRangeException">
 	/// <paramref name="destination"/> holds more than <see cref="MaxV7Batch"/> UUIDs, or
 	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">
+	/// The random source failed, or the v7 stream is exhausted (see <see cref="MaxV7Batch"/>).
+	/// Nothing is reserved.
 	/// </exception>
 	public static void FillV7(Span<byte> destination, long unixMilliseconds)
 	{
@@ -1016,6 +1044,9 @@ public static partial class UuidGenerator
 	/// <exception cref="ArgumentOutOfRangeException">
 	/// <paramref name="count"/> is negative or greater than <see cref="MaxV7Batch"/>, or
 	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// </exception>
+	/// <exception cref="InvalidOperationException">
+	/// The random source failed, or the v7 stream is exhausted (see <see cref="MaxV7Batch"/>).
 	/// </exception>
 	public static Guid[] NewV7Batch(int count, long unixMilliseconds)
 	{

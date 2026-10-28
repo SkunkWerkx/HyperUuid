@@ -9,6 +9,7 @@ export type HyperUuidErrorCode =
   | 'ERR_HYPERUUID_INVALID_ID'
   | 'ERR_HYPERUUID_INVALID_BUFFER'
   | 'ERR_HYPERUUID_INVALID_COUNT'
+  | 'ERR_HYPERUUID_COUNTER_EXHAUSTED'
   | 'ERR_HYPERUUID_UNAVAILABLE'
 export interface HyperUuidError extends Error {
   code: HyperUuidErrorCode

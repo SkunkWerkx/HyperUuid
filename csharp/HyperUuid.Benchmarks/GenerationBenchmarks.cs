@@ -12,8 +12,6 @@ namespace HyperUuid.Benchmarks;
 [MemoryDiagnoser]
 public class GenerationBenchmarks
 {
-	const long RfcTestVectorMs = 1_645_557_742_000;
-
 	[Benchmark(Baseline = true, Description = "Guid.NewGuid")]
 	public Guid SystemGuidNewGuid() => Guid.NewGuid();
 
@@ -24,5 +22,5 @@ public class GenerationBenchmarks
 	public Guid NewV5() => UuidGenerator.NewV5(UuidGenerator.Namespaces.Dns, "www.example.com");
 
 	[Benchmark(Description = "UuidGenerator.NewV7")]
-	public Guid NewV7() => UuidGenerator.NewV7(RfcTestVectorMs);
+	public Guid NewV7() => UuidGenerator.NewV7(BenchClock.Ms);
 }

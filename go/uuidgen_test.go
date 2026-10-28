@@ -262,9 +262,11 @@ func TestV7OverflowTimestampErrors(t *testing.T) {
 }
 
 func TestV7SameMillisecondBatchIsMonotonicallyOrdered(t *testing.T) {
+	// Ordering is the stream's, so mint at the present; the 2022 vector is out of stream.
+	now := uint64(time.Now().UnixMilli())
 	ids := make([]uuid.UUID, 100)
 	for i := range ids {
-		id, err := NewV7At(rfcTestVectorMs)
+		id, err := NewV7At(now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -396,15 +398,18 @@ func TestV7BatchReturnsCountUuidsSortedAndSharingTheTimestamp(t *testing.T) {
 }
 
 func TestV7BatchContinuesTheSameCounterSequenceAsIndividualCalls(t *testing.T) {
-	before, err := NewV7At(rfcTestVectorMs)
+	// Ordering is a stream property, so mint at the present: the 2022 vector is more than 11 s
+	// behind the stream and would be minted out of stream, unordered.
+	now := uint64(time.Now().UnixMilli())
+	before, err := NewV7At(now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := NewV7BatchAt(10, rfcTestVectorMs)
+	batch, err := NewV7BatchAt(10, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := NewV7At(rfcTestVectorMs)
+	after, err := NewV7At(now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,9 +553,12 @@ func sqlGuidCompare(a, b [16]byte) int {
 }
 
 func TestV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
+	// Current-time timestamps, within 500 ms of now so the stream is not dragged ahead: the
+	// ordering this checks is the stream's, and an old vector would be minted out of stream.
+	now := uint64(time.Now().UnixMilli())
 	var ids []uuid.UUID
 	for i := uint64(0); i < 200; i++ {
-		id, err := NewV7At(rfcTestVectorMs + i)
+		id, err := NewV7At(now + i)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -558,7 +566,7 @@ func TestV7ToSqlOrderSortsByCreationOrderUnderSqlGuidComparison(t *testing.T) {
 	}
 	// Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
 	for i := 0; i < 200; i++ {
-		id, err := NewV7At(rfcTestVectorMs + 1_000_000)
+		id, err := NewV7At(now + 200)
 		if err != nil {
 			t.Fatal(err)
 		}

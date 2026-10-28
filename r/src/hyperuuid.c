@@ -160,6 +160,9 @@ SEXP C_new_v7(SEXP millis, SEXP n, SEXP as_raw) {
         Rf_error("unix_millis must be non-negative and fit within 48 bits");
       if (rc == 4)
         Rf_error("batch count exceeds the 26-bit counter space (67108864 per call)");
+      if (rc == 6)
+        Rf_error("version 7 counter exhausted: the stream cannot advance without running more than "
+                 "1000 ms ahead of the supplied timestamp or past its last millisecond");
       if (rc != 0)
         Rf_error("uuid_new_v7_batch: unexpected status %d", (int)rc);
     } else {
@@ -170,6 +173,9 @@ SEXP C_new_v7(SEXP millis, SEXP n, SEXP as_raw) {
           Rf_error("uuid_new_v7: random source failure");
         if (rc == 2)
           Rf_error("unix_millis must be non-negative and fit within 48 bits");
+        if (rc == 6)
+          Rf_error("version 7 counter exhausted: the stream cannot advance without running more "
+                   "than 1000 ms ahead of the supplied timestamp or past its last millisecond");
         if (rc != 0)
           Rf_error("uuid_new_v7: unexpected status %d", (int)rc);
       }

@@ -267,6 +267,7 @@ sentinels, all matched with `errors.Is`:
 | Error | Returned when |
 | --- | --- |
 | `ErrRandomSource` | the core's random source failed — `NewV4`, the v7 generators, and their batch and Fill forms. `NewV5` draws no entropy and never returns it |
+| `ErrCounterExhausted` | the v7 stream can't advance without running more than 1000 ms ahead of the supplied timestamp or past 2^44 − 2 — every v7 generator, batch and Fill forms included. Nothing is reserved; a call whose timestamp is past the stream's millisecond succeeds |
 | `ErrTimestampOutOfRange` | `unixMillis` doesn't fit version 7's 48 bits of Unix milliseconds — every v7 generator |
 | `ErrWrongVersion` | a SQL-order conversion was given a value it doesn't take: to SQL order, anything but an RFC 9562 version 7; from SQL order, anything not converted from one |
 | `ErrNotTimeBased` | `GetTimestamp`/`GetTimestampIn` was given a UUID that isn't an RFC 9562 version 7 (in that layout): another version, version 6 included, or another variant |
@@ -299,10 +300,12 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 
 | method | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
-| `NewV7At` x1000 individually | 69,832 | 0 | 0 |
-| `NewV7BatchAt(1000)` | 6,965 | 16,384 | 1 |
-| `FillV7At` into an existing slice | 3,763 | **0** | **0** |
-| `FillV7BytesAt` into an existing buffer | 3,661 | **0** | **0** |
+| `NewV7At` x1000 individually † | 69,832 | 0 | 0 |
+| `NewV7BatchAt(1000)` † | 6,965 | 16,384 | 1 |
+| `FillV7At` into an existing slice † | 3,763 | **0** | **0** |
+| `FillV7BytesAt` into an existing buffer † | 3,661 | **0** | **0** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 `FillV7Bytes`/`FillV7BytesAt` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms are within 3% of each other, since neither converts; the byte form exists for convenience, not speed.
 
@@ -310,9 +313,15 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 
 ### Batch size and order
 
-One v7 batch or fill takes at most `MaxV7Batch` UUIDs — 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond — and every batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0; the UUIDs from there on carry a timestamp one millisecond later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it returns `ErrBatchTooLarge` before anything is allocated or written.
+One v7 batch or fill takes at most `MaxV7Batch` UUIDs — 67,108,864, every one of the 2^20 steps a millisecond holds at 64 UUIDs to a step — and every batch up to that size is in strictly increasing order. A batch of n consumes ⌈n/64⌉ steps of one process-wide stream, and one that crosses a millisecond's last step splits into the next, so its tail carries a later timestamp (at most 1000 ms past the one supplied) and still sorts after its head. A larger batch would have to reuse counter values within one millisecond, so it returns `ErrBatchTooLarge` before anything is allocated or written.
 
-The roll-forward orders one batch, not the stream. The next batch or `NewV7At` call in the same real millisecond starts its counter just past the wrap and carries the supplied timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond later; two single calls either side of the wrap in one millisecond sort in reverse the same way. It happens at most once per `MaxV7Batch` UUIDs the process mints.
+Every v7 call reserves the next step of that stream, which is re-seeded at random whenever a timestamp moves it forward. For timestamps up to 2^44 − 2 (the year 2527):
+
+- A `unixMillis` within 10 s of the newest timestamp the stream has reserved at either fails with `ErrCounterExhausted` or sorts strictly after every stream UUID whose call completed before it began, on any goroutine. Overlapping calls are ordered by reservation, which need not be completion order. A timestamp up to 11 s behind the stream is clamped onto its millisecond, so the embedded timestamp can run up to 11 s ahead of the supplied one.
+- A `unixMillis` more than 11 s behind the stream, or past 2^44 − 2, is minted at itself, outside the stream: it succeeds, embeds its timestamp exactly and is ordered against nothing. One call far in the future therefore advances the stream, and until the clock catches up, real-time calls are minted out of stream and unordered among themselves. A clock that steps back by more than 11 s does the same.
+- A call that would take the stream more than 1000 ms ahead of the supplied timestamp, or past 2^44 − 2, returns `ErrCounterExhausted` and reserves nothing. It is a state error, not an argument error: a call whose timestamp is past the stream's millisecond succeeds. A failed `FillV7`/`FillV7Bytes` may have written entropy into the front of its destination, so treat it as clobbered.
+
+On a target without 64-bit atomics none of this applies: the core keeps one never-reset 26-bit counter that wraps every 67,108,864 UUIDs. [v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely) has the full contract.
 
 ### Raw-byte SQL-order transforms
 
@@ -484,7 +493,9 @@ session, median of three runs:
 | --- | ---: |
 | `NewV4` | 64 ns, 0 allocs |
 | `NewV5String` | 98 ns, 1 alloc |
-| `NewV7At` | 69 ns, 0 allocs |
+| `NewV7At` † | 69 ns, 0 allocs |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 No call allocates but `NewV5String`, whose one allocation is Go's own `[]byte(name)` conversion.
 `go build -gcflags=-m` is right that any Go pointer handed to a cgo call is conservatively
@@ -500,9 +511,11 @@ crossings is the whole win:
 
 | Call | Time, allocations |
 | --- | ---: |
-| `NewV7BatchAt(1000, ...)` | 7.0 µs, 1 alloc |
+| `NewV7BatchAt(1000, ...)` † | 7.0 µs, 1 alloc |
 
-against 69.8 µs for 1000 individual `NewV7At` calls (see
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
+
+against 69.8 µs † for 1000 individual `NewV7At` calls (see
 [Destination-buffer fills](#destination-buffer-fills), where `FillV7At` drops the one
 allocation too). If your workload can batch, batch.
 

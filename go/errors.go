@@ -11,6 +11,15 @@ var ErrRandomSource = errors.New("hyperuuid: random source failure")
 // Fill forms — when unixMillis doesn't fit the 48-bit unix_ts_ms field (return code 2).
 var ErrTimestampOutOfRange = errors.New("hyperuuid: unix millisecond timestamp out of range for this UUID version")
 
+// ErrCounterExhausted is returned by every version 7 generator — NewV7, NewV7At, NewV7AtTime,
+// their batch and Fill forms — when the process-wide stream cannot advance without running
+// more than 1000 ms ahead of the supplied timestamp, or past the last millisecond the stream
+// holds (2^44 − 2), and the call is not out of stream (return code 6). It is a state error,
+// not an argument error: the failed call reserved nothing and a call whose timestamp is past
+// the stream's millisecond succeeds. A failed batch or fill may have written entropy into the
+// front of dst, so treat dst as clobbered, not untouched.
+var ErrCounterExhausted = errors.New("hyperuuid: version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond")
+
 // ErrNotTimeBased is returned by GetTimestamp and GetTimestampIn when the given UUID isn't an
 // RFC 9562 version 7 UUID (in that layout): another version, version 6 and version 1
 // included, or another variant.

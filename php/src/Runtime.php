@@ -30,6 +30,10 @@ final class Runtime
     /** The widest count or length the C ABI's `uint32_t` parameters can carry. */
     private const UINT32_MAX = 0xFFFFFFFF;
 
+    /** V7 return code 6's meaning (single and batch): the stream can't advance. */
+    private const COUNTER_EXHAUSTED = 'version 7 counter exhausted: the stream cannot advance without running more '
+        . 'than 1000 ms ahead of the supplied timestamp or past its last millisecond';
+
     /** Batch return code 3's meaning: `count * 16` overflows the platform's address space. */
     private const UNADDRESSABLE_BATCH = 'the batch is too large to address on this platform';
 
@@ -93,6 +97,9 @@ final class Runtime
             throw new TimestampOutOfRangeException(
                 'unix_millis must fit within the RFC 9562 48-bit field'
             );
+        }
+        if ($rc === 6) {
+            throw new CounterExhaustedException(self::COUNTER_EXHAUSTED);
         }
         if ($rc !== 0) {
             throw new RandomSourceException("uuid_new_v7 failed with code {$rc}");
@@ -166,6 +173,9 @@ final class Runtime
         }
         if ($rc === 4) {
             throw new \InvalidArgumentException(self::v7BatchLimitMessage($count));
+        }
+        if ($rc === 6) {
+            throw new CounterExhaustedException(self::COUNTER_EXHAUSTED);
         }
         if ($rc !== 0) {
             throw new RandomSourceException("uuid_new_v7_batch failed with code {$rc}");

@@ -98,11 +98,11 @@ time v7's 48-bit field cannot hold (negative, past 2^48 - 1, `NaN`, an infinity,
 | --- | --- | --- |
 | `newV4` | `(): string` | `RANDOM_SOURCE` |
 | `newV4Bytes` | `(): Uint8Array` | `RANDOM_SOURCE` |
-| `newV7` | `(time?: number \| Date): string` | `TIMESTAMP_RANGE`, `RANDOM_SOURCE` |
-| `newV7Bytes` | `(time?: number \| Date): Uint8Array` | `TIMESTAMP_RANGE`, `RANDOM_SOURCE` |
-| `newV7Batch` | `(count: number, time?: number \| Date): string[]` | `INVALID_COUNT`, `BATCH_TOO_LARGE`, `TIMESTAMP_RANGE`, `RANDOM_SOURCE` |
-| `newV7BatchBytes` | `(count: number, time?: number \| Date): Uint8Array` | `INVALID_COUNT`, `BATCH_TOO_LARGE`, `TIMESTAMP_RANGE`, `RANDOM_SOURCE` |
-| `fillV7` | `(buffer: Uint8Array, time?: number \| Date): void` | `INVALID_BUFFER`, `BATCH_TOO_LARGE`, `TIMESTAMP_RANGE`, `RANDOM_SOURCE` |
+| `newV7` | `(time?: number \| Date): string` | `TIMESTAMP_RANGE`, `COUNTER_EXHAUSTED`, `RANDOM_SOURCE` |
+| `newV7Bytes` | `(time?: number \| Date): Uint8Array` | `TIMESTAMP_RANGE`, `COUNTER_EXHAUSTED`, `RANDOM_SOURCE` |
+| `newV7Batch` | `(count: number, time?: number \| Date): string[]` | `INVALID_COUNT`, `BATCH_TOO_LARGE`, `TIMESTAMP_RANGE`, `COUNTER_EXHAUSTED`, `RANDOM_SOURCE` |
+| `newV7BatchBytes` | `(count: number, time?: number \| Date): Uint8Array` | `INVALID_COUNT`, `BATCH_TOO_LARGE`, `TIMESTAMP_RANGE`, `COUNTER_EXHAUSTED`, `RANDOM_SOURCE` |
+| `fillV7` | `(buffer: Uint8Array, time?: number \| Date): void` | `INVALID_BUFFER`, `BATCH_TOO_LARGE`, `TIMESTAMP_RANGE`, `COUNTER_EXHAUSTED`, `RANDOM_SOURCE` |
 | `newV5` | `(namespace: string \| Uint8Array, name: string \| Uint8Array): string` | `INVALID_ID` |
 | `version` | `(id: string \| Uint8Array, layout?: Layout): number` | `INVALID_ID` |
 | `variant` | `(id: string \| Uint8Array): Variant` | `INVALID_ID` |
@@ -213,11 +213,14 @@ layout and why drivers need the bytes rather than the text form.
 ### Version 7 batches and buffers
 
 A v7 batch (`newV7Batch`, `newV7BatchBytes`, `fillV7`) is always in strictly increasing
-order. The 26-bit counter that orders ids within a millisecond is one process-wide sequence
-that wraps every 2^26 values, so a batch can straddle the wrap; the ids from the wrap on
-carry the supplied millisecond plus one rather than sorting before the ones ahead of them.
-For the same reason one batch holds at most `MAX_V7_BATCH` (67,108,864) ids. The roll-forward
-orders one batch, not the stream: the root README's
+order, including across a millisecond whose steps run out: the ids from the split on carry the
+next millisecond. One batch holds at most `MAX_V7_BATCH` (67,108,864) ids. Every v7 door shares
+one process-wide stream that may run up to 1000 ms ahead of the timestamp you supply; a call
+that would take it further, or past its last millisecond (2^44 - 2), throws
+`ERR_HYPERUUID_COUNTER_EXHAUSTED` and reserves nothing. It is a state error, not an argument
+error, and a call whose timestamp is past the stream's millisecond succeeds. A timestamp more
+than 11 s behind the stream is minted at itself, outside it, and is ordered against nothing.
+The root README's
 [v7 ordering, precisely](https://github.com/SkunkWerkx/HyperUuid#v7-ordering-precisely) has
 the whole contract.
 
@@ -284,29 +287,32 @@ the version. `v7UnixMillis` is the cheaper one, with no `Date` built.
 ## Bun
 
 The same package runs under Bun: `bun test tests/` runs this package's whole suite (the same
-56 tests `node --test` runs), and the [Benchmarks](#benchmarks) below were taken on both.
+57 tests `node --test` runs), and the [Benchmarks](#benchmarks) below were taken on both.
 
 ## Benchmarks
 
-Apple M6 (Mac18,5), macOS, Node 26.12.1 / Bun 1.4.4, measured 2026-10-26, with
+Apple M6 (Mac18,5), macOS, Node 26.12.1 / Bun 1.4.4, measured 2026-10-27, with
 [mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`; see
 `bench/bench.ts`). These numbers are not comparable to the root README's tables, which were
-measured on linux-x64 on an Intel Core i9-11900H. Averages per call:
+measured on linux-x64 on an Intel Core i9-11900H. The three v7 generation rows are from a
+later run the same day, after the last core change. Bun's `uuid` `v7()` is the noisiest
+baseline here: 99.0 ns in that run and 132 ns in the first, so read its ratio with that
+spread. Averages per call:
 
 | Call | Node 26 | Bun 1.4 | vs. |
 | --- | ---: | ---: | --- |
-| `newV4()` | 781 ns | 800 ns | `crypto.randomUUID()`: 65.6 ns / 40.0 ns: **11.9x / 20x slower** |
-| `newV7()` | 685 ns | 699 ns | `uuid`'s `v7()`: 347 ns / 142 ns: **2.0x / 4.9x slower** |
-| `newV7Batch(1000)` | 61.1 µs | 42.7 µs | 1000x `newV7()`: 676 µs / 697 µs: **11x / 16x faster** |
-| `newV7BatchBytes(1000)` | 20.8 µs | 19.3 µs | `newV7Batch(1000)`: **2.9x / 2.2x faster** |
-| `v7UnixMillis(id)` | 115 ns | 173 ns | |
+| `newV4()` | 780 ns | 800 ns | `crypto.randomUUID()`: 66.1 ns / 37.7 ns: **11.8x / 21x slower** |
+| `newV7()` | 677 ns | 697 ns | `uuid`'s `v7()`: 348 ns / 99.0 ns: **1.9x / 7.0x slower** |
+| `newV7Batch(1000)` | 60.1 µs | 42.5 µs | 1000x `newV7()`: 679 µs / 696 µs: **11x / 16x faster** |
+| `newV7BatchBytes(1000)` | 19.7 µs | 19.3 µs | `newV7Batch(1000)`: **3.1x / 2.2x faster** |
+| `v7UnixMillis(id)` | 112 ns | 107 ns | |
 
 The single-id losses are real, and most of each is one system call. On macOS the core
 fetches its randomness from the operating system on every call (`getentropy`; the user-space
 ChaCha20 path in `rust/src/entropy.rs` is Linux and Android only), where a round trip into
-the addon that touches no randomness (`v7UnixMillis`) is 115 ns. `crypto.randomUUID()` and `uuid` draw from
+the addon that touches no randomness (`v7UnixMillis`) is 112 ns. `crypto.randomUUID()` and `uuid` draw from
 a buffer of random bytes they refill in bulk, so they pay that cost once per many ids. A batch
-does the same: one fetch for the whole batch, about 61 ns an id as strings and 21 ns as bytes
+does the same: one fetch for the whole batch, about 60 ns an id as strings and 20 ns as bytes
 in the table above. If you mint ids one at a time and only need v4, `crypto.randomUUID()` is
 the faster call.
 

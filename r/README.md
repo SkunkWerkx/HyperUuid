@@ -65,7 +65,7 @@ doors are strict everywhere.
 | --- | --- | --- | --- |
 | `uuid_v4(n = 1)` | character, `n` ids | (no data input) | `n` not one non-negative whole number |
 | `uuid_v4_raw(n = 1)` | raw matrix, 16 x `n` | (no data input) | as `uuid_v4()` |
-| `uuid_v7(n = 1, time = Sys.time())` | character, `n` ids | (no data input) | `n` as `uuid_v4()`; `time` per [the time rule](#the-time-rule); `n` over `uuid_v7_max_batch` with a scalar `time` |
+| `uuid_v7(n = 1, time = Sys.time())` | character, `n` ids | (no data input) | `n` as `uuid_v4()`; `time` per [the time rule](#the-time-rule); `n` over `uuid_v7_max_batch` with a scalar `time`; counter exhaustion |
 | `uuid_v7_raw(n = 1, time = Sys.time())` | raw matrix, 16 x `n` | (no data input) | as `uuid_v7()` |
 | `uuid_v5(namespace, name)` | character, one id per name | `NA` name gives `NA` | `namespace` not one valid UUID (an `NA` namespace included); `name` not a character vector or a list of raw vectors |
 | `uuid_to_raw(x)` | raw matrix, 16 x `length(x)` | error, naming the first bad element | `x` not character; any `NA` or malformed element |
@@ -98,9 +98,23 @@ bytes in place. The layout is the caller's to know, not something a value reveal
 becomes whole Unix milliseconds as `floor(seconds * 1000)`; a `Date` is midnight UTC, not
 local midnight. It has length 1 or `n`:
 
-- Length 1 generates the whole request as one batch sharing the 26-bit monotonic counter, so
-  the ids are strictly increasing; at most `uuid_v7_max_batch` per call.
+- Length 1 generates the whole request as one batch from the process-wide stream, so the
+  ids are strictly increasing; at most `uuid_v7_max_batch` per call.
 - Length `n` generates one id per element, each from its own time.
+
+The stream orders a call whose `time` is within 10 s of the newest `time` it has reserved at:
+its ids sort after every id from a stream reservation that completed before the call began,
+across calls and threads. The ids may carry a timestamp up to 11 s ahead of `time`: a `time`
+up to 11 s behind the stream is clamped onto the stream's millisecond, and a millisecond
+whose steps run out splits into the next.
+
+A call that would run the stream more than 1000 ms ahead of `time`, or past its last
+millisecond (2^44 − 2), errors with `version 7 counter exhausted: the stream cannot
+advance without running more than 1000 ms ahead of the supplied timestamp or past its last
+millisecond`. It reserves nothing, and a call whose `time` is past the stream's millisecond
+succeeds. A `time` more than 11 s behind the stream, or past 2^44 − 2, is minted at itself,
+outside the stream, and is ordered against nothing. See the root README's
+[v7 ordering, precisely](../README.md#v7-ordering-precisely).
 
 Any other length errors with both lengths named. A missing or non-finite element errors
 before the core is called, and a time before 1970 or past the 48-bit field errors too.
@@ -120,38 +134,39 @@ uuid_to_raw(ids[uuid_is_rfc(ids, 1) %in% TRUE])
 
 ## Benchmarks
 
-Apple M6 (Mac18,5), macOS, R 4.6.1 (Homebrew build), measured 2026-10-26, against the
+Apple M6 (Mac18,5), macOS, R 4.6.1 (Homebrew build), measured 2026-10-27, against the
 [uuid](https://cran.r-project.org/package=uuid) package 1.2.2 with bench 1.1.4
 (`R_LIBS=<lib> Rscript bench/bench.R` against an installed copy). These were measured on a
 different machine and OS from the root README's linux-x64 tables and are not comparable to
-them.
+them. The four time-based lines are from a later run the same day, after the last core change.
 
 ```text
-2026-10-26, R version 4.6.1 (2026-06-24), Apple M6 (Mac18,5)
+2026-10-27, R version 4.6.1 (2026-06-24), Apple M6 (Mac18,5)
 hyperuuid 1.0.0, uuid 1.2.2, bench 1.1.4
 
  expression                                    median   itr/sec mem_alloc
- hyperuuid::uuid_v4()                            1.31µs 734965  12.92KB  
- uuid::UUIDgenerate()                            9.31µs 106573  33.89KB  
- hyperuuid::uuid_v7()                            2.91µs 338648  26.09KB  
- uuid::UUIDgenerate(use.time = TRUE)             1.8µs  553148   0B      
- hyperuuid::uuid_v4(1000)                      791.1µs    1224  23.53KB  
- uuid::UUIDgenerate(n = 1000)                    6.98ms    143   7.86KB  
- hyperuuid::uuid_v7(1000)                      158.75µs   5834  23.53KB  
- uuid::UUIDgenerate(use.time = TRUE, n = 1000) 100.86µs   8059   7.86KB  
+ hyperuuid::uuid_v4()                            1.31µs 731544  12.92KB  
+ uuid::UUIDgenerate()                            9.35µs 105955   7.34KB  
+ hyperuuid::uuid_v7()                            2.91µs 337185  27.2KB   
+ uuid::UUIDgenerate(use.time = TRUE)             1.8µs  548633   0B      
+ hyperuuid::uuid_v4(1000)                      781.4µs    1267  23.53KB  
+ uuid::UUIDgenerate(n = 1000)                    6.96ms    140   7.86KB  
+ hyperuuid::uuid_v7(1000)                      146.16µs   5901  23.53KB  
+ uuid::UUIDgenerate(use.time = TRUE, n = 1000) 100.86µs   7858   7.86KB  
 ```
 
 | Comparison (median) | hyperuuid | uuid | Result |
 | --- | --- | --- | --- |
-| v4, one id | 1.31 µs | 9.31 µs | hyperuuid 7.1x faster |
-| v4, 1000 ids | 791.1 µs | 6.98 ms | hyperuuid 8.8x faster |
+| v4, one id | 1.31 µs | 9.35 µs | hyperuuid 7.1x faster |
+| v4, 1000 ids | 781.4 µs | 6.96 ms | hyperuuid 8.9x faster |
 | time-based, one id | 2.91 µs | 1.8 µs | **hyperuuid 1.6x slower** |
-| time-based, 1000 ids | 158.75 µs | 100.86 µs | **hyperuuid 1.6x slower** |
+| time-based, 1000 ids | 146.16 µs | 100.86 µs | **hyperuuid 1.4x slower** |
 
 The time-based rows compare different work: `UUIDgenerate(use.time = TRUE)` makes version 1
 ids (a clock sequence and a fixed node, no random bits), while `uuid_v7()` makes RFC 9562
-version 7 ids with a monotonic counter and fresh random bits. uuid has no version 7. It is
-still the call an R user reaching for time-based ids has today, and it is faster.
+version 7 ids from a counter stream re-seeded every millisecond, with fresh random bits. uuid
+has no version 7. It is still the call an R user reaching for time-based ids has today, and it
+is faster.
 `uuid_v4(1000)` costs more than `uuid_v7(1000)` because each v4 is one random-source call,
 while a v7 batch fetches its random bits once.
 
