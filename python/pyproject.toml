@@ -45,8 +45,8 @@ Issues = "https://github.com/SkunkWerkx/HyperUuid/issues"
 
 [project.optional-dependencies]
 # mypy is what tests/test_typing.py checks a consumer with; that one test skips without it.
-test = ["pytest>=8.0", "mypy>=1.11"]
-bench = ["pyperf>=2.6"]
+test = ["pytest>=9.1.1", "mypy>=2.4.0"]
+bench = ["pyperf>=2.10.0"]
 
 [tool.maturin]
 manifest-path = "../rust/Cargo.toml"
