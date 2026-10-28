@@ -10,7 +10,7 @@ RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation,
 version 8 SQL Server order for v7, calling
 directly into the native `libhyperuuid` shared library via PHP's built-in
 [`FFI`](https://www.php.net/manual/en/book.ffi.php) extension — dlopen/dlsym plus a raw C-ABI
-call, no runtime bridge, no Composer dependency beyond `ext-ffi` itself. PHP 8.2 is the
+call, no runtime bridge, no Composer dependency beyond `ext-ffi` itself. PHP 8.3 is the
 floor. Bundles a native build for every supported platform (see
 [Requirements](#requirements)) and picks the right one at runtime — Composer has no
 per-platform native selection, so the package carries them all and resolves at load.
@@ -150,7 +150,7 @@ with those groups reversed, while a plain `fetch()` of the `binary(16)` hands ba
 
 ## Requirements
 
-- **PHP 8.2 or later**, 64-bit.
+- **PHP 8.3 or later**, 64-bit.
 - **`ext-ffi`**, loaded and permitted for your SAPI — see [Enabling FFI](#enabling-ffi)
   below. No other extension and no Composer dependency.
 - **A supported platform.** The package bundles one native library per platform and picks

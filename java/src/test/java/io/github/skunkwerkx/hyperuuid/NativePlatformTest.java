@@ -46,6 +46,32 @@ class NativePlatformTest {
     }
 
     @Test
+    void theJniLibraryIsNamedBesideTheCore() {
+        assertEquals(
+                "hyperuuid_jni.dll",
+                NativePlatform.resolve("Windows 11", "amd64", false).jniLibraryFileName());
+        assertEquals(
+                "libhyperuuid_jni.dylib",
+                NativePlatform.resolve("Mac OS X", "aarch64", false).jniLibraryFileName());
+        assertEquals(
+                "libhyperuuid_jni.so",
+                NativePlatform.resolve("Linux", "amd64", false).jniLibraryFileName());
+        assertEquals(
+                "/native/linux-musl-arm64/libhyperuuid_jni.so",
+                NativePlatform.resolve("Linux", "aarch64", true).jniResourcePath());
+    }
+
+    @Test
+    void aMissingLibraryIsExplainedByWhatIsMissing() {
+        assertTrue(NativePlatform.nativeMissing(null, null).contains("carries no native library for os.name="));
+        var target = NativePlatform.resolve("Linux", "amd64", false);
+        assertEquals(
+                "/native/linux-x64/libhyperuuid_jni.so classpath resource not found (this jar was built "
+                        + "without a native library for this platform)",
+                NativePlatform.nativeMissing(target, target.jniResourcePath()));
+    }
+
+    @Test
     void muslOnlyMattersOnLinux() {
         assertEquals("osx-arm64", rid("Mac OS X", "aarch64", true));
         assertEquals("win-x64", rid("Windows 11", "amd64", true));

@@ -1,0 +1,7 @@
+# musl (Alpine): a *-linux-musl target defaults to a static C runtime, under which rustc
+# cannot produce a cdylib. Same sections as rust/.cargo/config.toml.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]

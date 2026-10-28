@@ -8,11 +8,11 @@ HyperUuid now ships nine bindings over one Rust core, with TypeScript and R land
 
 | Binding | Mechanism | Distribution | Floor | Single-call result |
 | --- | --- | --- | --- | --- |
-| C# | LibraryImport over the C ABI | NuGet | .NET 11 only | 7.5-7.9x faster than `Guid.NewGuid()` |
-| Java | FFM | Maven Central | JDK 25 | 2.8-5.1x faster than `UUID.randomUUID()` |
-| Python | PyO3 extension | PyPI, wheels only (no sdist) | 3.11 | 3.4-4.2x faster than stdlib |
+| C# | LibraryImport over the C ABI | NuGet | .NET 10 (desktop, server); .NET 11 (all platforms) | 7.5-7.9x faster than `Guid.NewGuid()` |
+| Java | JNI (21–24), FFM (25+) | Maven Central | JDK 21 | 2.8-5.1x faster than `UUID.randomUUID()` |
+| Python | PyO3 extension | PyPI, wheels and an sdist | 3.11 | 3.4-4.2x faster than stdlib |
 | Ruby | Magnus, Fiddle fallback | RubyGems | 3.3 (on Fiddle) | 2.1-5.5x faster than `SecureRandom.uuid` |
-| PHP | ext-ffi | Packagist, binaries in git | 8.2 | 1.2-1.4x faster than a naive inline v4 |
+| PHP | ext-ffi | Packagist, binaries in git | 8.3 | 1.2-1.4x faster than a naive inline v4 |
 | Swift | static library | git tag, binaries in git | 6.2 | 11-16x faster than `Foundation.UUID()` |
 | Go | cgo | git tag, binaries in git | 1.26 | slower than `google/uuid` (control group) |
 | TypeScript (new) | napi-rs addon | npm: root package + 8 platform packages | Node 22, Bun | 1.9-21x slower than `crypto.randomUUID()` / `uuid` `v7()` |
@@ -51,11 +51,11 @@ C# and Java are the floors that lock out the financial and insurance buyers; the
 
 | Binding | Change | Why |
 | --- | --- | --- |
-| C# | Target `net10.0` and `net11.0` | .NET 8 ends support Nov 10, 2026; 10 is the LTS conservative shops run |
-| Java | JNI path for JDK 21 in a multi-release JAR's base, FFM under `META-INF/versions/25`; floor 21, no JDK 17 | FFM is only a preview in 21 (final in 22), so 21 needs JNI |
+| [x] C# | Target `net10.0` and `net11.0` | .NET 8 ends support Nov 10, 2026; 10 is the LTS conservative shops run |
+| [x] Java | JNI path for JDK 21 in a multi-release JAR's base, FFM under `META-INF/versions/25`; floor 21, no JDK 17 | FFM is only a preview in 21 (final in 22), so 21 needs JNI. In the tree; ships in 1.1.0 |
 | Ruby | Add 3.3 to the Magnus fat-gem grid until its end of life | The supported floor currently lands on slow Fiddle |
-| Python | Publish an sdist via maturin | FreeBSD, ppc64le and s390x (Linux on IBM Z at banks) can build from source |
-| PHP | Floor moves to 8.3 | 8.2 reaches end of life Dec 31, 2026 |
+| [x] Python | Publish an sdist via maturin | FreeBSD, ppc64le and s390x (Linux on IBM Z at banks) can build from source |
+| [x] PHP | Floor moves to 8.3 | 8.2 reaches end of life Dec 31, 2026 |
 | [x] Rust | `uuid` crate `From`/`Into` behind a feature flag | Most Rust code already holds `uuid::Uuid` |
 
 ## Phase 2: Binaries out of git
@@ -80,7 +80,7 @@ C is next because it is nearly free and opens the core to every language that sp
 
 1. **C.** Ship a cbindgen header, pkg-config and CMake config files, and the prebuilt libraries already built. Formalise the C ABI as a versioned, stable contract, since nine bindings now depend on it.
 2. **TypeScript v1.2: wasm fallback.** A napi-rs WASI build that the root package falls back to automatically, so `--omit=optional` and unlisted platforms still work and browsers get a path. Before it ships, test Docker images that strip optional dependencies, lockfiles made on a Mac and installed on Linux, and serverless bundlers that miss `.node` files.
-3. **Entropy on macOS.** TypeScript's single-call loss is mostly one `getentropy` syscall per ID; the ChaCha20 pool runs on Linux only. Measure the pool on macOS before extending it there.
+3. [x] **Entropy on macOS.** Done another way: Apple targets call `CCRandomGenerateBytes` once per request instead of `getentropy` per id (a single v7 on the Apple M6 went from 594 to 60 ns, 2026-10-28). The ChaCha20 pool stays Linux and Android only. In the tree; ships in 1.1.0.
 4. **R: hold the API where it is.** CRAN is done; keep HyperUuid's R surface minimal and spend R effort on HyperCast and HyperTabular, the real targets for the actuary.
 5. **C++.** A thin header over the C header using `std::expected` (C++23). Add vcpkg and Conan ports when someone asks.
 

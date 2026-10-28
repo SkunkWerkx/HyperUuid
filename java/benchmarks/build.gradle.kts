@@ -14,14 +14,24 @@ dependencies {
     implementation(rootProject)
 }
 
+val jdkFloor: Int by rootProject.extra
+
 java {
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    sourceCompatibility = JavaVersion.toVersion(jdkFloor)
+    targetCompatibility = JavaVersion.toVersion(jdkFloor)
 }
 
 // The library's own floor, enforced the same way it is there.
 tasks.withType<JavaCompile>().configureEach {
-    options.release = 25
+    options.release = jdkFloor
+}
+
+// The jmh jar bundles the library's classes; without this attribute the JDK reads only the
+// jar's base and a 25 JVM silently benchmarks the JNI path. The @Setup checks fail on that.
+tasks.named<Jar>("jmhJar") {
+    manifest {
+        attributes("Multi-Release" to "true")
+    }
 }
 
 jmh {
@@ -51,8 +61,29 @@ jmh {
     // UuidGenerator's FFM downcalls are a "restricted method" — the JMH-forked JVM needs the
     // same opt-in the library's own test task already sets.
     jvmArgsAppend.add("--enable-native-access=ALL-UNNAMED")
+    // -PjmhJdk=<feature>: fork the benchmark JVMs on that JDK through the toolchain (the
+    // floor, say), the Gradle JVM staying on 25. The default is the Gradle JVM itself.
+    if (project.hasProperty("jmhJdk")) {
+        val launcher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(project.property("jmhJdk").toString().toInt())
+        }
+        jvm.set(launcher.map { it.executablePath.asFile.absolutePath })
+    }
     // -PjmhInclude=<regex>: a subset of the suite, JMH's own include syntax.
     if (project.hasProperty("jmhInclude")) {
         includes.set(listOf(project.property("jmhInclude") as String))
+    }
+}
+
+// A benchmark that throws (a @Setup backend check, say) leaves JMH printing the exception and
+// the build green: the plugin's failOnError hands JMH `-foe 1`, which JMH reads as false
+// (measured: the property set, the exception printed, exit 0), and it exposes no way to pass
+// a raw `-foe true`. A run that measured nothing writes a results file with no rows, so the
+// task fails on that.
+tasks.named("jmh") {
+    val results = layout.buildDirectory.file("results/jmh/results.txt")
+    doLast {
+        val rows = results.get().asFile.readLines().count { Regex("""^\S+\s+(avgt|thrpt|sample|ss)\s+\d+""").containsMatchIn(it) }
+        check(rows > 0) { "jmh measured nothing; a benchmark failed (see the exception above)" }
     }
 }

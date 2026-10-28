@@ -131,7 +131,7 @@ pub(crate) fn new_v7_in(
     // Octets 5-15 in one 11-byte draw: the seed draw from octets 5-8 and the 6 random low
     // counter bits from octet 9, both of which `write_fields` then overwrites, and rand_b's
     // random tail in octets 10-15. Not all 16: on macOS a draw of 12 bytes or more costs about
-    // 120 ns more than one of 11.
+    // 100 ns more than one of 11 (entropy.rs has the measurement).
     let mut bytes = [0u8; 16];
     fill(&mut bytes[5..], unix_millis).map_err(NewV7Error::Random)?;
     let r = u32::from_le_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);

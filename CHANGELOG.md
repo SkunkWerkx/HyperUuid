@@ -28,6 +28,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Java runs on JDK 21.** The jar is multi-release: its base reaches the core through
+  JNI, from a library built from the core for every platform, and JDK 25+ keeps FFM. The API
+  and exceptions are the same on both, with two exceptions: the load failure's message and
+  cause name the path's own library, and a fill above 64 KiB can throw `OutOfMemoryError` on
+  JNI. A `null` argument is a `NullPointerException` naming the parameter on both. The jar
+  grows by ⟨n⟩ KB. *(Java)*
+- **Python: a source distribution.** `hyperuuid-<version>.tar.gz` now ships with the wheels,
+  so where no wheel fits, pip falls back to building from source (Rust 1.89 or newer and a
+  C linker); CI proves that build on x86-64 glibc 2.17 and musl. Attested like the wheels.
+  *(PyPI)*
+- **Core on big-endian.** CI runs the core's test suite, conformance corpus included, on
+  s390x under QEMU. *(repository only)*
 - **A TypeScript binding for Node and Bun, on npm as `hyperuuid`.** A Node-API addon built
   with napi-rs, the core linked into the `.node` file, published as eight platform packages
   (`@skunkwerkx/hyperuuid-<platform>`, one per RID) that the root package picks through
@@ -107,8 +119,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shipped three, `cp311-abi3` for CPython 3.11 and newer with the GIL and `cp315-abi3.abi3t`
   for 3.15 and newer with or without it: 17 wheels a release where 1.0.0 had 25. The
   free-threaded 3.14 wheel proved the GIL-free path, and it was bound to one interpreter
-  version, too narrow an ABI to carry. Free-threaded 3.13 and 3.14 now get `No matching
-  distribution found`, as PyPy does; free-threading starts at 3.15. *(Python)*
+  version, too narrow an ABI to carry. Free-threaded 3.14 now gets no wheel, and pip builds
+  the sdist (see Added), which a report-only CI job builds and tests there; free-threaded 3.13
+  cannot build it, since PyO3 0.30 refuses free-threaded CPython below 3.14. Free-threading
+  starts at 3.15. *(Python)*
 - **The release flow, after its first run.** `release.yml` uploads the wheels as a step of
   its own `pypi-publish` job again, so their PEP 740 publish attestations name it; staging
   starts by itself once the release-mode CI on the preparation commit is green (that run's
@@ -118,6 +132,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `actions/cache-poisoning/poisonable-step`; and `pypi-recovery.yml` is gone. *(repository only)*
 - **Rust, R — minimum Rust is now 1.89** (was 1.85), the floor of current `uuid` 1.x. Source
   installs of the R package and builds from this repository need `rustc` 1.89. *(Rust, R)*
+- **C# — .NET 10 is supported, on desktop and server.** The package builds `net10.0` and
+  `net11.0` from one source, and package validation holds their public APIs identical. On .NET
+  10 it covers Windows, Linux (glibc and musl) and macOS, framework-dependent and Native AOT;
+  Blazor WebAssembly, iOS, Mac Catalyst and Android stay .NET 11 and later, and a .NET 10
+  project for any of them stops at build with the new error `HYPERUUID003`, which names the
+  platform (for WebAssembly, dotnet/runtime#132858: .NET 10's toolchain cannot link the core).
+  `HyperUuid.targets` moves to `build/net10.0/` (and `buildTransitive/net10.0/`), one copy NuGet
+  selects for both frameworks. CI runs the suite and the Native AOT smoke test on both
+  frameworks on every desktop and musl leg, and a new `test-nuget-package` job proves from the
+  packed package that a .NET 10 Native AOT publish links the core in. *(C#)*
+- **PHP: the floor is 8.3.** 8.2 reaches end of life on 2026-12-31. A project on 8.2 keeps
+  resolving 1.0.x. *(Packagist)*
+- **Faster ids on macOS.** The core draws its random bytes from `CCRandomGenerateBytes`,
+  Apple's user-space CSPRNG seeded by the kernel, the generator Rust's standard library uses
+  on Apple platforms. It replaces a `getentropy` syscall per id: a single v7 on an Apple M6
+  went from 594 to 60 ns. iOS, tvOS, watchOS, visionOS and Mac Catalyst already used it through
+  `getrandom`. *(core, and every binding on macOS)*
 
 ### Fixed
 

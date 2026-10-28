@@ -8,7 +8,7 @@ build-backend = "maturin"
 [project]
 name = "hyperuuid"
 dynamic = ["version"]
-description = "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order — a PyO3 native extension linking a Rust core directly into CPython. No runtime bridge, no compiler needed to install."
+description = "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order — a PyO3 native extension linking a Rust core directly into CPython. No runtime bridge, no compiler needed to install on supported platforms."
 readme = "README.md"
 license = "MIT"
 # A local copy, not a path up to the repo root: PEP 639 globs forbid `..` outright
@@ -53,6 +53,9 @@ manifest-path = "../rust/Cargo.toml"
 python-source = "src"
 module-name = "hyperuuid._native"
 features = ["python"]
+# Cargo reads config from its cwd, the sdist root, so the musl `-crt-static` fix in
+# .cargo/config.toml has to travel there for a source build on musl to produce a cdylib.
+include = [{ path = ".cargo/config.toml", format = "sdist" }]
 
 [tool.ruff]
 # One width for the package, its tests and its benchmark, the Rust core's own (rustfmt.toml).

@@ -26,11 +26,28 @@ import java.util.stream.Stream;
  * this very process has mapped.
  */
 final class NativePlatform {
-    record Target(String rid, String libraryFileName) {
-        /** Classpath resource path of this target's bundled native library. */
+    record Target(String rid, String libraryFileName, String jniLibraryFileName) {
+        /** Classpath resource path of this target's bundled native library (the FFM path's). */
         String resourcePath() {
             return "/native/" + rid + "/" + libraryFileName;
         }
+
+        /** Classpath resource path of this target's bundled JNI library (the JNI path's). */
+        String jniResourcePath() {
+            return "/native/" + rid + "/" + jniLibraryFileName;
+        }
+    }
+
+    /**
+     * Why there is no native library to load, for the load failure of either path: no build
+     * exists for this platform at all ({@code target} is {@code null}), or one should and this
+     * jar was packed without {@code resourcePath}.
+     */
+    static String nativeMissing(Target target, String resourcePath) {
+        return target == null
+                ? "hyperuuid: this jar carries no native library for " + describe()
+                : resourcePath + " classpath resource not found (this jar was built "
+                        + "without a native library for this platform)";
     }
 
     // Resolved once, on first access to this class.
@@ -64,13 +81,13 @@ final class NativePlatform {
         }
         String os = osName.toLowerCase(Locale.ROOT);
         if (os.startsWith("windows")) {
-            return new Target("win-" + arch, "hyperuuid.dll");
+            return new Target("win-" + arch, "hyperuuid.dll", "hyperuuid_jni.dll");
         }
         if (os.startsWith("mac") || os.startsWith("darwin")) {
-            return new Target("osx-" + arch, "libhyperuuid.dylib");
+            return new Target("osx-" + arch, "libhyperuuid.dylib", "libhyperuuid_jni.dylib");
         }
         if (os.startsWith("linux")) {
-            return new Target((musl ? "linux-musl-" : "linux-") + arch, "libhyperuuid.so");
+            return new Target((musl ? "linux-musl-" : "linux-") + arch, "libhyperuuid.so", "libhyperuuid_jni.so");
         }
         return null;
     }

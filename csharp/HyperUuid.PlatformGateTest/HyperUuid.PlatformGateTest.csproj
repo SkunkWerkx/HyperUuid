@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Exists only for the HYPERUUID003 probes, and is not in HyperUuid.slnx. It has no source
+       and no references: it imports the shipped targets file by hand, in the project body
+       the way the smoke tests do, and a probe picks the framework and RID from the command
+       line, for example
+         dotnet build -p:GateFramework=net10.0-ios
+         dotnet msbuild -getProperty:_HyperUuidNet10Unsupported -p:GateFramework=net10.0-windows -p:EnableWindowsTargeting=true
+       with an optional -p:RuntimeIdentifier=browser-wasm. -->
+  <PropertyGroup>
+    <TargetFramework>$(GateFramework)</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <Import Project="../HyperUuid/build/net10.0/HyperUuid.targets" />
+
+</Project>

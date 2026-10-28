@@ -1,7 +1,8 @@
 //! Entropy for every generator: [`fill`] is `getrandom::fill`, except on Linux, where it is
 //! ChaCha20 run in user space in one of two shapes, on Android, which has the first, on
-//! Windows, where `getrandom` writes through a buffer of its own, and on WASI, where it is
-//! called a chunk at a time (see `fill_with` for each).
+//! Apple platforms, where it is `CCRandomGenerateBytes` called directly, on Windows, where
+//! `getrandom` writes through a buffer of its own, and on WASI, where it is called a chunk at a
+//! time (see `fill_with` for each).
 //!
 //! **Large requests (a batch of 32 v7 UUIDs and up), Linux and Android:** one 32-byte
 //! `getrandom` draw keys a ChaCha20 keystream that fills the whole request. That is the
@@ -21,10 +22,14 @@
 //! Measured on linux-x64 (i9-11900H): `new_v7_batch` of 1000 went from 10.6 to 4.4 ns per UUID
 //! on glibc 2.43, whose `getrandom` already runs in the vDSO, and from 12.5 to 3.4 on musl,
 //! whose `getrandom` is a real syscall; a single `new_v4` went from 38 to 23 ns on glibc and
-//! from 228 to 24 on musl. The other targets keep `getrandom` because it was already as fast or
+//! from 228 to 24 on musl. Windows and WASI keep `getrandom` because it was already as fast or
 //! faster there: Windows' `ProcessPrng` did the same batch in 2.4 ns per UUID against
-//! ChaCha20's 3.4, and wasm32-wasip1 under wasmtime came out even. macOS has not been measured
-//! yet.
+//! ChaCha20's 3.4, and wasm32-wasip1 under wasmtime came out even. On an Apple M6
+//! (Mac18,5, macOS 27.0.1, 2026-10-28), `CCRandomGenerateBytes` against `getentropy`: a single
+//! `new_v4` went from 711 to 168 ns, a single `new_v7` from 594 to 60 ns, and `new_v7_batch`
+//! of 1000 from 18.2 to 1.9 ns per UUID. Apple's generator costs more from 12 bytes up
+//! (`CCRandomGenerateBytes` took 67.5 ns for 11 bytes and 169 ns for 12 in a C probe on the same
+//! machine and date), which is why `new_v4` (16 bytes) sits above `new_v7` (11).
 //!
 //! Keying a cipher for a large request costs ~700 cycles (the AVX2 backend works eight blocks
 //! at a time even for one), which the pool beats below about 192 bytes.
@@ -92,11 +97,28 @@ fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::
     target_os = "linux",
     target_os = "android",
     target_os = "wasi",
+    target_vendor = "apple",
     windows
 )))]
 #[inline(always)]
 fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
     getrandom::fill(buf)
+}
+
+/// Apple: `CCRandomGenerateBytes`, the call Rust std makes on every Apple target and the one
+/// `getrandom` already takes on iOS, tvOS, watchOS, visionOS and Mac Catalyst. Apple seeds it from the
+/// kernel. It lives in `libSystem`, so nothing new is linked. It is called once per request,
+/// because it has no host cap to chunk around.
+#[cfg(target_vendor = "apple")]
+#[inline(always)]
+fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+    // SAFETY: the pointer and length come from one live `&mut [u8]`.
+    let status = unsafe { libc::CCRandomGenerateBytes(buf.as_mut_ptr().cast(), buf.len()) };
+    if status == libc::kCCSuccess {
+        Ok(())
+    } else {
+        Err(getrandom::Error::UNEXPECTED)
+    }
 }
 
 /// WASI: `random_get` a chunk at a time. `getrandom` hands the host the whole request in one
@@ -585,7 +607,7 @@ mod pool {
 
 #[cfg(test)]
 mod tests {
-    use super::fill;
+    use super::{fill, fill_at};
 
     // Both sides of the stretch threshold, and a length that ends mid-block.
     const LENGTHS: [usize; 4] = [16, 191, 192, 6_003];
@@ -645,5 +667,46 @@ mod tests {
             })
             .collect();
         assert_eq!(draws.len(), 5_000);
+    }
+
+    #[test]
+    fn two_64_byte_draws_differ_and_are_not_zero() {
+        let (mut a, mut b) = ([0u8; 64], [0u8; 64]);
+        fill(&mut a).unwrap();
+        fill(&mut b).unwrap();
+        assert_ne!(a, b);
+        assert_ne!(a, [0; 64]);
+        assert_ne!(b, [0; 64]);
+    }
+
+    #[test]
+    fn an_empty_draw_succeeds() {
+        assert!(fill(&mut []).is_ok());
+        assert!(fill_at(&mut [], 0).is_ok());
+    }
+
+    #[cfg(not(target_os = "wasi"))]
+    #[test]
+    fn concurrent_draws_never_repeat() {
+        let all: std::collections::HashSet<[u8; 16]> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    s.spawn(|| {
+                        (0..1_000)
+                            .map(|_| {
+                                let mut b = [0u8; 16];
+                                fill(&mut b).unwrap();
+                                b
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap())
+                .collect()
+        });
+        assert_eq!(all.len(), 8_000);
     }
 }

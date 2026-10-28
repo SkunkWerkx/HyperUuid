@@ -3,6 +3,10 @@ package io.github.skunkwerkx.hyperuuid.aotsmoketest;
 import io.github.skunkwerkx.hyperuuid.UuidGenerator;
 import io.github.skunkwerkx.hyperuuid.UuidLayout;
 import io.github.skunkwerkx.hyperuuid.UuidVariant;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -32,6 +36,11 @@ public final class Main {
         // the core unloadable, and this is the probe a consumer would notice that through.
         System.out.println("available: " + UuidGenerator.isAvailable());
         require(UuidGenerator.isAvailable(), "the core did not load");
+        // Which backend loaded, and in an image that no JNI library came along.
+        requireExpectedBackend();
+        if (System.getProperty("org.graalvm.nativeimage.imagecode") != null) {
+            requireNoJniLibraryEmbedded();
+        }
         // The version probe is the one export linked without the critical option, so it
         // needs its own downcall signature in reachability-metadata.json — this is what
         // proves the registration reached the binary.
@@ -180,6 +189,67 @@ public final class Main {
 
         System.out.println("hyperuuid AOT smoke test passed: v4=" + v4 + " v5=" + v5 + " v7=" + v7 + " v7Batch[0]="
                 + v7Batch[0] + " v7Sql=" + v7Sql);
+    }
+
+    // Which NativeCore loaded, by the two signals the library's own BackendTest uses: the
+    // native-method count (14 on the JNI class, 0 on the FFM one) and the class file major
+    // (65 for the --release 21 base, 69 under META-INF/versions/25). NativeCore is
+    // package-private, so this goes through reflection. An image has no class file to read,
+    // so there the count alone speaks; it sees the FFM class, the only one the image keeps.
+    private static void requireExpectedBackend() {
+        boolean ffm = Runtime.version().feature() >= 25;
+        String expected = ffm ? "ffm" : "jni";
+        Class<?> core;
+        try {
+            core = Class.forName("io.github.skunkwerkx.hyperuuid.NativeCore");
+        } catch (ClassNotFoundException e) {
+            throw new AssertionError("NativeCore is not loadable", e);
+        }
+        long natives = Arrays.stream(core.getDeclaredMethods())
+                .filter(m -> Modifier.isNative(m.getModifiers()))
+                .count();
+        require(natives == (ffm ? 0 : 14), expected + " expected, but NativeCore declares " + natives + " natives");
+        String major = "n/a (image)";
+        if (System.getProperty("org.graalvm.nativeimage.imagecode") == null) {
+            try (InputStream in = core.getResourceAsStream("NativeCore.class")) {
+                require(in != null, "NativeCore.class is not readable as a resource");
+                DataInputStream data = new DataInputStream(in);
+                data.readInt();
+                data.readUnsignedShort();
+                int found = data.readUnsignedShort();
+                require(found == (ffm ? 69 : 65), expected + " expected, but NativeCore is class file major " + found);
+                major = Integer.toString(found);
+            } catch (IOException e) {
+                throw new AssertionError("NativeCore.class is unreadable", e);
+            }
+        }
+        System.out.println("backend: " + expected + " (" + natives + " natives, class major " + major + ")");
+    }
+
+    // The image must not carry the JNI shim or the core's JNI-path copy: only the FFM path
+    // survives into it (the base NativeCore and its libraries are unreachable), and the
+    // resource globs cover the core library alone. The JNI library names are the three the
+    // Java side resolves, for each of the eight RIDs.
+    private static void requireNoJniLibraryEmbedded() {
+        String[] rids = {
+            "win-x64",
+            "win-arm64",
+            "osx-x64",
+            "osx-arm64",
+            "linux-x64",
+            "linux-arm64",
+            "linux-musl-x64",
+            "linux-musl-arm64"
+        };
+        String[] names = {"libhyperuuid_jni.so", "libhyperuuid_jni.dylib", "hyperuuid_jni.dll"};
+        for (String rid : rids) {
+            for (String name : names) {
+                require(
+                        Main.class.getResource("/native/" + rid + "/" + name) == null,
+                        "the image embeds the JNI library /native/" + rid + "/" + name);
+            }
+        }
+        System.out.println("image: no JNI library embedded");
     }
 
     // java.util.UUID's two longs are RFC 9562 byte order already, most significant first.

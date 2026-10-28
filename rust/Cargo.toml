@@ -31,6 +31,7 @@ uuid = { version = "1.29", optional = true, default-features = false }
 
 # `now_v7` reads the clock with `clock_gettime` itself rather than through std, whose
 # `SystemTime::now` unwraps the call (see v7.rs). Already in the graph through getrandom.
+# `entropy.rs` calls `CCRandomGenerateBytes` through it on Apple targets.
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2.189", default-features = false }
 

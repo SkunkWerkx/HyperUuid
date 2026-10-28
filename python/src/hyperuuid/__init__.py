@@ -9,7 +9,8 @@ Section 6.6 well-known namespaces already in the standard library:
 
 Ships as real platform-specific wheels (linux glibc and musl, macOS, Windows; x64 and arm64,
 plus Pyodide's ``pyemscripten`` wasm32 for the browser) built by ``maturin`` — no compiler
-needed to install: ``abi3`` for every CPython 3.11+, and ``abi3t`` for free-threaded
+needed to install where a wheel fits; elsewhere pip builds it from the sdist, which needs
+Rust. The wheels are ``abi3`` for every CPython 3.11+, and ``abi3t`` for free-threaded
 CPython 3.15+, where the extension runs without the GIL. The package is typed:
 ``py.typed`` ships beside it, with a stub for the extension module.
 """

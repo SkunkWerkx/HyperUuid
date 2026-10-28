@@ -1,0 +1,40 @@
+[package]
+name = "hyperuuid-jni"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.89"
+description = "The JNI shim the Java binding loads on JDK 21: scalar and array natives over the HyperUuid C ABI."
+license = "MIT"
+publish = false
+
+# A cdylib is what the JVM loads; the rlib is what examples/no_panic.rs links to prove the
+# natives cannot panic (a cdylib alone gives an example nothing to import).
+[lib]
+name = "hyperuuid_jni"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hyperuuid = { path = "../../rust", default-features = false, features = ["cdylib"] }
+jni-sys = "0.4"
+no-panic = { version = "0.1", optional = true }
+
+[dev-dependencies]
+hyperuuid = { path = "../../rust", default-features = false, features = ["cdylib", "std"] }
+
+[features]
+no-panic = ["dep:no-panic"]
+
+[[example]]
+name = "no_panic"
+required-features = ["no-panic"]
+
+# Every shipping build aborts on a panic; the no-panic proof alone overrides this with
+# CARGO_PROFILE_RELEASE_PANIC=unwind, because under abort it cannot see a panic path.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true
