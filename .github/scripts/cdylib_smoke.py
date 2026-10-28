@@ -89,4 +89,23 @@ check(len(set(ids)) == 1000, "uuid_new_v7_batch repeated an id")
 # Past the 26-bit counter space a v7 batch is refused (code 4) before anything is written.
 check(lib.uuid_new_v7_batch(ms, (1 << 26) + 1, out) == 4, "oversized v7 batch not refused")
 
+# The v7 stream used up at its last millisecond, 2^44 - 2: once it cannot advance, both v7
+# exports say so with code 6 rather than minting out of order. Last, because the stream is
+# process-wide and every later real-time v7 in this process would be minted out of stream.
+last_ms = (1 << 44) - 2
+check(lib.uuid_new_v7(last_ms, out) == 0, "uuid_new_v7 at the stream's last millisecond")
+big = ctypes.create_string_buffer(16 * 65536)
+# 65,536 UUIDs are 1,024 of the millisecond's 2^20 steps, so at most 1,024 batches fit.
+for _ in range(1025):
+    rc = lib.uuid_new_v7_batch(last_ms, 65536, big)
+    if rc != 0:
+        break
+check(rc == 6, f"uuid_new_v7_batch on an exhausted v7 stream returned {rc}, not 6")
+# Fewer than 1,024 steps are left, so singles run out within as many calls.
+for _ in range(1025):
+    rc = lib.uuid_new_v7(last_ms, out)
+    if rc != 0:
+        break
+check(rc == 6, f"uuid_new_v7 on an exhausted v7 stream returned {rc}, not 6")
+
 print(f"cdylib smoke: {lib_path} {got}, all {len(names)} exports called")

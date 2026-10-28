@@ -61,21 +61,21 @@ Cutting to the chase, by language — real numbers, no adjustment for story, ful
 | [Java](java/) | **2.8-5.1x faster** | `UUID.randomUUID()` |
 | [Rust](rust/) | **1.7-2.4x faster** | the `uuid` crate |
 | [PHP](php/) | **1.2-1.4x faster** | a naive inline v4 (PHP core has no UUID call at all) |
-| [R](r/) | **7.1-8.8x faster** for v4; **1.6x slower** for time-based ids, a v7 against a v1 | the `uuid` package's `UUIDgenerate()` |
-| [TypeScript](typescript/) | **2.0-20x slower** per call | `crypto.randomUUID()`, the `uuid` package's `v7()` |
+| [R](r/) | **7.1-8.9x faster** for v4; **1.4-1.6x slower** for time-based ids, a v7 against a v1 | the `uuid` package's `UUIDgenerate()` |
+| [TypeScript](typescript/) | **1.9-21x slower** per call | `crypto.randomUUID()`, the `uuid` package's `v7()` |
 | [Go](go/) | slower per call — [the control group](#the-control-group-go) | `google/uuid` |
 
-The R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, every other row on linux-x64 on an Intel Core i9-11900H, so the two groups are not comparable with each other.
+The R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, every other row on linux-x64 on an Intel Core i9-11900H, so the two groups are not comparable with each other. The linux-x64 rows' v7 figures were measured before the per-millisecond re-seed (core change, 2026-10-27); the Apple M6 rows after it.
 
-- **[C#](csharp/)** — 7.5-7.9x faster than `Guid.NewGuid()` for v4 and v7, zero allocation on every call, and the only way to get a v7 with a real monotonic counter before .NET 9 — even on .NET 9+, `Guid.CreateVersion7()` still has no counter at all.
-- **[Java](java/)** — 2.8-5.1x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5 or v7. Proven under GraalVM Native Image too, not just the JVM.
-- **[Rust](rust/)** — this *is* the engine. 1.7-2.4x faster than the `uuid` crate on v4, v5 and v7, and 9x at reading a timestamp back out, allocation-free, asserted by a real counting-allocator test, not just claimed.
-- **[Swift](swift/)** — every call beats `Foundation.UUID()` by 11-16x, while also being the only way to get v5/v7 in Swift at all — Foundation only ever does v4.
-- **[Python](python/)** — every call ahead of stdlib's own C-accelerated ones through the PyO3 native extension: 3.4x faster than `uuid.uuid4()`, 4.2x faster than `uuid.uuid5()`, 3.8x faster than 3.14's own `uuid.uuid7()`, and timestamp extraction 1.6x faster than `UUID.time` as a `datetime`, 2.4x as a plain integer. On 3.11-3.13, where stdlib has no v7 at all, it's not even a comparison.
-- **[Ruby](ruby/)** — the same mechanism swap as Python, same result: **5.5x faster than `SecureRandom.uuid`** for v4, 3.8-4.0x for v7, 2.1x for v5 — and `SecureRandom.uuid` only ever does random v4 anyway.
-- **[PHP](php/)** — a v4 costs less than a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation), by 1.4x, and a v7 by 1.2x — the whole native round trip for less than the price of PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 45x. Still the only zero-Composer-dependency way to generate v4, v5 and v7 in PHP at all.
-- **[R](r/)** — on the Apple M6, `uuid_v4()` is 7.1x faster than the `uuid` package's `UUIDgenerate()` for one id and 8.8x for 1000, and `uuid_v7()` is 1.6x slower than its `UUIDgenerate(use.time = TRUE)` at both sizes. That comparison is different work: `uuid` makes a version 1 (a clock sequence and a fixed node, no random bits) and has no version 7, but it is the time-based call an R user has today, and it is faster. Every function is vectorised and propagates `NA` element-wise.
-- **[TypeScript](typescript/)** — loses every single-id call: on the Apple M6, `newV4()` is 11.9x slower than `crypto.randomUUID()` on Node and 20x on Bun, and `newV7()` 2.0x and 4.9x slower than the `uuid` package's `v7()`. Most of each is one system call: on macOS the core fetches its randomness from the operating system for every id, where those two draw from a buffer they refill in bulk. A batch pays for it once, so `newV7Batch(1000)` is 11x faster than 1000 `newV7()` calls on Node and 16x on Bun. What the binding gives is the same engine as every other binding, under Node and Bun, with the SQL Server order.
+- **[C#](csharp/)** — 7.5-7.9x faster than `Guid.NewGuid()` for v4 and v7, zero allocation on every call, and the only way to get a v7 with a real counter, strictly increasing within the process's stream, before .NET 9 — even on .NET 9+, `Guid.CreateVersion7()` still has no counter at all. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[Java](java/)** — 2.8-5.1x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5 or v7. Proven under GraalVM Native Image too, not just the JVM. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[Rust](rust/)** — this *is* the engine. 1.7-2.4x faster than the `uuid` crate on v4, v5 and v7, and 9x at reading a timestamp back out, allocation-free, asserted by a real counting-allocator test, not just claimed. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[Swift](swift/)** — every call beats `Foundation.UUID()` by 11-16x, while also being the only way to get v5/v7 in Swift at all — Foundation only ever does v4. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[Python](python/)** — every call ahead of stdlib's own C-accelerated ones through the PyO3 native extension: 3.4x faster than `uuid.uuid4()`, 4.2x faster than `uuid.uuid5()`, 3.8x faster than 3.14's own `uuid.uuid7()`, and timestamp extraction 1.6x faster than `UUID.time` as a `datetime`, 2.4x as a plain integer. On 3.11-3.13, where stdlib has no v7 at all, it's not even a comparison. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[Ruby](ruby/)** — the same mechanism swap as Python, same result: **5.5x faster than `SecureRandom.uuid`** for v4, 3.8-4.0x for v7, 2.1x for v5 — and `SecureRandom.uuid` only ever does random v4 anyway. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[PHP](php/)** — a v4 costs less than a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation), by 1.4x, and a v7 by 1.2x — the whole native round trip for less than the price of PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 45x. Still the only zero-Composer-dependency way to generate v4, v5 and v7 in PHP at all. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[R](r/)** — on the Apple M6, `uuid_v4()` is 7.1x faster than the `uuid` package's `UUIDgenerate()` for one id and 8.9x for 1000, and `uuid_v7()` is 1.6x slower than its `UUIDgenerate(use.time = TRUE)` for one id and 1.4x for 1000. That comparison is different work: `uuid` makes a version 1 (a clock sequence and a fixed node, no random bits) and has no version 7, but it is the time-based call an R user has today, and it is faster. Every function is vectorised and propagates `NA` element-wise.
+- **[TypeScript](typescript/)** — loses every single-id call: on the Apple M6, `newV4()` is 11.8x slower than `crypto.randomUUID()` on Node and 21x on Bun, and `newV7()` 1.9x and 7.0x slower than the `uuid` package's `v7()`. Most of each is one system call: on macOS the core fetches its randomness from the operating system for every id, where those two draw from a buffer they refill in bulk. A batch pays for it once, so `newV7Batch(1000)` is 11x faster than 1000 `newV7()` calls on Node and 16x on Bun. What the binding gives is the same engine as every other binding, under Node and Bun, with the SQL Server order.
 
 **Regardless of where your language lands above:** if SQL Server is your RDBMS, [SQL Server ordering](#sql-server-ordering) below might be reason enough to reach for this on its own — the only practical way to mint a client-side ID on a frontier device and have it arrive already sorted for clustering, something `NEWSEQUENTIALID()` structurally can't do (server-side only) and something `IDENTITY(1,1)` can't do at all for a value — a many-to-many bridge table's composite key, most concretely — that needs to exist before the row does.
 
@@ -107,7 +107,7 @@ So the honest guidance is narrower for Go than for any other binding here: reach
 | --- | --- | --- |
 | **v4** | Cryptographically random | §5.4 |
 | **v5** | Deterministic, namespace + name, SHA-1 (cross-language interoperable — the same `(namespace, name)` pair produces the same UUID everywhere, including against Python's own `uuid.uuid5`) | §5.5 |
-| **v7** | Time-ordered, 48-bit Unix-ms timestamp + 26-bit monotonic counter + random bits — strictly increasing even under concurrent generation (see [v7 ordering, precisely](#v7-ordering-precisely)) | §6.2 |
+| **v7** | Time-ordered, 48-bit Unix-ms timestamp + a counter re-seeded each millisecond + random bits — strictly increasing within one process's stream, even under concurrent generation (see [v7 ordering, precisely](#v7-ordering-precisely)) | §6.2 |
 | **v8** | Only as the [SQL Server order](#sql-server-ordering) of a v7: the same 122 bits in the order `uniqueidentifier` sorts by | §5.8 / §6.11 |
 | **Nil** / **Max** | The all-zero and all-one special values | §5.9 / §5.10 |
 | **Inspection** | Version, variant (NCS / RFC 9562 / Microsoft / Future), and a one-call "is this an RFC 9562 UUID of version N" guard, in RFC order or straight from [SQL Server order](#sql-server-ordering) | §4.1 / §4.2 |
@@ -118,14 +118,17 @@ Inspection is layout knowledge, so it lives in the core like everything else. Ev
 
 ### v7 ordering, precisely
 
-The v7 counter is one process-wide sequence, seeded once and advanced atomically by every call and every batch, so concurrent callers in the same millisecond still get strictly increasing values. It is 26 bits wide and never resets, so it wraps back to 0 every 67,108,864 UUIDs. That has three consequences:
+Every v7 call reserves the next step of one process-wide stream. The stream is re-seeded at random whenever a timestamp moves it forward, so counters do not count UUIDs across milliseconds. Each millisecond holds 2^20 steps, a single call consumes one step and a batch of n consumes ⌈n/64⌉. These guarantees hold on targets with 64-bit atomics, for timestamps up to 2^44 − 2 (the year 2527). Let S be the newest timestamp among the stream reservations that have succeeded; failed and out-of-stream calls never change it.
 
-- **A batch is always in strictly increasing order.** A batch that straddles the wrap stamps its UUIDs from the wrap on with the supplied timestamp plus one millisecond, as RFC 9562 §6.2 allows on counter overflow. No embedded timestamp is ever more than a millisecond ahead of the supplied one.
-- **A batch takes at most 67,108,864 UUIDs** (`MaxV7Batch` and its spellings). A larger one would have to reuse counter values within one millisecond, so every binding refuses it with an argument error before allocating anything.
-- **Two individual calls in the same millisecond on either side of the wrap sort in reverse.** Individual calls share no state but the counter, so they have nothing to roll forward with. This happens at most once per 67,108,864 calls, and only when the two calls land in the same millisecond.
-- **A batch's rolled-forward tail runs ahead of whatever comes next in the real millisecond.** The roll-forward orders one batch, not the stream: the next batch or call in the same millisecond starts its counter just past the wrap, carries the supplied timestamp, and so sorts before the previous batch's tail stamped a millisecond later. Same cause as the point above, and just as rare.
+- **Ordering.** A call whose timestamp is within 10 s of S either fails with `CounterExhausted` or reserves from the stream, and its UUIDs then sort strictly after every UUID from a stream reservation that completed before it began, on any thread. Overlapping reservations, singles and batches alike, are ordered by reservation, which need not be completion order. A timestamp up to 11 s behind the stream is clamped onto the stream's millisecond, and a millisecond whose steps run out splits into the next, so a batch that crosses the split is still strictly increasing.
+- **Embedded timestamp.** It runs at most 11 s ahead of the supplied one: a clamped call carries the stream's millisecond, a split's tail carries the millisecond after it (at most 1000 ms ahead of the supplied timestamp), and an out-of-stream call carries its own timestamp exactly.
+- **Backfill and future-dated calls.** A timestamp more than 11 s behind the stream, or past 2^44 − 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone and is ordered against nothing. One call far in the future therefore advances the stream, and until the clock catches up, real-time calls fall behind it and are minted out of stream, unordered among themselves. A clock that steps back by more than 11 s does the same.
+- **Capacity and exhaustion.** A millisecond entered by an advance holds at least 2^19 + 1 steps, and one entered by a split holds 2^20. Demand above that splits forward, and the stream may drift up to 1000 ms ahead of the supplied timestamp. A split that would take it further, or past 2^44 − 2, fails with `CounterExhausted` (return code 6 over the C ABI) before anything is reserved. It is a state error, not an argument error: it reserves nothing, and a call whose timestamp is past the stream's millisecond succeeds. No throughput floor is claimed.
+- **What the counter leaks.** Only consumed steps, and only for stream-generated values. Within one millisecond the step difference between two values is exactly the number of steps consumed between them, and the raw counters of adjacent singles differ by 1 to 127. Across a split, from step s_a at one millisecond to step s_b at the next, the rollover-adjusted difference (2^20 − 1 − s_a) + (s_b + 1) is exactly the steps consumed between them; splits happen only while the stream is overloaded and ahead of real time. Across a real advance the re-seed hides the count. A lone step value shows at least step − (2^19 − 1) steps consumed in its millisecond. An out-of-stream value draws its own seed and relates to nothing.
+- **A batch takes at most 67,108,864 UUIDs** (`MaxV7Batch` and its spellings). Every binding refuses a larger one with an argument error before allocating anything.
+- **No 64-bit atomics.** Targets without them (`thumbv7em-none-eabi` and the like) keep a never-reset 26-bit counter that wraps every 67,108,864 UUIDs. None of the guarantees above apply there: a batch that straddles the wrap is stamped from the wrap on a millisecond later, and individual calls either side of the wrap sort in reverse.
 
-The timestamp is the caller's, trusted as given: nothing detects a clock that goes backwards, and a v7 minted after one sorts before the values minted ahead of it.
+The timestamp is the caller's, not read from the clock, so a clock that goes backwards by less than 11 s is absorbed by the clamp, and one that goes back further is minted out of stream.
 
 ## Platform support
 
@@ -246,9 +249,9 @@ that exist have no FFM.
 
 Most languages *do* already have one — `Guid.NewGuid()`, `java.util.UUID.randomUUID()`, `uuid.uuid4()`, `SecureRandom.uuid`. HyperUuid isn't arguing you should never use those. It's for the specific, common situation where you need more than plain v4 randomness gives you:
 
-1. **Time-sortable IDs with real ordering guarantees.** A v7 ID minted a microsecond after another one you generated on the same thread will sort after it — HyperUuid's monotonic counter (RFC 9562 §6.2 Method 1) guarantees that even under concurrent generation. Most stdlib v4 generators have no time-ordering story at all, and even a stdlib that *does* offer v7 (C#'s `Guid.CreateVersion7`, added in .NET 9) doesn't implement the counter, so two IDs minted in the same millisecond sort randomly relative to each other — exactly the index-fragmentation problem v7 adoption is meant to solve in the first place.
+1. **Time-sortable IDs with real ordering guarantees.** A v7 ID minted a microsecond after another one you generated on the same thread will sort after it — HyperUuid's process-wide v7 stream (RFC 9562 §6.2 Method 1) guarantees that even under concurrent generation. Most stdlib v4 generators have no time-ordering story at all, and even a stdlib that *does* offer v7 (C#'s `Guid.CreateVersion7`, added in .NET 9) doesn't implement the counter, so two IDs minted in the same millisecond sort randomly relative to each other — exactly the index-fragmentation problem v7 adoption is meant to solve in the first place.
 2. **One generation engine across a polyglot system.** If your API is C#, your batch jobs are Go, and your data pipeline is Python, plain per-language UUID libraries give you three independent implementations that all *should* agree bit-for-bit on RFC 9562 semantics but have no structural reason to. HyperUuid's v5 namespace UUIDs are verified in CI to match byte-for-byte with Python's own `uuid.uuid5` — because it's the literal same Rust code minting them everywhere, not three ports of the same spec.
-3. **Batch throughput, and a byte-level door under it.** Need to backfill a million IDs? `NewV7Batch`/`new_v7_batch`/`NewV7BatchAt` (binding-dependent naming) shares one timestamp capture and one contiguous counter reservation across the whole batch instead of paying per-item overhead N times — 1.3-15x faster than the equivalent loop depending on binding ([numbers below](#batch-generation-vs-an-equivalent-loop) and in each binding's README). Underneath that, every binding also exposes a raw-bytes form that constructs no UUID objects at all, which beats its own batch by **41x** in Ruby, 36x in Python and 16x in PHP and lands every language measured on linux-x64 on the same floor, 3.6-4.9 µs per 1000 UUIDs ([numbers below](#skipping-object-construction-entirely)). Most stdlib UUID facilities have no batch API at all, let alone both.
+3. **Batch throughput, and a byte-level door under it.** Need to backfill a million IDs? `NewV7Batch`/`new_v7_batch`/`NewV7BatchAt` (binding-dependent naming) shares one timestamp capture and one contiguous counter reservation across the whole batch instead of paying per-item overhead N times — 1.3-15x faster than the equivalent loop depending on binding ([numbers below](#batch-generation-vs-an-equivalent-loop) and in each binding's README). Underneath that, every binding also exposes a raw-bytes form that constructs no UUID objects at all, which beats its own batch by **41x** in Ruby, 36x in Python and 16x in PHP and lands every language measured on linux-x64 on the same floor, 3.6-4.9 µs per 1000 UUIDs ([numbers below](#skipping-object-construction-entirely)). Most stdlib UUID facilities have no batch API at all, let alone both. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 4. **It's not slower for the trouble — it's faster, mostly.** Generation beats the platform's own call outright in every language measured on linux-x64 except Go. TypeScript, measured so far only on an Apple M6 Mac, loses every single-id call there, and R's time-based ids lose to the `uuid` package's v1 (see [the scoreboard](#the-scoreboard)).
 
 The honest trade-off: this is one more native dependency to ship (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll`, or a prebuilt extension for the Python/Ruby fast paths) versus a UUID call that's already sitting in your standard library. If you only need plain v4 randomness and don't care about cross-language consistency, the stdlib call is simpler and that's a completely reasonable choice.
@@ -284,7 +287,9 @@ The "high-performance, allocation-free" claim is measured, not just asserted —
 | `Guid.NewGuid()` | 292.84 ns | 0 B |
 | `UuidGenerator.NewV4()` | 36.94 ns (**7.93x faster**) | 0 B |
 | `UuidGenerator.NewV5()` | 69.27 ns (4.23x faster) | 0 B |
-| `UuidGenerator.NewV7()` | 38.88 ns (7.53x faster) | 0 B |
+| `UuidGenerator.NewV7()` † | 38.88 ns (7.53x faster) | 0 B |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 Every one of these is genuinely zero-allocation — including `NewV5(Guid, string)`, which UTF-8-encodes the name into a 256-byte stack buffer with an `ArrayPool` fallback for longer names, the same technique the batch methods use (and, before that, proven in this project's own [SequentialGuid](https://github.com/buvinghausen/SequentialGuid) library).
 
@@ -295,21 +300,25 @@ The headline single-call numbers from the [Ruby](ruby/) and [PHP](php/) READMEs,
 | Call | Time | The platform comparison |
 | --- | ---: | --- |
 | Ruby `HyperUuid.new_v4` (Magnus) | 191 ns | `SecureRandom.uuid` 1.06 µs — **5.5x faster** |
-| Ruby `HyperUuid.new_v7` (Magnus, explicit ms) | 264 ns | — **4.0x faster** |
+| Ruby `HyperUuid.new_v7` (Magnus, explicit ms) † | 264 ns | — **4.0x faster** |
 | PHP `HyperUuid::newV4()` | 224 ns | naive inline `random_bytes` v4 308 ns — **1.4x faster** |
 | PHP `->timestamp()` (v7) | 293 ns | `ramsey/uuid` `getDateTime()` 13.2 µs — **45x faster** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any platform without a prebuilt Magnus gem) keeps its own honest numbers in the [Ruby README](ruby/) — slower, mechanism-bound, and still fully supported. Python has no `ctypes` fallback at all; PyO3's `abi3` wheels leave nothing for one to cover.
 
 ### Batch generation vs. an equivalent loop
 
-`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Batch*`, `cargo bench` (from `rust/`), `go test -bench=. -benchmem ./...` (from `go/`):
+`dotnet run -c Release --project csharp/HyperUuid.Benchmarks -- --filter *Batch*`, `cargo bench` (from `rust/`, one v7 case per process, as [its README](rust/README.md#benchmarks) says), `go test -bench=. -benchmem ./...` (from `go/`):
 
 | Binding | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| Rust — v7 | 25.2 µs | 4.40 µs | **5.7x** |
-| C# — v7 | 37.5 µs | 6.06 µs | **6.2x** |
-| Go — v7 | 69.8 µs | 6.97 µs | **10.0x** |
+| Rust — v7 † | 25.2 µs | 4.40 µs | **5.7x** |
+| C# — v7 † | 37.5 µs | 6.06 µs | **6.2x** |
+| Go — v7 † | 69.8 µs | 6.97 µs | **10.0x** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 Go's batch win is the largest of the three because its per-call toll is the largest: nearly all of a single call is `runtime.cgocall` (see [the control group](#the-control-group-go)), and a batch pays it once for 1000 UUIDs. The individual calls allocate nothing (v5 aside, which pays for Go's own `[]byte(name)`), so the win is time alone — and batch is exactly where the control group stops being the exception.
 
@@ -321,55 +330,57 @@ The batch doors above still hand back a collection of the language's own UUID ty
 
 | Binding | batch → objects | raw bytes | speedup | API |
 | --- | ---: | ---: | ---: | --- |
-| Ruby | 202 µs | **4.9 µs** | **41x** | `new_v7_batch_bytes` |
-| Python | 132 µs | **3.7 µs** | **36x** | `fill_v7(bytearray)` |
-| PHP | 67.1 µs | **4.2 µs** | **16x** | `newV7BatchBytes` |
-| Java | 9.3 µs | **3.6 µs** | 2.6x | `fillV7(byte[])` |
-| Go | 7.0 µs | **3.7 µs** | 1.9x, and 0 allocs | `FillV7BytesAt` |
-| C# | 6.1 µs | **3.8 µs** | 1.6x, and 0 allocs | `FillV7(Span<byte>)` |
-| Swift | 3.7 µs | **3.8 µs** | level | `fillV7(into: raw bytes)` |
+| Ruby † | 202 µs | **4.9 µs** | **41x** | `new_v7_batch_bytes` |
+| Python † | 132 µs | **3.7 µs** | **36x** | `fill_v7(bytearray)` |
+| PHP † | 67.1 µs | **4.2 µs** | **16x** | `newV7BatchBytes` |
+| Java † | 9.3 µs | **3.6 µs** | 2.6x | `fillV7(byte[])` |
+| Go † | 7.0 µs | **3.7 µs** | 1.9x, and 0 allocs | `FillV7BytesAt` |
+| C# † | 6.1 µs | **3.8 µs** | 1.6x, and 0 allocs | `FillV7(Span<byte>)` |
+| Swift † | 3.7 µs | **3.8 µs** | level | `fillV7(into: raw bytes)` |
 
-Read the right-hand column, not the speedup column: **every binding converges on roughly 3.6–4.9 µs per 1000 UUIDs**, because that is what the work actually costs. The native call is not the bottleneck in any of them; what varies is the price each language charges to wrap those 16000 bytes in a thousand objects — 200 µs of it in Ruby, 130 µs in Python, essentially none in Swift.
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
-Java is the instructive middle. It is not an interpreted language, yet it gains 2.6x where C# gains 1.6x and Swift nothing, and the reason is visible in its own numbers: filling a `UUID[]` measures 12.3 µs against `newV7Batch`'s 9.3 µs, no cheaper for skipping the array allocation, because `java.util.UUID` is two `long`s and every element has to be rebuilt regardless of who allocated the array. Only its `byte[]` form escapes that. The dividing line is not compiled-versus-interpreted; it is whether the language's UUID type is already RFC-ordered bytes.
+Read the right-hand column, not the speedup column: **every binding converges on roughly 3.6–4.9 µs per 1000 UUIDs**, because that is what the work actually costs. The native call is not the bottleneck in any of them; what varies is the price each language charges to wrap those 16000 bytes in a thousand objects — 200 µs of it in Ruby, 130 µs in Python, essentially none in Swift. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
+
+Java is the instructive middle. It is not an interpreted language, yet it gains 2.6x where C# gains 1.6x and Swift nothing, and the reason is visible in its own numbers: filling a `UUID[]` measures 12.3 µs against `newV7Batch`'s 9.3 µs, no cheaper for skipping the array allocation, because `java.util.UUID` is two `long`s and every element has to be rebuilt regardless of who allocated the array. Only its `byte[]` form escapes that. The dividing line is not compiled-versus-interpreted; it is whether the language's UUID type is already RFC-ordered bytes. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 That also explains why Go, C# and Swift barely move: they are already at or near the floor. Their win is allocation, not time — `FillV7` writes into a buffer you already own, so a hot loop allocates nothing at all. In Go and Swift it needs no per-element conversion either, since `uuid.UUID` is `[16]byte` and Foundation's `UUID` wraps `uuid_t`, both already in RFC order; C# and Java must rebuild each element because `System.Guid` is mixed-endian and `java.util.UUID` is two longs.
 
-**One caveat, and it inverts the advice** — documented on every method in the three dynamic bindings, because getting it wrong is a pessimization: this is only faster if bytes are the *destination*. In Python, filling a buffer and then building `uuid.UUID` objects from it measures ~890 µs, more than six times as slow as `new_v7_batch`, because the extension constructs them through a faster path internally than anything callable from Python. Use the byte forms for a bind parameter, a wire format, or a bulk `COPY` — not as a step on the way to objects.
+**One caveat, and it inverts the advice** — documented on every method in the three dynamic bindings, because getting it wrong is a pessimization: this is only faster if bytes are the *destination*. In Python, filling a buffer and then building `uuid.UUID` objects from it measures ~890 µs, more than six times as slow as `new_v7_batch`, because the extension constructs them through a faster path internally than anything callable from Python. Use the byte forms for a bind parameter, a wire format, or a bulk `COPY` — not as a step on the way to objects. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 ### TypeScript and R, on an Apple M6
 
-These two were measured on an Apple M6 (Mac18,5) under macOS on 2026-10-26, a different machine and OS from every table above, so they are not comparable to the linux-x64 numbers.
+These two were measured on an Apple M6 (Mac18,5) under macOS on 2026-10-27, a different machine and OS from every table above, so they are not comparable to the linux-x64 numbers.
 
-TypeScript, Node 26.12.1 and Bun 1.4.4, with [mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`, from `typescript/`), averages per call:
+TypeScript, Node 26.12.1 and Bun 1.4.4, with [mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`, from `typescript/`), averages per call; the three v7 generation rows are from a later run the same day, after the last core change, and Bun's `uuid` `v7()` is the noisiest baseline here (99.0 ns in that run, 132 ns in the first), so read its ratio with that spread:
 
 | Call | Node 26 | Bun 1.4 | vs. |
 | --- | ---: | ---: | --- |
-| `newV4()` | 781 ns | 800 ns | `crypto.randomUUID()`: 65.6 ns / 40.0 ns: **11.9x / 20x slower** |
-| `newV7()` | 685 ns | 699 ns | `uuid`'s `v7()`: 347 ns / 142 ns: **2.0x / 4.9x slower** |
-| `newV7Batch(1000)` | 61.1 µs | 42.7 µs | 1000x `newV7()`: 676 µs / 697 µs: **11x / 16x faster** |
-| `newV7BatchBytes(1000)` | 20.8 µs | 19.3 µs | `newV7Batch(1000)`: **2.9x / 2.2x faster** |
-| `v7UnixMillis(id)` | 115 ns | 173 ns | |
+| `newV4()` | 780 ns | 800 ns | `crypto.randomUUID()`: 66.1 ns / 37.7 ns: **11.8x / 21x slower** |
+| `newV7()` | 677 ns | 697 ns | `uuid`'s `v7()`: 348 ns / 99.0 ns: **1.9x / 7.0x slower** |
+| `newV7Batch(1000)` | 60.1 µs | 42.5 µs | 1000x `newV7()`: 679 µs / 696 µs: **11x / 16x faster** |
+| `newV7BatchBytes(1000)` | 19.7 µs | 19.3 µs | `newV7Batch(1000)`: **3.1x / 2.2x faster** |
+| `v7UnixMillis(id)` | 112 ns | 107 ns | |
 
-Most of each single-id loss is one system call: on macOS the core fetches its randomness from the operating system on every call (`getentropy`; the user-space ChaCha20 path in `rust/src/entropy.rs` is Linux and Android only), where a round trip into the addon that touches no randomness (`v7UnixMillis`) is 115 ns. `crypto.randomUUID()` and `uuid` draw from a buffer of random bytes they refill in bulk, and a batch pays once in the same way.
+Most of each single-id loss is one system call: on macOS the core fetches its randomness from the operating system on every call (`getentropy`; the user-space ChaCha20 path in `rust/src/entropy.rs` is Linux and Android only), where a round trip into the addon that touches no randomness (`v7UnixMillis`) is 112 ns. `crypto.randomUUID()` and `uuid` draw from a buffer of random bytes they refill in bulk, and a batch pays once in the same way.
 
-R 4.6.1 (Homebrew build), against the [uuid](https://cran.r-project.org/package=uuid) package 1.2.2 with bench 1.1.4 (`R_LIBS=<lib> Rscript bench/bench.R` from `r/`, against an installed copy), medians:
+R 4.6.1 (Homebrew build), against the [uuid](https://cran.r-project.org/package=uuid) package 1.2.2 with bench 1.1.4 (`R_LIBS=<lib> Rscript bench/bench.R` from `r/`, against an installed copy), medians; the two time-based rows are from a later run the same day, after the last core change:
 
 | Comparison (median) | hyperuuid | uuid | Result |
 | --- | --- | --- | --- |
-| v4, one id | 1.31 µs | 9.31 µs | hyperuuid 7.1x faster |
-| v4, 1000 ids | 791.1 µs | 6.98 ms | hyperuuid 8.8x faster |
+| v4, one id | 1.31 µs | 9.35 µs | hyperuuid 7.1x faster |
+| v4, 1000 ids | 781.4 µs | 6.96 ms | hyperuuid 8.9x faster |
 | time-based, one id | 2.91 µs | 1.8 µs | **hyperuuid 1.6x slower** |
-| time-based, 1000 ids | 158.75 µs | 100.86 µs | **hyperuuid 1.6x slower** |
+| time-based, 1000 ids | 146.16 µs | 100.86 µs | **hyperuuid 1.4x slower** |
 
-The time-based rows compare different work: `UUIDgenerate(use.time = TRUE)` makes version 1 ids (a clock sequence and a fixed node, no random bits), while `uuid_v7()` makes version 7 ids with a monotonic counter and fresh random bits, and uuid has no version 7. `uuid_v4(1000)` costs more than `uuid_v7(1000)` for the same reason as TypeScript's single ids: each v4 is one random-source call, while a v7 batch fetches its random bits once.
+The time-based rows compare different work: `UUIDgenerate(use.time = TRUE)` makes version 1 ids (a clock sequence and a fixed node, no random bits), while `uuid_v7()` makes version 7 ids from a counter stream re-seeded every millisecond, with fresh random bits, and uuid has no version 7. `uuid_v4(1000)` costs more than `uuid_v7(1000)` for the same reason as TypeScript's single ids: each v4 is one random-source call, while a v7 batch fetches its random bits once.
 
 ## Key features
 
 - **RFC 9562 compliant** — correct version nibble and variant bits on every UUID, from every binding, because they all come from the same Rust core
-- **One implementation, nine call sites** — no per-language reimplementation to drift out of sync; v5's SHA-1 hashing, v7's monotonic counter and the SQL Server permutation are each written exactly once
+- **One implementation, nine call sites** — no per-language reimplementation to drift out of sync; v5's SHA-1 hashing, v7's counter stream and the SQL Server permutation are each written exactly once
 - **Faster than the platform's own call** — in every language measured on linux-x64 except Go, measured per binding with that ecosystem's own benchmark harness; TypeScript and R, measured so far only on an Apple M6, lose calls there ([their tables](#typescript-and-r-on-an-apple-m6))
-- **Monotonically increasing v7** — a process-global counter (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls, and every batch stays in order across the counter's wrap ([precisely](#v7-ordering-precisely))
+- **Monotonically increasing v7** — a process-global stream (RFC 9562 §6.2 Method 1) guarantees strict ordering under concurrency, continued correctly across individual *and* batch calls, and a batch stays in order across a millisecond's end ([precisely](#v7-ordering-precisely)); when the stream cannot advance, the call fails with `CounterExhausted`
 - **Batch generation** — `NewV7Batch`/`new_v7_batch` amortizes timestamp capture, counter reservation, and the random-bytes fetch across the whole batch
 - **SQL Server byte ordering** — `V7ToSqlOrder`/`v7_to_sql_order`, as an RFC 9562 version 8, computed once in the Rust core and exported to every binding, verified against the real `System.Data.SqlTypes.SqlGuid` comparator, and validated and read in place without converting back
 - **Inspection** — version, variant and a one-call RFC guard, in either layout, from the core

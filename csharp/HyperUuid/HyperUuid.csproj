@@ -55,6 +55,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The mapping test reaches V7Failure and ThrowOnBatchFailure (internal); the assembly is
+         unsigned, so the name alone suffices. -->
+    <InternalsVisibleTo Include="HyperUuid.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Tells the platform compatibility analyzer (CA1416 family) this project claims browser
          support, so it flags any BCL call this assembly makes that's marked
          [UnsupportedOSPlatform("browser")] or excluded from a browser allow-list. Cheap,

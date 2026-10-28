@@ -3,6 +3,12 @@ require "open3"
 
 RFC_TEST_VECTOR_MS = 1_645_557_742_000
 
+# A current-time millisecond for the ordering tests. The v7 stream advances to the present, so
+# a fixed old timestamp falls more than 11 s behind it and is minted out of stream, unordered.
+def now_ms
+  (Time.now.to_r * 1000).to_i
+end
+
 # Replicates System.Data.SqlTypes.SqlGuid.CompareTo's fixed byte significance order — the
 # correctness oracle this project's C# test suite checks directly against the real type; no
 # Ruby equivalent exists to test against here, so this stands in for it in the #to_sql_order
@@ -102,7 +108,8 @@ RSpec.describe HyperUuid do
     end
 
     it "produces a monotonically ordered batch within the same millisecond" do
-      ids = Array.new(100) { described_class.new_v7(RFC_TEST_VECTOR_MS) }
+      ms = now_ms
+      ids = Array.new(100) { described_class.new_v7(ms) }
       expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
     end
 
@@ -112,7 +119,8 @@ RSpec.describe HyperUuid do
       after = (Time.now.to_r * 1000).to_i
 
       embedded_ms = id.bytes[0, 6].bytes.reduce(0) { |acc, b| (acc << 8) | b }
-      expect(embedded_ms).to be_between(before, after)
+      # The stream may stamp a later ms that an earlier test moved it to.
+      expect(embedded_ms).to be_between(before, after + 1_000)
     end
   end
 
@@ -120,14 +128,19 @@ RSpec.describe HyperUuid do
     it "returns count UUIDs sharing the given timestamp, sorted" do
       ids = described_class.new_v7_batch(1000, RFC_TEST_VECTOR_MS)
       expect(ids.size).to eq(1000)
-      expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
       ids.each { |id| expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc) }
     end
 
+    it "is strictly increasing at the current time" do
+      ids = described_class.new_v7_batch(1000, now_ms)
+      expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
+    end
+
     it "continues the same counter sequence as individual calls" do
-      before = described_class.new_v7(RFC_TEST_VECTOR_MS)
-      batch = described_class.new_v7_batch(10, RFC_TEST_VECTOR_MS)
-      after = described_class.new_v7(RFC_TEST_VECTOR_MS)
+      ms = now_ms
+      before = described_class.new_v7(ms)
+      batch = described_class.new_v7_batch(10, ms)
+      after = described_class.new_v7(ms)
 
       ids = [before, *batch, after]
       expect(ids.map(&:to_s)).to eq(ids.map(&:to_s).sort)
@@ -232,8 +245,9 @@ RSpec.describe HyperUuid do
     end
 
     it "sorts by creation order under SqlGuid-style comparison" do
-      ids = (0...200).map { |i| described_class.new_v7(RFC_TEST_VECTOR_MS + i) }
-      ids += Array.new(200) { described_class.new_v7(RFC_TEST_VECTOR_MS + 1_000_000) }
+      ms = now_ms
+      ids = (0...200).map { |i| described_class.new_v7(ms + i) }
+      ids += Array.new(200) { described_class.new_v7(ms + 500) }
 
       sql_ordered = ids.map { |id| id.to_sql_order.bytes }
       sorted = sql_ordered.sort { |a, b| sql_guid_cmp(a, b) }

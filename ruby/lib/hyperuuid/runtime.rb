@@ -28,6 +28,12 @@ module HyperUuid
     V7_BATCH_TOO_LARGE = "a single version 7 batch takes at most 67108864 UUIDs (the 26-bit counter space)"
     BATCH_TOO_LARGE_TO_ADDRESS = "the batch is too large to address on this platform"
 
+    # The version 7 stream's refusal (the core's return code 6): it cannot advance without
+    # running more than 1000 ms ahead of the supplied timestamp or past its last millisecond.
+    # The Magnus extension carries the same text, and spec/counter_exhaustion_spec.rb pins it.
+    V7_COUNTER_EXHAUSTED = "version 7 counter exhausted: the stream cannot advance without running more " \
+                           "than 1000 ms ahead of the supplied timestamp or past its last millisecond"
+
     # The SQL Server order conversions' one refusal, in the core's own words (the Magnus
     # extension raises its SqlOrderError's text): a value that isn't a UUID of the
     # conversion's version (code 5), an ArgumentError. Every version 7 converts.
@@ -68,6 +74,7 @@ module HyperUuid
         case rc
         when 0 then out[0, 16]
         when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
+        when 6 then raise CounterExhaustedError, V7_COUNTER_EXHAUSTED
         else raise random_source_failure("uuid_new_v7")
         end
       end
@@ -89,6 +96,7 @@ module HyperUuid
         when 2 then raise TimestampOutOfRangeError, V7_TIMESTAMP_OUT_OF_RANGE
         when 3 then raise ArgumentError, BATCH_TOO_LARGE_TO_ADDRESS
         when 4 then raise ArgumentError, V7_BATCH_TOO_LARGE
+        when 6 then raise CounterExhaustedError, V7_COUNTER_EXHAUSTED
         else raise random_source_failure("uuid_new_v7_batch")
         end
       end

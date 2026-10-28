@@ -4,7 +4,7 @@ Oct 27, 2026 · @Buvy
 
 ## Where it stands
 
-HyperUuid now ships nine bindings over one Rust core, with TypeScript and R landed as of master commit `12fe74d` (Oct 26, 2026). Fork safety is already solved; the counter, runtime floors and in-git binaries are the open items.
+HyperUuid now ships nine bindings over one Rust core, with TypeScript and R landed as of master commit `12fe74d` (Oct 26, 2026). Fork safety and the counter re-seed are solved; runtime floors and in-git binaries are the open items.
 
 | Binding | Mechanism | Distribution | Floor | Single-call result |
 | --- | --- | --- | --- | --- |
@@ -15,15 +15,15 @@ HyperUuid now ships nine bindings over one Rust core, with TypeScript and R land
 | PHP | ext-ffi | Packagist, binaries in git | 8.2 | 1.2-1.4x faster than a naive inline v4 |
 | Swift | static library | git tag, binaries in git | 6.2 | 11-16x faster than `Foundation.UUID()` |
 | Go | cgo | git tag, binaries in git | 1.26 | slower than `google/uuid` (control group) |
-| TypeScript (new) | napi-rs addon | npm: root package + 8 platform packages | Node 22, Bun | 2.0-20x slower than `crypto.randomUUID()` / `uuid` `v7()` |
-| R (new) | `.Call` into a vendored static library | CRAN source package | R 4.2 | v4 7.1-8.8x faster than `uuid`; time-based 1.6x slower |
+| TypeScript (new) | napi-rs addon | npm: root package + 8 platform packages | Node 22, Bun | 1.9-21x slower than `crypto.randomUUID()` / `uuid` `v7()` |
+| R (new) | `.Call` into a vendored static library | CRAN source package | R 4.2 | v4 7.1-8.9x faster than `uuid`; time-based 1.4-1.6x slower |
 
 What the TypeScript and R landing settled:
 
 - **TypeScript** published its loss up front, as planned. Batches recover it: `newV7Batch(1000)` is 11x (Node) to 16x (Bun) faster than 1000 single calls. There is no wasm fallback yet, so `--omit=optional` or an unlisted platform gets no addon.
 - **R** went straight to CRAN as a source package with vendored crates, rather than r-universe first. It exposes raw-matrix doors (`uuid_v4_raw`, `uuid_v7_raw`, `uuid_to_raw`) and the vectorised SQL-order conversions.
 - **Fork safety is done.** The Linux entropy pool lives in a mapping marked `MADV_WIPEONFORK`, refuses to run if that flag is not honoured, and `rust/tests/entropy_pool.rs` proves a forked child draws different bytes. No key outlives one second, which also covers snapshot restores.
-- **The v7 counter is unchanged.** It is still seeded once per process and never resets.
+- **The v7 counter re-seeds on every new millisecond** (Unreleased; Phase 0 below). Two IDs no longer reveal how many were minted between them across a millisecond.
 - **The About text could not be re-checked from here.** The public page last showed "v4/v5/v6/v7" and seven languages; confirm it now names nine and drops v6.
 
 ## Standing policies
@@ -39,7 +39,7 @@ Four rules decide every item below.
 
 The counter re-seed is the one change that touches persisted behaviour; the rest is wording.
 
-- [ ] **Re-seed the v7 counter on each new millisecond.** Re-initialise it randomly when the timestamp advances (RFC 9562 §6.2 Method 1; check §6.9). Today two IDs reveal how many were minted between them. Rework the batch roll-forward and the wrap rules in "v7 ordering, precisely", and update the corpus.
+- [x] **Re-seed the v7 counter on each new millisecond.** Re-initialise it randomly when the timestamp advances (RFC 9562 §6.2 Method 1; check §6.9). Two IDs used to reveal how many were minted between them. Rework the batch roll-forward and the wrap rules in "v7 ordering, precisely"; no corpus change: the layout is untouched.
 - [ ] **Fix the About text:** drop v6, name all nine languages.
 - [ ] **Reposition the README.** Lead with SQL Server ordering, v7 ordering guarantees and byte-identical v5. Speed supports; it does not lead. Cut to about a third and push depth into per-binding READMEs.
 - [ ] **Go README:** put the cgo requirement and the `CGO_ENABLED=0` compile error in the opening lines.

@@ -6,7 +6,7 @@
 //!
 //! - [`v4::new_v4`] — random (RFC 9562 §5.4)
 //! - [`v5::new_v5`] — deterministic, namespace + name based, SHA-1 (RFC 9562 §5.5)
-//! - [`v7::new_v7`] — time-sortable, millisecond timestamp + monotonic counter (RFC 9562 §6.2)
+//! - [`v7::new_v7`] — time-sortable, millisecond timestamp + re-seeded counter (RFC 9562 §6.2)
 //! - [`v7::to_sql_order`] / [`v7::to_rfc_order`] — the byte order SQL Server's
 //!   `uniqueidentifier` needs to sort a version 7 UUID by creation order, written as an RFC
 //!   9562 version 8, and back
@@ -23,11 +23,12 @@
 // both compiler-enforced rather than claimed. Five things reached past `core` and none do
 // now: the error types implement `core::error::Error` (stable since 1.81), `getrandom`'s
 // std-only error impl rides the feature rather than being pinned on, `v7::now_v7` joins the
-// `wasm32` gate it already had (it's the one API needing an OS clock), `v7`'s monotonic
-// counter trades std's `OnceLock` for a lock-free seed fold over `core::sync::atomic` (see
-// `v7::counter` for why that keeps the ordering guarantee intact), and the two `*_batch`
-// functions draw their entropy through the caller's own buffer instead of a `count`-sized
-// scratch buffer, which is what retires the crate's last allocation. There is no
+// `wasm32` gate it already had (it's the one API needing an OS clock), `v7`'s stream is one
+// `core::sync::atomic` word seeded by its first compare-and-swap rather than through std's
+// `OnceLock` (the never-reset counter kept for targets without 64-bit atomics folds its seed
+// in lock-free instead; `v7::fallback` has why that keeps its ordering intact), and the two
+// `*_batch` functions draw their entropy through the caller's own buffer instead of a
+// `count`-sized scratch buffer, which is what retires the crate's last allocation. There is no
 // `extern crate alloc` here on purpose: nothing needs it, and a consumer with no heap at all
 // is a consumer this crate can now serve.
 //
@@ -125,6 +126,10 @@ unsafe extern "C" {}
 mod entropy;
 mod ffi;
 pub mod sql;
+// The v7 stream is one 64-bit word swapped as a whole; a target without 64-bit atomics keeps
+// v7's never-reset counter instead (`v7::fallback`).
+#[cfg(target_has_atomic = "64")]
+mod stream;
 mod timestamp;
 mod uuid;
 pub mod v4;

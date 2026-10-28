@@ -13,6 +13,7 @@ pub enum ErrorCode {
     InvalidId,
     InvalidBuffer,
     InvalidCount,
+    CounterExhausted,
     /// An engine-level failure (out of memory building a string) keeps napi's own status.
     Napi(Status),
 }
@@ -27,6 +28,7 @@ impl AsRef<str> for ErrorCode {
             ErrorCode::InvalidId => "ERR_HYPERUUID_INVALID_ID",
             ErrorCode::InvalidBuffer => "ERR_HYPERUUID_INVALID_BUFFER",
             ErrorCode::InvalidCount => "ERR_HYPERUUID_INVALID_COUNT",
+            ErrorCode::CounterExhausted => "ERR_HYPERUUID_COUNTER_EXHAUSTED",
             ErrorCode::Napi(status) => status.as_ref(),
         }
     }
@@ -97,6 +99,7 @@ fn v7_error(error: NewV7Error, random_message: &str) -> napi::Error<ErrorCode> {
             ErrorCode::InvalidBuffer,
             "buffer length must be a multiple of 16 (one whole UUID per 16 bytes)",
         ),
+        NewV7Error::CounterExhausted => err(ErrorCode::CounterExhausted, &error.to_string()),
         _ => err(ErrorCode::RandomSource, random_message),
     }
 }

@@ -8,6 +8,7 @@
 
 use super::*;
 use core::str::FromStr;
+use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 #[test]
 fn version_export_packs_the_crate_version() {
@@ -99,7 +100,17 @@ fn v5_has_version_and_variant_bits_set() {
 }
 
 // RFC 9562 Appendix A.6: 2022-02-22T19:22:22Z = 1645557742000 ms since epoch.
+//
+// Also the newest timestamp any test here hands the process-wide v7 stream through the public
+// API, so those calls stamp it exactly: one at a later in-stream time would make them clamp.
+// A test that asserts an order across calls mints from a stream of its own ([`v7_in`]).
 const RFC_TEST_VECTOR_MS: u64 = 1_645_557_742_000;
+
+/// One version 7 from `stream` at `unix_millis`, with real entropy: the public [`v7::new_v7`]
+/// on a stream no other test shares.
+fn v7_in(stream: &AtomicU64, unix_millis: u64) -> Uuid {
+    v7::new_v7_in(stream, unix_millis, entropy::fill_at).unwrap()
+}
 
 // RFC 9562 Appendix A.6's version 7. A freshly minted v7 can't stand in for "a value in RFC
 // order" where a conversion from SQL order must refuse it: its random octet 7 carries the
@@ -147,8 +158,9 @@ fn v7_overflow_timestamp_errors() {
 
 #[test]
 fn v7_same_millisecond_batch_is_monotonically_ordered() {
+    let stream = AtomicU64::new(0);
     let ids: Vec<Uuid> = (0..100)
-        .map(|_| v7::new_v7(RFC_TEST_VECTOR_MS).unwrap())
+        .map(|_| v7_in(&stream, RFC_TEST_VECTOR_MS))
         .collect();
     let mut sorted = ids.clone();
     sorted.sort();
@@ -168,7 +180,8 @@ fn a_timestamp_past_u64_millis_is_out_of_range_not_wrapped() {
 #[test]
 fn v7_increasing_timestamps_sort_in_creation_order() {
     const BASE_MS: u64 = 1_000_000;
-    let ids: Vec<Uuid> = (0..10).map(|i| v7::new_v7(BASE_MS + i).unwrap()).collect();
+    let stream = AtomicU64::new(0);
+    let ids: Vec<Uuid> = (0..10).map(|i| v7_in(&stream, BASE_MS + i)).collect();
     let mut sorted = ids.clone();
     sorted.sort();
     assert_eq!(ids, sorted);
@@ -239,13 +252,21 @@ fn v7_batch_is_monotonically_ordered() {
 }
 
 #[test]
-fn v7_batch_continues_the_same_counter_sequence_as_individual_calls() {
-    // A batch call shouldn't collide with (or reorder relative to) individual calls
-    // interleaved around it on the same shared counter.
-    let before = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+fn v7_batch_and_individual_calls_on_one_stream_sort_in_call_order() {
+    // A batch shouldn't collide with (or reorder relative to) individual calls interleaved
+    // around it on the same stream.
+    let stream = AtomicU64::new(0);
+    let before = v7_in(&stream, RFC_TEST_VECTOR_MS);
     let mut batch = vec![0u8; 10 * 16];
-    v7::new_v7_batch(RFC_TEST_VECTOR_MS, 10, &mut batch).unwrap();
-    let after = v7::new_v7(RFC_TEST_VECTOR_MS).unwrap();
+    v7::new_v7_batch_in(
+        &stream,
+        RFC_TEST_VECTOR_MS,
+        10,
+        &mut batch,
+        entropy::fill_at,
+    )
+    .unwrap();
+    let after = v7_in(&stream, RFC_TEST_VECTOR_MS);
 
     let mut ids = vec![before];
     let (batch_ids, _) = batch.as_chunks::<16>();
@@ -280,6 +301,14 @@ fn v7_batch_trailing_entropy_is_distinct_per_item() {
         .map(|item| item[10..16].try_into().unwrap())
         .collect();
     assert_eq!(tails.len(), COUNT, "rand_b tails repeated across the batch");
+}
+
+#[test]
+fn counter_exhausted_display_text() {
+    assert_eq!(
+        v7::NewV7Error::CounterExhausted.to_string(),
+        "version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond"
+    );
 }
 
 #[test]
@@ -401,12 +430,11 @@ fn sql_guid_cmp(a: &[u8; 16], b: &[u8; 16]) -> std::cmp::Ordering {
 #[test]
 fn v7_sql_order_sorts_by_creation_order_under_sqlguid_comparison() {
     // Increasing timestamps, one per millisecond...
-    let mut ids: Vec<Uuid> = (0..200)
-        .map(|i| v7::new_v7(1_000_000 + i).unwrap())
-        .collect();
+    let stream = AtomicU64::new(0);
+    let mut ids: Vec<Uuid> = (0..200).map(|i| v7_in(&stream, 1_000_000 + i)).collect();
     // ...plus a same-millisecond run, so the counter (not just the timestamp) has to sort
     // correctly too.
-    ids.extend((0..200).map(|_| v7::new_v7(5_000_000).unwrap()));
+    ids.extend((0..200).map(|_| v7_in(&stream, 5_000_000)));
 
     let sql: Vec<[u8; 16]> = ids
         .iter()
@@ -676,4 +704,175 @@ fn parse_errors_compose_with_standard_error_propagation() {
     }
     let error = parse("not-a-uuid").unwrap_err();
     assert!(error.downcast_ref::<ParseUuidError>().is_some());
+}
+
+// The v7 stream through the injectable paths, `new_v7_in` and `new_v7_batch_in`: a local
+// stream word and a fake entropy source, so each test sets the state it needs and reads back
+// exactly what the call installed.
+mod v7_stream {
+    use super::*;
+    use crate::stream::{STEPS, STREAM_MAX_MILLIS, encode};
+    use v7::NewV7Error;
+
+    const M: u64 = RFC_TEST_VECTOR_MS;
+
+    fn ones(buf: &mut [u8], _: u64) -> Result<(), getrandom::Error> {
+        buf.fill(0xFF);
+        Ok(())
+    }
+
+    fn zeros(buf: &mut [u8], _: u64) -> Result<(), getrandom::Error> {
+        buf.fill(0);
+        Ok(())
+    }
+
+    fn broken(_: &mut [u8], _: u64) -> Result<(), getrandom::Error> {
+        Err(getrandom::Error::UNSUPPORTED)
+    }
+
+    fn never(_: &mut [u8], _: u64) -> Result<(), getrandom::Error> {
+        panic!("a call that fails validation drew entropy")
+    }
+
+    fn item(out: &[u8], i: usize) -> Uuid {
+        Uuid::from_bytes(out[i * 16..(i + 1) * 16].try_into().unwrap())
+    }
+
+    // An advance reserves every step of the batch, not just its first: the batch's last item
+    // is step seed + 1, and the single after it must reserve seed + 2. All-ones entropy for the
+    // batch and all-zero for the single, so a single landing on the batch's last step (low6
+    // and tail 0 against the batch's 0xFF tail) sorts below it instead of tying by luck.
+    #[test]
+    fn v7_single_after_a_batch_sorts_after_its_last_item() {
+        let stream = AtomicU64::new(0);
+        let mut out = vec![0u8; 65 * 16];
+        v7::new_v7_batch_in(&stream, M, 65, &mut out, ones).unwrap();
+        let last = item(&out, 64);
+        let single = v7::new_v7_in(&stream, M, zeros).unwrap();
+        assert!(single > last, "{single} <= {last}");
+    }
+
+    #[test]
+    fn v7_entropy_failure_reserves_nothing() {
+        let state = encode(M, 9);
+        let stream = AtomicU64::new(state);
+        let failed = Err(NewV7Error::Random(getrandom::Error::UNSUPPORTED));
+        assert_eq!(v7::new_v7_in(&stream, M, broken), failed);
+        let mut out = vec![0u8; 65 * 16];
+        assert_eq!(
+            v7::new_v7_batch_in(&stream, M, 65, &mut out, broken),
+            failed.map(|_| ())
+        );
+        assert_eq!(stream.load(Relaxed), state);
+    }
+
+    // The buffer isn't asserted: the batch's entropy is drawn into it before the reservation.
+    #[test]
+    fn v7_exhaustion_reserves_nothing() {
+        let state = encode(STREAM_MAX_MILLIS, STEPS - 1);
+        let stream = AtomicU64::new(state);
+        assert_eq!(
+            v7::new_v7_in(&stream, STREAM_MAX_MILLIS, ones),
+            Err(NewV7Error::CounterExhausted)
+        );
+        assert_eq!(stream.load(Relaxed), state);
+        let mut out = vec![0u8; 65 * 16];
+        assert_eq!(
+            v7::new_v7_batch_in(&stream, STREAM_MAX_MILLIS, 65, &mut out, ones),
+            Err(NewV7Error::CounterExhausted)
+        );
+        assert_eq!(stream.load(Relaxed), state);
+    }
+
+    // A distinct byte at every offset of the draw, so a field read from the wrong octet shows.
+    fn counting(buf: &mut [u8], _: u64) -> Result<(), getrandom::Error> {
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_add(1);
+        }
+        Ok(())
+    }
+
+    // The 26-bit counter of a v7: rand_a's 12 bits over the 14 after the variant.
+    fn counter26(id: &Uuid) -> u32 {
+        let b = id.as_bytes();
+        (u32::from(b[6] & 0x0F) << 22)
+            | (u32::from(b[7]) << 14)
+            | (u32::from(b[8] & 0x3F) << 8)
+            | u32::from(b[9])
+    }
+
+    // The exact counter a reservation produces, the per-millisecond sort key. The corpus pins
+    // only where `write_fields` puts a counter; this pins which counter each path composes,
+    // `step << 6 | low6` for a single and `step << 6 | i % 64` for a batch's item i, and the
+    // empty-head placement of a reservation that starts past the stream's last step.
+    #[test]
+    fn v7_reservations_compose_the_exact_counter() {
+        // A single clamped onto step 9 takes step 10, its low 6 bits from octet 9, the fifth
+        // byte of the 11-byte draw into octets 5-15, and its tail from the last six.
+        let stream = AtomicU64::new(encode(M, 9));
+        let single = v7::new_v7_in(&stream, M, counting).unwrap();
+        assert_eq!(v7::unix_millis(&single), M);
+        assert_eq!(counter26(&single), (10 << 6) | 5);
+        assert_eq!(single.as_bytes()[10..], [6, 7, 8, 9, 10, 11]);
+
+        // A 130-item batch from the same state: steps 10 to 12, 64 items to a step.
+        let stream = AtomicU64::new(encode(M, 9));
+        let mut out = vec![0u8; 130 * 16];
+        v7::new_v7_batch_in(&stream, M, 130, &mut out, counting).unwrap();
+        for i in 0..130u32 {
+            let id = item(&out, i as usize);
+            assert_eq!(v7::unix_millis(&id), M, "item {i}");
+            assert_eq!(counter26(&id), ((10 + i / 64) << 6) | (i % 64), "item {i}");
+        }
+
+        // A single on a stream at its millisecond's last step has an empty head: it lands at
+        // step 0 of the next millisecond.
+        let stream = AtomicU64::new(encode(M, STEPS - 1));
+        let single = v7::new_v7_in(&stream, M, counting).unwrap();
+        assert_eq!(v7::unix_millis(&single), M + 1);
+        assert_eq!(counter26(&single), 5);
+
+        // A 65-item batch there: the first 64 at step 0 of M + 1, item 64 at step 1.
+        let stream = AtomicU64::new(encode(M, STEPS - 1));
+        let mut out = vec![0u8; 65 * 16];
+        v7::new_v7_batch_in(&stream, M, 65, &mut out, counting).unwrap();
+        for i in 0..65u32 {
+            let id = item(&out, i as usize);
+            assert_eq!(v7::unix_millis(&id), M + 1, "item {i}");
+            assert_eq!(counter26(&id), ((i / 64) << 6) | (i % 64), "item {i}");
+        }
+    }
+
+    // A count of 0 is a success that draws nothing and reserves nothing.
+    #[test]
+    fn v7_empty_batch_draws_and_reserves_nothing() {
+        let state = encode(M, 9);
+        let stream = AtomicU64::new(state);
+        assert_eq!(v7::new_v7_batch_in(&stream, M, 0, &mut [], never), Ok(()));
+        assert_eq!(stream.load(Relaxed), state);
+    }
+
+    #[test]
+    fn v7_validation_failures_leave_the_buffer_untouched() {
+        let state = encode(M, 9);
+        let stream = AtomicU64::new(state);
+        let mut out = [0xABu8; 31];
+        let cases = [
+            (M, 2, NewV7Error::BufferTooSmall),
+            (M, v7::MAX_BATCH + 1, NewV7Error::BatchTooLarge),
+            (v7::MAX_UNIX_MILLIS + 1, 1, NewV7Error::TimestampOutOfRange),
+        ];
+        for (millis, count, want) in cases {
+            assert_eq!(
+                v7::new_v7_batch_in(&stream, millis, count, &mut out, never),
+                Err(want)
+            );
+            assert_eq!(out, [0xABu8; 31], "{want:?}");
+        }
+        assert_eq!(
+            v7::new_v7_in(&stream, v7::MAX_UNIX_MILLIS + 1, never),
+            Err(NewV7Error::TimestampOutOfRange)
+        );
+        assert_eq!(stream.load(Relaxed), state);
+    }
 }

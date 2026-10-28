@@ -1,6 +1,7 @@
 //! Entropy for every generator: [`fill`] is `getrandom::fill`, except on Linux, where it is
-//! ChaCha20 run in user space in one of two shapes, on Android, which has the first, and on
-//! Windows, where `getrandom` writes through a buffer of its own (see `fill_with` there).
+//! ChaCha20 run in user space in one of two shapes, on Android, which has the first, on
+//! Windows, where `getrandom` writes through a buffer of its own, and on WASI, where it is
+//! called a chunk at a time (see `fill_with` for each).
 //!
 //! **Large requests (a batch of 32 v7 UUIDs and up), Linux and Android:** one 32-byte
 //! `getrandom` draw keys a ChaCha20 keystream that fills the whole request. That is the
@@ -87,10 +88,29 @@ fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::
         .map_err(|_| getrandom::Error::UNEXPECTED)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "wasi",
+    windows
+)))]
 #[inline(always)]
 fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
     getrandom::fill(buf)
+}
+
+/// WASI: `random_get` a chunk at a time. `getrandom` hands the host the whole request in one
+/// call, and hosts cap it: wasmtime traps past 64 MiB, which a `MAX_BATCH` of v7 (402 MB of
+/// random bytes) is well past. 64 KiB is the smallest cap any host is known to set (the Web
+/// Crypto limit that browser shims inherit), and a request that size costs the same as one
+/// call, so a batch of 1000 never sees the loop.
+#[cfg(target_os = "wasi")]
+#[inline(always)]
+fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+    for chunk in buf.chunks_mut(65_536) {
+        getrandom::fill(chunk)?;
+    }
+    Ok(())
 }
 
 /// Windows: `ProcessPrng` into a buffer of its own, then copied out, never into `buf` directly.
@@ -600,6 +620,17 @@ mod tests {
                 "{len} bytes: {ones} one bits, expected about {half}"
             );
         }
+    }
+
+    #[test]
+    fn a_draw_past_the_hosts_limit_is_filled() {
+        // wasmtime traps a `random_get` past 64 MiB; one byte over has to come back whole, on
+        // every target, with its last chunk as random as its first.
+        let mut buf = vec![0u8; (64 << 20) + 1];
+        fill(&mut buf).unwrap();
+        let tail = &buf[buf.len() - 4_097..];
+        assert!(tail.iter().any(|&b| b != 0), "the tail was never written");
+        assert_ne!(&buf[..4_097], tail, "the tail repeats the head");
     }
 
     #[test]

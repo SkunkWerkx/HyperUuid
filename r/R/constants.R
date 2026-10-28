@@ -1,7 +1,8 @@
 #' The largest batch a single `uuid_v7()` call can generate
 #'
-#' A scalar `time` generates one batch that shares a 26-bit monotonic counter, so a call
-#' holds at most this many ids (2^26). Ask for more and [uuid_v7()] errors; split the
+#' A scalar `time` generates one batch, a contiguous run of the process-wide v7 stream's
+#' steps at 64 ids to a step, so a call holds at most this many ids (2^26, every step one
+#' millisecond holds). Ask for more and [uuid_v7()] errors; split the
 #' request, or pass a `time` of length `n`.
 #'
 #' @format An integer, `67108864L`.

@@ -397,6 +397,8 @@ public final class UuidGenerator {
      * Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.
      *
      * @return a new version 7 UUID timestamped at the current time
+     * @throws IllegalStateException if the version 7 stream is exhausted (see
+     *     {@link #newV7(long)}) or the random source fails
      */
     public static UUID newV7() {
         return newV7(System.currentTimeMillis());
@@ -406,10 +408,34 @@ public final class UuidGenerator {
      * Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond
      * timestamp.
      *
+     * <p>Every version 7 call reserves the next step of one process-wide stream, which is
+     * re-seeded at random whenever a timestamp moves it forward, so counters do not count
+     * UUIDs across milliseconds. For timestamps up to 2^44 &minus; 2 (the year 2527), a call
+     * whose timestamp is within 10 s of the newest stream timestamp either throws
+     * {@link IllegalStateException} (exhaustion, below) or reserves from the stream, and its
+     * UUID then sorts strictly after every UUID from a stream reservation that completed
+     * before it began, on any thread. A timestamp up to 11 s behind the stream is clamped
+     * onto the stream's millisecond, so the embedded timestamp can run ahead of
+     * {@code unixMillis}: by at most 11 s, and by at most 1000 ms when the stream's steps run
+     * out and it splits into the next millisecond.
+     *
+     * <p>A timestamp more than 11 s behind the stream, or past 2^44 &minus; 2, is minted at
+     * itself, outside the stream: it succeeds, carries {@code unixMillis} exactly, leaves
+     * the stream alone and is ordered against nothing. One call far in the future therefore
+     * advances the stream, and until the clock catches up, real-time calls fall behind it
+     * and are minted out of stream, unordered among themselves.
+     *
+     * <p>A split that would take the stream more than 1000 ms ahead of {@code unixMillis},
+     * or past 2^44 &minus; 2, throws {@link IllegalStateException} before anything is
+     * reserved. It is a state error, not an argument error, and a call whose timestamp is
+     * past the stream's millisecond succeeds.
+     *
      * @param unixMillis the Unix-epoch millisecond timestamp to embed
      * @return a new version 7 UUID timestamped at {@code unixMillis}
      * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
      *     within 48 bits
+     * @throws IllegalStateException if the stream is exhausted (message beginning
+     *     {@code "version 7 counter exhausted"}) or the random source fails
      */
     public static UUID newV7(long unixMillis) {
         MemorySegment out = SCRATCH.get().out;
@@ -423,6 +449,9 @@ public final class UuidGenerator {
         }
         if (rc == 2) {
             throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
+        }
+        if (rc == 6) {
+            throw new IllegalStateException(V7_COUNTER_EXHAUSTED);
         }
         if (rc != 0) {
             throw new IllegalStateException("uuid_new_v7 failed with code " + rc + " (random source failure)");
@@ -881,16 +910,19 @@ public final class UuidGenerator {
 
     /**
      * Creates {@code count} time-sortable version 7 UUIDs sharing one timestamp capture and
-     * one contiguous block of the monotonic counter — one downcall and one random-bytes
-     * fetch instead of {@code count} of each. In strictly increasing order however the batch
-     * lands on the counter; see {@link #MAX_V7_BATCH}, which also says why that orders one
-     * batch rather than the stream across a counter wrap.
+     * one contiguous block of the v7 stream — one downcall and one random-bytes fetch
+     * instead of {@code count} of each. A batch of n consumes ceil(n/64) of a millisecond's
+     * 2^20 steps and is in strictly increasing order, including across a split into the next
+     * millisecond; see {@link #newV7(long)} for the stream's ordering, timestamp and
+     * exhaustion contract, which a batch shares.
      *
      * @param count how many UUIDs to create
      * @param unixMillis the shared Unix-epoch millisecond timestamp to embed in each
      * @return {@code count} new version 7 UUIDs
      * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
      *     within 48 bits, or {@code count} is negative or greater than {@link #MAX_V7_BATCH}
+     * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
+     *     the random source fails
      */
     public static UUID[] newV7Batch(int count, long unixMillis) {
         requireBatchCount(count);
@@ -924,6 +956,8 @@ public final class UuidGenerator {
      *
      * @param count how many UUIDs to create
      * @return {@code count} new version 7 UUIDs timestamped at the current time
+     * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
+     *     the random source fails
      */
     public static UUID[] newV7Batch(int count) {
         return newV7Batch(count, System.currentTimeMillis());
@@ -957,16 +991,23 @@ public final class UuidGenerator {
         }
     }
 
+    // The v7 stream cannot advance without running more than 1000 ms ahead of the supplied
+    // timestamp or past the last millisecond the stream holds: the core's code 6. A state
+    // error, not an argument error, so it is an IllegalStateException like the random source.
+    static final String V7_COUNTER_EXHAUSTED = "version 7 counter exhausted: the stream cannot advance without running "
+            + "more than 1000 ms ahead of the supplied timestamp or past its last millisecond";
+
     // A batch export's non-zero return code as the exception it means: 2 is the caller's
-    // timestamp, 3 a batch too
-    // large to address on this platform (count * 16 overflowing the core's usize, a 32-bit
-    // host only), 4 a v7 batch past MAX_V7_BATCH. Only 1 is the random source.
+    // timestamp, 3 a batch too large to address on this platform (count * 16 overflowing the
+    // core's usize, a 32-bit host only), 4 a v7 batch past MAX_V7_BATCH, 6 the v7 stream
+    // running out. Only 1 is the random source.
     static RuntimeException batchFailure(int rc, String fn, int count, String outOfRangeMessage) {
         return switch (rc) {
             case 2 -> new IllegalArgumentException(outOfRangeMessage);
             case 3 ->
                 new IllegalArgumentException("a batch of " + count + " UUIDs is too large to address on this platform");
             case 4 -> v7BatchTooLarge(count);
+            case 6 -> new IllegalStateException(V7_COUNTER_EXHAUSTED);
             default -> new IllegalStateException(fn + " failed with code " + rc + " (random source failure)");
         };
     }
@@ -997,20 +1038,14 @@ public final class UuidGenerator {
     /**
      * The most UUIDs one version 7 batch ({@link #newV7Batch(int, long)},
      * {@link #fillV7(UUID[], long)}, {@link #fillV7(byte[], long)} and their overloads) mints:
-     * 67,108,864, the size of the 26-bit counter that orders UUIDs within a millisecond.
+     * 67,108,864, which is 2^20 steps' worth: a batch of n consumes ceil(n/64) steps, so the
+     * largest batch takes exactly one millisecond of the stream.
      *
-     * <p>Every batch up to this size is in strictly increasing order. The counter is one
-     * process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
-     * UUIDs from there on carry a timestamp one millisecond later than the one supplied rather
-     * than sorting before the ones ahead of them. A larger batch would have to reuse counter
-     * values within one millisecond, so it is refused with {@link IllegalArgumentException},
-     * before anything is allocated or written.
-     *
-     * <p>The roll-forward orders one batch, not the stream. The next batch or {@code newV7}
-     * call in the same real millisecond starts its counter just past the wrap and carries the
-     * supplied timestamp, so it sorts before the previous batch's tail, stamped a millisecond
-     * later; two single calls either side of the wrap in one millisecond sort in reverse the
-     * same way. It happens at most once per {@code MAX_V7_BATCH} UUIDs the process mints.
+     * <p>Every batch up to this size is in strictly increasing order, including one that
+     * splits into the next millisecond (see {@link #newV7(long)}). A larger batch is refused
+     * with {@link IllegalArgumentException} naming this limit, before anything is allocated
+     * or written. Whether a batch of any size has room in the stream is a separate question,
+     * answered by {@link IllegalStateException} when it has not.
      */
     public static final int MAX_V7_BATCH = 1 << 26;
 
@@ -1036,8 +1071,8 @@ public final class UuidGenerator {
 
     /**
      * Fills {@code destination} with time-sortable version 7 UUIDs sharing one timestamp
-     * capture and one contiguous block of the monotonic counter, in strictly increasing order
-     * (see {@link #MAX_V7_BATCH}).
+     * capture and one contiguous block of the v7 stream, in strictly increasing order (see
+     * {@link #MAX_V7_BATCH}, and {@link #newV7(long)} for the stream's contract).
      *
      * <p>Writes into an array the caller already owns rather than allocating a new one. Each
      * element is still rebuilt from the native bytes, because {@link UUID} is two longs and
@@ -1047,6 +1082,8 @@ public final class UuidGenerator {
      * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
      * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
      *     within 48 bits, or {@code destination} is longer than {@link #MAX_V7_BATCH}
+     * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
+     *     the random source fails
      */
     public static void fillV7(UUID[] destination, long unixMillis) {
         requireBatchCount(destination.length);
@@ -1058,6 +1095,8 @@ public final class UuidGenerator {
      * Fills {@code destination} with version 7 UUIDs sharing the current time.
      *
      * @param destination the array to fill; its length determines how many UUIDs are generated
+     * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
+     *     the random source fails
      */
     public static void fillV7(UUID[] destination) {
         fillV7(destination, System.currentTimeMillis());
@@ -1076,7 +1115,7 @@ public final class UuidGenerator {
 
     /**
      * Fills {@code destination} with raw RFC 9562-ordered version 7 UUID bytes, 16 per UUID,
-     * in strictly increasing order (see {@link #MAX_V7_BATCH}).
+     * in strictly increasing order (see {@link #MAX_V7_BATCH} and {@link #newV7(long)}).
      *
      * <p>This is the conversion-free form: the native core already writes RFC-ordered bytes
      * contiguously, so nothing is rebuilt on the way out. Prefer it when the destination is a
@@ -1088,6 +1127,8 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of
      *     16 or holds more than {@link #MAX_V7_BATCH} UUIDs, or {@code unixMillis} is
      *     negative or doesn't fit within 48 bits
+     * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
+     *     the random source fails
      */
     public static void fillV7(byte[] destination, long unixMillis) {
         requireWholeUuids(destination.length);
@@ -1099,6 +1140,8 @@ public final class UuidGenerator {
      * Fills {@code destination} with raw version 7 UUID bytes using the current time.
      *
      * @param destination the array to fill; its length determines how many UUIDs are generated
+     * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
+     *     the random source fails
      */
     public static void fillV7(byte[] destination) {
         fillV7(destination, System.currentTimeMillis());

@@ -8,12 +8,14 @@ require "securerandom"
 require "hyperuuid"
 
 NAME = "example.com"
-# The RFC 9562 test-vector timestamp, the same fixed input the PHP benchmark uses: the
-# explicit-millis rows isolate the binding's own cost from the OS wall-clock read the
+# The explicit-millis row isolates the binding's own cost from the OS wall-clock read the
 # default rows also pay (a machine whose clock defeats the vDSO fast path — WSL2 on arm64
 # was one — prices clock_gettime(CLOCK_REALTIME) at ~1 µs, a real syscall; most Linux prices
-# it at tens of nanoseconds, and there the two sets of rows land together).
-RFC_TEST_VECTOR_MS = 1_645_557_742_000
+# it at tens of nanoseconds, and there the two sets of rows land together). Its millisecond is
+# the present, read once per benchmark-ips cycle outside the calls: the default rows move the
+# v7 stream to the present, so a fixed timestamp from the past would be more than 11 s behind
+# it and time the out-of-stream path instead.
+def now_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
 
 # Every number below belongs to one backend on one Ruby, so say which before printing any:
 # run it again under HYPERUUID_PURE=1 for the other one.
@@ -26,7 +28,18 @@ Benchmark.ips do |x|
   x.report("HyperUuid.new_v4") { HyperUuid.new_v4 }
   x.report("HyperUuid.new_v5") { HyperUuid.new_v5(HyperUuid::Namespaces::DNS, NAME) }
   x.report("HyperUuid.new_v7") { HyperUuid.new_v7 }
-  x.report("HyperUuid.new_v7 (explicit ms)") { HyperUuid.new_v7(RFC_TEST_VECTOR_MS) }
+  ms = now_ms
+  explicit_ms = -> { HyperUuid.new_v7(ms) }
+  # benchmark-ips's own loop for a block that takes no argument, with the clock read added
+  # once per cycle, so this row pays the same per-call block overhead as the rows above.
+  x.report("HyperUuid.new_v7 (explicit ms)") do |times|
+    ms = now_ms
+    i = 0
+    while i < times
+      explicit_ms.call
+      i += 1
+    end
+  end
   x.compare!
 end
 

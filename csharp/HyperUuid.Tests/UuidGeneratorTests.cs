@@ -142,6 +142,10 @@ public sealed class UuidGeneratorTests
 
 	const long RfcTestVectorMs = 1_645_557_742_000;
 
+	// The present, for ordering tests: the v7 stream is process-wide and sits at the present, so
+	// a fixed old timestamp is minted outside it and orders against nothing.
+	static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
 	[Fact]
 	public void Nil_IsAllZeroBytes()
 	{
@@ -185,7 +189,8 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void V7_SameMillisecondBatchIsMonotonicallyOrdered()
 	{
-		var ids = Enumerable.Range(0, 100).Select(_ => UuidGenerator.NewV7(RfcTestVectorMs)).ToArray();
+		var now = Now();
+		var ids = Enumerable.Range(0, 100).Select(_ => UuidGenerator.NewV7(now)).ToArray();
 		var sorted = ids.OrderBy(x => x).ToArray();
 		sorted.ShouldBe(ids, ignoreOrder: false);
 	}
@@ -202,8 +207,9 @@ public sealed class UuidGeneratorTests
 		var ms = ((long)rfc[0] << 40) | ((long)rfc[1] << 32) | ((long)rfc[2] << 24) |
 				  ((long)rfc[3] << 16) | ((long)rfc[4] << 8) | rfc[5];
 
+		// The stream may stamp a later ms that an earlier test moved it to.
 		ms.ShouldBeGreaterThanOrEqualTo(before);
-		ms.ShouldBeLessThanOrEqualTo(after);
+		ms.ShouldBeLessThanOrEqualTo(after + 1_000);
 	}
 
 	[Fact]
@@ -275,9 +281,10 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void V7Batch_ContinuesTheSameCounterSequenceAsIndividualCalls()
 	{
-		var before = UuidGenerator.NewV7(RfcTestVectorMs);
-		var batch = UuidGenerator.NewV7Batch(10, RfcTestVectorMs);
-		var after = UuidGenerator.NewV7(RfcTestVectorMs);
+		var now = Now();
+		var before = UuidGenerator.NewV7(now);
+		var batch = UuidGenerator.NewV7Batch(10, now);
+		var after = UuidGenerator.NewV7(now);
 
 		var ids = new[] { before }.Concat(batch).Append(after).ToArray();
 		var sorted = ids.OrderBy(x => x).ToArray();
@@ -353,15 +360,18 @@ public sealed class UuidGeneratorTests
 		// The correctness oracle here is the real System.Data.SqlTypes.SqlGuid — the same
 		// type T-SQL's own ORDER BY on a uniqueidentifier column matches — not a hand-rolled
 		// stand-in for it, unlike the Rust core's own version of this test.
+		// Current-time timestamps: only calls near the stream's millisecond are ordered, and a
+		// fixed 2022 timestamp is minted outside it. No offset exceeds now + 500 ms (see TestStream).
+		var now = Now();
 		var ids = new List<Guid>();
 		for (long i = 0; i < 200; i++)
 		{
-			ids.Add(UuidGenerator.NewV7(RfcTestVectorMs + i));
+			ids.Add(UuidGenerator.NewV7(now + i));
 		}
 		// Same-millisecond run, so the counter (not just the timestamp) has to sort correctly too.
 		for (var i = 0; i < 200; i++)
 		{
-			ids.Add(UuidGenerator.NewV7(RfcTestVectorMs + 1_000_000));
+			ids.Add(UuidGenerator.NewV7(now + 500));
 		}
 
 		var sqlOrdered = ids.Select(UuidGenerator.V7ToSqlOrder).ToList();
@@ -568,7 +578,8 @@ public sealed class UuidGeneratorTests
 		var after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 		foreach (var id in buf)
-			UuidGenerator.V7UnixMillis(id).ShouldBeInRange(before, after);
+			// The stream may stamp a later ms that an earlier test moved it to.
+			UuidGenerator.V7UnixMillis(id).ShouldBeInRange(before, after + 1_000);
 	}
 
 	[Theory]
@@ -584,8 +595,8 @@ public sealed class UuidGeneratorTests
 		foreach (var id in buf)
 		{
 			id.ToString()[14].ShouldBe('7');
-			// At most one millisecond on, if the batch straddles the counter's wrap.
-			UuidGenerator.V7UnixMillis(id).ShouldBeInRange(RfcTestVectorMs, RfcTestVectorMs + 1);
+			// Out of stream (the vector is years behind it), so the timestamp is carried exactly.
+			UuidGenerator.V7UnixMillis(id).ShouldBe(RfcTestVectorMs);
 		}
 		buf.OrderBy(x => x).ShouldBe(buf, ignoreOrder: false);
 		buf.ToHashSet().Count.ShouldBe(count);

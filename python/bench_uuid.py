@@ -9,6 +9,7 @@ samples).
 from __future__ import annotations
 
 import sys
+import time
 import uuid
 
 import pyperf
@@ -16,6 +17,12 @@ import pyperf
 import hyperuuid
 
 RFC_TEST_VECTOR_MS = 1_645_557_742_000
+# The v7 generation cases mint at the present, read once when this module loads. pyperf runs
+# each benchmark in its own short-lived worker processes, which all load it afresh, so every
+# call is minted through the v7 stream and the clock read stays out of the timed calls. A
+# timestamp more than 11 s behind one the process has minted at would time the out-of-stream
+# path instead.
+NOW_MS = time.time_ns() // 1_000_000
 BATCH_SIZE = 1000
 
 runner = pyperf.Runner()
@@ -34,7 +41,7 @@ runner.bench_func(
     lambda: uuid.uuid5(uuid.NAMESPACE_DNS, "example.com"),
 )
 
-runner.bench_func("hyperuuid.new_v7", lambda: hyperuuid.new_v7(RFC_TEST_VECTOR_MS))
+runner.bench_func("hyperuuid.new_v7", lambda: hyperuuid.new_v7(NOW_MS))
 
 if sys.version_info >= (3, 14):
     runner.bench_func("stdlib uuid.uuid7", uuid.uuid7)
@@ -45,12 +52,12 @@ if sys.version_info >= (3, 14):
 def v7_individual_loop() -> None:
     """Mints BATCH_SIZE v7 UUIDs one call at a time."""
     for _ in range(BATCH_SIZE):
-        hyperuuid.new_v7(RFC_TEST_VECTOR_MS)
+        hyperuuid.new_v7(NOW_MS)
 
 
 runner.bench_func(
     f"hyperuuid.new_v7_batch({BATCH_SIZE})",
-    lambda: hyperuuid.new_v7_batch(BATCH_SIZE, RFC_TEST_VECTOR_MS),
+    lambda: hyperuuid.new_v7_batch(BATCH_SIZE, NOW_MS),
 )
 runner.bench_func(f"hyperuuid.new_v7 x{BATCH_SIZE} (loop)", v7_individual_loop)
 

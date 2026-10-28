@@ -29,6 +29,10 @@ public enum UuidGenerator {
         /// platform: its byte length can't be addressed, or the count doesn't fit the
         /// call's 32-bit count. Refused before anything is allocated or written.
         case batchNotAddressable(count: Int)
+        /// A version 7 call's split would take the stream more than 1000 ms ahead of the supplied
+        /// timestamp, or past its last millisecond (2^44 − 2). Nothing was reserved or written. It is
+        /// a state error, not an argument error: the same call succeeds once the clock has caught up.
+        case counterExhausted
 
         /// What was refused, in one line.
         public var description: String {
@@ -47,12 +51,31 @@ public enum UuidGenerator {
                     "hyperuuid: a single version 7 batch takes at most \(UuidGenerator.maxV7Batch) UUIDs (the 26-bit counter space); got \(count)"
             case .batchNotAddressable(let count):
                 return "hyperuuid: a batch of \(count) UUIDs is too large for one native call on this platform"
+            case .counterExhausted:
+                return "hyperuuid: \(UuidGenerator.counterExhaustedMessage)"
             }
         }
 
         /// The same text as ``description``, so `localizedDescription` names the failure too
         /// instead of Foundation's generic "The operation couldn't be completed".
         public var errorDescription: String? { description }
+    }
+
+    /// The core's exhaustion message, without the `hyperuuid: ` prefix `description` adds.
+    static let counterExhaustedMessage =
+        "version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond"
+
+    /// Maps a v7 native return code to its error. Code 6 is the core's `CounterExhausted`,
+    /// handled ahead of the default arm; `count` is the batch size the codes 3 and 4 report.
+    /// Code 0 is not an error and must not be passed.
+    static func v7Error(_ rc: Int32, count: Int) -> Error {
+        switch rc {
+        case 2: return .timestampOutOfRange
+        case 3: return .batchNotAddressable(count: count)
+        case 4: return .batchTooLarge(count: count)
+        case 6: return .counterExhausted
+        default: return .randomSourceFailure(code: rc)
+        }
     }
 
     private typealias UuidNewV4Fn = @convention(c) (UnsafeMutablePointer<UInt8>?) -> Int32
@@ -217,14 +240,19 @@ public enum UuidGenerator {
 
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond
     /// timestamp.
+    ///
+    /// Every v7 call reserves the next step of one process-wide stream. A timestamp within 10 s
+    /// of the newest the stream has reserved at sorts after every UUID from a call that completed
+    /// before it began, on any thread. A timestamp more than 11 s behind the stream, or past
+    /// 2^44 − 2, is minted at itself, outside the stream, and is ordered against nothing.
+    ///
+    /// Throws ``Error/counterExhausted`` when the call's split would take the stream more than
+    /// 1000 ms ahead of `unixMillis`, or past 2^44 − 2; nothing is reserved. See ``maxV7Batch``.
     public static func newV7(unixMillis: UInt64) throws -> UUID {
         let l = loaded()
         let (rc, out) = withOut { l.newV7(unixMillis, $0) }
-        switch rc {
-        case 0: return UUID(uuid: out)
-        case 2: throw Error.timestampOutOfRange
-        default: throw Error.randomSourceFailure(code: rc)
-        }
+        guard rc == 0 else { throw v7Error(rc, count: 1) }
+        return UUID(uuid: out)
     }
 
     /// Creates a time-sortable UUID version 7 (RFC 9562 §6.2) using the current time.
@@ -266,29 +294,30 @@ public enum UuidGenerator {
     }
 
     /// The most UUIDs one version 7 batch (`newV7Batch`, `fillV7` and their overloads)
-    /// mints: 67,108,864, the size of the 26-bit counter that orders UUIDs within a
-    /// millisecond.
+    /// mints: 67,108,864, which is 2^20 steps' worth: a batch of n consumes ⌈n/64⌉ steps, so
+    /// the largest batch takes exactly one millisecond of the stream.
     ///
-    /// Every batch up to this size is in strictly increasing order. The counter is one
-    /// process-wide sequence, so a batch can straddle the point where it wraps back to 0; the
-    /// UUIDs from there on carry a timestamp one millisecond later than the one supplied
-    /// rather than sorting before the ones ahead of them. A larger batch would have to reuse
+    /// Every batch up to this size is in strictly increasing order. Every v7 call reserves
+    /// steps of one process-wide stream; a batch that outruns the steps left in a millisecond
+    /// splits into the next one, and the UUIDs from there on carry a timestamp one millisecond
+    /// later than the one supplied. A timestamp within 10 s of the newest the stream has
+    /// reserved at is ordered against every other call in the stream; one more than 11 s behind
+    /// it, or past 2^44 − 2, is minted at itself, outside the stream, and is ordered against
+    /// nothing, so backfill and fixed test timestamps work. A larger batch would have to reuse
     /// counter values within one millisecond, so it throws ``Error/batchTooLarge(count:)``
     /// before anything is allocated or written.
     ///
-    /// The roll-forward orders one batch, not the stream. The next batch or `newV7` call in the
-    /// same real millisecond starts its counter just past the wrap and carries the supplied
-    /// timestamp, so it sorts before the previous batch's tail, stamped a millisecond later;
-    /// two single calls either side of the wrap in one millisecond sort in reverse the same
-    /// way. It happens at most once per ``maxV7Batch`` UUIDs the process mints.
+    /// A split that would take the stream more than 1000 ms ahead of the supplied timestamp, or
+    /// past 2^44 − 2, throws ``Error/counterExhausted`` and reserves nothing: a state error, not
+    /// an argument error. A call whose timestamp is past the stream's millisecond succeeds.
     public static let maxV7Batch = 1 << 26
 
     /// Creates `count` time-sortable version 7 UUIDs sharing one Unix-epoch millisecond
-    /// timestamp capture and one contiguous block of the monotonic counter — one native call
+    /// timestamp capture and one contiguous block of the v7 stream — one native call
     /// and one random-bytes fetch instead of `count` of each. The batch is strictly
-    /// increasing; if it crosses the counter's wrap, the UUIDs from there on carry
-    /// `unixMillis + 1`. That orders this batch, not the stream: a batch or `newV7` call in
-    /// the same real millisecond after it can sort before its tail (see ``maxV7Batch``).
+    /// increasing; if it outruns a millisecond's steps, it splits into the next and the
+    /// UUIDs from there on carry `unixMillis + 1`. It throws ``Error/counterExhausted`` when the
+    /// split would run too far ahead of `unixMillis` (see ``maxV7Batch``).
     ///
     /// A `count` over ``maxV7Batch`` throws ``Error/batchTooLarge(count:)`` before the array
     /// is allocated.
@@ -341,15 +370,15 @@ public enum UuidGenerator {
     // MARK: - Destination-buffer fills
 
     /// Fills `destination` with time-sortable version 7 UUIDs sharing one `unixMillis`
-    /// timestamp capture and one contiguous block of the monotonic counter.
+    /// timestamp capture and one contiguous block of the v7 stream.
     ///
     /// `newV7Batch(count:)` allocates a fresh array on every call; this writes into storage
     /// the caller already owns, which is what lets a hot path reuse one buffer across batches.
     /// `destination` is raw RFC 9562-ordered bytes, 16 per UUID, and its length must be a whole
     /// multiple of 16. The UUIDs are strictly increasing, with the same possible
-    /// `unixMillis + 1` as ``newV7Batch(count:unixMillis:)``, which orders this fill, not the
-    /// stream (see ``maxV7Batch``); more than ``maxV7Batch`` of them
-    /// throws ``Error/batchTooLarge(count:)`` with nothing written.
+    /// split into `unixMillis + 1` as ``newV7Batch(count:unixMillis:)``, and the same
+    /// ``Error/counterExhausted`` when it would run too far ahead (see ``maxV7Batch``); more than
+    /// ``maxV7Batch`` of them throws ``Error/batchTooLarge(count:)`` with nothing written.
     public static func fillV7(into destination: UnsafeMutableRawBufferPointer, unixMillis: UInt64) throws {
         try fill(into: destination, unixMillis: unixMillis, limit: maxV7Batch) { l in l.newV7Batch }
     }
@@ -397,13 +426,7 @@ public enum UuidGenerator {
             nativeCount,
             destination.baseAddress?.assumingMemoryBound(to: UInt8.self)
         )
-        switch rc {
-        case 0: return
-        case 2: throw Error.timestampOutOfRange
-        case 3: throw Error.batchNotAddressable(count: count)
-        case 4: throw Error.batchTooLarge(count: count)
-        default: throw Error.randomSourceFailure(code: rc)
-        }
+        guard rc == 0 else { throw v7Error(rc, count: count) }
     }
 
     private static func fillUUIDs(

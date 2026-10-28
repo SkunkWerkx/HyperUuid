@@ -51,8 +51,8 @@ func ExampleNewV7AtTime() {
 }
 
 func ExampleNewV7BatchAt() {
-	// One native call, one timestamp capture and one contiguous block of the monotonic
-	// counter: the batch comes back already in creation order.
+	// One native call, one timestamp capture and one contiguous block of the v7 stream: the
+	// batch comes back already in creation order.
 	ids, err := hyperuuid.NewV7BatchAt(1000, uint64(appendixA6.UnixMilli()))
 	if err != nil {
 		log.Fatal(err)

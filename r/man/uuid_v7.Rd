@@ -20,11 +20,21 @@ since the Unix epoch. Length 1, or length \code{n}. Defaults to the current time
 \code{uuid_v7_raw()} returns a raw matrix with 16 rows and \code{n} columns, one id per column.
 }
 \description{
-A scalar \code{time} generates the whole request as one batch sharing a monotonic counter, so
-the ids are strictly increasing; at most \link{uuid_v7_max_batch} per call. A \code{time} of
+A scalar \code{time} generates the whole request as one batch, one contiguous run of the
+stream, so the ids are strictly increasing; at most \link{uuid_v7_max_batch} per call. A \code{time} of
 length \code{n} generates one id per element.
 }
 \details{
+Every call draws from one process-wide stream, so ids made with a \code{time} within 10 s of
+the newest \code{time} the stream has reserved at are ordered after every id from a stream
+reservation that completed before the call began, even across calls and threads. The
+stream may run up to 1000 ms ahead of the \code{time} you pass; a request that would take it
+further, or past its last millisecond (2^44 - 2), is an error
+(\verb{version 7 counter exhausted: ...}). It is a state error: it reserves nothing, and a call
+whose \code{time} is past the stream's millisecond succeeds. A \code{time} more than 11 s behind
+the stream, or past 2^44 - 2 ms, is minted at itself, outside the stream and unordered.
+See the root README, "v7 ordering, precisely".
+
 \code{time} is converted to whole Unix milliseconds as \code{floor(seconds * 1000)}; a \code{Date} is
 midnight UTC. \code{time} is an argument, so a missing or non-finite element, a time before
 1970 or past the 48-bit field, a length other than 1 or \code{n}, and \code{n} over

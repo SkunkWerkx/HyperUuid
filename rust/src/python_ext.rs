@@ -219,6 +219,7 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
         Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
             Err(PyValueError::new_err(e.to_string()))
         }
+        Err(e @ v7::NewV7Error::CounterExhausted) => Err(PyRuntimeError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err(
             "uuid_new_v7: random source failure",
         )),
@@ -271,6 +272,7 @@ fn new_v7_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
         Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
             Err(PyValueError::new_err(e.to_string()))
         }
+        Err(e @ v7::NewV7Error::CounterExhausted) => Err(PyRuntimeError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err(
             "uuid_new_v7_batch: random source failure",
         )),
@@ -537,6 +539,7 @@ fn fill_v7_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> P
         Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
             Err(PyValueError::new_err(e.to_string()))
         }
+        Err(e @ v7::NewV7Error::CounterExhausted) => Err(PyRuntimeError::new_err(e.to_string())),
         Err(_) => Err(PyRuntimeError::new_err(
             "uuid_new_v7_batch: random source failure",
         )),

@@ -129,28 +129,43 @@ sql = HyperUuid::Uuid.new(row["id"]) # read with layout: :sql_server
 In ActiveRecord, map the column as `:binary`, which quotes as `0x…`. Reading needs the `CAST`
 too: tiny_tds returns a `uniqueidentifier` as text with those groups reversed.
 
-### The version 7 batch limit
+### Version 7 ordering and the batch limit
 
-`HyperUuid::MAX_V7_BATCH` is 67,108,864 (2²⁶), the size of the counter that orders version 7
-UUIDs within a millisecond, and the most one `new_v7_batch` or `new_v7_batch_bytes` call
-mints. A larger count is an `ArgumentError` naming the limit, raised before anything is
-allocated. Every batch is in strictly increasing order: the counter is one process-wide
-sequence, so a batch can straddle the point where it wraps back to 0, and the UUIDs from there
-on carry a timestamp one millisecond later than the one supplied rather than sorting before the
-ones ahead of them.
+Every v7 call, single or batch, reserves from one process-wide stream that is re-seeded at
+random whenever a timestamp moves it forward. A single call consumes one of a millisecond's 2²⁰
+steps and a batch of n consumes ⌈n/64⌉. A batch is always in strictly increasing order. For
+timestamps up to 2⁴⁴ − 2 (the year 2527):
 
-That roll-forward orders one batch, not the stream. The next batch or single `new_v7` in the
-same real millisecond starts its counter just past the wrap and carries the supplied timestamp,
-so it sorts before the previous batch's tail, which was stamped a millisecond later. Two single
-`new_v7` calls either side of the wrap in one millisecond sort in reverse the same way. It
-happens at most once per 2²⁶ UUIDs the process mints.
+- **Ordering.** A call whose timestamp is within 10 s of the newest stream timestamp either
+  raises `HyperUuid::CounterExhaustedError` (below) or reserves from the stream, and its UUIDs
+  then sort strictly after every UUID from a reservation that completed before it began, on any
+  thread. Overlapping reservations are ordered by reservation, which need not be completion
+  order.
+- **Embedded timestamp.** At most 11 s ahead of the one supplied: a timestamp up to 11 s behind
+  the stream is clamped onto the stream's millisecond, and a millisecond whose steps run out
+  splits into the next, so a split's tail carries the millisecond after it (at most 1000 ms
+  ahead of the supplied timestamp). An out-of-stream call carries its own timestamp exactly.
+- **Backfill and future-dated calls.** A timestamp more than 11 s behind the stream, or past
+  2⁴⁴ − 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone and is
+  ordered against nothing. One call far in the future therefore advances the stream, and until
+  the clock catches up, real-time calls are minted out of stream, unordered among themselves.
+- **Exhaustion.** A split that would take the stream more than 1000 ms ahead of the supplied
+  timestamp, or past 2⁴⁴ − 2, raises `HyperUuid::CounterExhaustedError`, before anything is
+  reserved. A call whose timestamp is past the stream's millisecond succeeds.
+- **Batch size.** `HyperUuid::MAX_V7_BATCH` is 67,108,864 (2²⁶), the most one `new_v7_batch` or
+  `new_v7_batch_bytes` call mints. A larger count is an `ArgumentError` naming the limit,
+  raised before anything is allocated.
 
 ### Errors
 
-Two exceptions describe a failed call, and both carry the same message on every backend:
+Three exceptions describe a failed call, and each carries the same message on every backend:
 
 - `HyperUuid::TimestampOutOfRangeError` — the time cannot be embedded in a version 7: past
   its 48-bit millisecond field, or negative (a `Time` before the Unix epoch included).
+- `HyperUuid::CounterExhaustedError` — the version 7 stream cannot advance without running
+  more than 1000 ms ahead of the supplied time or past its last millisecond (see
+  [Version 7 ordering and the batch limit](#version-7-ordering-and-the-batch-limit)). Nothing is
+  reserved.
 - `HyperUuid::RandomSourceError` — the operating system's random source failed.
 
 Everything else is a caller bug and raises Ruby's own error for it, checked once in the shared
@@ -200,7 +215,7 @@ bytes = HyperUuid.new_v7_batch_bytes(1000)
 first = bytes[0, 16] # ready for a BINARY(16) bind parameter
 ```
 
-**About 41x faster than `new_v7_batch`** for a 1000-UUID batch (4.9 µs versus 202 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched.
+**About 41x faster than `new_v7_batch`** for a 1000-UUID batch (4.9 µs versus 202 µs). The native call is identical — the difference is that `new_v7_batch` then allocates a `Uuid` object and its byte Strings for every item on top of it. This hands back the bytes the native core already produced, untouched. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `new_v7_batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
@@ -218,24 +233,28 @@ Real numbers, `benchmark-ips` on Ruby 4.0.7, linux-x64 on an Intel Core i9-11900
 |---|---:|---:|
 | `SecureRandom.uuid` | 943,917 | baseline |
 | `HyperUuid.new_v4` | 5,236,000 | **5.5x faster** |
-| `HyperUuid.new_v7` (explicit ms) | 3,785,000 | **4.0x faster** |
-| `HyperUuid.new_v7` (current time) | 3,574,000 | **3.8x faster** |
+| `HyperUuid.new_v7` (explicit ms) † | 3,785,000 | **4.0x faster** |
+| `HyperUuid.new_v7` (current time) † | 3,574,000 | **3.8x faster** |
 | `HyperUuid.new_v5` | 1,942,000 | 2.1x faster |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 A `HyperUuid.new_v4` — real entropy, correct version/variant bits, minted by the shared Rust core — costs less than a fifth of what `SecureRandom.uuid` does, because the Magnus extension is an ordinary native method call with nothing marshalled around it.
 
-The "current time" rows deserve a footnote, because they will not look like this everywhere. Here they land beside the explicit-ms rows: the only difference between the two is one `Process.clock_gettime(CLOCK_REALTIME)` wall-clock read, and on this machine that read is too cheap to see. On a machine with a slow clock it is the whole story — where a virtualized clock defeats the vDSO fast path the same read costs ~1µs, which puts both current-time rows at parity with `SecureRandom.uuid` while the explicit-ms rows stay well ahead of it. `SecureRandom.uuid` never reads a clock — random v4 is the only thing it does. If your clock is slow and you are minting many, read it once and pass the timestamp, or use the batch doors.
+The "current time" rows deserve a footnote, because they will not look like this everywhere. Here they land beside the explicit-ms rows: the only difference between the two is one `Process.clock_gettime(CLOCK_REALTIME)` wall-clock read, and on this machine that read is too cheap to see. On a machine with a slow clock it is the whole story — where a virtualized clock defeats the vDSO fast path the same read costs ~1µs, which puts both current-time rows at parity with `SecureRandom.uuid` while the explicit-ms rows stay well ahead of it. `SecureRandom.uuid` never reads a clock — random v4 is the only thing it does. If your clock is slow and you are minting many, read it once and pass the timestamp, or use the batch doors. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
-The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.16x slower than `SecureRandom.uuid` for v4 (1.24 µs against 1.07 µs in its own run) and about 1.3x slower for v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it.
+The Fiddle fallback (`HYPERUUID_PURE=1`, and any platform without a prebuilt extension) keeps its own diet — a reused thread-local scratch buffer instead of two GC-finalizer-registering mallocs per call, zero-copy `String` passes for read-only inputs, an unsynchronized fast path past the load mutex — landing at 1.16x slower than `SecureRandom.uuid` for v4 (1.24 µs against 1.07 µs in its own run) and about 1.3x slower for v7, with the same structural story as before: `Fiddle`'s interpreted marshalling is the floor, and the batch doors are how you amortize it. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 Batch generation still amortizes per-call cost on both backends — one native call for the whole batch:
 
 | Call | i/s (Magnus backend) |
 |---|---:|
-| `new_v7` × 1000 (individual) | 3,742 |
-| `new_v7_batch(1000)` | 4,850 (**1.3x**) |
+| `new_v7` × 1000 (individual) † | 3,742 |
+| `new_v7_batch(1000)` † | 4,850 (**1.3x**) |
 
-The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on (in this table's run; 202 µs in the bytes-versus-objects run above) is building a thousand `Uuid` objects — the byte form above does the same native work in 4.9 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one.
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
+
+The multiplier is small on this backend for the best reason available: the individual calls are cheap, so there is little waste left to amortize, and what `new_v7_batch` spends its 206 µs on (in this table's run; 202 µs in the bytes-versus-objects run above) is building a thousand `Uuid` objects — the byte form above does the same native work in 4.9 µs. On the Fiddle backend, where each call costs 1.4 µs, the same batch is 6.7x the loop. If you need v5/v7, need many at once, or need this Ruby service's IDs to agree byte-for-byte with a Go or Python service's, that's what this gem is for — and now it's the fast option too, not just the capable one. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 ## Backends
 
@@ -372,7 +391,7 @@ Fiddle fallback costs the most: measured on win-x64, Ruby 3.4, the Magnus backen
 `new_v4` in 406ns against Fiddle's 2407ns (**5.9x**) and `new_v7` in 595ns against 2759ns
 (**4.6x**) — a far wider gap than any Linux or macOS leg shows — and on real Windows-on-ARM
 hardware, Ruby 4.0.6, `new_v4` in 416ns against Fiddle's 2299ns (**5.5x**) and `new_v7` in
-621ns against 2474ns (**4.0x**), the same shape. Both extensions are built for the `gnullvm`
+621ns against 2474ns (**4.0x**), the same shape (the `new_v7` figures measured before the per-millisecond re-seed, core change, 2026-10-27). Both extensions are built for the `gnullvm`
 Rust targets rather than `gnu` — the same mingw-w64/UCRT ABI RubyInstaller's Ruby uses,
 linked with LLVM and compiler-rt instead of GCC and a statically-linked libgcc, which is what
 keeps the shipped extension small. The build script, and the two flags that are load-bearing

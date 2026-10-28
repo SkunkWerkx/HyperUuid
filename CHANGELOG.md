@@ -54,9 +54,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   derived from `rust/Cargo.lock` by `r/tools/vendor.sh --stage`, never committed), and
   `.gitattributes` keeps `r/` and `typescript/` out of the archive Packagist serves.
   *(repository only)*
+- **Every binding reports an exhausted v7 stream as its own error.** The core's new
+  `NewV7Error::CounterExhausted` (return code 6 over the C ABI) reaches each binding as a
+  state error, never as a random source failure, at the single and the batch site alike,
+  with the core's message: Python raises `RuntimeError`, Ruby
+  `HyperUuid::CounterExhaustedError`, PHP `CounterExhaustedException` (the generic exception
+  on the ext-php-rs door), TypeScript an error with code `ERR_HYPERUUID_COUNTER_EXHAUSTED`, R
+  a plain error condition, Go `ErrCounterExhausted`, Java `IllegalStateException`, C#
+  `InvalidOperationException` (the `Try` forms return false) and Swift
+  `UuidGenerator.Error.counterExhausted`. *(C#, Java, Go, Python, Ruby, PHP, Swift,
+  TypeScript, R)*
 
 ### Changed
 
+- **The v7 counter is re-seeded on every new millisecond.** The stream used to be one 26-bit
+  counter, seeded once per process and never reset, so two ids revealed how many were minted
+  between them, and it wrapped every 67,108,864 UUIDs, rolling a batch's tail a millisecond
+  forward and leaving individual calls either side of the wrap in reverse order. Now each
+  millisecond holds 2^20 steps, the stream is re-seeded at random whenever a timestamp moves it
+  forward (RFC 9562 §6.2 Method 1), a single call takes one step and a batch of n takes ⌈n/64⌉.
+  A timestamp up to 11 s behind the stream is clamped onto the stream's millisecond, and a
+  millisecond that runs out splits into the next, up to 1000 ms ahead of the supplied
+  timestamp; a split that would go further, or past 2^44 − 2, fails with the new
+  `NewV7Error::CounterExhausted` (return code 6 over the C ABI) and reserves nothing. The
+  layout is untouched and the corpus unchanged. The contract is README "v7 ordering,
+  precisely". Targets without 64-bit atomics keep the old never-reset counter. Measured on the
+  Apple M6 on 2026-10-27 (Criterion, the same harness against both cores, one process per
+  case), the change is level within 1%, and its small losses are these: a single v7 costs
+  600.3 ns a call against 600.7 ns before, 592.3 against 592.2 ns on the real clock, and 1000
+  singles 590.0 against 585.7 µs (+0.7%); singles from eight contending threads cost 360.5
+  against 357.1 ns per call in wall time over the eight (+0.9%); a batch of 1000 costs 18.18
+  against 18.08 µs alone (+0.6%) and 13.17 against 13.23 µs per batch in wall time over eight
+  threads. The contended figures include the harness's own shared call counter, which all eight
+  threads increment, so the cores' own difference under contention is somewhat larger than the
+  wall time shows. A single id draws 11 random bytes, the seed, its low counter bits and its
+  tail, where it drew 6; the same build drawing 16 cost 720.5 ns single and 511.3 ns contended,
+  because on macOS a `getentropy` of 12 bytes or more is slower. The TypeScript and R tables
+  were re-measured there; the linux-x64 tables predate the change. *(Rust, and through it every
+  binding)*
+- **v7 calls more than 11 s behind the stream are no longer ordered.** A timestamp more than
+  11 s behind the newest one the stream has reserved at, or past 2^44 − 2, is minted at
+  itself, outside the stream: it succeeds, carries its own timestamp exactly, leaves the
+  stream alone and is ordered against nothing. Callers who mint for ordering at a fixed
+  historic millisecond in a process that has also minted at the present used to get strictly
+  increasing ids and now get unordered ones; a batch is still strictly increasing within
+  itself. *(Rust, and through it every binding)*
 - **Python — the `cp314-cp314t` wheel is gone.** Each platform ships two wheels where it
   shipped three, `cp311-abi3` for CPython 3.11 and newer with the GIL and `cp315-abi3.abi3t`
   for 3.15 and newer with or without it: 17 wheels a release where 1.0.0 had 25. The
@@ -70,6 +112,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   run a `GITHUB_TOKEN` started), and a second request for a commit already staged is skipped
   with a notice; the Forge commit's step output is `revision`, which clears CodeQL's
   `actions/cache-poisoning/poisonable-step`; and `pypi-recovery.yml` is gone. *(repository only)*
+
+### Fixed
+
+- **A v7 batch past 64 MiB of random bytes no longer traps on WASI.** `getrandom` handed
+  the host the whole request in one `random_get`, and wasmtime refuses one past 64 MiB, so a
+  batch of more than about 11 million v7 ids (a `MAX_BATCH` draws 402 MB) aborted the
+  process. The draw now goes a 64 KiB chunk at a time on WASI; every other target is
+  unchanged. *(Rust, and the Go, Ruby and Swift WebAssembly builds, which link its
+  `wasm32-wasip1` archive)*
 
 ## [1.0.0] — 2026-10-25
 

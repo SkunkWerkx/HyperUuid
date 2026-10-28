@@ -19,10 +19,16 @@ use PhpBench\Attributes as Bench;
 #[Bench\OutputTimeUnit('microseconds', precision: 3)]
 final class UuidBench
 {
-    private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
+    /**
+     * The present, read once per iteration process in warmUp(), outside the timed revolutions:
+     * every call is then minted through the v7 stream. A fixed timestamp held long enough would
+     * split the stream forward until it failed with CounterExhaustedException.
+     */
+    private int $nowMs = 0;
 
     public function warmUp(): void
     {
+        $this->nowMs = (int) (microtime(true) * 1000);
         HyperUuid::newV4();
     }
 
@@ -38,7 +44,7 @@ final class UuidBench
 
     public function benchNewV7(): void
     {
-        HyperUuid::newV7(self::RFC_TEST_VECTOR_MS);
+        HyperUuid::newV7($this->nowMs);
     }
 
     /** Naive inline reference point, not RFC-complete — PHP core has no UUID facility to compare against. */

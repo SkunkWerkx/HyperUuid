@@ -5,9 +5,11 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.infra.Blackhole;
 
@@ -22,7 +24,16 @@ import org.openjdk.jmh.infra.Blackhole;
 public class GenerationBenchmarks {
 
     private static final UUID NAMESPACE = UuidGenerator.Namespaces.DNS;
-    private static final long TS = 1_645_557_742_000L;
+    // The current Unix millisecond, read once per measurement iteration, outside the timed
+    // region. A fixed timestamp would be clamped onto one millisecond of the v7 stream and,
+    // held for a whole fork, split it forward until it failed with the exhaustion error; one
+    // re-read every iteration keeps every call on the stream path at the present.
+    private long ts;
+
+    @Setup(Level.Iteration)
+    public void readClock() {
+        ts = System.currentTimeMillis();
+    }
 
     @Benchmark
     public void javaUtilRandomUuid(Blackhole bh) {
@@ -41,6 +52,6 @@ public class GenerationBenchmarks {
 
     @Benchmark
     public void newV7(Blackhole bh) {
-        bh.consume(UuidGenerator.newV7(TS));
+        bh.consume(UuidGenerator.newV7(ts));
     }
 }

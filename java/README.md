@@ -44,7 +44,7 @@ public class Main {
         System.out.println("sql is v7: " + UuidGenerator.isRfc(sqlOrdered, 7, UuidLayout.SQL_SERVER));
         System.out.println("sql timestamp: " + UuidGenerator.getTimestamp(sqlOrdered, UuidLayout.SQL_SERVER));
 
-        // One downcall, one random-bytes fetch, one counter reservation for the whole batch:
+        // One downcall, one random-bytes fetch, one stream reservation for the whole batch:
         UUID[] batch = UuidGenerator.newV7Batch(1000);
         System.out.println("batch: " + batch.length);
     }
@@ -61,7 +61,19 @@ Nothing loads until the first call that needs the core — `UuidGenerator.NIL`/`
 UUID id = UuidGenerator.isAvailable() ? UuidGenerator.newV7() : UUID.randomUUID();
 ```
 
-A batch is bounded by its own output: `count * 16` bytes has to be an array, so no batch can exceed `Integer.MAX_VALUE / 16` (134,217,727) UUIDs, and a negative count throws `IllegalArgumentException`. A version 7 batch is bounded tighter still, by its counter: `UuidGenerator.MAX_V7_BATCH` (`1 << 26`, 67,108,864) per call across `newV7Batch` and both `fillV7` forms. Every v7 batch up to that size is in strictly increasing order. The counter is one process-wide sequence, so a batch can straddle the point where it wraps back to 0, and the UUIDs from there on carry a timestamp 1 ms later than the one supplied rather than sorting before the ones ahead of them. A larger batch would have to reuse counter values within one millisecond, so it throws `IllegalArgumentException` naming the limit, before anything is allocated or written. The roll-forward orders one batch, not the stream: the next batch or `newV7` call in the same real millisecond starts its counter just past the wrap and carries the supplied timestamp, so it sorts before the previous batch's tail, which was stamped a millisecond later. Two single calls either side of the wrap in one millisecond sort in reverse the same way. It happens at most once per `MAX_V7_BATCH` UUIDs the process mints. Every batch failure that is the caller's (a timestamp out of range, a batch too large) is an `IllegalArgumentException`. Only a random-source failure is an `IllegalStateException`.
+A batch is bounded by its own output: `count * 16` bytes has to be an array, so no batch can exceed `Integer.MAX_VALUE / 16` (134,217,727) UUIDs, and a negative count throws `IllegalArgumentException`. A version 7 batch is bounded tighter still: `UuidGenerator.MAX_V7_BATCH` (`1 << 26`, 67,108,864) per call across `newV7Batch` and both `fillV7` forms, and a larger one throws `IllegalArgumentException` naming the limit, before anything is allocated or written.
+
+### Version 7 ordering
+
+Every v7 call, single or batch, reserves from one process-wide stream that is re-seeded at random whenever a timestamp moves it forward. A single call consumes one of a millisecond's 2^20 steps and a batch of n consumes ceil(n/64). For timestamps up to 2^44 − 2 (the year 2527), with S the newest timestamp among the stream reservations that have succeeded:
+
+- **Ordering.** A call whose timestamp is within 10 s of S either throws `IllegalStateException` (exhaustion, below) or reserves from the stream, and its UUIDs then sort strictly after every UUID from a reservation that completed before it began, on any thread. Overlapping reservations are ordered by reservation, which need not be completion order. A batch that crosses a split into the next millisecond is still strictly increasing.
+- **Embedded timestamp.** At most 11 s ahead of the one supplied: a timestamp up to 11 s behind the stream is clamped onto the stream's millisecond, and a split's tail carries the millisecond after it (at most 1000 ms ahead of the supplied timestamp). An out-of-stream call carries its own timestamp exactly.
+- **Backfill and future-dated calls.** A timestamp more than 11 s behind the stream, or past 2^44 − 2, is minted at itself, outside the stream: it succeeds, leaves the stream alone and is ordered against nothing. One call far in the future therefore advances the stream, and until the clock catches up, real-time calls fall behind it and are minted out of stream, unordered among themselves. A clock that steps back by more than 11 s does the same.
+- **Exhaustion.** A split that would take the stream more than 1000 ms ahead of the supplied timestamp, or past 2^44 − 2, throws `IllegalStateException` with a message beginning `version 7 counter exhausted`, before anything is reserved. It is a state error, not an argument error: a call whose timestamp is past the stream's millisecond succeeds.
+- **What the counter leaks.** Only consumed steps, and only for stream-generated values. Within one millisecond the step difference between two values is exactly the number of steps consumed between them. Across a real advance the re-seed hides the count.
+
+Every failure that is the caller's (a timestamp out of range, a batch too large) is an `IllegalArgumentException`. A random-source failure and stream exhaustion are `IllegalStateException`.
 
 ## Native access
 
@@ -80,8 +92,8 @@ The honest answer for v5 and v7 is that there's no comparison to make — the JD
 
 1. **No v5 at all.** `UUID.nameUUIDFromBytes()` is MD5-based — that's RFC 9562 v3, not v5. If you need deterministic namespace-based UUIDs that agree with every other RFC 9562 implementation (SHA-1, not MD5), the JDK has never had a built-in way to do it. This binding's v5 output is verified in CI to match RFC 9562's own Appendix A.4 test vector and Python's `uuid.uuid5` byte-for-byte.
 2. **No v7 in any released JDK.** A v7 factory (`UUID.ofEpochMillis`) is in progress upstream — [JDK-8357251](https://bugs.openjdk.org/browse/JDK-8357251) / [JDK-8334015](https://bugs.openjdk.org/browse/JDK-8334015) — but unshipped as of any JDK release. This binding gives you one today.
-3. **A real monotonic counter for v7.** A process-global counter (RFC 9562 §6.2 Method 1) guarantees strict creation order under concurrency, across both individual and batch calls.
-4. **Batch generation.** `newV7Batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch, instead of paying per-item native-call overhead N times. `java.util.UUID` has no bulk generation API at all.
+3. **A real monotonic stream for v7.** A process-global stream (RFC 9562 §6.2 Method 1) guarantees strict creation order under concurrency, across both individual and batch calls (see [Version 7 ordering](#version-7-ordering)).
+4. **Batch generation.** `newV7Batch(count)` shares one timestamp capture, one random-bytes fetch, and one stream reservation across the whole batch, instead of paying per-item native-call overhead N times. `java.util.UUID` has no bulk generation API at all.
 5. **Cross-language consistency.** The same Rust core mints v5/v7 UUIDs for every other binding in this repo — a Java service and a Python or Go service produce byte-identical v5 UUIDs for the same `(namespace, name)`, which no per-language reimplementation can structurally guarantee.
 6. **SQL Server byte ordering.** `UuidGenerator.v7ToSqlOrder(id3)` converts a version 7 UUID to an RFC 9562 version 8 (§5.8, the version for custom layouts) that `System.Data.SqlTypes.SqlGuid` comparison — and therefore T-SQL `ORDER BY` on a `uniqueidentifier` column — sorts by creation order. The 8 and the RFC variant sit where SQL Server's text form shows them, and the other 122 bits hold all of the version 7's, so every version 7 converts and `v7FromSqlOrder` gives back the exact original. Both directions throw `IllegalArgumentException` for a value of the wrong version: anything but an RFC 9562 version 7 going in, anything without the layout's 8 and variant coming back. The layout is computed in the native Rust core and verified there (and independently against the real `SqlGuid` comparator in the C# binding's own test suite) rather than reimplemented in Java. Bind the result as bytes, never with `setObject(UUID)`: [Binding to SQL Server](#binding-to-sql-server) has why and how.
 
@@ -105,10 +117,12 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 
 | Benchmark | Mean | B/op |
 | --- | ---: | ---: |
-| `newV7` x1000 individually | 34.9 µs | 32,000 |
-| `newV7Batch(1000)` | 9.3 µs | 52,104 |
-| `fillV7(UUID[])` into an existing array | 12.3 µs | 48,088 |
-| `fillV7(byte[])` into an existing buffer | **3.6 µs** | **0** |
+| `newV7` x1000 individually † | 34.9 µs | 32,000 |
+| `newV7Batch(1000)` † | 9.3 µs | 52,104 |
+| `fillV7(UUID[])` into an existing array † | 12.3 µs | 48,088 |
+| `fillV7(byte[])` into an existing buffer † | **3.6 µs** | **0** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 The middle two rows are the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation is not the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
 
@@ -173,7 +187,9 @@ Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`
 | `UUID.randomUUID()` | 160.6 ns | 128 | baseline |
 | `UuidGenerator.newV4()` | 31.5 ns | 32 | **5.1x faster** |
 | `UuidGenerator.newV5()` | 57.3 ns | 64 | **2.8x faster** |
-| `UuidGenerator.newV7()` | 35.8 ns | 32 | **4.5x faster** |
+| `UuidGenerator.newV7()` † | 35.8 ns | 32 | **4.5x faster** |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 **Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall but the version probe's is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
@@ -183,24 +199,28 @@ Batch generation vs. an equivalent loop:
 
 | Method | 1000 individual calls | `*Batch(1000)` | Speedup |
 | --- | ---: | ---: | ---: |
-| v7 | 34.9 µs | 9.3 µs | **3.7x** |
+| v7 † | 34.9 µs | 9.3 µs | **3.7x** |
 
-The batch multiplier is modest for the best reason available: the individual calls are cheap, so there is little waste left to amortize. The `byte[]` fill is where the rest goes: 3.6 µs, 9.7x over the loop.
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
+
+The batch multiplier is modest for the best reason available: the individual calls are cheap, so there is little waste left to amortize. The `byte[]` fill is where the rest goes: 3.6 µs, 9.7x over the loop. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 Reproduce: `./gradlew :benchmarks:jmh`.
 
 ## AOT
 
-Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — the two SQL-order conversions share `(ADDRESS)int` with `uuid_new_v4` and `uuid_variant`, and a signature missing from the file is enough to build clean and crash at runtime; the generators, the inspection and the timestamp exports fill eight more, and the version probe's `()int`, the one downcall not linked critical, is a tenth entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: 57 ns per `newV7(long)` there (the table below).
+Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — the two SQL-order conversions share `(ADDRESS)int` with `uuid_new_v4` and `uuid_variant`, and a signature missing from the file is enough to build clean and crash at runtime; the generators, the inspection and the timestamp exports fill eight more, and the version probe's `()int`, the one downcall not linked critical, is a tenth entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: 57 ns per `newV7(long)` there (the table below). (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 A native image still loads the core's shared library at startup, extracted from the jar as on the JVM, rather than linking the static archive into the executable the way C# Native AOT and Go do. Linking it in works on Linux, but only through GraalVM's internal builder API, with separate linker handling for each OS, so it is deliberately not done; the forge's [levers not pulled](https://github.com/SkunkWerkx/.github#levers-deliberately-not-pulled) table has the full reasoning, the proven recipe, and what would change the answer.
 
-**What it costs.** There is no JMH to run in an image, so these rows are a hand loop — warm up, then one million `newV7(long)` calls and three thousand of each fill, best of five rounds — built into a native image with the metadata the jar ships, on linux-x64 (an Intel Core i9-11900H), one session. The first row is the same loop on the JVM. Its `newV7(long)` and byte-fill columns land on the JMH figures above, which is what makes the loop trustworthy for the row JMH cannot produce; its `UUID[]` fill does not (7.9 µs against JMH's 12.3 µs), so that column compares the image with this loop on the JVM, not with JMH:
+**What it costs.** There is no JMH to run in an image, so these rows are a hand loop — warm up, then one million `newV7(long)` calls and three thousand of each fill, best of five rounds — built into a native image with the metadata the jar ships, on linux-x64 (an Intel Core i9-11900H), one session. The first row is the same loop on the JVM. Its `newV7(long)` and byte-fill columns land on the JMH figures above, which is what makes the loop trustworthy for the row JMH cannot produce; its `UUID[]` fill does not (7.9 µs against JMH's 12.3 µs), so that column compares the image with this loop on the JVM, not with JMH (measured before the per-millisecond re-seed, core change, 2026-10-27):
 
 | Runtime, hand loop | `newV7(long)` | `fillV7(byte[16000])` | `fillV7(UUID[1000])` |
 | --- | ---: | ---: | ---: |
-| FFM downcall, GraalVM CE 25.4 JVM | 38 ns | 3.5 µs | 7.9 µs |
-| FFM downcall, Native Image | 57 ns | 3.7 µs | 19.5 µs |
+| FFM downcall, GraalVM CE 25.4 JVM † | 38 ns | 3.5 µs | 7.9 µs |
+| FFM downcall, Native Image † | 57 ns | 3.7 µs | 19.5 µs |
+
+† Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
 A native image costs more than the JVM, up to about two and a half times, which is the ordinary price of an ahead-of-time compiler without a profile. The byte fill is the exception, level in both, because nearly all of it is native work.
 

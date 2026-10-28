@@ -7,6 +7,11 @@ import XCTest
 /// minted at run time, by this library and by Foundation; ``CorpusTests`` pins the fixed
 /// vectors.
 final class InspectionTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        _ = TestStream.primed
+    }
+
     private let ms: UInt64 = 1_645_557_742_000
 
     func testFoundationAndLibraryValuesReportTheirVersionAndTheRfcVariant() throws {
@@ -178,7 +183,8 @@ final class InspectionTests: XCTestCase {
     }
 
     // Exactly the counter space: 1 GiB of bytes, in strictly increasing order end to end, and
-    // at most a millisecond past the supplied timestamp (the roll-forward over the wrap).
+    // exactly the supplied timestamp: a fixed old timestamp is minted out of stream, so it never
+    // splits into the next millisecond.
     func testAV7BatchOfExactlyTheCounterSpaceIsStrictlyIncreasing() throws {
         try skipUnlessGiBTestsCanRun()
         let count = UuidGenerator.maxV7Batch
@@ -194,7 +200,7 @@ final class InspectionTests: XCTestCase {
         }
         XCTAssertTrue(increasing)
         let last = UUID(rfcBytes: Array(UnsafeRawBufferPointer(rebasing: buffer[(count - 1) * 16..<count * 16])))
-        XCTAssertTrue((ms...ms + 1).contains(try UuidGenerator.v7UnixMillis(last)))
+        XCTAssertEqual(try UuidGenerator.v7UnixMillis(last), ms)
     }
 
     // The two 1 GiB tests: skipped under WASI, whose 32-bit linear memory a gigabyte would

@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
@@ -19,6 +20,14 @@ import org.junit.jupiter.api.function.Executable;
  */
 class InspectionTest {
     private static final long MS = 1_645_557_742_000L;
+
+    // Moves the v7 stream to the present, so the fixed-vector calls below are minted out of it
+    // and carry their timestamp exactly whatever the test order. The rule: no test
+    // supplies more than now + 500 ms, and current-time bounds allow + 1000 ms.
+    @BeforeAll
+    static void primeStream() {
+        UuidGenerator.newV7();
+    }
 
     @Test
     void jdkAndLibraryValuesReportTheirVersionAndTheRfcVariant() {
@@ -240,19 +249,25 @@ class InspectionTest {
         assertTrue(UuidGenerator.batchFailure(1, "uuid_new_v7_batch", 7, "ts") instanceof IllegalStateException);
     }
 
-    // Exactly the counter space: 1 GiB of bytes, in strictly increasing order end to end, and
-    // at most a millisecond past the supplied timestamp (the roll-forward over the wrap).
+    // Exactly the counter space: 1 GiB of bytes, in strictly increasing order end to end. Minted
+    // at the present, where the stream is: at a fixed old timestamp the call is out of stream and
+    // unordered. A batch this size takes 2^20 steps: on an advance it fits at the supplied
+    // millisecond, on a clamp it splits to the stream's next one, and the core refuses a split
+    // more than 1000 ms ahead of the supplied timestamp, so the last item is within 1000 ms.
     @Test
     void aV7BatchOfExactlyTheCounterSpaceIsStrictlyIncreasing() {
+        long now = System.currentTimeMillis();
         byte[] bytes = new byte[UuidGenerator.MAX_V7_BATCH * 16];
-        UuidGenerator.fillV7(bytes, MS);
+        UuidGenerator.fillV7(bytes, now);
         for (int i = 1; i < UuidGenerator.MAX_V7_BATCH; i++) {
             int at = i * 16;
             if (Arrays.compareUnsigned(bytes, at - 16, at, bytes, at, at + 16) >= 0) {
                 throw new AssertionError("item " + i + " does not sort after item " + (i - 1));
             }
         }
+        long first = UuidGenerator.v7UnixMillis(RfcBytes.fromRfcBytes(bytes, 0));
+        assertTrue(first >= now && first <= now + 11_000, "first item at " + first + ", supplied " + now);
         long last = UuidGenerator.v7UnixMillis(RfcBytes.fromRfcBytes(bytes, bytes.length - 16));
-        assertTrue(last == MS || last == MS + 1, "last item at " + last);
+        assertTrue(last >= now && last <= now + 1_000, "last item at " + last + ", supplied " + now);
     }
 }

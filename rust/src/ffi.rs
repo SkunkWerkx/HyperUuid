@@ -8,7 +8,8 @@
 //! Return codes: `0` success, `1` random source failure, `2` timestamp out of range, `3` a
 //! batch too large to address (`count * 16` overflows `usize`, which only a 32-bit target can
 //! reach, and where no buffer that size can exist), `4` a version 7 batch larger than the
-//! 26-bit counter space, `5` a SQL-order conversion handed a value of the wrong version.
+//! 26-bit counter space, `5` a SQL-order conversion handed a value of the wrong version, `6` a
+//! version 7 stream that cannot advance (counter exhausted).
 //!
 //! Enum codes reserve 0 as "unspecified", so a code a binding failed to set is detectable:
 //! layout `1` RFC 9562, `2` SQL Server; variant `1` NCS, `2` RFC 9562, `3` Microsoft,
@@ -179,7 +180,8 @@ pub extern "C" fn uuid_get_timestamp(
 /// Writes a time-sortable UUID version 7 (RFC 9562 §6.2) to `out_ptr` (16 bytes), embedding
 /// `unix_millis` (milliseconds since the Unix epoch, supplied by the host — the guest has
 /// no clock of its own).
-/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range.
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
+/// 6 if the version 7 stream cannot advance (see [`v7::new_v7`]).
 #[unsafe(no_mangle)]
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
@@ -194,6 +196,7 @@ pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
         // Only a batch has a buffer to be short of; mapped anyway rather than panicking.
         Err(v7::NewV7Error::BufferTooSmall) => 3,
         Err(v7::NewV7Error::BatchTooLarge) => 4,
+        Err(v7::NewV7Error::CounterExhausted) => 6,
     }
 }
 
@@ -221,11 +224,12 @@ pub extern "C" fn uuid_v7_unix_millis_in(uuid_ptr: *const u8, layout_code: u32) 
 }
 
 /// Writes `count` time-sortable UUID version 7 values to `out_ptr` (`count * 16` bytes),
-/// sharing one `unix_millis` timestamp capture and one contiguous block of the monotonic
-/// counter. A `count` of 0 is a no-op success. Items past the counter's wrap are stamped
-/// `unix_millis + 1`, so the batch is always in order (see [`v7::new_v7_batch`]).
+/// sharing one `unix_millis` timestamp capture and one contiguous reservation of the version 7
+/// stream. A `count` of 0 is a no-op success. Items past the end of the stream's millisecond
+/// are stamped the next one, so the batch is always in order (see [`v7::new_v7_batch`]).
 /// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
-/// 4 if `count` exceeds [`v7::MAX_BATCH`] (2^26).
+/// 3 if `count * 16` overflows `usize`, 4 if `count` exceeds [`v7::MAX_BATCH`] (2^26), 6 if the
+/// stream cannot advance. On 1 and 6 the front of the buffer may hold entropy.
 #[unsafe(no_mangle)]
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut u8) -> i32 {
@@ -246,6 +250,7 @@ pub extern "C" fn uuid_new_v7_batch(unix_millis: u64, count: u32, out_ptr: *mut 
         Err(v7::NewV7Error::TimestampOutOfRange) => 2,
         Err(v7::NewV7Error::BufferTooSmall) => 3,
         Err(v7::NewV7Error::BatchTooLarge) => 4,
+        Err(v7::NewV7Error::CounterExhausted) => 6,
     }
 }
 

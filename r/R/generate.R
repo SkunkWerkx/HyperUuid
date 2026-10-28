@@ -25,9 +25,19 @@ uuid_v4_raw <- function(n = 1) {
 
 #' Generate time-ordered (version 7) UUIDs
 #'
-#' A scalar `time` generates the whole request as one batch sharing a monotonic counter, so
-#' the ids are strictly increasing; at most [uuid_v7_max_batch] per call. A `time` of
+#' A scalar `time` generates the whole request as one batch, one contiguous run of the
+#' stream, so the ids are strictly increasing; at most [uuid_v7_max_batch] per call. A `time` of
 #' length `n` generates one id per element.
+#'
+#' Every call draws from one process-wide stream, so ids made with a `time` within 10 s of
+#' the newest `time` the stream has reserved at are ordered after every id from a stream
+#' reservation that completed before the call began, even across calls and threads. The
+#' stream may run up to 1000 ms ahead of the `time` you pass; a request that would take it
+#' further, or past its last millisecond (2^44 - 2), is an error
+#' (`version 7 counter exhausted: ...`). It is a state error: it reserves nothing, and a call
+#' whose `time` is past the stream's millisecond succeeds. A `time` more than 11 s behind
+#' the stream, or past 2^44 - 2 ms, is minted at itself, outside the stream and unordered.
+#' See the root README, "v7 ordering, precisely".
 #'
 #' `time` is converted to whole Unix milliseconds as `floor(seconds * 1000)`; a `Date` is
 #' midnight UTC. `time` is an argument, so a missing or non-finite element, a time before
