@@ -34,6 +34,10 @@ test('the fallback literals equal the native values', () => {
 
 // Driving the real stream to its ceiling poisons the process-wide v7 state, so the script runs
 // in a process of its own: the same runtime as this one (Node or Bun) loading the same package.
+// Filling the stream's last millisecond mints up to 2^26 ids, seconds on a slow host and past
+// Bun's 5 s default timeout (Node's runner has none). Bun applies neither node:test's `timeout`
+// option nor bunfig's, so the file raises Bun's default itself.
+if (process.versions.bun) require('bun:test').setDefaultTimeout(120_000)
 const EXHAUSTION_SCRIPT = `
 const assert = require('node:assert/strict')
 const api = require(process.env.HYPERUUID_INDEX)
