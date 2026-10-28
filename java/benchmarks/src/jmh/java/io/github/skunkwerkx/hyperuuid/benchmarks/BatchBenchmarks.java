@@ -25,6 +25,11 @@ public class BatchBenchmarks {
     // re-read every iteration keeps every call on the stream path at the present.
     private long ts;
 
+    @Setup(Level.Trial)
+    public void requireExpectedBackend() {
+        BackendCheck.require();
+    }
+
     @Setup(Level.Iteration)
     public void readClock() {
         ts = System.currentTimeMillis();

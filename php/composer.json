@@ -15,7 +15,7 @@
         "source": "https://github.com/SkunkWerkx/HyperUuid"
     },
     "require": {
-        "php": ">=8.2",
+        "php": ">=8.3",
         "ext-ffi": "*"
     },
     "require-dev": {

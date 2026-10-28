@@ -104,6 +104,7 @@ jobs:
       # exercises the real surface — including the non-throwing Try* path and the raw-byte
       # span transforms — so this covers the AOT-sensitive parts, not just NewV4().
       csharp_aot_project: csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj
+      csharp_aot_frameworks: "net10.0 net11.0"
       # The forge's ruby_version default (4.0, the current release) is the primary ABI; this
       # adds a second Magnus build+suite against 3.4 so each platform gem can ship both. A
       # Magnus extension is bound to one Ruby minor — unlike PyO3's abi3 wheels, which is why
@@ -114,6 +115,9 @@ jobs:
       # then and 3.4 consumers fall back to the universal Fiddle gem, which is exactly what
       # it's there for.
       ruby_compat_version: "3.4"
+      # The floor composer.json declares; the musl job runs the PHP suite on it beside
+      # php_version. Explicit because the Forge's default (8.2) serves the siblings.
+      php_floor_version: "8.3"
       # attest_native defaults to true in the forge — each native library gets SLSA
       # provenance tying it to this run and commit. It matters here specifically because the
       # Rust build is deterministic for one toolchain and build image but NOT bit-reproducible
@@ -121,14 +125,20 @@ jobs:
       # hash and size; csharp/README.md has the measurement), so rebuild-and-compare isn't a
       # check a consumer can actually perform. The permissions block above is what makes it
       # work; without those scopes the step fails rather than silently skipping.
-      # .NET 11 is HyperUuid's floor, on every platform including Blazor WebAssembly; the forge
-      # installs the SDK global.json names.
+      # The suite and the AOT smoke test run on net10.0 and net11.0 on every desktop and musl
+      # leg: the forge installs the global.json SDK plus the 10.0 runtime and publishes once
+      # per framework. Blazor WebAssembly, iOS, Mac Catalyst and Android stay .NET 11 (HYPERUUID003).
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
+      csharp_extra_runtime: "10.0"
       # A jar has no per-platform package selection like NuGet's RID folders, and the
       # csproj's runtimes/**/native wildcard stages at pack time — so both bindings take
       # the pipeline's explicit per-leg placement for in-repo testing.
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
       java_resources_dir: java/src/main/resources/native
+      # JDK 21 is the jar's floor (JNI on 21–24), shipped beside the primary 25; it reaches
+      # EOL at Temurin on 2029-12-31, then this input and `java_jni` go.
+      java_jni: true
+      jdk_floor_version: "21"
       # The TypeScript addon (uploaded and attested as node-{rid} for release.yml's npm-pack)
       # and R CMD check --as-cran. Both default false in the Forge until the siblings carry
       # these bindings; the Node, Bun and R versions are the Forge's defaults.
@@ -169,7 +179,9 @@ jobs:
   # into, attested and uploaded as pypi-wheels-{rid}. release.yml publishes these exact
   # files. A wheel that cannot be installed therefore fails the pull request; while they
   # were built in release.yml, 0.4.0's osx-x64 wheel failed its first install with four
-  # registries already published.
+  # registries already published. With `sdist` in `.github/hyper.json`, the source
+  # distribution too: built, `pip install`ed at exactly `rust-version` on manylinux2014 and
+  # Alpine (one minor lower must fail), attested and uploaded as `pypi-wheels-sdist`.
   build-wheels:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
     # Same two scopes build-native hands down, for the same reason: the forge attests each
@@ -193,8 +205,9 @@ jobs:
   # backend, clippy also runs the Android configuration, whose entropy path (entropy.rs:
   # ChaCha20 for batches, no pool) nothing else compiles, and `extra_features: uuid1` with the
   # `no_panic_command` override put the `uuid` interop feature through clippy, the MSRV check
-  # and the no-panic link. Static analysis only, so none of it
-  # waits on build-native.
+  # and the no-panic link, and `big_endian` runs the core's suite, corpus included, on s390x
+  # under QEMU, and `lint_java_jni` runs the JNI crate's std tests and its no_std build.
+  # None of it waits on build-native.
   check-core:
     uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master
     permissions:
@@ -203,9 +216,11 @@ jobs:
       no_std_rustflags: --cfg getrandom_backend="custom"
       extra_features: uuid1
       no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1
+      big_endian: s390x-unknown-linux-gnu
       clippy_targets: aarch64-linux-android
       lint_node: true
       lint_r: true
+      lint_java_jni: true
 
 
   # iOS and Mac Catalyst, for the three bindings that reach them. Neither platform loads a
@@ -222,7 +237,7 @@ jobs:
   #    XCFramework over the committed one: with the XCFramework present the manifest declares
   #    a second binary target and puts a platform condition on the first, which is the
   #    package a macOS consumer resolves from a tag.
-  #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/net11.0/HyperUuid.targets.
+  #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/net10.0/HyperUuid.targets.
   #    HyperUuid.AppleSmokeTest is the Native AOT smoke test's SmokeTest.Run() as an app: run as a
   #    Mac Catalyst process, installed and launched in the simulator, and built for an iOS
   #    device with signing off. No runner has a device, so that last one is proved as far as
@@ -418,13 +433,39 @@ jobs:
           done
           echo "the iOS device app defines the core's exports"
 
+      # The net10.0 apps the targets file refuses; the three net11.0 builds above are the
+      # control, since they import the same file and build. The probe builds an Exe because
+      # the Apple SDK's Xcode check (_ValidateXcodeVersion) runs only for one: a class library
+      # builds on any Xcode, so without OutputType=Exe the probe would pass with the gate gone,
+      # while with it the gate must win over the Xcode error (proven both ways locally on
+      # Xcode 27.1, where a gate-less net10.0-ios Exe fails "requires Xcode 26.0").
+      - name: C# — net10.0-ios and net10.0-maccatalyst stop with HYPERUUID003
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          gate=csharp/HyperUuid.PlatformGateTest/HyperUuid.PlatformGateTest.csproj
+          gate_dir=csharp/HyperUuid.PlatformGateTest
+          for probe in "net10.0-ios|iOS" "net10.0-maccatalyst|Mac Catalyst"; do
+            tfm="${probe%%|*}"
+            platform="${probe#*|}"
+            rm -rf "${gate_dir:?}/bin" "${gate_dir:?}/obj"
+            if dotnet build "$gate" -p:GateFramework="$tfm" -p:OutputType=Exe -tl:off > "gate-$tfm.log" 2>&1; then
+              echo "::error::$tfm built; the gate did not stop it"; cat "gate-$tfm.log"; exit 1
+            fi
+            grep -qF "error HYPERUUID003" "gate-$tfm.log" \
+              || { echo "::error::$tfm failed, but not with HYPERUUID003"; cat "gate-$tfm.log"; exit 1; }
+            grep -qF "$platform needs .NET 11 or later: target ${tfm/net10.0/net11.0}." "gate-$tfm.log" \
+              || { echo "::error::$tfm: the HYPERUUID003 text does not name $platform"; cat "gate-$tfm.log"; exit 1; }
+            echo "$tfm stops with HYPERUUID003"
+          done
+
   # Android, in an emulator, for the three bindings that reach it: C#, Go and Swift.
   #
   # C#: HyperUuid.AndroidSmokeTest, which runs the Native AOT smoke test's SmokeTest.Run()
   # from an Activity, against the package as a MAUI app would take it — packed here from
   # build-android's shared libraries and build-static's static-libs archives, and
   # restored from a local folder, so that what is proven is the .nupkg's own layout (NuGet's
-  # runtimes/{rid}/native/ into the APK's lib/{abi}/, and build/net11.0/HyperUuid.targets
+  # runtimes/{rid}/native/ into the APK's lib/{abi}/, and build/net10.0/HyperUuid.targets
   # handing a Native AOT publish its archive), not a project reference's.
   #
   # Four APKs: CoreCLR (.NET 11's Android runtime; Mono is not supported there) and
@@ -522,6 +563,22 @@ jobs:
           done
           ls -l apks
 
+      # The same file reaches the four APKs above from the package, and they build on net11.0
+      # (the control); on net10.0 it stops the build.
+      - name: C# — net10.0-android stops with HYPERUUID003
+        run: |
+          set -euo pipefail
+          gate_dir=csharp/HyperUuid.PlatformGateTest
+          rm -rf "${gate_dir:?}/bin" "${gate_dir:?}/obj"
+          if dotnet build csharp/HyperUuid.PlatformGateTest/HyperUuid.PlatformGateTest.csproj -p:GateFramework=net10.0-android -tl:off > gate-android.log 2>&1; then
+            echo "::error::net10.0-android built; the gate did not stop it"; cat gate-android.log; exit 1
+          fi
+          grep -qF "error HYPERUUID003" gate-android.log \
+            || { echo "::error::net10.0-android failed, but not with HYPERUUID003"; cat gate-android.log; exit 1; }
+          grep -qF "Android needs .NET 11 or later: target net11.0-android." gate-android.log \
+            || { echo "::error::the HYPERUUID003 text does not name Android and net11.0-android"; cat gate-android.log; exit 1; }
+          echo "net10.0-android stops with HYPERUUID003"
+
       - name: Inspect the APKs
         run: |
           set -euo pipefail
@@ -581,6 +638,165 @@ jobs:
             .github/scripts/android_device_test.sh stage/go-x86_64 ./hyperuuid.test -test.v -test.short
             .github/scripts/android_device_test.sh stage/swift-x86_64 ./HyperUuidPackageTests.xctest
 
+  # The .NET 10 half of the C# package, on Linux: packed from this run's libraries and taken
+  # back out of a local feed, so that what is proven is the .nupkg's own layout. Four things:
+  #  * the layout (lib/net10.0 and lib/net11.0, the targets file under build/net10.0 only);
+  #  * the Native AOT smoke test published and run from the package on net10.0 and net11.0,
+  #    with the core linked in (no libhyperuuid.so beside the executable, none NEEDED, and a
+  #    libc.so NEEDED line as the positive control that the readelf dump lists dependencies);
+  #  * its control: the same package with build/ and buildTransitive/ stripped publishes a
+  #    libhyperuuid.so beside the executable, so the check above can see a lost static link;
+  #  * the floor (net9.0 does not restore) and the gate (HYPERUUID003 for Blazor WebAssembly
+  #    on net10.0; net11.0 passes it). The net11.0 half is evaluated, and built only to show
+  #    HYPERUUID002, because this job installs no wasm workload.
+  # The runner image's SDK is not assumed to be the only one: the job logs which are there.
+  test-nuget-package:
+    needs: [build-static, build-native]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      SMOKE_PROJECT: csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj
+      SMOKE_DIR: csharp/HyperUuid.AotSmokeTest
+      GATE_PROJECT: csharp/HyperUuid.PlatformGateTest/HyperUuid.PlatformGateTest.csproj
+      GATE_DIR: csharp/HyperUuid.PlatformGateTest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-linux-x64
+          path: artifacts
+
+      # Over the checkout, laid out by repository path: the archive lands in
+      # csharp/HyperUuid/staticlibs/linux-x64/.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: static-libs
+          path: .
+
+      - name: Stage runtimes/linux-x64/native/
+        run: |
+          set -euo pipefail
+          mkdir -p csharp/HyperUuid/runtimes/linux-x64/native
+          cp artifacts/libhyperuuid.so csharp/HyperUuid/runtimes/linux-x64/native/
+          [ -f csharp/HyperUuid/staticlibs/linux-x64/libhyperuuid.a ] \
+            || { echo "::error::static-libs has no csharp/HyperUuid/staticlibs/linux-x64/libhyperuuid.a"; exit 1; }
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Which SDKs are here
+        run: |
+          set -euo pipefail
+          dotnet --version
+          dotnet --list-sdks
+
+      - name: Pack HyperUuid into a local feed and check its layout
+        run: |
+          set -euo pipefail
+          version="0.0.0-pkg.${{ github.run_id }}"
+          echo "HYPERUUID_VERSION=$version" >> "$GITHUB_ENV"
+          echo "HYPERUUID_FEED=$RUNNER_TEMP/feed" >> "$GITHUB_ENV"
+          echo "NUGET_PACKAGES=$RUNNER_TEMP/nuget-packages" >> "$GITHUB_ENV"
+          dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o "$RUNNER_TEMP/feed" -p:Version="$version"
+          unzip -l "$RUNNER_TEMP/feed/HyperUuid.$version.nupkg" | tee "$RUNNER_TEMP/nupkg.txt"
+          for path in lib/net10.0/HyperUuid.Managed.dll lib/net11.0/HyperUuid.Managed.dll \
+                      build/net10.0/HyperUuid.targets buildTransitive/net10.0/HyperUuid.targets \
+                      runtimes/linux-x64/native/libhyperuuid.so staticlibs/linux-x64/libhyperuuid.a; do
+            grep -q " $path\$" "$RUNNER_TEMP/nupkg.txt" || { echo "::error::the package has no $path"; exit 1; }
+          done
+          if grep -q " build/net11.0/\| buildTransitive/net11.0/" "$RUNNER_TEMP/nupkg.txt"; then
+            echo "::error::the package carries a build/net11.0 or buildTransitive/net11.0 folder; the targets file is under net10.0 only"
+            exit 1
+          fi
+
+      # Package mode: the smoke test takes the .nupkg from the feed, so NuGet makes the
+      # targets import. One TFM at a time (without -f a multi-targeted publish fails with
+      # NETSDK1129), from a clean tree, since the two share bin/ and obj/.
+      - name: Native AOT from the package, on net10.0 and net11.0
+        run: |
+          set -euo pipefail
+          for tfm in net10.0 net11.0; do
+            rm -rf "${SMOKE_DIR:?}/bin" "${SMOKE_DIR:?}/obj"
+            dotnet publish "$SMOKE_PROJECT" -c Release -f "$tfm" -r linux-x64 -p:PublishAot=true \
+              -p:HyperUuidVersion="$HYPERUUID_VERSION" -p:RestoreAdditionalProjectSources="$HYPERUUID_FEED" \
+              -o "aot-out/$tfm"
+            if [ -e "aot-out/$tfm/libhyperuuid.so" ]; then
+              echo "::error::$tfm: aot-out/$tfm carries libhyperuuid.so; the core should be linked into the executable"
+              exit 1
+            fi
+            # readelf writes to a file, so a missing or unreadable executable fails the step
+            # (set -e) instead of reading as "nothing NEEDED"; the libc line is the positive
+            # control that the dump really lists dynamic dependencies.
+            readelf -d "aot-out/$tfm/HyperUuid.AotSmokeTest" > "aot-needed-$tfm.txt"
+            grep -q 'NEEDED.*libc\.so' "aot-needed-$tfm.txt" \
+              || { echo "::error::$tfm: readelf lists no NEEDED libc.so; the dump cannot be trusted"; cat "aot-needed-$tfm.txt"; exit 1; }
+            if grep -q 'NEEDED.*libhyperuuid\.so' "aot-needed-$tfm.txt"; then
+              echo "::error::$tfm: the executable needs libhyperuuid.so at run time"
+              exit 1
+            fi
+            "aot-out/$tfm/HyperUuid.AotSmokeTest" | tee "aot-run-$tfm.log"
+            grep -q "ALL NATIVE AOT CHECKS PASSED" "aot-run-$tfm.log"
+            echo "$tfm: the core is linked in and the smoke test passes"
+          done
+
+      # The control for the step above: without build/ and buildTransitive/ nothing hands
+      # the publish its archive, and it quietly falls back to the shared library beside the
+      # executable. If it did not, the check above could not see a lost static link.
+      - name: Control — a package without its targets falls back to the shared library
+        run: |
+          set -euo pipefail
+          nobuild="$HYPERUUID_VERSION.nobuild"
+          dotnet pack csharp/HyperUuid/HyperUuid.csproj -c Release -o "$HYPERUUID_FEED" -p:Version="$nobuild"
+          zip -d "$HYPERUUID_FEED/HyperUuid.$nobuild.nupkg" 'build/*' 'buildTransitive/*'
+          rm -rf "${SMOKE_DIR:?}/bin" "${SMOKE_DIR:?}/obj"
+          dotnet publish "$SMOKE_PROJECT" -c Release -f net10.0 -r linux-x64 -p:PublishAot=true \
+            -p:HyperUuidVersion="$nobuild" -p:RestoreAdditionalProjectSources="$HYPERUUID_FEED" \
+            -o aot-out/nobuild
+          [ -e aot-out/nobuild/libhyperuuid.so ] \
+            || { echo "::error::the check in the previous step cannot see a lost static link"; exit 1; }
+          echo "without its targets the publish carries libhyperuuid.so beside the executable"
+
+      - name: The floor is .NET 10
+        run: |
+          set -euo pipefail
+          rm -rf "${SMOKE_DIR:?}/bin" "${SMOKE_DIR:?}/obj"
+          if dotnet restore "$SMOKE_PROJECT" -p:TargetFrameworks=net9.0 \
+               -p:HyperUuidVersion="$HYPERUUID_VERSION" -p:RestoreAdditionalProjectSources="$HYPERUUID_FEED" > restore-net9.log 2>&1; then
+            echo "::error::net9.0 restored the package; the floor is net10.0"; cat restore-net9.log; exit 1
+          fi
+          grep -q NU1202 restore-net9.log \
+            || { echo "::error::the net9.0 restore failed, but not with NU1202"; cat restore-net9.log; exit 1; }
+          echo "net9.0 does not restore the package (NU1202)"
+
+      - name: Blazor WebAssembly needs .NET 11
+        run: |
+          set -euo pipefail
+          rm -rf "${GATE_DIR:?}/bin" "${GATE_DIR:?}/obj"
+          if dotnet build "$GATE_PROJECT" -p:GateFramework=net10.0 -p:RuntimeIdentifier=browser-wasm -tl:off > gate-wasm-net10.log 2>&1; then
+            echo "::error::net10.0 + browser-wasm built; the gate did not stop it"; cat gate-wasm-net10.log; exit 1
+          fi
+          grep -qF "error HYPERUUID003" gate-wasm-net10.log \
+            || { echo "::error::net10.0 + browser-wasm failed, but not with HYPERUUID003"; cat gate-wasm-net10.log; exit 1; }
+          grep -qF "Blazor WebAssembly" gate-wasm-net10.log \
+            || { echo "::error::the HYPERUUID003 text does not name Blazor WebAssembly"; cat gate-wasm-net10.log; exit 1; }
+          echo "net10.0 + browser-wasm stops with HYPERUUID003"
+          # The control is evaluation-only: no wasm workload here, so a net11.0 browser build
+          # rightly stops at HYPERUUID002, which is not the gate's error.
+          rm -rf "${GATE_DIR:?}/bin" "${GATE_DIR:?}/obj"
+          flag="$(dotnet msbuild "$GATE_PROJECT" -getProperty:_HyperUuidNet10Unsupported -p:GateFramework=net11.0 -p:RuntimeIdentifier=browser-wasm)"
+          [ -z "$flag" ] || { echo "::error::the gate flags net11.0 + browser-wasm: $flag"; exit 1; }
+          if dotnet build "$GATE_PROJECT" -p:GateFramework=net11.0 -p:RuntimeIdentifier=browser-wasm -p:WasmNativeWorkloadAvailable=false -tl:off > gate-wasm-net11.log 2>&1; then
+            echo "::error::net11.0 + browser-wasm built without the wasm workload"; cat gate-wasm-net11.log; exit 1
+          fi
+          grep -qF "error HYPERUUID002" gate-wasm-net11.log \
+            || { echo "::error::net11.0 + browser-wasm failed, but not with HYPERUUID002"; cat gate-wasm-net11.log; exit 1; }
+          if grep -qF "HYPERUUID003" gate-wasm-net11.log; then
+            echo "::error::net11.0 + browser-wasm raised HYPERUUID003"; cat gate-wasm-net11.log; exit 1
+          fi
+          echo "net11.0 + browser-wasm passes the gate (and stops at HYPERUUID002 without the workload)"
+
   # A release's run is dispatched by prepare-release.yml with a GITHUB_TOKEN, and GitHub raises
   # no workflow_run for a run that token started, so stage-native-binaries.yml would never hear
   # that it finished. workflow_dispatch is one of the two events the token may raise: once every
@@ -590,7 +806,7 @@ jobs:
   # requests and the weekly schedule never stage, and only this job may start a workflow.
   request-staging:
     needs: [build-static, build-android, test-swift-static, build-native, build-wasm, build-wheels,
-            check-core, test-apple-mobile, test-android]
+            check-core, test-apple-mobile, test-android, test-nuget-package]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-26.04
     permissions:

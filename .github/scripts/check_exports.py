@@ -94,6 +94,28 @@ def napi_catch_unwind(path):
         sys.exit(f"check_exports: {path.name} has napi functions without catch_unwind: " + ", ".join(bad))
 
 
+def jni_no_panic(path):
+    """Every JNI entry point must carry the no-panic attribute: the example's link-time proof
+    covers only the fns that have it, so one dropped attribute would pass every site."""
+    path = Path(path)
+    if not path.is_absolute():
+        path = ROOT / path
+    lines = path.read_text(encoding="utf-8").splitlines()
+    bad = []
+    for number, line in enumerate(lines):
+        match = re.match(r'pub unsafe extern "system" fn (\w+)', line)
+        if not match:
+            continue
+        attrs, above = [], number - 1
+        while above >= 0 and lines[above].startswith("#["):
+            attrs.append(lines[above])
+            above -= 1
+        if not any("no_panic::no_panic" in attr for attr in attrs):
+            bad.append(f"{match.group(1)} (line {number + 1})")
+    if bad:
+        sys.exit(f"check_exports: {path.name} has JNI functions without no_panic: " + ", ".join(bad))
+
+
 C_PROTOTYPE = r"(?m)^(?:u?int\d+_t|void) (\w+)\("
 
 # Python's extension has conveniences past the C ABI: a v7 buffer fill
@@ -126,10 +148,41 @@ SITES = [
         "Java (FFM)",
         [
             (
-                "java/src/main/java/io/github/skunkwerkx/hyperuuid/UuidGenerator.java",
+                "java/src/main/java25/io/github/skunkwerkx/hyperuuid/NativeCore.java",
                 r'export\("(\w+)"\)',
             )
         ],
+        "all",
+        (),
+    ),
+    # The JDK 21 base: the Java declarations, the shim's registration table, the shim's no-panic
+    # proof (snake case, so not `camel`) and the shim's own C imports of the core.
+    (
+        "Java (JNI natives)",
+        [
+            (
+                "java/src/main/java/io/github/skunkwerkx/hyperuuid/NativeCore.java",
+                r"static native \w+ (\w+)\(",
+            )
+        ],
+        camel,
+        ("jniNatives",),
+    ),
+    (
+        "Java (JNI table)",
+        [("java/jni/src/lib.rs", r'(?m)^\s*native!\(\s*"(\w+)",')],
+        camel,
+        ("jniNatives",),
+    ),
+    (
+        "Java (JNI no-panic)",
+        [("java/jni/examples/no_panic.rs", r"hyperuuid_jni::(?:native_(\w+)|(JNI_OnLoad))\(")],
+        "all",
+        ("jni_natives", "JNI_OnLoad"),
+    ),
+    (
+        "Java (JNI imports)",
+        [("java/jni/src/lib.rs", r"(?m)^\s*fn ((?:uuid|hyperuuid)_\w+)\(")],
         "all",
         (),
     ),
@@ -188,16 +241,25 @@ SITES = [
 ]
 
 
-def declared(sources):
-    names = set()
+# Sites whose names must each appear once: a table that registers a name twice is a bug a
+# set comparison cannot see.
+UNIQUE_SITES = ("Java (JNI table)",)
+
+
+def declared_list(sources):
+    names = []
     for glob, pattern in sources:
         files = sorted(ROOT.glob(glob))
         if not files:
             sys.exit(f"check_exports: {glob} matches no file")
         for path in files:
             for match in re.finditer(pattern, path.read_text(encoding="utf-8"), re.MULTILINE):
-                names.update(group for group in match.groups() if group)
+                names.extend(group for group in match.groups() if group)
     return names
+
+
+def declared(sources):
+    return set(declared_list(sources))
 
 
 def main():
@@ -206,6 +268,7 @@ def main():
         sys.exit(f"check_exports: read {sorted(exports)} from {CORE}, which is not the core's ABI")
     print(f"core: {len(exports)} exports")
     napi_catch_unwind("typescript/src/lib.rs")
+    jni_no_panic("java/jni/src/lib.rs")
     failed = False
     for binding, sources, wants, extra in SITES:
         if wants == "all":
@@ -215,11 +278,15 @@ def main():
         else:
             expected = {name for name in map(wants, exports) if name}
         expected |= set(extra)
-        got = declared(sources)
+        found = declared_list(sources)
+        got = set(found)
+        repeats = sorted({name for name in found if found.count(name) > 1}) if binding in UNIQUE_SITES else []
         missing, stale = sorted(expected - got), sorted(got - expected)
-        if missing or stale:
+        if missing or stale or repeats:
             failed = True
             print(f"FAIL {binding}")
+            for name in repeats:
+                print(f"     repeats {name}")
             for name in missing:
                 print(f"     missing {name}")
             for name in stale:

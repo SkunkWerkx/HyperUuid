@@ -1,7 +1,13 @@
 {
   "resources": [
     {
-      "glob": "native/*/*"
+      "glob": "native/*/libhyperuuid.so"
+    },
+    {
+      "glob": "native/*/libhyperuuid.dylib"
+    },
+    {
+      "glob": "native/*/hyperuuid.dll"
     }
   ],
   "foreign": {

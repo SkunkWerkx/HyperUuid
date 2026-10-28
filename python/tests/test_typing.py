@@ -5,6 +5,7 @@ The last one needs mypy and is skipped without it."""
 import ast
 import inspect
 import os
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,9 @@ def test_a_consumer_type_checks_against_the_package(monkeypatch):
     api = pytest.importorskip("mypy.api")
     # The package as this checkout has it, the way conftest.py puts it on sys.path. --strict
     # follows the import, so hyperuuid's own annotations are checked against the stub too.
-    monkeypatch.setenv("MYPYPATH", str(PACKAGE.parent))
+    # An installed package is found through site-packages, which mypy refuses on MYPYPATH.
+    if str(PACKAGE.parent) not in {sysconfig.get_path("purelib"), sysconfig.get_path("platlib")}:
+        monkeypatch.setenv("MYPYPATH", str(PACKAGE.parent))
     out, err, status = api.run(
         ["--strict", "--cache-dir", os.devnull, str(SAMPLES / "consumer.py")]
     )

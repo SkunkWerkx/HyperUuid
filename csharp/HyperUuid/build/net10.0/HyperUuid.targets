@@ -26,16 +26,50 @@
        JavaScript library (src/lib/libuuid.js), which defines a stub of that name and takes
        over the export whenever it is listed.
 
-       One floor. The package targets net11.0 and nothing older, and this file sits under
-       build/net11.0/ (with buildTransitive/net11.0/'s copy beside it) like the assembly
-       under lib/net11.0/. With every framework-specific asset in a net11.0 folder, NuGet
-       refuses the package to an older project at restore (NU1202) instead of restoring it
-       and leaving the build to fail later, so nothing here needs a target-framework gate
-       of its own: the wiring below never meets a toolchain older than the .NET 11 one the
-       exception-handling translation further down depends on. (The staticlib's directory is spelled nativeassets/net11.0/ to match; the path
-       below names it directly, so the spelling is a folder name, not something NuGet selects
-       by.) -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+       Two frameworks, one file. The package carries lib/net10.0/ and lib/net11.0/, and this
+       file sits once under build/net10.0/ (with buildTransitive/net10.0/'s copy beside it):
+       NuGet picks the nearest build/{tfm}/ folder, and net10.0 is the nearest one for both
+       net10.0 and net11.0 projects, so there is no build/net11.0/ copy to keep in step.
+
+       On .NET 10 the file serves Windows, Linux and macOS, framework-dependent or Native AOT,
+       and refuses the platforms that need .NET 11 with HYPERUUID003 (the gate below): Blazor
+       WebAssembly, Android, iOS and Mac Catalyst. The gate reads $(TargetFramework) and
+       $(RuntimeIdentifier), not $(TargetFrameworkVersion) or $(TargetPlatformIdentifier): the
+       four projects that import this file by hand do it in the project body, before the SDK
+       has set those two, and they are empty there (a NuGet import runs after them). The
+       TargetFramework functions give the same answer in both places. It hooks
+       _CheckForInvalidConfigurationAndPlatform so that it speaks first, ahead of the Xcode
+       and JDK checks the platform SDKs run, which would otherwise answer with their own
+       message. Every other block below stands aside when the gate fires, so a refused build
+       reports one diagnostic.
+
+       The wasm archive stays in nativeassets/net11.0/: the path below names it directly, so
+       the spelling is a folder name, not something NuGet selects by, and the only toolchain
+       that links it is .NET 11's. -->
+  <!-- HYPERUUID003: the platforms .NET 10 cannot serve. Evaluated here, at the top, so every
+       block below can stand aside on _HyperUuidNet10Unsupported. Windows desktop
+       (net10.0-windows) and net10.0-macos are not matched and build as before. -->
+  <PropertyGroup Condition="'$([MSBuild]::GetTargetFrameworkIdentifier($(TargetFramework)))' == '.NETCoreApp' And $([MSBuild]::VersionLessThan($([MSBuild]::GetTargetFrameworkVersion($(TargetFramework))), '11.0'))">
+    <_HyperUuidNet10Platform>$([MSBuild]::GetTargetPlatformIdentifier($(TargetFramework)))</_HyperUuidNet10Platform>
+    <_HyperUuidNet10Unsupported Condition="'$(RuntimeIdentifier)' == 'browser-wasm' Or '$(_HyperUuidNet10Platform)' == 'browser'">Blazor WebAssembly</_HyperUuidNet10Unsupported>
+    <_HyperUuidNet10Unsupported Condition="'$(_HyperUuidNet10Unsupported)' == '' And '$(_HyperUuidNet10Platform)' == 'android'">Android</_HyperUuidNet10Unsupported>
+    <_HyperUuidNet10Unsupported Condition="'$(_HyperUuidNet10Unsupported)' == '' And '$(_HyperUuidNet10Platform)' == 'ios'">iOS</_HyperUuidNet10Unsupported>
+    <_HyperUuidNet10Unsupported Condition="'$(_HyperUuidNet10Unsupported)' == '' And '$(_HyperUuidNet10Platform)' == 'maccatalyst'">Mac Catalyst</_HyperUuidNet10Unsupported>
+    <_HyperUuidNet10Tfm Condition="'$(_HyperUuidNet10Unsupported)' == 'Blazor WebAssembly'">net11.0</_HyperUuidNet10Tfm>
+    <_HyperUuidNet10Tfm Condition="'$(_HyperUuidNet10Unsupported)' == 'Android'">net11.0-android</_HyperUuidNet10Tfm>
+    <_HyperUuidNet10Tfm Condition="'$(_HyperUuidNet10Unsupported)' == 'iOS'">net11.0-ios</_HyperUuidNet10Tfm>
+    <_HyperUuidNet10Tfm Condition="'$(_HyperUuidNet10Unsupported)' == 'Mac Catalyst'">net11.0-maccatalyst</_HyperUuidNet10Tfm>
+    <_HyperUuidNet10Suffix Condition="'$(_HyperUuidNet10Unsupported)' == 'Blazor WebAssembly'"> .NET 10's WebAssembly toolchain cannot link HyperUuid's native core: https://github.com/dotnet/runtime/issues/132858.</_HyperUuidNet10Suffix>
+  </PropertyGroup>
+
+  <Target Name="_HyperUuidErrorUnsupportedNet10Platform"
+          BeforeTargets="_CheckForInvalidConfigurationAndPlatform"
+          Condition="'$(_HyperUuidNet10Unsupported)' != ''">
+    <Error Code="HYPERUUID003"
+           Text="HyperUuid supports .NET 10 on Windows, Linux and macOS, framework-dependent or Native AOT. $(_HyperUuidNet10Unsupported) needs .NET 11 or later: target $(_HyperUuidNet10Tfm).$(_HyperUuidNet10Suffix)" />
+  </Target>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(_HyperUuidNet10Unsupported)' == ''">
     <NativeFileReference Include="$(MSBuildThisFileDirectory)../../runtimes/browser-wasm/nativeassets/net11.0/libhyperuuid.a" />
   </ItemGroup>
 
@@ -51,7 +85,7 @@
        the same check. -->
   <Target Name="_HyperUuidErrorWasmWorkloadMissing"
           BeforeTargets="BeforeBuild"
-          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(WasmNativeWorkloadAvailable)' != 'true' And '$(HyperUuidRequireWasmWorkload)' != 'false'">
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(WasmNativeWorkloadAvailable)' != 'true' And '$(HyperUuidRequireWasmWorkload)' != 'false' And '$(_HyperUuidNet10Unsupported)' == ''">
     <Error Code="HYPERUUID002"
            Text="HyperUuid's WebAssembly support links its native core into the runtime, which needs the wasm-tools workload, and it is not installed. Without it the publish succeeds but the app has no uuid_* symbols, UuidGenerator.IsAvailable is false in the browser and every generator call throws. Run 'dotnet workload install wasm-tools', or set HyperUuidRequireWasmWorkload to false if the app keeps a managed fallback." />
   </Target>
@@ -68,7 +102,7 @@
        Exclude names the item list itself, so the flag is added once however many packages
        ask for it: an app that references both HyperUuid and HyperCast imports both files,
        and without this wasm-opt was handed the pass twice. -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(_HyperUuidNet10Unsupported)' == ''">
     <WasmOptConfigurationFlags Include="--translate-to-exnref" Exclude="@(WasmOptConfigurationFlags)" />
   </ItemGroup>
 
@@ -79,7 +113,7 @@
        @(NativeCopyLocalItems), which is where restore puts it, before anything copies it. -->
   <Target Name="_HyperUuidDropWasmArchiveFromCopyLocal"
           AfterTargets="ResolvePackageAssets"
-          Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+          Condition="'$(RuntimeIdentifier)' == 'browser-wasm' And '$(_HyperUuidNet10Unsupported)' == ''">
     <ItemGroup>
       <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
                             Condition="'%(NativeCopyLocalItems.NuGetPackageId)' == 'HyperUuid' And '%(NativeCopyLocalItems.Filename)%(NativeCopyLocalItems.Extension)' == 'libhyperuuid.a'" />
@@ -105,12 +139,12 @@
        SDK, and each of those inner builds evaluates this with its own RuntimeIdentifier. An
        RID with no archive here (iossimulator-x64, tvOS) gets nothing, and the app fails at
        its native link on the undefined uuid_* symbols: at build time, not at run time. -->
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' And '$(_HyperUuidNet10Unsupported)' == ''">
     <_HyperUuidAppleMobile Condition="$(RuntimeIdentifier.StartsWith('ios-')) Or $(RuntimeIdentifier.StartsWith('iossimulator-')) Or $(RuntimeIdentifier.StartsWith('maccatalyst-'))">true</_HyperUuidAppleMobile>
     <_HyperUuidAppleMobileLibrary Condition="'$(_HyperUuidAppleMobile)' == 'true'">$(MSBuildThisFileDirectory)../../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidAppleMobileLibrary>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(_HyperUuidAppleMobile)' == 'true' And Exists('$(_HyperUuidAppleMobileLibrary)')">
+  <ItemGroup Condition="'$(_HyperUuidAppleMobile)' == 'true' And Exists('$(_HyperUuidAppleMobileLibrary)') And '$(_HyperUuidNet10Unsupported)' == ''">
     <NativeReference Include="$(_HyperUuidAppleMobileLibrary)" Kind="Static" />
   </ItemGroup>
 
@@ -136,13 +170,13 @@
        Not for browser-wasm or for iOS and Mac Catalyst, which have their own wiring above,
        and not for anything but an AOT publish: a JIT process cannot link an archive, so it
        still loads the shared library. -->
-  <PropertyGroup Condition="'$(PublishAot)' == 'true' And '$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'browser-wasm' And '$(_HyperUuidAppleMobile)' != 'true' And '$(HyperUuidStaticLink)' != 'false'">
+  <PropertyGroup Condition="'$(PublishAot)' == 'true' And '$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'browser-wasm' And '$(_HyperUuidAppleMobile)' != 'true' And '$(HyperUuidStaticLink)' != 'false' And '$(_HyperUuidNet10Unsupported)' == ''">
     <_HyperUuidStaticLibrary Condition="$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../../staticlibs/$(RuntimeIdentifier)/hyperuuid.lib</_HyperUuidStaticLibrary>
     <_HyperUuidStaticLibrary Condition="!$(RuntimeIdentifier.StartsWith('win'))">$(MSBuildThisFileDirectory)../../staticlibs/$(RuntimeIdentifier)/libhyperuuid.a</_HyperUuidStaticLibrary>
     <_HyperUuidStaticLibrary Condition="!Exists('$(_HyperUuidStaticLibrary)')"></_HyperUuidStaticLibrary>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(_HyperUuidStaticLibrary)' != ''">
+  <ItemGroup Condition="'$(_HyperUuidStaticLibrary)' != '' And '$(_HyperUuidNet10Unsupported)' == ''">
     <DirectPInvoke Include="hyperuuid" />
     <NativeLibrary Include="$(_HyperUuidStaticLibrary)" />
   </ItemGroup>
@@ -155,7 +189,7 @@
        and is not in an AOT publish anyway. -->
   <Target Name="_HyperUuidDropSharedLibraryFromAotPublish"
           AfterTargets="ComputeResolvedFilesToPublishList"
-          Condition="'$(_HyperUuidStaticLibrary)' != ''">
+          Condition="'$(_HyperUuidStaticLibrary)' != '' And '$(_HyperUuidNet10Unsupported)' == ''">
     <ItemGroup>
       <_HyperUuidSharedLibrary Include="@(ResolvedFileToPublish)"
                          Condition="'%(Filename)%(Extension)' == 'libhyperuuid.so' Or '%(Filename)%(Extension)' == 'libhyperuuid.dylib' Or '%(Filename)%(Extension)' == 'hyperuuid.dll'" />

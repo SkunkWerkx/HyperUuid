@@ -372,7 +372,7 @@ All of this ran on linux-arm64 only. CI's probe leg on x64 decides Task 8's word
   - `:366`: "Every wheel PyPI serves, the Pyodide one included," → "Every wheel PyPI serves, the Pyodide one included, and the sdist".
   - `:376`: "Each wheel also carries" → "Each wheel and the sdist also carry".
   - `:389`: "for every wheel" → "for every wheel and the sdist".
-  - The two `gh attestation verify hyperuuid-<version>-*.whl` examples: add `pip download hyperuuid==<version> --no-deps --no-binary :all: -d .` beside the existing `pip download`, and run each verify as `for f in hyperuuid-<version>*; do gh attestation verify "$f" …; done`.
+  - The two `gh attestation verify hyperuuid-<version>-*.whl` examples: add the PyPI JSON `curl -sLO "$(curl -s https://pypi.org/pypi/hyperuuid/<version>/json | jq -r '.urls[] | select(.packagetype=="sdist") | .url')"` beside the existing `pip download`, and run each verify as `for f in hyperuuid-<version>*; do gh attestation verify "$f" …; done`.
 - Modify: `README.md`:
   - `:88`: "so `pip` always resolves a native wheel and there is no `ctypes` fallback" → "so `pip` resolves a native wheel on every platform that has one, builds the same extension from the sdist everywhere else, and there is no `ctypes` fallback";
   - `:173`: "the gems, the wheels, the crate" → "the gems, the wheels and the sdist, the crate";
@@ -422,7 +422,7 @@ These come from the spec's Verification:
 3. The `workflow_dispatch` publish runs, then `registry-confirm` for all 18.
 4. By hand:
    - the sdist's PyPI file page shows its PEP 740 attestation;
-   - `pip download hyperuuid==1.1.0 --no-binary :all: --no-deps` returns `hyperuuid-1.1.0.tar.gz`;
+   - the README's PyPI JSON `curl` returns `hyperuuid-1.1.0.tar.gz`;
    - `gh attestation verify` passes on it with the release predicate;
    - the README's sdist download line is re-run;
    - Packagist's 1.1.0 page declares `php >=8.3`.

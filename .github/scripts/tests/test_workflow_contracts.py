@@ -4,6 +4,7 @@ at master and keep only triggers, permissions, gates and the Forge-commit resolu
 HyperCast and HyperTabular carry the same file; the three move together. When a HyperForge
 checkout sits beside this repository, every action and reusable workflow referenced is also
 checked against its declared inputs."""
+import json
 from pathlib import Path
 import re
 import unittest
@@ -65,14 +66,14 @@ class ReleaseFlowTests(unittest.TestCase):
         # The PEP 740 publish attestations must name this file, so the upload is a step here.
         job = self.jobs['pypi-publish']
         steps = [job.index('uses: ./.hyperforge/.github/actions/publish-pypi'),
-                 job.index('- name: Publish only missing preserved wheels (Trusted Publishing)'),
-                 job.index('- name: Verify every public wheel matches the prepared bytes')]
+                 job.index('- name: Publish only missing preserved wheels and sdist (Trusted Publishing)'),
+                 job.index('- name: Verify every public wheel and sdist matches the prepared bytes')]
         self.assertEqual(steps, sorted(steps))
         self.assertIn('      - id: pypi\n        uses: ./.hyperforge/.github/actions/publish-pypi', job)
         self.assertEqual(job.count('uses: pypa/gh-action-pypi-publish@'), 1)
         self.assertRegex(job, r"if: steps\.pypi\.outputs\.pending == 'true' && github\.event_name == 'workflow_dispatch'\n"
                               r" +uses: pypa/gh-action-pypi-publish@[0-9a-f]{40} # v[0-9.]+\n +with:\n +packages-dir: pending-pypi\n")
-        self.assertRegex(job, r"Verify every public wheel matches the prepared bytes\n"
+        self.assertRegex(job, r"Verify every public wheel and sdist matches the prepared bytes\n"
                               r" +if: github\.event_name == 'workflow_dispatch'\n"
                               r' +run: python3 "\$FORGE_SCRIPTS/release_inventory\.py" registry-confirm --registry pypi\n')
         self.assertNotIn('pypa/', '\n'.join(j for name, j in self.jobs.items() if name != 'pypi-publish'))
@@ -155,6 +156,10 @@ class ReleaseFlowTests(unittest.TestCase):
         for secret in ('MAVEN_CENTRAL_USERNAME', 'MAVEN_CENTRAL_PASSWORD', 'MAVEN_SIGNING_KEY', 'MAVEN_SIGNING_KEY_PASSWORD'):
             self.assertIn(f'{secret}: ${{{{ secrets.{secret} }}}}', self.jobs['maven-publish'])
 
+    def test_maven_jobs_pack_the_jni_libraries(self):
+        for name in ('maven-pack', 'maven-publish'):
+            self.assertIn('      java_jni: true\n', self.jobs[name], name)
+
 
 class PreparationFlowTests(unittest.TestCase):
     def test_prepare_release_is_one_forge_call(self):
@@ -219,22 +224,54 @@ class CiTests(unittest.TestCase):
         self.assertIn('needs: [build-static, build-android]', self.jobs['test-android'])
         self.assertIn('needs: build-static', self.jobs['test-swift-static'])
 
+    def test_php_floor_is_explicit_and_matches_both_composer_files(self):
+        # The Forge's php_floor_version default (8.2) serves the siblings; this repo says its own.
+        m = re.search(r'^      php_floor_version: "(\d+\.\d+)"$', self.jobs['build-native'], re.M)
+        self.assertIsNotNone(m)
+        floor = m.group(1)
+        self.assertEqual(floor, '8.3')
+        for composer in (ROOT / 'composer.json', ROOT / 'php' / 'composer.json'):
+            self.assertEqual(json.loads(composer.read_text())['require']['php'], '>=' + floor)
+
+    def test_nuget_package_job_proves_the_packed_layout(self):
+        job = self.jobs['test-nuget-package']
+        self.assertIn('    needs: [build-static, build-native]\n', header(job))
+        self.assertIn('    runs-on: ubuntu-26.04\n', header(job))
+        self.assertNotRegex(header(job), r'^    if:', 'it runs on pull requests, like test-android')
+        self.assertIn('setup-dotnet', job)
+        self.assertIn('global-json-file: global.json', job)
+        self.assertNotIn('dotnet-version', job)
+        for needle in ('HYPERUUID003', 'NU1202', '.nobuild', 'readelf -d'):
+            self.assertIn(needle, job)
+        request = self.jobs['request-staging']
+        needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
+        self.assertIn('test-nuget-package', re.split(r'[\s,]+', needs.strip()))
+
     def test_typescript_and_r_legs_are_on(self):
         # The Forge's node and r inputs default false until the siblings carry the bindings.
         self.assertEqual(re.findall(r'^      (node|r): (.*)$', self.jobs['build-native'], re.M),
                          [('node', 'true'), ('r', 'true')])
 
-    def test_static_checks_run_in_the_forge_with_this_repositorys_six_inputs(self):
+    def test_java_jni_legs_are_on(self):
+        # The Forge's java_jni input defaults false; the jar's floor is JDK 21 beside the primary 25.
+        build = self.jobs['build-native']
+        self.assertIn('      java_jni: true\n', build)
+        self.assertIn('      jdk_floor_version: "21"\n', build)
+
+    def test_static_checks_run_in_the_forge_with_this_repositorys_eight_inputs(self):
         core = self.jobs['check-core']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master', core)
         self.assertEqual(with_block(core), {'no_std_rustflags', 'extra_features', 'no_panic_command',
-                                             'clippy_targets', 'lint_node', 'lint_r'})
+                                             'clippy_targets', 'lint_node', 'lint_r', 'big_endian',
+                                             'lint_java_jni'})
+        self.assertIn('big_endian: s390x-unknown-linux-gnu', core)
         self.assertIn('no_std_rustflags: --cfg getrandom_backend="custom"', core)
         self.assertIn('extra_features: uuid1', core)
         self.assertIn('no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1', core)
         self.assertIn('clippy_targets: aarch64-linux-android', core)
         self.assertIn('lint_node: true', core)
         self.assertIn('lint_r: true', core)
+        self.assertIn('lint_java_jni: true', core)
         inline = [name for name in self.jobs if re.match(r'(check|lint|format)-', name) and name != 'check-core']
         self.assertEqual(inline, [], 'static checks live in hyper-check-core.yml, once')
 

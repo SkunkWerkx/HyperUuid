@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HyperUuid</PackageId>
@@ -52,6 +52,10 @@
          undocumented public member fails the build instead of silently shipping undocumented. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- One source, two TFMs: pack fails if net11.0 ever exposes API net10.0 lacks, or the
+         two lib/ groups drift apart. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <EnableStrictModeForCompatibleFrameworksInPackage>true</EnableStrictModeForCompatibleFrameworksInPackage>
   </PropertyGroup>
 
   <ItemGroup>
@@ -83,7 +87,7 @@
     <!-- Standard NuGet RID-specific native asset layout (what a real consumer of the packed
          .nupkg gets) — whatever RID(s) happen to be present under runtimes/ at build time.
          No runtimes/browser-wasm/lib/ asset is needed: one compiled assembly covers
-         every platform (see UuidGenerator.cs's own remarks), so NuGet's plain lib/net11.0/
+         every platform (see UuidGenerator.cs's own remarks), so NuGet's plain lib/{tfm}/
          fallback already is the browser-wasm build. Only
          runtimes/browser-wasm/nativeassets/net11.0/ (the Rust core's wasm32-unknown-emscripten
          staticlib) is RID-specific here, placed there before packing — see
@@ -128,7 +132,7 @@
     <None Include="buildTransitive/**" Pack="true" PackagePath="buildTransitive" />
     <!-- The core as a static library, one per RID: for a Native AOT publish to link in
          instead of loading the shared library, and for an iOS or Mac Catalyst app, which
-         can only link it. build/net11.0/HyperUuid.targets has the wiring and the reasons. Staged
+         can only link it. build/net10.0/HyperUuid.targets has the wiring and the reasons. Staged
          here before packing, like runtimes/, and not committed. -->
     <None Include="staticlibs/**" Pack="true" PackagePath="staticlibs" />
     <!-- Local dev loop, the same one HyperCast's csproj carries: when the Rust core has been

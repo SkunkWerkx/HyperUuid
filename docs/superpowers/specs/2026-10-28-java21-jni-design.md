@@ -309,8 +309,6 @@ written as a loss.
 - **Every table:**
   - is labelled "Apple M6 (Mac18,5), macOS ⟨ver⟩, Temurin ⟨25.0.x⟩ and ⟨21.0.x⟩, ⟨date⟩";
   - has an FFM column and a JNI column, each against its own JDK's `UUID.randomUUID()`;
-  - adds one sentence: on macOS, the core calls `getentropy` for every id, which dominates single
-    v4 and v7 calls;
   - drops every † note.
 - **AOT:** "Native Image is built on GraalVM for JDK 25 and always takes the FFM path. GraalVM
   Community for JDK 21 is past end of life, so the JNI path has no image row."
@@ -503,7 +501,6 @@ written as a loss.
 | Hole | Closed or labelled |
 | --- | --- |
 | JNI is slower | Measured and printed beside FFM (L12) |
-| M6 calls may lose to `UUID.randomUUID()` | Printed as measured; :61 says "slower" if so. The Apple entropy item removes the per-id `getentropy` before the receipts |
 | The split slows FFM | L12's 5% gate: old and new Java on one recorded core artifact, so a core speed-up cannot mask it |
 | A shaded jar drops `Multi-Release` | The README section. The in-tree case, JMH's fat jar, is closed |
 | Which path ran? | Four independent signals (L3), and `checkSuiteParity` |

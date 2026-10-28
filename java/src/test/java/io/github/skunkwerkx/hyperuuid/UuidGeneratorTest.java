@@ -534,14 +534,11 @@ class UuidGeneratorTest {
         // README's contract is that isAvailable() answers false there and never throws, and
         // that a generating method throws ExceptionInInitializerError, then
         // NoClassDefFoundError, rather than anything wrapped around them.
+        // The jar's copy without native/**, not the main output: the test classpath no longer
+        // carries main's classes loose (a multi-release jar is the unit under test).
         var classes = String.join(
                 java.io.File.pathSeparator,
-                Path.of(UuidGenerator.class
-                                .getProtectionDomain()
-                                .getCodeSource()
-                                .getLocation()
-                                .toURI())
-                        .toString(),
+                System.getProperty("hyperuuid.noNativeJar"),
                 Path.of(NoCore.class
                                 .getProtectionDomain()
                                 .getCodeSource()
@@ -571,6 +568,8 @@ class UuidGeneratorTest {
             var process = new ProcessBuilder(
                             java,
                             "--enable-native-access=ALL-UNNAMED",
+                            "-Xcheck:jni",
+                            "-Dhyperuuid.expectBackend=" + System.getProperty("hyperuuid.expectBackend"),
                             "-cp",
                             System.getProperty("java.class.path"),
                             ExhaustionMain.class.getName())
@@ -613,6 +612,11 @@ class UuidGeneratorTest {
         }
 
         public static void main(String[] args) {
+            // The path the parent expects is the path this child exercises.
+            String expected = System.getProperty("hyperuuid.expectBackend");
+            if (!NativeCore.backend().equals(expected)) {
+                throw new AssertionError("backend " + NativeCore.backend() + ", expected " + expected);
+            }
             // 1. One single at M succeeds.
             UuidGenerator.newV7(M);
             // 2. Batches until the first error: the batch site (at most 1,025 of them).
@@ -670,6 +674,44 @@ class UuidGeneratorTest {
             System.out.println(thrown);
             System.out.println("probe: " + UuidGenerator.isAvailable());
         }
+    }
+
+    // The shim reads a v5 name in a critical region up to 64 KiB and copies it out above, and
+    // writes a batch in one 4,096-UUID critical fill or a malloc: both sides must agree with
+    // each other and with an independent SHA-1.
+    @Test
+    void fillsEitherSideOfTheCriticalBoundAreWhole() {
+        for (int count : new int[] {4096, 4097}) {
+            UUID[] batch = UuidGenerator.newV7Batch(count);
+            assertEquals(count, batch.length);
+            for (int i = 0; i < count; i++) {
+                assertEquals(7, batch[i].version());
+                if (i > 0) {
+                    assertTrue(
+                            Arrays.compareUnsigned(bytes(batch[i - 1]), bytes(batch[i])) < 0,
+                            "not strictly increasing at " + i + " of " + count);
+                }
+            }
+        }
+        for (int length : new int[] {65_536, 65_537}) {
+            byte[] name = new byte[length];
+            for (int i = 0; i < length; i++) {
+                name[i] = (byte) (i * 31 + 7);
+            }
+            assertEquals(
+                    CheckJniTest.referenceV5(UuidGenerator.Namespaces.DNS, name),
+                    UuidGenerator.newV5(UuidGenerator.Namespaces.DNS, name),
+                    "v5 of " + length + " bytes");
+        }
+    }
+
+    private static byte[] bytes(UUID id) {
+        var out = new byte[16];
+        for (int i = 0; i < 8; i++) {
+            out[i] = (byte) (id.getMostSignificantBits() >>> (56 - 8 * i));
+            out[8 + i] = (byte) (id.getLeastSignificantBits() >>> (56 - 8 * i));
+        }
+        return out;
     }
 
     @Test

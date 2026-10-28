@@ -136,6 +136,7 @@ jobs:
     with:
       crate: hyperuuid
       java_resources_dir: java/src/main/resources/native
+      java_jni: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
     secrets:
       MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
@@ -399,12 +400,12 @@ jobs:
       # ghcr.io/<this repo>:<tag> and both v1.0.0 uploads failed before sending anything. The
       # action cannot make the OIDC exchange without uploading, so only a publish dispatch runs
       # it, and its PEP 740 publish attestations name this file, as every release's must.
-      - name: Publish only missing preserved wheels (Trusted Publishing)
+      - name: Publish only missing preserved wheels and sdist (Trusted Publishing)
         if: steps.pypi.outputs.pending == 'true' && github.event_name == 'workflow_dispatch'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pending-pypi
-      - name: Verify every public wheel matches the prepared bytes
+      - name: Verify every public wheel and sdist matches the prepared bytes
         if: github.event_name == 'workflow_dispatch'
         run: python3 "$FORGE_SCRIPTS/release_inventory.py" registry-confirm --registry pypi
 
@@ -443,6 +444,7 @@ jobs:
     with:
       crate: hyperuuid
       java_resources_dir: java/src/main/resources/native
+      java_jni: true
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
       prepared_run_id: ${{ github.run_id }}
       prepared_artifact_name: verified-maven-central-package

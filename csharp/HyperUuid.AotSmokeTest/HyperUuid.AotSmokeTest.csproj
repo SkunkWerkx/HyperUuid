@@ -1,8 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Two modes. By default it references the library project and imports the package's
+       targets file by hand, which is what the in-tree publish proves. With
+       -p:HyperUuidVersion=<v> -p:RestoreAdditionalProjectSources=<feed> (the Android smoke
+       test's convention) it takes the packed package from that feed instead, so the targets
+       file arrives by NuGet's own import, as a consumer gets it. Publish one TFM at a time:
+       dotnet publish -f net10.0 (or net11.0) -r <rid> -p:PublishAot=true; without -f a
+       multi-targeted publish fails with NETSDK1129. -->
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
@@ -10,7 +17,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../HyperUuid/HyperUuid.csproj" />
+    <ProjectReference Include="../HyperUuid/HyperUuid.csproj" Condition="'$(HyperUuidVersion)' == ''" />
+    <PackageReference Include="HyperUuid" Version="$(HyperUuidVersion)" Condition="'$(HyperUuidVersion)' != ''" />
   </ItemGroup>
 
   <!-- A project reference gets none of a NuGet package's build/ imports, so the file a real
@@ -18,7 +26,8 @@
        the Native AOT wiring in it, and it has to take the same branch a consumer does. The
        archive it links is csharp/HyperUuid/staticlibs/{rid}/, which is not committed —
        the forge's static-libs/build-static-libs.sh stages it, in CI and by hand. Where it
-       is absent the publish loads the shared library, as it did before these existed. -->
-  <Import Project="../HyperUuid/build/net11.0/HyperUuid.targets" />
+       is absent the publish loads the shared library, as it did before these existed. In
+       package mode NuGet does the import. -->
+  <Import Project="../HyperUuid/build/net10.0/HyperUuid.targets" Condition="'$(HyperUuidVersion)' == ''" />
 
 </Project>

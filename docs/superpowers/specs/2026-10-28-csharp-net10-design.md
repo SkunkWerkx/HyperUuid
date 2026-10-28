@@ -178,6 +178,7 @@ still derives `sdk:11.0-alpine-aot` from `global.json`, and this item adds no ne
   ([dotnet/runtime#132858](https://github.com/dotnet/runtime/issues/132858)), and is why
   `HYPERUUID003` stops .NET 10 browser builds; .NET 11's toolchain relinks cleanly." The `wasm-opt`
   swap "verified workaround" is removed: on .NET 10 it is not enough (brief P4-P5).
+  *Correction (Task 7 fix round 1):* the shipped text keeps "on a native relink" in the heading, dates the claim (as of 2026-10-28, issue open, reproduced on 10.0.14, `rust-version` 1.89) and adds that a package consumer is stopped by `HYPERUUID003` first, so the error is reachable only by importing the targets file by hand.
 - *Platform support* intro: "Every row below is .NET 11 and later; with Windows, macOS, iOS, Mac
   Catalyst and Android, that is every platform .NET MAUI targets. On .NET 10 the package supports
   the Linux, macOS and Windows rows, framework-dependent or Native AOT." New paragraph: "**.NET 10
@@ -332,7 +333,7 @@ inventory and release attestation carry the one `.nupkg` and `.snupkg` as before
 | "Same API on both frameworks" is asserted | Closed: strict package validation fails pack on any difference |
 | net10 is built but never run | Closed: tests on both TFMs on 5 desktop + 2 musl legs; local NC 2, 11 |
 | SDK 11 can't really pack net10 in CI | Closed: `test-nuget-package` packs with `global.json`'s SDK only |
-| HYPERUUID003 loses to Xcode/JDK/workload errors | Closed for Xcode and JDK with the workload installed (early hook, probed 2026-10-28; CI probes on all four). Labelled, unprobed: with the workload missing, NETSDK1147 may come first, and the README says so (amended after review, 2026-10-28) |
+| HYPERUUID003 loses to Xcode/JDK/workload errors | Closed for Xcode and JDK with the workload installed (early hook, probed 2026-10-28; the Apple probes build an Exe, because the Xcode check runs only for one, and see HYPERUUID003 win over the Xcode error with the gate in and the Xcode error with it removed, on Xcode 27.1; CI runs the iOS, Mac Catalyst, Android and wasm probes, each proving HYPERUUID003 with the workload and toolchain present, not the missing-JDK or missing-Xcode case). Labelled, unprobed: with the workload missing, NETSDK1147 may come first, and the README says so (amended after review, 2026-10-28) |
 | A net10 Blazor app is blocked by a server-side class library | Labelled: it got NU1202 in 1.0.0 already (Open item 2) |
 | osx-x64 net10 is unrun | Labelled: cross-built, no leg on either framework, as the README says |
 | `net10.0-macos`, `net10.0-tvos` | Not claimed on either framework; tvOS fails at native link as today |

@@ -34,6 +34,7 @@ class HyperConfigTests(unittest.TestCase):
         self.assertEqual((self.cfg['crate'], self.cfg['project']), ('hyperuuid', 'HyperUuid'))
         self.assertEqual(self.cfg['cdylib_smoke'], '.github/scripts/cdylib_smoke.py')
         self.assertTrue((ROOT / self.cfg['cdylib_smoke']).is_file())
+        self.assertIs(self.cfg.get('sdist'), True)
         self.assertTrue((ROOT / self.cfg.get('abi_probe', '.github/scripts/abi_probe.c')).is_file())
         self.assertTrue((BUNDLE_INCLUDE / 'hyperuuid.h').is_file())
 

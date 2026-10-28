@@ -1,5 +1,6 @@
 # Keep the PyO3 build out of rust/target/, so it cannot overwrite the plain cdylib
-# that Ruby/Java/C#/Go/PHP/Swift load from rust/target/release/.
+# that Ruby/Java/C#/Go/PHP/Swift load from rust/target/release/. This file also ships at the
+# sdist's root (pyproject.toml's `include`), where cargo finds it for a source build.
 [build]
 target-dir = "target"
 
@@ -7,7 +8,8 @@ target-dir = "target"
 # runtime, which cannot produce one ("cannot produce cdylib ... as the target does not
 # support these crate types"). maturin 1.15 does not add this itself when the host *is* musl
 # — an Alpine container building its own wheel — so it is spelled out here for the build
-# that runs from this directory.
+# that runs from this directory, and, from the sdist's copy of this file, for a pip source
+# build on musl, which is what makes that build produce a cdylib.
 [target.x86_64-unknown-linux-musl]
 rustflags = ["-C", "target-feature=-crt-static"]
 

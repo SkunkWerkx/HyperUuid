@@ -8,7 +8,9 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
 1. Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] — <date>` with a bullet for
    every package the diff touched; the tag run refuses a CHANGELOG without that section,
    and the GitHub Release notes are generated from it. Set `r/NEWS.md`'s heading to
-   `# hyperuuid X.Y.Z` to match.
+   `# hyperuuid X.Y.Z` to match. Fill every `⟨…⟩` placeholder in the section (the Java
+   bullet's `⟨n⟩ KB`, measured once the jar is built); the Forge refuses a section that
+   still holds one.
 2. Dispatch `prepare-release.yml` with the version. It bumps every manifest, pushes A and
    runs `ci.yml` on it; `stage-native-binaries.yml` then commits the verified natives as B.
 3. CodeQL runs weekly and on demand, not on pull requests: run it on B

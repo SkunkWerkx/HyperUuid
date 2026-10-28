@@ -6,7 +6,7 @@
 
 **`java.util.UUID` can generate v4 (random) and v3 (MD5 name-based) — that's it. No v5, no v7, no batch API. This binding gives you the whole RFC.**
 
-RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with v7's version 8 SQL Server order, calling directly into the native `libhyperuuid` shared library via `java.lang.foreign` (FFM) downcalls — no runtime bridge, no extra runtime dependency (plain Java, not Kotlin: see the root README for why that matters). JDK 25 is the floor: the first long-term-support release with the final FFM API (JEP 454 finalized it in JDK 22, and 22 through 24 are past end of life). The jar bundles a native build for every supported platform (Linux glibc, Linux musl, macOS, Windows × x64/arm64) under `/native/{rid}/` and picks the right one at runtime.
+RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with v7's version 8 SQL Server order, calling the core in-process: through JNI on JDK 21 to 24, and through `java.lang.foreign` (FFM) downcalls on JDK 25 and later, from one multi-release jar — no runtime bridge, no extra runtime dependency (plain Java, not Kotlin: see the root README for why that matters). JDK 21 is the floor, not 17: Temurin builds no JDK 17 for Windows arm64 or Alpine (musl) arm64, so a 17 floor could not be tested on every platform this jar ships, and 17 leaves Temurin support on 2027-10-31. JDK 22 to 24 take the JNI path; they are past end of life and not tested. The jar bundles a native build for every supported platform (Linux glibc, Linux musl, macOS, Windows × x64/arm64) under `/native/{rid}/` and picks the right one at runtime. Each `/native/{rid}/` holds the core and the JNI library built from it.
 
 ```java
 package com.example;
@@ -55,7 +55,7 @@ Returns plain `java.util.UUID` — no wrapper type, so it works everywhere a `UU
 
 ## Gating on the core
 
-Nothing loads until the first call that needs the core — `UuidGenerator.NIL`/`MAX` and `Namespaces` never do. A consumer with a fallback of its own gates on `UuidGenerator.isAvailable()` first: probed once, cached, never throws — `false` when the platform library will not open, the jar carries no core for this OS/arch, or an older core lacks an export this binding was built against. The generating methods do not fall back. The first one to need a core that failed to load throws `ExceptionInInitializerError`, and every later one `NoClassDefFoundError`; either way the original failure is in its cause chain. `UuidGenerator.nativeVersion()` reports the loaded core's `major.minor.patch`, and succeeds exactly when `isAvailable()` is `true` — the pair that proves the library that resolved is the one this jar was built against.
+Nothing loads until the first call that needs the core — `UuidGenerator.NIL`/`MAX` and `Namespaces` never do. A consumer with a fallback of its own gates on `UuidGenerator.isAvailable()` first: probed once, cached, never throws — `false` when the platform library will not open, the jar carries no core for this OS/arch, or the bundled library lacks a function this binding was built against. The generating methods do not fall back. A `null` argument is a `NullPointerException` naming the parameter on both paths, before any native call. The two paths differ in two ways only: the load failure's message and cause name the path's own library, and on JNI a fill above 64 KiB can throw `OutOfMemoryError` when native memory is short. Each JVM (and class loader) extracts its own temporary copy of the library; on Windows a loaded DLL cannot be deleted, so `hyperuuid*.dll` copies accumulate in `%TEMP%`. A read-only or `noexec` temporary directory makes `isAvailable()` `false`, with the loader's own exception (an `UncheckedIOException`, `UnsatisfiedLinkError` or `IllegalArgumentException`) in the cause chain. The first one to need a core that failed to load throws `ExceptionInInitializerError`, and every later one `NoClassDefFoundError`; either way the original failure is in its cause chain. `UuidGenerator.nativeVersion()` reports the loaded core's `major.minor.patch`, and succeeds exactly when `isAvailable()` is `true` — the pair that proves the library that resolved is the one this jar was built against.
 
 ```java
 UUID id = UuidGenerator.isAvailable() ? UuidGenerator.newV7() : UUID.randomUUID();
@@ -77,7 +77,7 @@ Every failure that is the caller's (a timestamp out of range, a batch too large)
 
 ## Native access
 
-FFM downcalls are a *restricted* operation: the JDK wants the application, not a library on its classpath, to say that native code may run. Without that the first call still works, and prints a four-line warning naming `java.lang.foreign.Linker::downcallHandle` and ending "Restricted methods will be blocked in a future release unless native access is enabled". Grant it where the JVM is launched:
+FFM downcalls are a *restricted* operation: the JDK wants the application, not a library on its classpath, to say that native code may run. Without that the first call still works. On JDK 21 to 23 nothing is printed without the grant. From 24, a JVM without it prints a four-line warning naming the method that loads native code: `Linker::downcallHandle` on 25 and later, ending "Restricted methods will be blocked in a future release unless native access is enabled". Grant it where the JVM is launched:
 
 ```sh
 java --enable-native-access=ALL-UNNAMED -cp app.jar:hyperuuid.jar com.example.Main        # on the classpath
@@ -85,6 +85,10 @@ java --enable-native-access=io.github.skunkwerkx.hyperuuid -p mods -m com.exampl
 ```
 
 The jar's manifest carries `Automatic-Module-Name: io.github.skunkwerkx.hyperuuid`, so the module-path form has a stable name to grant rather than one derived from the jar's file name. An executable jar can make the same grant in its own manifest (`Enable-Native-Access: ALL-UNNAMED`). Under `--illegal-native-access=deny` with no grant the library cannot be loaded at all: `isAvailable()` is `false` and the generating methods throw.
+
+### Shaded and fat jars
+
+Keep `Multi-Release: true` (maven-shade's `ManifestResourceTransformer`, Shadow's `manifest`). Without it JDK 25 runs the JNI path, which is correct, on the JNI path, and its warning names `System::load`.
 
 ## Why not `java.util.UUID`?
 
@@ -111,6 +115,8 @@ byte[] raw = new byte[1000 * 16];
 UuidGenerator.fillV7(raw); // RFC-ordered bytes, no UUID objects at all
 ```
 
+On JDK 21 to 24, a fill of up to 64 KiB holds the array for the core call alone. A larger one is made in native memory and copied in, so it never holds off garbage collection but briefly needs twice its size: a full `MAX_V7_BATCH` (1 GiB) needs 2 GiB.
+
 Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID` is two `long`s rather than 16 RFC-ordered bytes, so the `UUID[]` form still rebuilds every element from the native output — it removes the allocation, not the conversion. **The `byte[]` form is the one that removes real work**, since the native core already writes RFC-ordered bytes contiguously.
 
 `./gradlew :benchmarks:jmh`, JMH average time, 1000 UUIDs per op (linux-x64, an Intel Core i9-11900H, JDK 25):
@@ -124,7 +130,7 @@ Java sits with C#, not with Go and Swift, on the cost question. `java.util.UUID`
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
-The middle two rows are the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation is not the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it does so with **nothing allocated and nothing copied**: the caller's array is pinned and handed to the native side, which writes every UUID straight into it.
+The middle two rows are the point: filling a `UUID[]` is no cheaper than allocating a fresh one, and measures slower here. The allocation is not the expensive part — rebuilding a thousand `UUID` objects from RFC bytes is. Only the `byte[]` form escapes that, and it does so with **nothing allocated and nothing copied** on the FFM path: the caller's array is pinned and handed to the native side, which writes every UUID straight into it. (The JNI path pins an array up to 64 KiB the same way; a larger one goes through a native buffer and is copied.)
 
 A `byte[]` whose length isn't a multiple of 16 throws `IllegalArgumentException`.
 
@@ -191,7 +197,7 @@ Real numbers, [JMH](https://github.com/openjdk/jmh) (`./gradlew :benchmarks:jmh`
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
-**Why the doors are this cheap:** no door opens an arena or copies its input. Every downcall but the version probe's is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
+**Why the doors are this cheap (on the FFM path):** no door opens an arena or copies its input. Every downcall but the version probe's is linked `Linker.Option.critical(true)`, so a caller's own `byte[]` (a v5 name, a batch destination, sixteen bytes to reorder in place) is pinned and handed to the native side directly, and the single-UUID doors use one per-thread 16-byte in/out scratch for the life of the thread, written and read as two big-endian longs with no `byte[]` in between. Sound because every export is a short, non-blocking computation over the bytes it was handed that never calls back into Java — the profile the option exists for — and `reachability-metadata.json` registers it, so the GraalVM Native Image smoke test proves it under AOT too. The 32 bytes left per call are the `UUID` object itself.
 
 The FFM downcall doesn't lose to the JDK's own generator, and the reason is worth stating so the win isn't mistaken for a rigged comparison: `UUID.randomUUID()` is genuinely slow, largely because it goes through `java.security.SecureRandom` by default. How slow is the machine's business — what its random source costs sets the width of the gap, and a box where that is expensive shows a far larger multiple than this one does. Reported as measured, not adjusted to make the story better.
 
@@ -209,7 +215,7 @@ Reproduce: `./gradlew :benchmarks:jmh`.
 
 ## AOT
 
-Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — the two SQL-order conversions share `(ADDRESS)int` with `uuid_new_v4` and `uuid_variant`, and a signature missing from the file is enough to build clean and crash at runtime; the generators, the inspection and the timestamp exports fill eight more, and the version probe's `()int`, the one downcall not linked critical, is a tenth entry of its own) and a `resources` glob covering `native/*/*` — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: 57 ns per `newV7(long)` there (the table below). (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
+Native Image is built on GraalVM for JDK 25 and always takes the FFM path. GraalVM Community for JDK 21 is past end of life, so the JNI path has no image row. Verified against a real GraalVM Native Image build, not just claimed compatible — see `aot-smoke-test/` (`./gradlew :aot-smoke-test:nativeRun`), which builds and runs a genuine standalone native binary that calls every public method of `UuidGenerator` — the `isAvailable()`/`nativeVersion()` probe, each generator in each of its overloads, the batch and fill forms over both `UUID[]` and `byte[]`, the SQL/RFC byte-order conversions in their `UUID` and raw-byte forms, and the version/variant/layout inspection — no JVM required to run it. Needed a bundled `META-INF/native-image/.../reachability-metadata.json` to register each distinct FFM downcall *signature* ahead of time (GraalVM's reachability analysis is per-signature, not per-function — the two SQL-order conversions share `(ADDRESS)int` with `uuid_new_v4` and `uuid_variant`, and a signature missing from the file is enough to build clean and crash at runtime; the generators, the inspection and the timestamp exports fill eight more, and the version probe's `()int`, the one downcall not linked critical, is a tenth entry of its own) and three `resources` globs, one per core library name (`native/*/libhyperuuid.so`, `native/*/libhyperuuid.dylib`, `native/*/hyperuuid.dll`; the JNI shim library is deliberately not embedded, since an image always takes FFM) — both already shipped in this jar, verified by actually building and running the resulting executable with no JVM anywhere on `PATH`, so a consumer's own `native-image` build picks it up automatically with zero extra config. The jar's `native-image.properties` rides along the same way, and it is what keeps the downcalls compiled rather than interpreted in the image: 57 ns per `newV7(long)` there (the table below). (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 A native image still loads the core's shared library at startup, extracted from the jar as on the JVM, rather than linking the static archive into the executable the way C# Native AOT and Go do. Linking it in works on Linux, but only through GraalVM's internal builder API, with separate linker handling for each OS, so it is deliberately not done; the forge's [levers not pulled](https://github.com/SkunkWerkx/.github#levers-deliberately-not-pulled) table has the full reasoning, the proven recipe, and what would change the answer.
 
@@ -225,6 +231,19 @@ A native image still loads the core's shared library at startup, extracted from 
 A native image costs more than the JVM, up to about two and a half times, which is the ordinary price of an ahead-of-time compiler without a profile. The byte fill is the exception, level in both, because nearly all of it is native work.
 
 FFM is compiled in the image, not interpreted, because the downcall handles are constants there: they are created from the C signature alone in a class that needs nothing from the library, take the export's address as their first argument, and `META-INF/native-image/.../native-image.properties` in the jar has that class initialized at image build time. A consumer's `native-image` build inherits it with no configuration.
+
+## Building and testing
+
+The jar carries two native libraries per platform, so build both before Gradle runs: `cargo cdylib` in `rust/`, then `cargo build --release --locked --lib` in `java/jni/`. Gradle stages them into the jar and refuses a stale one: the build fails when either library is older than a source cargo read for it (its dep-info), and the message gives the rebuild commands.
+
+Gradle, Spotless, javadoc and publishing run on JDK 25. `./gradlew check` and `./gradlew build` also run `testFloor`, the same suite on JDK 21 (the JNI path end to end), which needs a local JDK 21: `gradle.properties` turns toolchain auto-download off, so pass it explicitly.
+
+```sh
+./gradlew check -Porg.gradle.java.installations.paths=<path to a JDK 21> \
+  -Porg.gradle.java.installations.auto-detect=false
+```
+
+Without a JDK 21 Gradle can see, `testFloor` fails with "Cannot find a Java installation … matching: {languageVersion=21 …}".
 
 ## Verifying provenance
 
@@ -242,7 +261,7 @@ gh attestation verify hyperuuid-<version>.jar --repo SkunkWerkx/HyperUuid \
 Its build provenance is the second check. The bundle is assembled by `hyper-pack-maven.yml`,
 a reusable workflow that lives in `SkunkWerkx/.github`, and that is the identity Fulcio
 records as the signer, so `--repo` alone is not enough there: add `--signer-repo`, or use
-`--owner` in place of both. The native libraries inside the jar carry their own, from the
+`--owner` in place of both. The native libraries inside the jar, the core and the JNI library for each platform, carry their own, from the
 Forge's build workflows at the preparation commit on master, and the pack job verifies each of
 them before it goes into the jar.
 
@@ -267,7 +286,7 @@ dependencies {
 }
 ```
 
-The current version is the one on the Maven Central badge above. Requires JDK 25 or later. The jar bundles a native build for all eight platforms (linux-x64, linux-arm64, linux-musl-x64, linux-musl-arm64, osx-x64, osx-arm64, win-x64, win-arm64) and picks the right one at runtime; see [Native access](#native-access) for the one flag the JVM wants.
+The current version is the one on the Maven Central badge above. Requires JDK 21 or later. The jar bundles a native build for all eight platforms (linux-x64, linux-arm64, linux-musl-x64, linux-musl-arm64, osx-x64, osx-arm64, win-x64, win-arm64) and picks the right one at runtime; see [Native access](#native-access) for the one flag the JVM wants.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

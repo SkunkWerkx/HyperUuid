@@ -1,21 +1,7 @@
 package io.github.skunkwerkx.hyperuuid;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.lang.foreign.Arena;
-import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.Linker;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.SymbolLookup;
-import java.lang.foreign.ValueLayout;
-import java.lang.invoke.MethodHandle;
-import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,20 +9,21 @@ import java.util.UUID;
 
 /**
  * RFC 9562 UUID generation (v4 random, v5 deterministic, v7 time-sortable, with a version 8
- * SQL Server order for v7) calling directly
- * into the native {@code libhyperuuid} shared library via the Java Foreign Function &amp; Memory
- * API (JEP 454; this binding's floor is JDK 25) — no runtime bridge, no extra runtime
- * dependency (plain Java rather than Kotlin: {@code kotlin-stdlib} would otherwise be a real
- * transitive dependency for every consumer, unlike every other binding in this repo).
+ * SQL Server order for v7) calling directly into the native {@code libhyperuuid} Rust core
+ * — no runtime bridge, no extra runtime dependency (plain Java rather than Kotlin:
+ * {@code kotlin-stdlib} would otherwise be a real transitive dependency for every consumer,
+ * unlike every other binding in this repo). This binding's floor is JDK 21. The jar is
+ * multi-release: on JDK 25 and later it reaches the core through the Java Foreign Function
+ * &amp; Memory API (JEP 454), and on 21 through 24 through a JNI shim library that holds the
+ * same core.
  *
- * <p>Nothing is copied on the way across. Every downcall is linked
- * {@link Linker.Option#critical(boolean) critical(true)}, so a caller's own {@code byte[]} — a
- * v5 name, a batch destination, sixteen bytes to reorder in place — is pinned and handed to the
- * native side directly, and the 16-byte in/out scratch the single-UUID doors need lives in one
- * per-thread segment for the life of the thread rather than a confined {@link Arena} opened
- * and torn down on every call. The underlying Rust core never allocates for these calls
- * either. This jar bundles a native build for every supported platform (see
- * {@link NativePlatform}) and picks the right one at runtime.
+ * <p>On the FFM path nothing is copied on the way across (the JNI path pins an array up to 64
+ * KiB the same way): every downcall is linked critical, so a caller's own {@code byte[]} — a v5 name, a batch destination, sixteen bytes to reorder in
+ * place — is pinned and handed to the native side directly, and the 16-byte in/out scratch
+ * the single-UUID doors need lives in one per-thread segment for the life of the thread. The
+ * underlying Rust core never allocates for these calls either. This jar bundles a native
+ * build for every supported platform (see {@link NativePlatform}) and picks the right one at
+ * runtime.
  *
  * <p>Nothing loads until the first call that needs the core. A consumer with a fallback of
  * its own gates on {@link #isAvailable()} first — the one probe that never throws — because
@@ -61,174 +48,14 @@ public final class UuidGenerator {
     }
 
     /**
-     * The downcall handles: one per C signature the core exports, none of them bound to an
-     * address. Each takes the export's address as its leading argument, which {@link Core}
-     * looks up once the library is loaded.
-     *
-     * <p>They live apart from {@link Core} for GraalVM Native Image. An image can only compile
-     * a call through a {@code MethodHandle} that is already a constant when the image is
-     * built; a handle created at run time — which is what binding one to a symbol's address
-     * forces, since the address does not exist until the library is loaded — is invoked
-     * through the image's method-handle interpreter instead, at microseconds a call (measured:
-     * 6.4 µs for {@code newV7}, against 36 ns on the JVM). Nothing in this class needs the
-     * library, so {@code META-INF/native-image/.../native-image.properties} has it initialized
-     * at image build time, and the handles are constants in the image. On the JVM the split
-     * changes nothing: the class initializes on the first native-path call, and the JIT folds
-     * a {@code static final} handle either way.
-     */
-    private static final class Downcalls {
-        private Downcalls() {}
-
-        private static final Linker LINKER = Linker.nativeLinker();
-
-        // critical(true) is what lets a heap segment (MemorySegment.ofArray over the caller's
-        // byte[]) cross without being copied into native memory first: the array is pinned for
-        // the duration of the call instead. The contract in exchange — the callee must be short,
-        // must not block, and must never upcall into Java — is exactly what every export here is:
-        // a bounded computation over the bytes it was handed, with no callbacks.
-        private static final Linker.Option CRITICAL = Linker.Option.critical(true);
-
-        // (out) -> rc — uuid_new_v4
-        private static final MethodHandle NEW =
-                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-        // (namespace, name, name_len, out) -> rc — uuid_new_v5
-        private static final MethodHandle NEW_NAMED = LINKER.downcallHandle(
-                FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT,
-                        ValueLayout.ADDRESS,
-                        ValueLayout.ADDRESS,
-                        ValueLayout.JAVA_INT,
-                        ValueLayout.ADDRESS),
-                CRITICAL);
-        // (unix_millis, out) -> rc — uuid_new_v7
-        private static final MethodHandle NEW_AT = LINKER.downcallHandle(
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
-        // (unix_millis, count, out) -> rc — uuid_new_v7_batch
-        private static final MethodHandle NEW_BATCH = LINKER.downcallHandle(
-                FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
-                CRITICAL);
-        // (uuid) -> unix_millis — uuid_v7_unix_millis
-        private static final MethodHandle UNIX_MILLIS =
-                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS), CRITICAL);
-        // (uuid) -> rc, rewritten in place on success — uuid_v7_to_sql_order, uuid_v7_to_rfc_order
-        private static final MethodHandle REORDER =
-                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-        // (uuid, layout) -> version — uuid_version
-        private static final MethodHandle VERSION_IN = LINKER.downcallHandle(
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), CRITICAL);
-        // (uuid) -> variant code — uuid_variant
-        private static final MethodHandle VARIANT =
-                LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS), CRITICAL);
-        // (uuid, version, layout) -> 1/0 — uuid_is_rfc
-        private static final MethodHandle IS_RFC = LINKER.downcallHandle(
-                FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
-                CRITICAL);
-        // (uuid, layout, millis_out) -> 7/0 — uuid_get_timestamp
-        private static final MethodHandle GET_TIMESTAMP = LINKER.downcallHandle(
-                FunctionDescriptor.of(
-                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS),
-                CRITICAL);
-        // (uuid, layout) -> unix_millis — uuid_v7_unix_millis_in
-        private static final MethodHandle UNIX_MILLIS_IN = LINKER.downcallHandle(
-                FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_INT), CRITICAL);
-        // () -> packed version — the probe. Nothing crosses, so it is not linked critical.
-        private static final MethodHandle VERSION = LINKER.downcallHandle(FunctionDescriptor.of(ValueLayout.JAVA_INT));
-
-        // RFC 9562 order is exactly UUID's msb/lsb decomposition, so a UUID is two big-endian
-        // longs in a segment — written and read as such, no byte[] in between. Unaligned,
-        // because a heap segment over a caller's byte[] carries no alignment guarantee at all
-        // (the aligned layout rejects it outright), and on every supported RID an unaligned
-        // load of an aligned address costs the same as an aligned one. Here for the same
-        // reason the handles are: a layout is read through a VarHandle, and one that is not a
-        // constant in the image costs ~70 ns a load there instead of one instruction.
-        private static final ValueLayout.OfLong BIG_ENDIAN_LONG =
-                ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.BIG_ENDIAN);
-    }
-
-    /**
-     * The loaded core: which path won, the library it resolved to, and the address of every
-     * export in it — all {@code static final}, all resolved in this holder's own class init.
-     * A holder rather than fields on {@code UuidGenerator} itself so that nothing loads
-     * until the first call that needs the core ({@link UuidGenerator#NIL},
-     * {@link UuidGenerator#MAX} and {@link Namespaces} never do), and so that
-     * {@link UuidGenerator#isAvailable()} can
-     * observe a load failure without {@code UuidGenerator} having failed to initialize: a
-     * call after a failed load throws the {@link NoClassDefFoundError} for this class, and
-     * the constants and the probe go on working.
-     */
-    private static final class Core {
-        private Core() {}
-
-        // The bundled library for this platform, loaded once at class init. A platform this
-        // jar ships no build for, or a library that will not open (a temp directory mounted
-        // noexec, say), fails this class's init with the reason, and isAvailable() says so.
-        private static final SymbolLookup LOOKUP = loadLibrary(NativePlatform.current());
-
-        // Where each export lives in the loaded library — the leading argument of the
-        // Downcalls handle with its signature. Looked up here, once, so an export missing from
-        // an older core fails this class's init (and isAvailable() says so) rather than a call.
-        private static final MemorySegment UUID_NEW_V4 = export("uuid_new_v4");
-        private static final MemorySegment UUID_NEW_V5 = export("uuid_new_v5");
-        private static final MemorySegment UUID_NEW_V7 = export("uuid_new_v7");
-        private static final MemorySegment UUID_V7_UNIX_MILLIS = export("uuid_v7_unix_millis");
-        private static final MemorySegment UUID_NEW_V7_BATCH = export("uuid_new_v7_batch");
-        private static final MemorySegment UUID_V7_TO_SQL_ORDER = export("uuid_v7_to_sql_order");
-        private static final MemorySegment UUID_V7_TO_RFC_ORDER = export("uuid_v7_to_rfc_order");
-        private static final MemorySegment UUID_VERSION = export("uuid_version");
-        private static final MemorySegment UUID_VARIANT = export("uuid_variant");
-        private static final MemorySegment UUID_IS_RFC = export("uuid_is_rfc");
-        private static final MemorySegment UUID_GET_TIMESTAMP = export("uuid_get_timestamp");
-        private static final MemorySegment UUID_V7_UNIX_MILLIS_IN = export("uuid_v7_unix_millis_in");
-        private static final MemorySegment HYPERUUID_VERSION = export("hyperuuid_version");
-
-        private static MemorySegment export(String symbol) {
-            return LOOKUP.find(symbol)
-                    .orElseThrow(() -> new IllegalStateException("libhyperuuid does not export " + symbol));
-        }
-
-        // Why there is no native library to load, for the messages below: no build exists for
-        // this platform at all, or one should and this jar was packed without it.
-        private static String nativeMissing(NativePlatform.Target target) {
-            return target == null
-                    ? "hyperuuid: this jar carries no native library for " + NativePlatform.describe()
-                    : target.resourcePath() + " classpath resource not found (this jar was built "
-                            + "without a native library for this platform)";
-        }
-
-        // The library must outlive every downcall made through it, so it's loaded into the
-        // JDK-provided global arena that lives for the process's lifetime rather than one this
-        // class would have to remember to keep a reference to.
-        private static SymbolLookup loadLibrary(NativePlatform.Target target) {
-            if (target == null) {
-                throw new IllegalStateException(nativeMissing(null));
-            }
-            try (InputStream resource = UuidGenerator.class.getResourceAsStream(target.resourcePath())) {
-                if (resource == null) {
-                    throw new IllegalStateException(nativeMissing(target));
-                }
-                String libraryFileName = target.libraryFileName();
-                String extension = libraryFileName.substring(libraryFileName.lastIndexOf('.'));
-                Path tmp = Files.createTempFile("hyperuuid", extension);
-                tmp.toFile().deleteOnExit();
-                Files.copy(resource, tmp, StandardCopyOption.REPLACE_EXISTING);
-                return SymbolLookup.libraryLookup(tmp, Arena.global());
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-    }
-
-    /**
      * Whether the core resolved: the bundled platform library loaded, and every export this
-     * binding was built against was found in it. Probed once, on first call, and cached;
-     * never throws. A library that will not open, a jar built without a core for this
-     * platform, an export missing from an older core — all come back {@code false}. This is
-     * what a consumer with a fallback of its own ({@link UUID#randomUUID()}, say) gates on
-     * before the first call: the generating methods themselves throw the load failure they
-     * hit rather than quietly mint from somewhere else. {@code true} exactly when
-     * {@link #nativeVersion()} succeeds.
+     * binding was built against was found in it (on JNI, every native it declares registered).
+     * Probed once, on first call, and cached; never throws. A library that will not open, a
+     * jar built without a core for this platform, an export missing from an older core — all
+     * come back {@code false}. This is what a consumer with a fallback of its own
+     * ({@link UUID#randomUUID()}, say) gates on before the first call: the generating methods
+     * themselves throw the load failure they hit rather than quietly mint from somewhere
+     * else. {@code true} exactly when {@link #nativeVersion()} succeeds.
      *
      * @return {@code true} when the core is loaded and callable
      */
@@ -238,7 +65,8 @@ public final class UuidGenerator {
 
     // Its own holder so the answer is computed once and cached without UuidGenerator's own
     // init depending on the load. The probe is the version export: the cheapest crossing
-    // there is, and reaching it proves Core initialized — every export resolved.
+    // there is, and reaching it proves Core initialized — every export resolved (or, on JNI,
+    // every native registered).
     private static final class Availability {
         static final boolean AVAILABLE = probe();
 
@@ -269,19 +97,7 @@ public final class UuidGenerator {
      * @return the loaded core's version as {@code "major.minor.patch"}
      */
     public static String nativeVersion() {
-        int packed;
-        // Every door evaluates Core's address and Downcalls' handle inside its try, so a core
-        // that failed to load arrives here as Core's or Downcalls' initialization error
-        // (ExceptionInInitializerError, then NoClassDefFoundError). Those are rethrown as they
-        // are, never wrapped: they are what isAvailable() answers false for and what the
-        // generating methods document. Only the downcall itself is unexpected.
-        try {
-            packed = (int) Downcalls.VERSION.invokeExact(Core.HYPERUUID_VERSION);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: hyperuuid_version downcall failed unexpectedly", t);
-        }
+        int packed = NativeCore.coreVersion();
         // major << 16 | minor << 8 | patch, per ffi.rs.
         return (packed >>> 16) + "." + ((packed >>> 8) & 0xFF) + "." + (packed & 0xFF);
     }
@@ -293,50 +109,17 @@ public final class UuidGenerator {
     public static final UUID MAX = new UUID(-1L, -1L);
 
     /**
-     * Per-thread scratch for the single-UUID doors: sixteen bytes to hand a UUID in and
-     * sixteen to receive one, allocated once per thread instead of a confined Arena opened
-     * and closed on every call (a native allocation plus a scope teardown each time, which
-     * was most of what those doors cost). Doors never nest, so no call can observe another's
-     * scratch mid-flight; nothing is shared between threads, so no door needs locking.
-     */
-    private static final class Scratch {
-        private final Arena arena = Arena.ofAuto();
-        final MemorySegment in = arena.allocate(16, 8);
-        final MemorySegment out = arena.allocate(16, 8);
-    }
-
-    private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
-
-    private static UUID readUuid(MemorySegment segment, long offset) {
-        return new UUID(
-                segment.get(Downcalls.BIG_ENDIAN_LONG, offset), segment.get(Downcalls.BIG_ENDIAN_LONG, offset + 8));
-    }
-
-    private static MemorySegment writeUuid(MemorySegment segment, UUID uuid) {
-        segment.set(Downcalls.BIG_ENDIAN_LONG, 0, uuid.getMostSignificantBits());
-        segment.set(Downcalls.BIG_ENDIAN_LONG, 8, uuid.getLeastSignificantBits());
-        return segment;
-    }
-
-    /**
      * Creates a random UUID version 4 (RFC 9562 §5.4).
      *
      * @return a new random version 4 UUID
      */
     public static UUID newV4() {
-        MemorySegment out = SCRATCH.get().out;
-        int rc;
-        try {
-            rc = (int) Downcalls.NEW.invokeExact(Core.UUID_NEW_V4, out);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_new_v4 downcall failed unexpectedly", t);
-        }
+        NativeCore.Scratch scratch = NativeCore.scratch();
+        int rc = NativeCore.newV4(scratch);
         if (rc != 0) {
             throw new IllegalStateException("uuid_new_v4 failed with code " + rc + " (random source failure)");
         }
-        return readUuid(out, 0);
+        return NativeCore.result(scratch);
     }
 
     /**
@@ -348,6 +131,8 @@ public final class UuidGenerator {
      * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, String name) {
+        Objects.requireNonNull(namespace, "namespace");
+        Objects.requireNonNull(name, "name");
         return newV5(namespace, name, StandardCharsets.UTF_8);
     }
 
@@ -362,6 +147,9 @@ public final class UuidGenerator {
      * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, String name, Charset charset) {
+        Objects.requireNonNull(namespace, "namespace");
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(charset, "charset");
         return newV5(namespace, name.getBytes(charset));
     }
 
@@ -374,23 +162,14 @@ public final class UuidGenerator {
      * @return the deterministic version 5 UUID for this (namespace, name) pair
      */
     public static UUID newV5(UUID namespace, byte[] name) {
-        Scratch scratch = SCRATCH.get();
-        MemorySegment nsSeg = writeUuid(scratch.in, namespace);
-        // The caller's own array crosses pinned; a zero-length name is the ABI's NULL.
-        MemorySegment nameSeg = name.length == 0 ? MemorySegment.NULL : MemorySegment.ofArray(name);
-        MemorySegment out = scratch.out;
-        int rc;
-        try {
-            rc = (int) Downcalls.NEW_NAMED.invokeExact(Core.UUID_NEW_V5, nsSeg, nameSeg, name.length, out);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_new_v5 downcall failed unexpectedly", t);
-        }
+        Objects.requireNonNull(namespace, "namespace");
+        Objects.requireNonNull(name, "name");
+        NativeCore.Scratch scratch = NativeCore.scratch();
+        int rc = NativeCore.newV5(scratch, namespace, name);
         if (rc != 0) {
             throw new IllegalStateException("uuid_new_v5 failed with code " + rc);
         }
-        return readUuid(out, 0);
+        return NativeCore.result(scratch);
     }
 
     /**
@@ -438,15 +217,8 @@ public final class UuidGenerator {
      *     {@code "version 7 counter exhausted"}) or the random source fails
      */
     public static UUID newV7(long unixMillis) {
-        MemorySegment out = SCRATCH.get().out;
-        int rc;
-        try {
-            rc = (int) Downcalls.NEW_AT.invokeExact(Core.UUID_NEW_V7, unixMillis, out);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_new_v7 downcall failed unexpectedly", t);
-        }
+        NativeCore.Scratch scratch = NativeCore.scratch();
+        int rc = NativeCore.newV7(scratch, unixMillis);
         if (rc == 2) {
             throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
         }
@@ -456,7 +228,7 @@ public final class UuidGenerator {
         if (rc != 0) {
             throw new IllegalStateException("uuid_new_v7 failed with code " + rc + " (random source failure)");
         }
-        return readUuid(out, 0);
+        return NativeCore.result(scratch);
     }
 
     /**
@@ -469,6 +241,7 @@ public final class UuidGenerator {
      *     bits
      */
     public static UUID newV7(Instant instant) {
+        Objects.requireNonNull(instant, "instant");
         return newV7(instant.toEpochMilli());
     }
 
@@ -483,14 +256,8 @@ public final class UuidGenerator {
      * @return the embedded Unix-epoch millisecond timestamp
      */
     public static long v7UnixMillis(UUID uuid) {
-        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
-        try {
-            return (long) Downcalls.UNIX_MILLIS.invokeExact(Core.UUID_V7_UNIX_MILLIS, seg);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_v7_unix_millis downcall failed unexpectedly", t);
-        }
+        Objects.requireNonNull(uuid, "uuid");
+        return NativeCore.v7UnixMillis(uuid);
     }
 
     /**
@@ -503,6 +270,7 @@ public final class UuidGenerator {
      * @return the embedded UTC timestamp
      */
     public static Instant v7Timestamp(UUID uuid) {
+        Objects.requireNonNull(uuid, "uuid");
         return Instant.ofEpochMilli(v7UnixMillis(uuid));
     }
 
@@ -520,6 +288,7 @@ public final class UuidGenerator {
      *     UUID
      */
     public static Optional<Instant> getTimestamp(UUID uuid) {
+        Objects.requireNonNull(uuid, "uuid");
         return getTimestamp(uuid, UuidLayout.RFC_9562);
     }
 
@@ -539,23 +308,16 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static Optional<Instant> getTimestamp(UUID uuid, UuidLayout layout) {
+        Objects.requireNonNull(uuid, "uuid");
         int code = layoutCode(layout);
         // One call: the core checks the variant and the version and reads the timestamp,
         // writing the millis into the out scratch only when it answers 7.
-        Scratch scratch = SCRATCH.get();
-        MemorySegment seg = writeUuid(scratch.in, uuid);
-        int version;
-        try {
-            version = (int) Downcalls.GET_TIMESTAMP.invokeExact(Core.UUID_GET_TIMESTAMP, seg, code, scratch.out);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_get_timestamp downcall failed unexpectedly", t);
-        }
+        NativeCore.Scratch scratch = NativeCore.scratch();
+        int version = NativeCore.getTimestamp(scratch, uuid, code);
         if (version == 0) {
             return Optional.empty();
         }
-        return Optional.of(Instant.ofEpochMilli(scratch.out.get(ValueLayout.JAVA_LONG, 0)));
+        return Optional.of(Instant.ofEpochMilli(NativeCore.resultMillis(scratch)));
     }
 
     /**
@@ -570,7 +332,8 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static long v7UnixMillis(UUID uuid, UuidLayout layout) {
-        return v7UnixMillisIn(uuid, layoutCode(layout));
+        Objects.requireNonNull(uuid, "uuid");
+        return NativeCore.v7UnixMillisIn(uuid, layoutCode(layout));
     }
 
     /**
@@ -584,6 +347,7 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static Instant v7Timestamp(UUID uuid, UuidLayout layout) {
+        Objects.requireNonNull(uuid, "uuid");
         return Instant.ofEpochMilli(v7UnixMillis(uuid, layout));
     }
 
@@ -610,52 +374,6 @@ public final class UuidGenerator {
         }
     }
 
-    private static int versionIn(UUID uuid, int layout) {
-        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
-        return versionNative(seg, layout);
-    }
-
-    private static int versionNative(MemorySegment seg, int layout) {
-        try {
-            return (int) Downcalls.VERSION_IN.invokeExact(Core.UUID_VERSION, seg, layout);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_version downcall failed unexpectedly", t);
-        }
-    }
-
-    private static int variantNative(MemorySegment seg) {
-        try {
-            return (int) Downcalls.VARIANT.invokeExact(Core.UUID_VARIANT, seg);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_variant downcall failed unexpectedly", t);
-        }
-    }
-
-    private static boolean isRfcNative(MemorySegment seg, int version, int layout) {
-        try {
-            return (int) Downcalls.IS_RFC.invokeExact(Core.UUID_IS_RFC, seg, version, layout) != 0;
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_is_rfc downcall failed unexpectedly", t);
-        }
-    }
-
-    private static long v7UnixMillisIn(UUID uuid, int layout) {
-        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
-        try {
-            return (long) Downcalls.UNIX_MILLIS_IN.invokeExact(Core.UUID_V7_UNIX_MILLIS_IN, seg, layout);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_v7_unix_millis_in downcall failed unexpectedly", t);
-        }
-    }
-
     /**
      * The RFC 9562 version nibble of {@code uuid}, 0 through 15 — 0 for {@link #NIL}, 15 for
      * {@link #MAX}. Agrees with {@link UUID#version()}, read by the core. Says nothing about
@@ -671,7 +389,8 @@ public final class UuidGenerator {
      * @return its version nibble
      */
     public static int version(UUID uuid) {
-        return versionIn(uuid, UuidLayout.RFC_9562.code());
+        Objects.requireNonNull(uuid, "uuid");
+        return NativeCore.version(uuid, UuidLayout.RFC_9562.code());
     }
 
     /**
@@ -692,7 +411,8 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static int version(UUID uuid, UuidLayout layout) {
-        return versionIn(uuid, layoutCode(layout));
+        Objects.requireNonNull(uuid, "uuid");
+        return NativeCore.version(uuid, layoutCode(layout));
     }
 
     /**
@@ -705,6 +425,7 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code uuid} is not exactly 16 bytes
      */
     public static int version(byte[] uuid) {
+        Objects.requireNonNull(uuid, "uuid");
         return version(uuid, UuidLayout.RFC_9562);
     }
 
@@ -721,9 +442,10 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static int version(byte[] uuid, UuidLayout layout) {
+        Objects.requireNonNull(uuid, "uuid");
         int code = layoutCode(layout);
         requireSingleUuid(uuid);
-        return versionNative(MemorySegment.ofArray(uuid), code);
+        return NativeCore.version(uuid, code);
     }
 
     /**
@@ -741,7 +463,8 @@ public final class UuidGenerator {
      * @return its variant
      */
     public static UuidVariant variant(UUID uuid) {
-        return UuidVariant.of(variantNative(writeUuid(SCRATCH.get().in, uuid)));
+        Objects.requireNonNull(uuid, "uuid");
+        return UuidVariant.of(NativeCore.variant(uuid));
     }
 
     /**
@@ -754,8 +477,9 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code uuid} is not exactly 16 bytes
      */
     public static UuidVariant variant(byte[] uuid) {
+        Objects.requireNonNull(uuid, "uuid");
         requireSingleUuid(uuid);
-        return UuidVariant.of(variantNative(MemorySegment.ofArray(uuid)));
+        return UuidVariant.of(NativeCore.variant(uuid));
     }
 
     /**
@@ -776,7 +500,8 @@ public final class UuidGenerator {
      * @return {@code true} if {@code uuid} is an RFC 9562 UUID of that version
      */
     public static boolean isRfc(UUID uuid, int version) {
-        return isRfcIn(uuid, version, UuidLayout.RFC_9562.code());
+        Objects.requireNonNull(uuid, "uuid");
+        return NativeCore.isRfc(uuid, version, UuidLayout.RFC_9562.code()) != 0;
     }
 
     /**
@@ -793,11 +518,8 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static boolean isRfc(UUID uuid, int version, UuidLayout layout) {
-        return isRfcIn(uuid, version, layoutCode(layout));
-    }
-
-    private static boolean isRfcIn(UUID uuid, int version, int layout) {
-        return isRfcNative(writeUuid(SCRATCH.get().in, uuid), version, layout);
+        Objects.requireNonNull(uuid, "uuid");
+        return NativeCore.isRfc(uuid, version, layoutCode(layout)) != 0;
     }
 
     /**
@@ -811,6 +533,7 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code uuid} is not exactly 16 bytes
      */
     public static boolean isRfc(byte[] uuid, int version) {
+        Objects.requireNonNull(uuid, "uuid");
         return isRfc(uuid, version, UuidLayout.RFC_9562);
     }
 
@@ -827,9 +550,10 @@ public final class UuidGenerator {
      * @throws NullPointerException if {@code layout} is {@code null}
      */
     public static boolean isRfc(byte[] uuid, int version, UuidLayout layout) {
+        Objects.requireNonNull(uuid, "uuid");
         int code = layoutCode(layout);
         requireSingleUuid(uuid);
-        return isRfcNative(MemorySegment.ofArray(uuid), version, code);
+        return NativeCore.isRfc(uuid, version, code) != 0;
     }
 
     /**
@@ -868,19 +592,13 @@ public final class UuidGenerator {
      * @throws IllegalArgumentException if {@code uuid} isn't an RFC 9562 version 7 UUID
      */
     public static UUID v7ToSqlOrder(UUID uuid) {
-        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
-        int rc;
-        try {
-            rc = (int) Downcalls.REORDER.invokeExact(Core.UUID_V7_TO_SQL_ORDER, seg);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_v7_to_sql_order downcall failed unexpectedly", t);
-        }
+        Objects.requireNonNull(uuid, "uuid");
+        NativeCore.Scratch scratch = NativeCore.scratch();
+        int rc = NativeCore.v7ToSqlOrder(scratch, uuid);
         if (rc != 0) {
             throw sqlOrderFailure(rc, "uuid_v7_to_sql_order");
         }
-        return readUuid(seg, 0);
+        return NativeCore.result(scratch);
     }
 
     /**
@@ -893,19 +611,13 @@ public final class UuidGenerator {
      *     from a version 7 — an RFC-ordered value included
      */
     public static UUID v7FromSqlOrder(UUID uuid) {
-        MemorySegment seg = writeUuid(SCRATCH.get().in, uuid);
-        int rc;
-        try {
-            rc = (int) Downcalls.REORDER.invokeExact(Core.UUID_V7_TO_RFC_ORDER, seg);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_v7_to_rfc_order downcall failed unexpectedly", t);
-        }
+        Objects.requireNonNull(uuid, "uuid");
+        NativeCore.Scratch scratch = NativeCore.scratch();
+        int rc = NativeCore.v7ToRfcOrder(scratch, uuid);
         if (rc != 0) {
             throw sqlOrderFailure(rc, "uuid_v7_to_rfc_order");
         }
-        return readUuid(seg, 0);
+        return NativeCore.result(scratch);
     }
 
     /**
@@ -930,24 +642,15 @@ public final class UuidGenerator {
         if (count == 0) {
             return new UUID[0];
         }
-        // One heap array as the destination, crossing pinned, then one UUID per 16 bytes.
-        MemorySegment out = MemorySegment.ofArray(new byte[count * 16]);
-        int rc;
-        try {
-            rc = (int) Downcalls.NEW_BATCH.invokeExact(Core.UUID_NEW_V7_BATCH, unixMillis, count, out);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: uuid_new_v7_batch downcall failed unexpectedly", t);
-        }
+        // One heap array as the destination, then one UUID per 16 bytes.
+        byte[] out = new byte[count * 16];
+        int rc = NativeCore.newV7Batch(unixMillis, count, out);
         if (rc != 0) {
             throw batchFailure(
                     rc, "uuid_new_v7_batch", count, "unixMillis must be non-negative and fit within 48 bits");
         }
         UUID[] result = new UUID[count];
-        for (int i = 0; i < count; i++) {
-            result[i] = readUuid(out, (long) i * 16);
-        }
+        NativeCore.readUuids(out, result);
         return result;
     }
 
@@ -967,7 +670,7 @@ public final class UuidGenerator {
     //
     // newV7Batch allocates a fresh UUID[] and a scratch byte[] on every call.
     // These write into storage the caller already owns — the byte[] form pinned and handed to
-    // the native side directly, nothing copied — so a hot path can reuse one buffer across
+    // the native side directly on FFM (on JNI up to 64 KiB) — so a hot path can reuse one buffer across
     // batches instead of handing the collector two objects per batch.
     //
     // Unlike the Go and Swift bindings, the UUID[] form still costs a per-element
@@ -976,16 +679,8 @@ public final class UuidGenerator {
     // it is why the byte[] forms below are the ones that actually remove work
     // rather than just removing an allocation.
 
-    private static void fillBytesNative(
-            MemorySegment out, int count, long unixMillis, MemorySegment export, String fn) {
-        int rc;
-        try {
-            rc = (int) Downcalls.NEW_BATCH.invokeExact(export, unixMillis, count, out);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
-        }
+    private static void fillBytesNative(byte[] out, int count, long unixMillis, String fn) {
+        int rc = NativeCore.newV7Batch(unixMillis, count, out);
         if (rc != 0) {
             throw batchFailure(rc, fn, count, "unixMillis must be non-negative and fit within 48 bits");
         }
@@ -1086,9 +781,10 @@ public final class UuidGenerator {
      *     the random source fails
      */
     public static void fillV7(UUID[] destination, long unixMillis) {
+        Objects.requireNonNull(destination, "destination");
         requireBatchCount(destination.length);
         requireV7BatchCount(destination.length);
-        fillUuidArray(destination, unixMillis, Core.UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
+        fillUuidArray(destination, unixMillis, "uuid_new_v7_batch");
     }
 
     /**
@@ -1099,18 +795,17 @@ public final class UuidGenerator {
      *     the random source fails
      */
     public static void fillV7(UUID[] destination) {
+        Objects.requireNonNull(destination, "destination");
         fillV7(destination, System.currentTimeMillis());
     }
 
-    private static void fillUuidArray(UUID[] destination, long unixMillis, MemorySegment export, String fn) {
+    private static void fillUuidArray(UUID[] destination, long unixMillis, String fn) {
         if (destination.length == 0) {
             return;
         }
-        MemorySegment out = MemorySegment.ofArray(new byte[destination.length * 16]);
-        fillBytesNative(out, destination.length, unixMillis, export, fn);
-        for (int i = 0; i < destination.length; i++) {
-            destination[i] = readUuid(out, (long) i * 16);
-        }
+        byte[] out = new byte[destination.length * 16];
+        fillBytesNative(out, destination.length, unixMillis, fn);
+        NativeCore.readUuids(out, destination);
     }
 
     /**
@@ -1131,9 +826,10 @@ public final class UuidGenerator {
      *     the random source fails
      */
     public static void fillV7(byte[] destination, long unixMillis) {
+        Objects.requireNonNull(destination, "destination");
         requireWholeUuids(destination.length);
         requireV7BatchCount(destination.length / 16);
-        fillByteArray(destination, unixMillis, Core.UUID_NEW_V7_BATCH, "uuid_new_v7_batch");
+        fillByteArray(destination, unixMillis, "uuid_new_v7_batch");
     }
 
     /**
@@ -1144,16 +840,17 @@ public final class UuidGenerator {
      *     the random source fails
      */
     public static void fillV7(byte[] destination) {
+        Objects.requireNonNull(destination, "destination");
         fillV7(destination, System.currentTimeMillis());
     }
 
-    private static void fillByteArray(byte[] destination, long unixMillis, MemorySegment export, String fn) {
+    private static void fillByteArray(byte[] destination, long unixMillis, String fn) {
         requireWholeUuids(destination.length);
         if (destination.length == 0) {
             return;
         }
-        // The caller's array is the destination: pinned for the call, written in place.
-        fillBytesNative(MemorySegment.ofArray(destination), destination.length / 16, unixMillis, export, fn);
+        // The caller's array is the destination, written in place.
+        fillBytesNative(destination, destination.length / 16, unixMillis, fn);
     }
 
     // ---- Raw-byte SQL-order transforms -----------------------------------------------
@@ -1164,24 +861,13 @@ public final class UuidGenerator {
     // correctness oracle can be pointed at directly — shared across every binding in this
     // repo rather than re-expressed against each language's own UUID type.
 
-    private static void sqlOrderBytes(byte[] uuid, MemorySegment export, String fn) {
-        if (uuid.length != 16) {
-            throw new IllegalArgumentException("a UUID is exactly 16 bytes; got " + uuid.length);
-        }
-        // In place, on the caller's own bytes — no staging copy in either direction.
-        // The core writes only on success, so a refused value leaves the caller's bytes as
-        // they were.
-        MemorySegment seg = MemorySegment.ofArray(uuid);
-        int rc;
-        try {
-            rc = (int) Downcalls.REORDER.invokeExact(export, seg);
-        } catch (LinkageError unloaded) {
-            throw unloaded;
-        } catch (Throwable t) {
-            throw new AssertionError("hyperuuid: " + fn + " downcall failed unexpectedly", t);
-        }
+    private static void sqlOrderBytes(byte[] uuid, boolean toSql) {
+        requireSingleUuid(uuid);
+        // In place, on the caller's own bytes. The core writes only on success, so a refused
+        // value leaves the caller's bytes as they were.
+        int rc = toSql ? NativeCore.v7ToSqlOrder(uuid) : NativeCore.v7ToRfcOrder(uuid);
         if (rc != 0) {
-            throw sqlOrderFailure(rc, fn);
+            throw sqlOrderFailure(rc, toSql ? "uuid_v7_to_sql_order" : "uuid_v7_to_rfc_order");
         }
     }
 
@@ -1194,7 +880,8 @@ public final class UuidGenerator {
      *     RFC 9562 version 7
      */
     public static void v7ToSqlOrder(byte[] uuid) {
-        sqlOrderBytes(uuid, Core.UUID_V7_TO_SQL_ORDER, "uuid_v7_to_sql_order");
+        Objects.requireNonNull(uuid, "uuid");
+        sqlOrderBytes(uuid, true);
     }
 
     /**
@@ -1206,6 +893,7 @@ public final class UuidGenerator {
      *     SQL-ordered value converted from a version 7
      */
     public static void v7FromSqlOrder(byte[] uuid) {
-        sqlOrderBytes(uuid, Core.UUID_V7_TO_RFC_ORDER, "uuid_v7_to_rfc_order");
+        Objects.requireNonNull(uuid, "uuid");
+        sqlOrderBytes(uuid, false);
     }
 }

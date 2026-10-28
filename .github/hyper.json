@@ -6,5 +6,6 @@
     "patterns": ["pub extern \"C\" fn (\\w+)"],
     "prefixes": ["uuid_", "hyperuuid_"]
   },
-  "cdylib_smoke": ".github/scripts/cdylib_smoke.py"
+  "cdylib_smoke": ".github/scripts/cdylib_smoke.py",
+  "sdist": true
 }
