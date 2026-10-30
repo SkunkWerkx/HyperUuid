@@ -127,7 +127,8 @@ jobs:
       # work; without those scopes the step fails rather than silently skipping.
       # The suite and the AOT smoke test run on net10.0 and net11.0 on every desktop and musl
       # leg: the forge installs the global.json SDK plus the 10.0 runtime and publishes once
-      # per framework. Blazor WebAssembly, iOS, Mac Catalyst and Android stay .NET 11 (HYPERUUID003).
+      # per framework. iOS, Mac Catalyst and Android stay .NET 11 (HYPERUUID003); Blazor
+      # WebAssembly takes both.
       csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
       csharp_extra_runtime: "10.0"
       # A jar has no per-platform package selection like NuGet's RID folders, and the
@@ -646,9 +647,9 @@ jobs:
   #    libc.so NEEDED line as the positive control that the readelf dump lists dependencies);
   #  * its control: the same package with build/ and buildTransitive/ stripped publishes a
   #    libhyperuuid.so beside the executable, so the check above can see a lost static link;
-  #  * the floor (net9.0 does not restore) and the gate (HYPERUUID003 for Blazor WebAssembly
-  #    on net10.0; net11.0 passes it). The net11.0 half is evaluated, and built only to show
-  #    HYPERUUID002, because this job installs no wasm workload.
+  #  * the floor (net9.0 does not restore) and the gate, which admits Blazor WebAssembly on
+  #    net10.0 and net11.0: evaluated, and built only to show HYPERUUID002, because this job
+  #    installs no wasm workload.
   # The runner image's SDK is not assumed to be the only one: the job logs which are there.
   test-nuget-package:
     needs: [build-static, build-native]
@@ -766,36 +767,33 @@ jobs:
                -p:HyperUuidVersion="$HYPERUUID_VERSION" -p:RestoreAdditionalProjectSources="$HYPERUUID_FEED" > restore-net9.log 2>&1; then
             echo "::error::net9.0 restored the package; the floor is net10.0"; cat restore-net9.log; exit 1
           fi
-          grep -q NU1202 restore-net9.log \
+          grep -qF "NU1202: Package HyperUuid " restore-net9.log \
             || { echo "::error::the net9.0 restore failed, but not with NU1202"; cat restore-net9.log; exit 1; }
           echo "net9.0 does not restore the package (NU1202)"
 
-      - name: Blazor WebAssembly needs .NET 11
+      # The wasm archive is built with -Zbuild-std for a feature set both .NET 10's and .NET 11's
+      # wasm toolchains accept, so the gate stands aside for Blazor on both. Evaluation shows the
+      # gate's answer; the build is to show HYPERUUID002, since this job installs no wasm
+      # workload. The Android evaluation is the control: the property is read, and does flag.
+      - name: The gate admits Blazor WebAssembly on .NET 10 and 11
         run: |
           set -euo pipefail
-          rm -rf "${GATE_DIR:?}/bin" "${GATE_DIR:?}/obj"
-          if dotnet build "$GATE_PROJECT" -p:GateFramework=net10.0 -p:RuntimeIdentifier=browser-wasm -tl:off > gate-wasm-net10.log 2>&1; then
-            echo "::error::net10.0 + browser-wasm built; the gate did not stop it"; cat gate-wasm-net10.log; exit 1
-          fi
-          grep -qF "error HYPERUUID003" gate-wasm-net10.log \
-            || { echo "::error::net10.0 + browser-wasm failed, but not with HYPERUUID003"; cat gate-wasm-net10.log; exit 1; }
-          grep -qF "Blazor WebAssembly" gate-wasm-net10.log \
-            || { echo "::error::the HYPERUUID003 text does not name Blazor WebAssembly"; cat gate-wasm-net10.log; exit 1; }
-          echo "net10.0 + browser-wasm stops with HYPERUUID003"
-          # The control is evaluation-only: no wasm workload here, so a net11.0 browser build
-          # rightly stops at HYPERUUID002, which is not the gate's error.
-          rm -rf "${GATE_DIR:?}/bin" "${GATE_DIR:?}/obj"
-          flag="$(dotnet msbuild "$GATE_PROJECT" -getProperty:_HyperUuidNet10Unsupported -p:GateFramework=net11.0 -p:RuntimeIdentifier=browser-wasm)"
-          [ -z "$flag" ] || { echo "::error::the gate flags net11.0 + browser-wasm: $flag"; exit 1; }
-          if dotnet build "$GATE_PROJECT" -p:GateFramework=net11.0 -p:RuntimeIdentifier=browser-wasm -p:WasmNativeWorkloadAvailable=false -tl:off > gate-wasm-net11.log 2>&1; then
-            echo "::error::net11.0 + browser-wasm built without the wasm workload"; cat gate-wasm-net11.log; exit 1
-          fi
-          grep -qF "error HYPERUUID002" gate-wasm-net11.log \
-            || { echo "::error::net11.0 + browser-wasm failed, but not with HYPERUUID002"; cat gate-wasm-net11.log; exit 1; }
-          if grep -qF "HYPERUUID003" gate-wasm-net11.log; then
-            echo "::error::net11.0 + browser-wasm raised HYPERUUID003"; cat gate-wasm-net11.log; exit 1
-          fi
-          echo "net11.0 + browser-wasm passes the gate (and stops at HYPERUUID002 without the workload)"
+          control="$(dotnet msbuild "$GATE_PROJECT" -getProperty:_HyperUuidNet10Unsupported -p:GateFramework=net10.0-android)"
+          [ "$control" = Android ] || { echo "::error::the gate does not flag net10.0-android (got '$control'); the reads below prove nothing"; exit 1; }
+          for f in net10.0 net11.0; do
+            rm -rf "${GATE_DIR:?}/bin" "${GATE_DIR:?}/obj"
+            flag="$(dotnet msbuild "$GATE_PROJECT" -getProperty:_HyperUuidNet10Unsupported -p:GateFramework="$f" -p:RuntimeIdentifier=browser-wasm)"
+            [ -z "$flag" ] || { echo "::error::the gate flags $f + browser-wasm: $flag"; exit 1; }
+            if dotnet build "$GATE_PROJECT" -p:GateFramework="$f" -p:RuntimeIdentifier=browser-wasm -p:WasmNativeWorkloadAvailable=false -tl:off > "gate-wasm-$f.log" 2>&1; then
+              echo "::error::$f + browser-wasm built without the wasm workload"; cat "gate-wasm-$f.log"; exit 1
+            fi
+            grep -qF "error HYPERUUID002" "gate-wasm-$f.log" \
+              || { echo "::error::$f + browser-wasm failed, but not with HYPERUUID002"; cat "gate-wasm-$f.log"; exit 1; }
+            if grep -qF "HYPERUUID003" "gate-wasm-$f.log"; then
+              echo "::error::$f + browser-wasm raised HYPERUUID003"; cat "gate-wasm-$f.log"; exit 1
+            fi
+            echo "$f + browser-wasm passes the gate (and stops at HYPERUUID002 without the workload)"
+          done
 
   # A release's run is dispatched by prepare-release.yml with a GITHUB_TOKEN, and GitHub raises
   # no workflow_run for a run that token started, so stage-native-binaries.yml would never hear

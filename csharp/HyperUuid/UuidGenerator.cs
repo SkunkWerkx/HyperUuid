@@ -36,7 +36,7 @@ namespace HyperUuid;
 /// platform can actually reach — see
 /// <c>HyperUuid.csproj</c>'s packaging targets for exactly how the single build lands in the
 /// NuGet package. Proven working end-to-end in a real headless-browser session — see this
-/// package's own README's WebAssembly (Blazor) section. WebAssembly is .NET 11 and later only.
+/// package's own README's WebAssembly (Blazor) section. WebAssembly is .NET 10 and later.
 /// </remarks>
 public static partial class UuidGenerator
 {

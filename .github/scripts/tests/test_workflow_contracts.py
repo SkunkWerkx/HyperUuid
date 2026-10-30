@@ -247,6 +247,20 @@ class CiTests(unittest.TestCase):
         needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
         self.assertIn('test-nuget-package', re.split(r'[\s,]+', needs.strip()))
 
+    def test_gate_admits_blazor_webassembly_on_net10_and_net11(self):
+        # The build-std archive links on both toolchains, so HYPERUUID003 no longer names Blazor.
+        job = self.jobs['test-nuget-package']
+        self.assertNotIn('Blazor WebAssembly needs .NET 11', job)
+        name = '      - name: The gate admits Blazor WebAssembly on .NET 10 and 11\n'
+        self.assertIn(name, job)
+        step = job.split(name, 1)[1].split('\n      - ', 1)[0]
+        self.assertIn('for f in net10.0 net11.0; do', step)
+        self.assertIn('-getProperty:_HyperUuidNet10Unsupported -p:GateFramework="$f" -p:RuntimeIdentifier=browser-wasm', step)
+        self.assertIn('-p:WasmNativeWorkloadAvailable=false', step)
+        self.assertIn('grep -qF "error HYPERUUID002"', step)
+        self.assertNotIn('grep -qF "error HYPERUUID003"', step)
+        self.assertIn('if grep -qF "HYPERUUID003"', step)
+
     def test_typescript_and_r_legs_are_on(self):
         # The Forge's node and r inputs default false until the siblings carry the bindings.
         self.assertEqual(re.findall(r'^      (node|r): (.*)$', self.jobs['build-native'], re.M),

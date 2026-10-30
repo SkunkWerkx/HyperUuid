@@ -25,8 +25,8 @@
         // Every call goes through the public UuidGenerator surface a Blazor consumer uses and
         // lands in the statically linked wasm module via LibraryImport("*"). The link already
         // proves every P/Invoked symbol is in the archive (wasm-ld refuses an undefined one);
-        // only a call proves it works through the SDK's pinvoke table and the exnref
-        // translation build/net10.0/HyperUuid.targets adds. That only holds for an entry point
+        // only a call proves it works through the SDK's pinvoke table. That only holds for an
+        // entry point
         // this page actually calls, so it calls all thirteen: the twelve uuid_* functions and
         // hyperuuid_version.
         try
