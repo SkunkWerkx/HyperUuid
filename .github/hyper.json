@@ -9,6 +9,5 @@
   "cdylib_smoke": ".github/scripts/cdylib_smoke.py",
   "sdist": true,
   "swift_remote": true,
-  "c_assets": true,
-  "wasm": { "toolchain": "nightly-2026-10-27" }
+  "c_assets": true
 }

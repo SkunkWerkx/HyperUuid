@@ -86,9 +86,16 @@ php-ext = "rustc --release --crate-type cdylib --features php --target-dir targe
 # one invocation. `--no-default-features --features staticlib` is what leaves
 # std out and supplies the panic handler in its place; two Hyper* libraries that each
 # carried std could not be linked into one app (`duplicate symbol: rust_eh_personality`).
-# `-Zbuild-std` compiles core and compiler_builtins with the target section's flags above, so
-# it needs the nightly `.github/hyper.json` pins as `wasm.toolchain`, with rust-src:
-# `cargo +<pin> wasm-staticlib`. On stable it stops at cargo's nightly-only error.
+# `-Zbuild-std` compiles core and compiler_builtins with the target section's flags above. It
+# is a nightly flag, which stable cargo takes only with RUSTC_BOOTSTRAP=1 set for that one
+# command, and it needs rust-src: `RUSTC_BOOTSTRAP=1 cargo wasm-staticlib`. Without the
+# variable it stops at cargo's nightly-only error. The flag carries no stability promise, so
+# CI's archive guard and Blazor legs are what prove each new stable release still builds it.
+# Cargo caches rustc's target cfg in target/.rustc_info.json without regard to the variable,
+# so after any plain cargo command for this target the build quietly loses the unstable cfgs
+# (compiler_builtins drops its f16 and f128 intrinsics, 265 KB becomes 199 KB), and keeps
+# what its build script made of them. CI's build is the first cargo command in a fresh
+# checkout; locally, delete that file and target/wasm32-unknown-emscripten/ before building.
 # Output: target/wasm32-unknown-emscripten/release/libhyperuuid.a.
 wasm-staticlib = "rustc -Zbuild-std=core,compiler_builtins --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features staticlib"
 # The same no_std static library for any other target: `cargo staticlib --target <triple>`.
