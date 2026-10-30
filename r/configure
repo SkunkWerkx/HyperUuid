@@ -3,7 +3,7 @@
 # Rust policy). rustup installs to ~/.cargo/bin, which is often not on R's PATH.
 export PATH="$PATH:$HOME/.cargo/bin"
 
-if ! command -v cargo > /dev/null 2>&1 || ! command -v rustc > /dev/null 2>&1; then
+if ! cargo --version > /dev/null 2>&1 || ! rustc --version > /dev/null 2>&1; then
   cat << 'MSG'
 ------------------------------------------------------------------------
 hyperuuid needs Cargo (Rust's package manager) and rustc to build.

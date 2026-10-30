@@ -1,7 +1,7 @@
 # Changelog
 
-All ten packages in this repository — the `hyperuuid` crate and the C#, Java, Go, Python, Ruby,
-PHP, Swift, TypeScript and R bindings — share one coordinated version, so one changelog covers
+All the packages in this repository — the `hyperuuid` crate, the C#, Java, Go, Python, Ruby,
+PHP, Swift, TypeScript and R bindings, and the C and C++ archives — share one coordinated version, so one changelog covers
 all of them. Each entry marks which packages it actually affects.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
@@ -38,6 +38,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so where no wheel fits, pip falls back to building from source (Rust 1.89 or newer and a
   C linker); CI proves that build on x86-64 glibc 2.17 and musl. Attested like the wheels.
   *(PyPI)*
+- **C: one archive per platform on the GitHub Release.** `hyperuuid-<version>-<rid>.tar.gz`
+  (`.zip` on Windows) for the eight desktop RIDs, android-arm64, android-x64, iOS, the iOS
+  simulator, Mac Catalyst on both architectures, and wasi-wasm32 (the Apple mobile and
+  WebAssembly ones static only):
+  the generated header, the shared and static libraries (Windows adds the DLL's import
+  library), `hyperuuidConfig.cmake` for `find_package` and `FetchContent`, and `hyperuuid.pc`
+  for pkg-config, every path relative so an archive works wherever it is unpacked. The static
+  library needs nothing past the C runtime. Packed and attested at the tag from the CI run's
+  attested libraries and named in the release attestation; CI builds a consumer against each
+  desktop archive through CMake and pkg-config, shared and static, and against the Apple
+  mobile ones on a Mac (an iOS device link, the simulator, Mac Catalyst). *(C)*
+- **C++: `hyperuuid.hpp` in every C archive.** A header-only C++23 binding over the C header,
+  linked against the same targets: `std::expected<T, hyperuuid::errc>` from every generating
+  call (`errc` is a `std::error_code` enum), a `uuid` value type with `parse`, `to_string` and
+  ordering, `std::chrono` overloads for v7 and timestamps, `std::span` fills, the SQL Server
+  order and inspection in either layout, and the RFC namespaces. CI builds and runs a C++
+  consumer beside the C one on every desktop archive and the Apple mobile ones. *(C++)*
 - **Core on big-endian.** CI runs the core's test suite, conformance corpus included, on
   s390x under QEMU. *(repository only)*
 - **A TypeScript binding for Node and Bun, on npm as `hyperuuid`.** A Node-API addon built
@@ -148,7 +165,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Apple's user-space CSPRNG seeded by the kernel, the generator Rust's standard library uses
   on Apple platforms. It replaces a `getentropy` syscall per id: a single v7 on an Apple M6
   went from 594 to 60 ns. iOS, tvOS, watchOS, visionOS and Mac Catalyst already used it through
-  `getrandom`. *(core, and every binding on macOS)*
+  `getrandom`. The TypeScript and R tables are re-measured with it: on Node, `newV7()` now beats
+  the `uuid` package's `v7()` (2.3x), and R's `uuid_v4()` is 12.7x faster than `uuid`'s
+  `UUIDgenerate()`, up from 7.1x. *(core, and every binding on macOS)*
 - **C# — the iOS and Mac Catalyst smoke test runs on the SDK's defaults.** Its Mac Catalyst
   build set `Registrar` to `managed-static`, after a Release app on .NET 11's default,
   `trimmable-static`, aborted before `Main`, a fault then put down to the SDK. It was the
@@ -162,9 +181,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   previews know .NET 11, and the harness takes them (`*-*`) until 0.16.0 ships stable.
   The harness had stopped there since the C# floor moved to .NET 11, so the C# tables
   predate that move. *(repository only)*
+- **Swift — the core comes from the GitHub Release, not from git.** The root `Package.swift`
+  names two zips by URL and checksum, the static-library artifact bundle and the XCFramework,
+  and SwiftPM downloads them and refuses one whose SHA-256 differs; the 22 committed files
+  under `swift/` are gone. Nothing changes in a consumer's manifest. In a checkout, the bundle
+  is build output: `.github/scripts/local-core.sh` builds the host's into it, `swift test`
+  links it, and `HYPERUUID_LOCAL_CORE` and the Swift core freshness check are gone.
+- **The C header is generated.** `include/hyperuuid.h` comes from `rust/src/ffi.rs`'s doc
+  comments through cbindgen, and a test fails when the committed copy differs; the Swift
+  bundle carries the same file. The hand-written header it replaces never mentioned return
+  code 6. *(repository only)*
 
 ### Fixed
 
+- **The shared library names itself.** On macOS its install name is
+  `@rpath/libhyperuuid.dylib`, not the build machine's path, and on Linux and Android its
+  soname is `libhyperuuid.so`, so a program linked against it finds it through its rpath or
+  the loader's search path. Bindings open it by path and see no difference. *(core)*
 - **C# — a Debug Blazor WebAssembly build loads** ([#50](https://github.com/SkunkWerkx/HyperUuid/issues/50)).
   Chromium refused an unstripped Debug build's `dotnet.native.wasm` with "module uses a mix
   of legacy and new exception handling instructions": the package translated the archive's

@@ -1,0 +1,7 @@
+# Every file: UTF-8 without a BOM, LF line endings (.gitattributes holds git to the same).
+# Each language's formatter settings live beside its code (csharp/.editorconfig for C#).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf

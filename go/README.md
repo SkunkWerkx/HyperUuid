@@ -12,7 +12,10 @@ calling directly into the native `hyperuuid` core — **linked into your binary 
 (`backend_static.go`). The core is a ~20 KB static library on the link line: nothing is
 embedded, nothing is extracted, nothing is `dlopen`ed, nothing can fail to load, and the
 binary runs from a read-only filesystem or a `scratch` image. `go get` is the whole install;
-a C compiler at build time is the one requirement (see [Requirements](#requirements)).
+cgo and a C compiler at build time are the one requirement (see [Requirements](#requirements)).
+A `CGO_ENABLED=0` build, which is Go's default for a cross-compile, stops at compile time with
+`undefined: hyperuuid_needs_cgo_and_a_C_compiler_…`; so does stock Go compiled to
+WebAssembly, where [TinyGo](#in-the-browser-tinygo) is the way in.
 
 ```go
 package main

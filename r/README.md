@@ -134,33 +134,33 @@ uuid_to_raw(ids[uuid_is_rfc(ids, 1) %in% TRUE])
 
 ## Benchmarks
 
-Apple M6 (Mac18,5), macOS, R 4.6.1 (Homebrew build), measured 2026-10-27, against the
+Apple M6 (Mac18,5), macOS, R 4.6.2 (Homebrew build), measured 2026-10-30, against the
 [uuid](https://cran.r-project.org/package=uuid) package 1.2.2 with bench 1.1.4
 (`R_LIBS=<lib> Rscript bench/bench.R` against an installed copy). These were measured on a
-different machine and OS from the root README's linux-x64 tables and are not comparable to
-them. The four time-based lines are from a later run the same day, after the last core change.
+different machine and OS from the [linux-x64 tables](../docs/benchmarks.md) and are not comparable to
+them.
 
 ```text
-2026-10-27, R version 4.6.1 (2026-06-24), Apple M6 (Mac18,5)
+2026-10-30, R version 4.6.2 (2026-10-29), Apple M6 (Mac18,5)
 hyperuuid 1.0.0, uuid 1.2.2, bench 1.1.4
 
  expression                                    median   itr/sec mem_alloc
- hyperuuid::uuid_v4()                            1.31µs 731544  12.92KB  
- uuid::UUIDgenerate()                            9.35µs 105955   7.34KB  
- hyperuuid::uuid_v7()                            2.91µs 337185  27.2KB   
- uuid::UUIDgenerate(use.time = TRUE)             1.8µs  548633   0B      
- hyperuuid::uuid_v4(1000)                      781.4µs    1267  23.53KB  
- uuid::UUIDgenerate(n = 1000)                    6.96ms    140   7.86KB  
- hyperuuid::uuid_v7(1000)                      146.16µs   5901  23.53KB  
- uuid::UUIDgenerate(use.time = TRUE, n = 1000) 100.86µs   7858   7.86KB  
+ hyperuuid::uuid_v4()                          779ns    1205092 12.92KB  
+ uuid::UUIDgenerate()                            9.92µs   99575  7.34KB  
+ hyperuuid::uuid_v7()                            2.46µs  397587 27.2KB   
+ uuid::UUIDgenerate(use.time = TRUE)             1.89µs  516366  0B      
+ hyperuuid::uuid_v4(1000)                      256µs       3362 23.53KB  
+ uuid::UUIDgenerate(n = 1000)                    7.41ms     134  7.86KB  
+ hyperuuid::uuid_v7(1000)                      119.35µs    8581 23.53KB  
+ uuid::UUIDgenerate(use.time = TRUE, n = 1000) 101.02µs    7557  7.86KB  
 ```
 
 | Comparison (median) | hyperuuid | uuid | Result |
 | --- | --- | --- | --- |
-| v4, one id | 1.31 µs | 9.35 µs | hyperuuid 7.1x faster |
-| v4, 1000 ids | 781.4 µs | 6.96 ms | hyperuuid 8.9x faster |
-| time-based, one id | 2.91 µs | 1.8 µs | **hyperuuid 1.6x slower** |
-| time-based, 1000 ids | 146.16 µs | 100.86 µs | **hyperuuid 1.4x slower** |
+| v4, one id | 779 ns | 9.92 µs | hyperuuid 12.7x faster |
+| v4, 1000 ids | 256 µs | 7.41 ms | hyperuuid 29x faster |
+| time-based, one id | 2.46 µs | 1.89 µs | **hyperuuid 1.3x slower** |
+| time-based, 1000 ids | 119.35 µs | 101.02 µs | **hyperuuid 1.2x slower** |
 
 The time-based rows compare different work: `UUIDgenerate(use.time = TRUE)` makes version 1
 ids (a clock sequence and a fixed node, no random bits), while `uuid_v7()` makes RFC 9562

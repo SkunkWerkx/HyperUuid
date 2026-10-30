@@ -45,10 +45,13 @@ java/src/main/resources/native/
 **/.pytest_cache/
 
 # Swift
-# The static libraries under swift/HyperUuidCore.artifactbundle/{triple}/ are committed, not
-# ignored — SwiftPM has no packing step for a git-URL dependency, unlike every other registry
-# this repo publishes to — and only by stage-native-binaries.yml, after their provenance checks.
+# The core in the artifact bundle and the XCFramework is build output: CI and
+# .github/scripts/local-core.sh write it, and consumers get it from the release's assets (the
+# root Package.swift). Only the bundle's include/ (header and module map) is source.
 **/.build/
+swift/HyperUuidCore.artifactbundle/*
+!swift/HyperUuidCore.artifactbundle/include/
+swift/HyperUuidCoreApple.xcframework/
 
 # Ruby
 # Same story — CI places each leg's native lib here for `bundle exec rspec` at build-native
@@ -116,16 +119,12 @@ r/src/*.dll
 python/src/hyperuuid_native.so
 python/src/hyperuuid_native.pyd
 # The staged PyO3 extension for local dev/test — nested at hyperuuid._native (the maturin
-# module-name), built from the core crate's python feature. The abi3 and abi3t builds carry
-# one file per platform regardless of Python version (the plain, .abi3 and .abi3t
-# spellings); a free-threaded 3.14 build is tagged per version (`maturin develop` names it
-# _native.cpython-314t-<platform>.so), hence the glob; .pyd covers Windows.
-python/src/hyperuuid/_native.so
-python/src/hyperuuid/_native.abi3.so
-python/src/hyperuuid/_native.abi3t.so
-python/src/hyperuuid/_native.cpython-*t-*.so
-python/src/hyperuuid/_native.pyd
-python/src/hyperuuid/_native.*.pyd
+# module-name), built from the core crate's python feature. maturin tags the file by ABI,
+# Python version and platform (_native.abi3.so, _native.abi3t-darwin.so,
+# _native.cpython-314t-<platform>.so and more), so these match every compiled spelling and
+# nothing else: _native.pyi beside them is the tracked type stub.
+python/src/hyperuuid/_native*.so
+python/src/hyperuuid/_native*.pyd
 # Staged Magnus extension for local dev/test (built from the core crate's `ruby` feature —
 # `cargo ruby`; platform gems carry the real artifact).
 ruby/lib/hyperuuid_native.so

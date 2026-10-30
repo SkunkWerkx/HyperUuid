@@ -172,7 +172,7 @@ wasm32-wasip1`, from inside this directory) imports one `wasi_snapshot_preview1`
 `random_get`, and nothing else;
 there is no clock, because `now_v7` is compiled out on `wasm32` and every other door takes
 the host's timestamp. Nothing in this repo ships that module: the Go and Swift bindings link
-the crate's `wasm32-wasip1` static archive instead ([WebAssembly](../README.md#webassembly)).
+the crate's `wasm32-wasip1` static archive instead ([WebAssembly](../docs/platforms.md#webassembly)).
 `ffi.rs` itself is untouched by any of this; on every native target the C ABI is still
 exactly those thirteen exports. They are what the C#, Java, Go, Swift and PHP bindings, Ruby's
 Fiddle backend and R's `.Call` shim (linked against the `staticlib` build) call; Python's and

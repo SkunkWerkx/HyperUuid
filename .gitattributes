@@ -1,3 +1,17 @@
+# Every text file is UTF-8 without a BOM and ends its lines with LF, on every platform, Windows
+# checkouts included: eol overrides a contributor's core.autocrlf. .editorconfig asks editors
+# for the same, and .github/scripts/tests/test_text_files.py fails CI on a CR, a BOM or a file
+# that is not UTF-8. The native libraries committed for Go and PHP are binary, named so that
+# no heuristic decides it.
+* text=auto eol=lf
+*.a     binary
+*.lib   binary
+*.dll   binary
+*.so    binary
+*.dylib binary
+*.jar   binary
+*.png   binary
+
 # What a `git archive` of this repository leaves out. Packagist serves the Composer package
 # as GitHub's archive of the tag, so without this every `composer require` downloads all
 # nine bindings and their bundled native libraries to use one of them. Composer needs

@@ -244,8 +244,9 @@ Batch generation amortizes the native call over the whole batch, with no per-ele
 ## Linking and deployment
 
 There is nothing for you to do. The package declares the core as a SwiftPM binary target —
-one static library per triple, in `HyperUuidCore.artifactbundle` — and SwiftPM links the one
-for your target into your executable. There is no shared library to find at run time, no
+one static library per triple, in `HyperUuidCore.artifactbundle.zip`, attached to the GitHub
+Release and named in the manifest by URL and checksum — and SwiftPM downloads it, checks it,
+and links the one for your target into your executable. There is no shared library to find at run time, no
 resource bundle, and nothing to deploy beside the binary: a multi-stage Dockerfile that
 copies only the executable works, so does a fully static build with
 `swift build --swift-sdk x86_64-swift-linux-musl`, and so does copying a macOS or Windows
@@ -271,11 +272,13 @@ image uses 16 KB pages, and links the aarch64 build (`.github/scripts/android_bu
 and `android_device_test.sh`, which run the same way against a local emulator). The two
 1 GiB batch tests skip there.
 
-In a checkout of this repository, `HYPERUUID_LOCAL_CORE=1 swift test` run from `swift/` links
-the bundle `.github/scripts/local-core.sh` builds from the checkout's core in place of the
-committed one. The root `Package.swift`, the one a dependency resolves, has no such switch.
-Without it, outside CI, `CoreFreshnessTests` fails when the checkout's `rust/` differs from
-the commit the committed bundle was built from.
+In a checkout of this repository the core is build output, never committed:
+`.github/scripts/local-core.sh` builds the host's archive from the checkout's `rust/` into
+`swift/HyperUuidCore.artifactbundle/` (gitignored but for its `include/`), and then `swift test`
+from `swift/` links it. CI writes each leg's archives there the same way. Without one the
+package still resolves, and a build stops at `import HyperUuidCore`. The root `Package.swift`
+links that local bundle when it is there too, so CI's smoke tests build through the consumer's
+manifest against the core the run built; a dependency's checkout never has one.
 
 Every call `throws` only `UuidGenerator.Error` — a native call that ran and was refused
 (`.timestampOutOfRange`, `.randomSourceFailure(code:)`, `.batchTooLarge(count:)`, `.counterExhausted`, …).
@@ -334,30 +337,30 @@ large (tens of MB, most of it ICU data); `-c release` and `wasm-opt` bring that 
 The other direction — running the core as wasm *inside* a native Swift process — is not
 built: no wasm engine ships as a Swift
 package with a stable API, and nothing here needs one, since every platform this binding
-supports has the core natively. The root README's
-[WebAssembly section](../README.md#webassembly) tracks both directions for every binding.
+supports has the core natively. The
+[WebAssembly table](../docs/platforms.md#webassembly) tracks both directions for every binding.
 
 ## Verifying provenance
 
-Like PHP, there is no separate package registry to attest here: SwiftPM resolves a git tag
-directly against this repo, and what it fetches is the tree at that tag, the static libraries
-under `swift/HyperUuidCore.artifactbundle/` and `swift/HyperUuidCoreApple.xcframework/`
-included. Each verifies from the release tag alone: the release attestation, signed by this
-repository's `release.yml` at the tag, names every one of them, with the release inventory as
-its predicate.
+There is no separate package registry to attest here: SwiftPM resolves a git tag directly
+against this repo, and downloads the two zips the tag's `Package.swift` names from that
+release's assets, refusing either if its SHA-256 differs from the checksum written there. Each
+zip verifies from the release tag alone: the release attestation, signed by this repository's
+`release.yml` at the tag, names both, with the release inventory as its predicate.
 
 ```sh
-gh attestation verify swift/HyperUuidCore.artifactbundle/arm64-apple-macosx/libhyperuuid.a \
+gh release download v<version> --repo SkunkWerkx/HyperUuid --pattern 'HyperUuidCore*.zip'
+gh attestation verify HyperUuidCore.artifactbundle.zip \
   --repo SkunkWerkx/HyperUuid --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
 ```
 
-Each archive also carries build provenance from `hyper-build-static.yml` in
-`SkunkWerkx/.github`, at the preparation commit the tagged commit was staged from
-(`stage-native-binaries.yml` verifies that before committing a byte), so that check needs
+Each zip also carries build provenance from `hyper-build-static.yml` in `SkunkWerkx/.github`,
+at the preparation commit the tagged commit was staged from (`stage-native-binaries.yml`
+verifies that before it writes a checksum into `Package.swift`), so that check needs
 `--signer-repo` beside `--repo`:
 
 ```sh
-gh attestation verify swift/HyperUuidCore.artifactbundle/x86_64-unknown-linux-gnu/libhyperuuid.a \
+gh attestation verify HyperUuidCoreApple.xcframework.zip \
   --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
 
@@ -400,11 +403,9 @@ functional registry, is a separate, optional listing — not needed for this to 
 requires `Package.swift` at the repository root with no monorepo subdirectory support, same
 constraint Packagist has for `composer.json` — [the repo root's own `Package.swift`](../Package.swift)
 exists for that reason, with its targets pointed at the real sources under `swift/` via
-`path:` rather than duplicating them. The native binaries — the static libraries under
-`HyperUuidCore.artifactbundle/{triple}/` (`hyperuuid.lib` for the two Windows triples,
-`libhyperuuid.a` for the rest) — are committed straight into git: unlike a real package
-registry, SwiftPM has no packing step of its own — whatever's literally in the git tree at
-the resolved tag is what a consumer's build links.
+`path:` rather than duplicating them. The native binaries are not in git: the manifest names
+two zips on the GitHub Release by URL and checksum, the static-library artifact bundle and,
+on a Mac, the XCFramework, and SwiftPM downloads the ones the resolved tag names.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

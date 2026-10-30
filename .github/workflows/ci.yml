@@ -82,6 +82,17 @@ jobs:
     with:
       project: HyperUuid
 
+  # The C archives the release attaches, packed from this run's libraries the way the tag
+  # run packs them, and each one built against through CMake and pkg-config on a runner that
+  # executes it (c/smoke/run.sh).
+  test-c:
+    needs: [build-native, build-static, build-android]
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+
   build-native:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
     # A reusable workflow can never escalate beyond what the calling job was granted, so the
@@ -200,8 +211,9 @@ jobs:
   # (hyper-check-core.yml): no_std and no-panic proofs, the C ABI held to rust/src/ffi.rs
   # (.github/scripts/check_exports.py and the cdylib built on every RID, dlopen'd and called by
   # .github/scripts/cdylib_smoke.py), the conformance corpus re-derived by corpus/oracle.py, the
-  # workflow-contract and ABI-probe tests in .github/scripts/tests, rustfmt and clippy, the MSRV, cargo-semver-checks against the last
-  # crates.io release, and actionlint over this directory. The inputs below are what is HyperUuid
+  # workflow-contract, ABI-probe and text-file tests in .github/scripts/tests (the last holds
+  # every tracked text file to UTF-8, no BOM and LF), rustfmt and clippy, the MSRV,
+  # cargo-semver-checks against the last crates.io release, and actionlint over this directory. The inputs below are what is HyperUuid
   # about it: off std there is no OS for `getrandom` to read, so the no_std builds name the custom
   # backend, clippy also runs the Android configuration, whose entropy path (entropy.rs:
   # ChaCha20 for batches, no pool) nothing else compiles, and `extra_features: uuid1` with the
@@ -227,17 +239,17 @@ jobs:
   # iOS and Mac Catalyst, for the three bindings that reach them. Neither platform loads a
   # library: the core is linked into the app, from the static libraries build-static
   # cross-compiles and attests (the forge's apple_mobile input), which
-  # are the bytes stage-native-binaries.yml commits for Swift and release.yml packs for C#.
+  # are the bytes the release attaches for Swift (zipped) and release.yml packs for C#.
   # This job is the one place they are linked into something and run, and it needs what no
   # build-native leg carries: Xcode, a simulator, and the .NET ios and maccatalyst workloads.
   #
   #  * Swift takes them from swift/HyperUuidCoreApple.xcframework, which swift/Package.swift
   #    declares only when it is there. The binding's suite runs on an iOS simulator and as a
   #    Mac Catalyst process, and the package is built for an iOS device. It also runs once
-  #    more for macOS itself, and the root manifest is built, both with this run's
-  #    XCFramework over the committed one: with the XCFramework present the manifest declares
-  #    a second binary target and puts a platform condition on the first, which is the
-  #    package a macOS consumer resolves from a tag.
+  #    more for macOS itself, and the root manifest is built, both with this run's bundle and
+  #    XCFramework in the tree: with the XCFramework present the manifest declares a second
+  #    binary target and puts a platform condition on the first, which is the package a macOS
+  #    consumer resolves from a tag (there from the release's zips).
   #  * C# takes them from csharp/HyperUuid/staticlibs/{rid}/ through build/net10.0/HyperUuid.targets.
   #    HyperUuid.AppleSmokeTest is the Native AOT smoke test's SmokeTest.Run() as an app: run as a
   #    Mac Catalyst process, installed and launched in the simulator, and built for an iOS
@@ -804,7 +816,7 @@ jobs:
   # requests and the weekly schedule never stage, and only this job may start a workflow.
   request-staging:
     needs: [build-static, build-android, test-swift-static, build-native, build-wasm, build-wheels,
-            check-core, test-apple-mobile, test-android, test-nuget-package]
+            check-core, test-apple-mobile, test-android, test-nuget-package, test-c]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-26.04
     permissions:
