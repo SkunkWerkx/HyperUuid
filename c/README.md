@@ -134,7 +134,8 @@ int main() {
 ```
 
 The generating calls return `std::expected<T, hyperuuid::errc>`, never throw, and `errc` is a
-`std::error_code` enum. The rest mirrors the other bindings: `fill_v7` into a `std::span`,
+`std::error_code` enum. Its codes are the C return codes, plus `name_too_long` for a v5 name
+over 2^32 − 1 bytes, which the C ABI's 32-bit length cannot carry. The rest mirrors the other bindings: `fill_v7` into a `std::span`,
 `v7_unix_millis`, `version`, `variant` and `is_rfc` in either layout, `uuid::parse` and
 `to_string`, `nil_uuid` and `max_uuid` (not `nil` and `max`, which Objective-C++ and
 `windows.h` define as macros), the RFC namespaces, and `native_version()`.

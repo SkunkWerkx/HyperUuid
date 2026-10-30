@@ -44,6 +44,9 @@ int main() {
   CHECK(hu::new_v7(std::uint64_t{1} << 48).error() == hu::errc::timestamp_out_of_range);
   std::error_code code = hu::errc::counter_exhausted;
   CHECK(code.category().name() == std::string_view("hyperuuid"));
+  // Checked by the header, not the core: a name the 32-bit C length cannot carry.
+  CHECK(make_error_code(hu::errc::name_too_long).message() ==
+        "the name is longer than 2^32 - 1 bytes");
 
   CHECK(hu::nil_uuid < hu::max_uuid && hu::is_available());
   std::printf("%s\n", hu::native_version().c_str());
