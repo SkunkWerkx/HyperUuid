@@ -1,0 +1,8 @@
+{
+    "library": "rust/target/release/libhyperuuid.dylib",
+    "library_sha256": "c4a373ea173912cb0876e5980565320a56407a1ba5ef1cf370a76e66bd570029",
+    "native_version": "1.0.0",
+    "source_sha": "466d19b5ec991bc37482dbdf4e0516db4eb58167",
+    "rust_tree_clean": true,
+    "php_version": "8.5.12"
+}

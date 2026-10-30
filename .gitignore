@@ -70,15 +70,11 @@ ruby/wasm-smoke/rubies/
 ruby/wasm-smoke/*.wasm
 
 # PHP
-# Native libs under php/src/native/{rid}/ are committed, not ignored — see
-# php/src/native/README.md for why (Packagist has no packing step, unlike every other
-# registry this repo publishes to).
 php/vendor/
 php/composer.lock
 php/.phpunit.result.cache
-# Root-level composer.json exists only for Packagist (see php/README.md's Install section) —
-# nothing actually runs `composer install` from the repo root except a consumer's own build,
-# but a stray local one shouldn't get committed either.
+# The root composer.json is the PIE package's metadata, not a project anyone installs from
+# the repo root, but a stray local `composer install` there shouldn't get committed either.
 /vendor/
 /composer.lock
 

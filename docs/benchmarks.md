@@ -6,7 +6,7 @@ The "high-performance, allocation-free" claim is measured, not just asserted —
 
 The summary table is the [scoreboard](../README.md#the-scoreboard) in the main README; what each row stands on:
 
-The R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, every other row on linux-x64 on an Intel Core i9-11900H, so the two groups are not comparable with each other. The linux-x64 rows' v7 figures were measured before the per-millisecond re-seed (core change, 2026-10-27); the Apple M6 rows after it, and after the switch to `CCRandomGenerateBytes` on Apple platforms (2026-10-28).
+The R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, every other row on linux-x64 on an Intel Core i9-11900H, so the two groups are not comparable with each other. The linux-x64 rows' v7 figures were measured before the per-millisecond re-seed (core change, 2026-10-27); the Apple M6 rows after it, and after the switch to `CCRandomGenerateBytes` on Apple platforms (2026-10-28). PHP's figures, here and in every table below, predate the extension: they measured 1.0's FFI package.
 
 - **[C#](../csharp/)** — 7.5-7.9x faster than `Guid.NewGuid()` for v4 and v7, zero allocation on every call, and the only way to get a v7 with a real counter, strictly increasing within the process's stream, before .NET 9 — even on .NET 9+, `Guid.CreateVersion7()` still has no counter at all. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
 - **[Java](../java/)** — 2.8-5.1x faster than `UUID.randomUUID()`, against no real competition: `java.util.UUID` has never shipped v5 or v7. Proven under GraalVM Native Image too, not just the JVM. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
@@ -14,7 +14,7 @@ The R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, ev
 - **[Swift](../swift/)** — every call beats `Foundation.UUID()` by 11-16x, while also being the only way to get v5/v7 in Swift at all — Foundation only ever does v4. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
 - **[Python](../python/)** — every call ahead of stdlib's own C-accelerated ones through the PyO3 native extension: 3.4x faster than `uuid.uuid4()`, 4.2x faster than `uuid.uuid5()`, 3.8x faster than 3.14's own `uuid.uuid7()`, and timestamp extraction 1.6x faster than `UUID.time` as a `datetime`, 2.4x as a plain integer. On 3.11-3.13, where stdlib has no v7 at all, it's not even a comparison. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
 - **[Ruby](../ruby/)** — the same mechanism swap as Python, same result: **5.5x faster than `SecureRandom.uuid`** for v4, 3.8-4.0x for v7, 2.1x for v5 — and `SecureRandom.uuid` only ever does random v4 anyway. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
-- **[PHP](../php/)** — a v4 costs less than a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation), by 1.4x, and a v7 by 1.2x — the whole native round trip for less than the price of PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 45x. Still the only zero-Composer-dependency way to generate v4, v5 and v7 in PHP at all. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
+- **[PHP](../php/)** — a v4 costs less than a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation), by 1.4x, and a v7 by 1.2x — the whole native round trip for less than the price of PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 45x. Installed by PIE, with no Composer dependency at all. (Measured before the extension, on 1.0's FFI package; v7 figures before the per-millisecond re-seed, core change, 2026-10-27.)
 - **[R](../r/)** — on the Apple M6, `uuid_v4()` is 12.7x faster than the `uuid` package's `UUIDgenerate()` for one id and 29x for 1000, and `uuid_v7()` is 1.3x slower than its `UUIDgenerate(use.time = TRUE)` for one id and 1.2x for 1000. That comparison is different work: `uuid` makes a version 1 (a clock sequence and a fixed node, no random bits) and has no version 7, but it is the time-based call an R user has today, and it is faster. Every function is vectorised and propagates `NA` element-wise.
 - **[TypeScript](../typescript/)** — on the Apple M6, `newV4()` is 4.1x slower than `crypto.randomUUID()` on Node and 6.4x on Bun, and `newV7()` is 2.3x faster than the `uuid` package's `v7()` on Node and 1.2x slower on Bun. The losses are the random source: on Apple platforms the core asks the operating system's generator for every id, where `crypto.randomUUID()` draws from a buffer it refills in bulk. A batch pays for it once, so `newV7Batch(1000)` is 3.5x faster than 1000 `newV7()` calls on Node and 6.2x on Bun. What the binding gives is the same engine as every other binding, under Node and Bun, with the SQL Server order.
 
@@ -22,9 +22,11 @@ The R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, ev
 
 The scoreboard above wasn't free, and the mechanism behind it is the actual finding of this project. There is no single trick; there are two, chosen per language by measuring where each one's boundary cost actually lives:
 
-**Direct FFI, where the crossing floor is already nanoseconds.** C#'s `P/Invoke` and Java's FFM cost on the order of ten nanoseconds per call; PHP's built-in `ext-ffi` measured ~105ns. At those floors the engine's own speed dominates, so those bindings call the C ABI directly — and any remaining slowness is *wrapper*, which gets dieted, not excused. PHP is the proof: with no mechanism change at all, a wrapper that reuses static scratch across calls and passes inputs as zero-copy `const char *` strings is what puts it level with the naive inline v4.
+**Direct FFI, where the crossing floor is already nanoseconds.** C#'s `P/Invoke` and Java's FFM cost on the order of ten nanoseconds per call. At those floors the engine's own speed dominates, so those bindings call the C ABI directly — and any remaining slowness is *wrapper*, which gets dieted, not excused.
 
 **A native extension, where the FFI mechanism itself is the cost.** CPython's `ctypes` prices every call at ~1µs of interpreted marshalling; Ruby's `Fiddle` charges over a microsecond. No diet fixes that — the mechanism is the bill. So those two bindings link the Rust core *directly into the language VM* as an ordinary native extension (PyO3, Magnus), turning the crossing into a plain C function call. The two bindings part ways from there: PyO3 ships one `abi3` wheel per platform that covers every CPython 3.11+ on that platform, beside PEP 803's `abi3t` wheel for free-threaded CPython 3.15+, where the extension runs with the GIL off, so `pip` resolves a native wheel on every platform that has one, falls back to building the same extension from the sdist elsewhere (CI proves that build on glibc 2.17 and musl), and there is no `ctypes` fallback — nothing left for it to buy. Magnus has no stable-ABI story across Ruby versions the way `abi3` gives PyO3 (a precompiled platform gem is tied to one Ruby minor version), so Ruby's gems are *fat* — one compiled extension per supported Ruby minor inside each platform gem — and Ruby keeps a real `Fiddle` fallback for whatever falls outside that grid: auto-selected on any platform/Ruby combination without a prebuilt Magnus gem, which today means Ruby 3.3, a Ruby newer than the release, Intel macOS, and any platform outside the eight RIDs — shipped only in the universal gem, the last resort — with the same test suite running green against both backends and cross-backend agreement pinned by tests, so the fallback is never a second implementation that can drift.
+
+PHP took the native-extension door for reach, not for the crossing: by default PHP allows its built-in FFI under a web SAPI only from preloaded code, so the binding is an ext-php-rs extension that PIE installs prebuilt, one per PHP minor, with no fallback. The extension has not been measured on the machine these tables come from yet.
 
 TypeScript and R were decided from the start rather than by measurement. TypeScript took the native-extension door: a Node-API addon built with napi-rs, the core linked into the `.node` file, which Node and Bun both load. R calls the C ABI from a hand-written shim reached through `.Call`, linked against the core's static library, which a source install builds from the Rust crates vendored into the package. Neither has a fallback.
 
@@ -53,10 +55,11 @@ The headline single-call numbers from the [Ruby](../ruby/) and [PHP](../php/) RE
 | --- | ---: | --- |
 | Ruby `HyperUuid.new_v4` (Magnus) | 191 ns | `SecureRandom.uuid` 1.06 µs — **5.5x faster** |
 | Ruby `HyperUuid.new_v7` (Magnus, explicit ms) † | 264 ns | — **4.0x faster** |
-| PHP `HyperUuid::newV4()` | 224 ns | naive inline `random_bytes` v4 308 ns — **1.4x faster** |
-| PHP `->timestamp()` (v7) | 293 ns | `ramsey/uuid` `getDateTime()` 13.2 µs — **45x faster** |
+| PHP `HyperUuid::newV4()` ‡ | 224 ns | naive inline `random_bytes` v4 308 ns — **1.4x faster** |
+| PHP `->timestamp()` (v7) ‡ | 293 ns | `ramsey/uuid` `getDateTime()` 13.2 µs — **45x faster** |
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
+‡ Predates the extension: 1.0's FFI package.
 
 The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any platform without a prebuilt Magnus gem) keeps its own honest numbers in the [Ruby README](../ruby/) — slower, mechanism-bound, and still fully supported. Python has no `ctypes` fallback at all; PyO3's `abi3` wheels leave nothing for one to cover.
 
@@ -84,13 +87,14 @@ The batch doors above still hand back a collection of the language's own UUID ty
 | --- | ---: | ---: | ---: | --- |
 | Ruby † | 202 µs | **4.9 µs** | **41x** | `new_v7_batch_bytes` |
 | Python † | 132 µs | **3.7 µs** | **36x** | `fill_v7(bytearray)` |
-| PHP † | 67.1 µs | **4.2 µs** | **16x** | `newV7BatchBytes` |
+| PHP † ‡ | 67.1 µs | **4.2 µs** | **16x** | `newV7BatchBytes` |
 | Java † | 9.3 µs | **3.6 µs** | 2.6x | `fillV7(byte[])` |
 | Go † | 7.0 µs | **3.7 µs** | 1.9x, and 0 allocs | `FillV7BytesAt` |
 | C# † | 6.1 µs | **3.8 µs** | 1.6x, and 0 allocs | `FillV7(Span<byte>)` |
 | Swift † | 3.7 µs | **3.8 µs** | level | `fillV7(into: raw bytes)` |
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
+‡ Predates the extension: 1.0's FFI package.
 
 Read the right-hand column, not the speedup column: **every binding converges on roughly 3.6–4.9 µs per 1000 UUIDs**, because that is what the work actually costs. The native call is not the bottleneck in any of them; what varies is the price each language charges to wrap those 16000 bytes in a thousand objects — 200 µs of it in Ruby, 130 µs in Python, essentially none in Swift. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 

@@ -4,9 +4,12 @@ at master and keep only triggers, permissions, gates and the Forge-commit resolu
 HyperCast and HyperTabular carry the same file; the three move together. When a HyperForge
 checkout sits beside this repository, every action and reusable workflow referenced is also
 checked against its declared inputs."""
+import io
 import json
 from pathlib import Path
 import re
+import subprocess
+import tarfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -104,6 +107,24 @@ class ReleaseFlowTests(unittest.TestCase):
         self.assertEqual(finalize_needs, {'find-ci-run', 'publication-gate', *PUBLISHERS})
         for publisher in PUBLISHERS:
             self.assertIn(f"needs.{publisher}.result == 'success'", finalize)
+
+    def test_pie_acceptance_runs_last_against_the_published_release(self):
+        # PIE reads the GitHub Release, so the acceptance waits for the finalizer that writes it,
+        # on a publish dispatch only, and asks for this release's bare version.
+        names = list(self.jobs)
+        self.assertEqual(names[-1], 'pie-acceptance')
+        job = self.jobs['pie-acceptance']
+        head = header(job)
+        self.assertEqual(set(re.split(r'[\s,]+', re.search(r'^    needs: \[([^]]*)\]', head, re.M)[1].strip())),
+                         {'find-ci-run', 'finalize-release'})
+        self.assertIn("github.event_name == 'workflow_dispatch'", head)
+        self.assertIn("needs.finalize-release.result == 'success'", head)
+        self.assertIn('    uses: SkunkWerkx/.github/.github/workflows/hyper-pie-acceptance.yml@master\n', job)
+        self.assertIn('      package: skunkwerkx/hyperuuid\n', job)
+        self.assertIn('      extension: hyperuuid\n', job)
+        self.assertIn('      package_version: ${{ needs.find-ci-run.outputs.version }}\n', job)
+        self.assertIn('      version: ${{ steps.guard.outputs.version }}\n', self.jobs['find-ci-run'])
+        self.assertEqual(json.loads((ROOT / 'composer.json').read_text())['name'], 'skunkwerkx/hyperuuid')
 
     def test_forge_commit_is_resolved_once_and_checked_out_before_every_action(self):
         find = self.jobs['find-ci-run']
@@ -232,6 +253,43 @@ class CiTests(unittest.TestCase):
         self.assertEqual(floor, '8.3')
         for composer in (ROOT / 'composer.json', ROOT / 'php' / 'composer.json'):
             self.assertEqual(json.loads(composer.read_text())['require']['php'], '>=' + floor)
+
+    def test_root_composer_is_a_pie_extension(self):
+        composer = json.loads((ROOT / 'composer.json').read_text())
+        self.assertEqual(composer['type'], 'php-ext')
+        ext = composer['php-ext']
+        self.assertEqual(ext['extension-name'], 'hyperuuid')
+        self.assertEqual(ext['download-url-method'], ['pre-packaged-binary'])
+        self.assertIs(ext['support-zts'], False)
+        self.assertEqual(ext['os-families'], ['linux', 'darwin', 'windows'])
+        self.assertNotIn('autoload', composer)
+        self.assertNotIn('ext-ffi', composer['require'])
+
+    def test_git_archive_is_metadata_only(self):
+        # PIE fetches the dist archive for its metadata. Git applies directory exclusion itself,
+        # and --worktree-attributes reads the edited .gitattributes without a commit. go/ stays
+        # in: the Go module proxy archives it.
+        archive = subprocess.run(['git', 'archive', '--worktree-attributes', '--format=tar', 'HEAD'],
+                                 cwd=ROOT, check=True, stdout=subprocess.PIPE).stdout
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            top = {name.split('/')[0] for name in tar.getnames() if name != 'pax_global_header'}
+        self.assertEqual(top, {'composer.json', 'LICENSE', 'README.md', 'go'})
+
+    def test_no_php_sources_in_working_tree(self):
+        self.assertFalse((ROOT / 'php' / 'src').exists())
+
+    def test_no_php_native_references(self):
+        # Nothing stages or reads PHP libraries from git any more: PIE installs the extension
+        # from the release's zips. This file names the path to look for it, so it is skipped.
+        this = Path(__file__).resolve()
+        found = []
+        for directory in (ROOT / '.github/workflows', ROOT / '.github/scripts'):
+            for path in sorted(directory.rglob('*')):
+                if not path.is_file() or path.resolve() == this or '__pycache__' in path.parts:
+                    continue
+                if 'php/src/native' in path.read_text(errors='replace'):
+                    found.append(str(path.relative_to(ROOT)))
+        self.assertEqual(found, [])
 
     def test_nuget_package_job_proves_the_packed_layout(self):
         job = self.jobs['test-nuget-package']

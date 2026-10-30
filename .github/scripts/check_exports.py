@@ -9,8 +9,8 @@ calls it.
 
 The Python and Ruby extensions and the TypeScript addon are not C ABI consumers: they link
 the core as a Rust crate and register its functions under their language's spelling, so their
-sites map each export to that spelling. The PHP extension (rust/src/php_ext.rs) is a benchmark
-spike that php/src never calls, so it is not checked.
+sites map each export to that spelling. The PHP extension (rust/src/php_ext/) registers
+hand-written classes rather than the C ABI, so it has no site here, only the panic-guard rule.
 
 No dependencies and no build: CI runs it in a job of its own, and so can a dev loop.
 
@@ -116,6 +116,126 @@ def jni_no_panic(path):
         sys.exit(f"check_exports: {path.name} has JNI functions without no_panic: " + ", ".join(bad))
 
 
+_RUST_NOISE = re.compile(
+    r"""//[^\n]*|/\*.*?\*/|b?"(?:\\.|[^"\\])*"|'(?:\\.[^']*|[^\\'])'""", re.DOTALL
+)
+
+
+def _mask_rust(text):
+    """Blanks comments, string literals and char literals (newlines kept) so that braces and
+    parentheses inside them don't confuse the matching below."""
+    return _RUST_NOISE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
+def _match_close(text, open_at, open_char, close_char):
+    """Index of the bracket closing the one at `open_at`, or -1."""
+    depth = 0
+    for index in range(open_at, len(text)):
+        if text[index] == open_char:
+            depth += 1
+        elif text[index] == close_char:
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _fn_body(masked, name_end):
+    """The body text (between the braces) of the fn whose name ends at `name_end`, or None
+    for a declaration without one."""
+    paren = masked.find("(", name_end)
+    if paren < 0:
+        return None
+    close = _match_close(masked, paren, "(", ")")
+    if close < 0:
+        return None
+    # The body's `{` or a `;` ends the signature only outside every bracket: `[u8; 16]` and
+    # `Foo<[u8; 4]>` in a return type carry a `;`. `->` is an arrow, not a closing angle.
+    depth, index, start = 0, close + 1, -1
+    while index < len(masked):
+        char = masked[index]
+        if char in "[<(":
+            depth += 1
+        elif char in "])" or (char == ">" and masked[index - 1] != "-"):
+            depth -= 1
+        elif depth <= 0 and char in "{;":
+            start = index if char == "{" else -1
+            break
+        index += 1
+    if start < 0:
+        return None
+    end = _match_close(masked, start, "{", "}")
+    return masked[start + 1 : end] if end >= 0 else None
+
+
+def php_guard(directory):
+    """Every PHP-callable Rust function in the extension must start with `guard(`: a panic
+    that unwinds through the Zend engine's C frames aborts the PHP process instead of
+    throwing. PHP-callable means every fn in a `#[php_impl]` block, every `#[php_function]`,
+    and every handler a `#[php(modifier = ...)]` function registers with
+    `FunctionBuilder::new("name", handler)` (a hand-written `extern "C" fn`, which must call
+    `guard(` somewhere inside, since the engine's wrapper macro surrounds its body).
+
+    Every other `extern "C" fn` the engine calls (the lifecycle callbacks: MINIT, RINIT,
+    RSHUTDOWN, post-startup) has no PHP caller to throw to, so it must contain
+    `catch_unwind(` or `run_handler(` instead."""
+    directory = Path(directory)
+    if not directory.is_absolute():
+        directory = ROOT / directory
+    files = sorted(directory.glob("*.rs"))
+    if not files:
+        sys.exit(f"check_exports: {directory} matches no file")
+    bad, unwinding, checked = [], [], 0
+    fn_head = re.compile(r"\bfn\s+(\w+)")
+    for path in files:
+        raw = path.read_text(encoding="utf-8")
+        masked = _mask_rust(raw)  # same length as `raw`, so offsets carry across
+        for match in re.finditer(r"#\[php_impl\b[^\]]*\]", masked):
+            brace = masked.find("{", match.end())
+            end = _match_close(masked, brace, "{", "}")
+            block = masked[brace + 1 : end]
+            depth_at = 0
+            for fn in fn_head.finditer(block):
+                depth_at = block.count("{", 0, fn.start()) - block.count("}", 0, fn.start())
+                if depth_at != 0:
+                    continue  # a fn nested in a method body
+                body = _fn_body(block, fn.end())
+                checked += 1
+                if body is None or not body.lstrip().startswith("guard("):
+                    bad.append(fn.group(1))
+        for match in re.finditer(r"#\[php_function\b[^\]]*\]", masked):
+            fn = fn_head.search(masked, match.end())
+            body = _fn_body(masked, fn.end()) if fn else None
+            checked += fn is not None
+            if fn and (body is None or not body.lstrip().startswith("guard(")):
+                bad.append(fn.group(1))
+        for match in re.finditer(r"#\[php\([^\]]*\bmodifier\s*=\s*(\w+)", masked):
+            modifier = re.search(rf"\bfn\s+{match.group(1)}\b", masked)
+            body = _fn_body(masked, modifier.end()) if modifier else None
+            if body is None:
+                bad.append(match.group(1))
+                continue
+            checked += 1
+            for handler in re.findall(r'FunctionBuilder::new\(\s*"?[^,]*?"?\s*,\s*(\w+)', body):
+                found = re.search(rf'extern "C" fn {handler}\b', raw)
+                inner = _fn_body(masked, found.end()) if found else None
+                if inner is None or "guard(" not in inner:
+                    bad.append(handler)
+        for found in re.finditer(r'\bextern\s+"C"\s+fn\s+(\w+)', raw):
+            body = _fn_body(masked, found.end())
+            if body is None or not ("catch_unwind(" in body or "run_handler(" in body):
+                unwinding.append(found.group(1))
+    if not checked:
+        sys.exit("check_exports: php_ext has no PHP-callable functions to check")
+    if bad:
+        sys.exit("check_exports: php_ext has PHP-callable functions without guard: " + ", ".join(bad))
+    if unwinding:
+        sys.exit(
+            'check_exports: php_ext has extern "C" functions without catch_unwind or run_handler: '
+            + ", ".join(unwinding)
+        )
+
+
 C_PROTOTYPE = r"(?m)^(?:u?int\d+_t|void) (\w+)\("
 
 # Python's extension has conveniences past the C ABI: a v7 buffer fill
@@ -205,12 +325,6 @@ SITES = [
         (),
     ),
     ("R (core.h)", [("r/src/core.h", C_PROTOTYPE)], "all", ()),
-    (
-        "PHP (FFI cdef)",
-        [("php/src/Runtime.php", r"'(?:int|u?int\d+_t|void) (\w+)\(")],
-        "all",
-        (),
-    ),
     ("Ruby (Fiddle)", [("ruby/lib/hyperuuid/runtime.rb", r'handle\["(\w+)"\]')], "all", ()),
     (
         "Ruby (Magnus)",
@@ -279,6 +393,7 @@ def main():
     print(f"core: {len(exports)} exports")
     napi_catch_unwind("typescript/src/lib.rs")
     jni_no_panic("java/jni/src/lib.rs")
+    php_guard("rust/src/php_ext")
     failed = False
     for binding, sources, wants, extra in SITES:
         if wants == "all":

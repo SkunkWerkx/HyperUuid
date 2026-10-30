@@ -1,0 +1,408 @@
+{
+    "HyperUuid": {
+        "kind": "class",
+        "final": true,
+        "readonly": false,
+        "interfaces": [],
+        "parent": null,
+        "constants": {
+            "MAX_V7_BATCH": 67108864
+        },
+        "cases": {},
+        "methods": {
+            "nativeVersion": {
+                "static": true,
+                "params": [],
+                "return": "string"
+            },
+            "newV4": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "newV5": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "namespace",
+                        "type": "HyperUuid\\Uuid",
+                        "optional": false,
+                        "default": null
+                    },
+                    {
+                        "name": "name",
+                        "type": "string",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "HyperUuid\\Uuid"
+            },
+            "newV7": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "unixMillis",
+                        "type": "DateTimeInterface|int|null",
+                        "optional": true,
+                        "default": "NULL"
+                    }
+                ],
+                "return": "HyperUuid\\Uuid"
+            },
+            "newV7Batch": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "count",
+                        "type": "int",
+                        "optional": false,
+                        "default": null
+                    },
+                    {
+                        "name": "unixMillis",
+                        "type": "DateTimeInterface|int|null",
+                        "optional": true,
+                        "default": "NULL"
+                    }
+                ],
+                "return": "array"
+            },
+            "newV7BatchBytes": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "count",
+                        "type": "int",
+                        "optional": false,
+                        "default": null
+                    },
+                    {
+                        "name": "unixMillis",
+                        "type": "DateTimeInterface|int|null",
+                        "optional": true,
+                        "default": "NULL"
+                    }
+                ],
+                "return": "string"
+            }
+        }
+    },
+    "Uuid": {
+        "kind": "class",
+        "final": true,
+        "readonly": false,
+        "interfaces": [
+            "JsonSerializable",
+            "Stringable"
+        ],
+        "parent": null,
+        "constants": {},
+        "cases": {},
+        "methods": {
+            "__construct": {
+                "static": false,
+                "params": [
+                    {
+                        "name": "bytes",
+                        "type": "string",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": null
+            },
+            "__toString": {
+                "static": false,
+                "params": [],
+                "return": "string"
+            },
+            "bytes": {
+                "static": false,
+                "params": [],
+                "return": "string"
+            },
+            "equals": {
+                "static": false,
+                "params": [
+                    {
+                        "name": "other",
+                        "type": "HyperUuid\\Uuid",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "bool"
+            },
+            "fromSqlOrder": {
+                "static": false,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "isRfc": {
+                "static": false,
+                "params": [
+                    {
+                        "name": "version",
+                        "type": "int",
+                        "optional": false,
+                        "default": null
+                    },
+                    {
+                        "name": "layout",
+                        "type": "HyperUuid\\UuidLayout",
+                        "optional": true,
+                        "default": "HyperUuid\\UuidLayout::Rfc9562"
+                    }
+                ],
+                "return": "bool"
+            },
+            "jsonSerialize": {
+                "static": false,
+                "params": [],
+                "return": "string"
+            },
+            "max": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "nil": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "parse": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "string",
+                        "type": "string",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "HyperUuid\\Uuid"
+            },
+            "timestamp": {
+                "static": false,
+                "params": [
+                    {
+                        "name": "throwOnMismatch",
+                        "type": "bool",
+                        "optional": true,
+                        "default": "true"
+                    },
+                    {
+                        "name": "layout",
+                        "type": "HyperUuid\\UuidLayout",
+                        "optional": true,
+                        "default": "HyperUuid\\UuidLayout::Rfc9562"
+                    }
+                ],
+                "return": "?DateTimeImmutable"
+            },
+            "toSqlOrder": {
+                "static": false,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "unixMillis": {
+                "static": false,
+                "params": [
+                    {
+                        "name": "layout",
+                        "type": "HyperUuid\\UuidLayout",
+                        "optional": true,
+                        "default": "HyperUuid\\UuidLayout::Rfc9562"
+                    }
+                ],
+                "return": "?int"
+            },
+            "variant": {
+                "static": false,
+                "params": [],
+                "return": "HyperUuid\\UuidVariant"
+            },
+            "version": {
+                "static": false,
+                "params": [
+                    {
+                        "name": "layout",
+                        "type": "HyperUuid\\UuidLayout",
+                        "optional": true,
+                        "default": "HyperUuid\\UuidLayout::Rfc9562"
+                    }
+                ],
+                "return": "int"
+            }
+        }
+    },
+    "Namespaces": {
+        "kind": "class",
+        "final": true,
+        "readonly": false,
+        "interfaces": [],
+        "parent": null,
+        "constants": {},
+        "cases": {},
+        "methods": {
+            "dns": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "oid": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "url": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            },
+            "x500": {
+                "static": true,
+                "params": [],
+                "return": "HyperUuid\\Uuid"
+            }
+        }
+    },
+    "UuidLayout": {
+        "kind": "enum",
+        "final": true,
+        "readonly": false,
+        "interfaces": [
+            "BackedEnum",
+            "UnitEnum"
+        ],
+        "parent": null,
+        "constants": {},
+        "cases": {
+            "Rfc9562": 1,
+            "SqlServer": 2
+        },
+        "methods": {
+            "cases": {
+                "static": true,
+                "params": [],
+                "return": "array"
+            },
+            "from": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "value",
+                        "type": "string|int",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "static"
+            },
+            "tryFrom": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "value",
+                        "type": "string|int",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "?static"
+            }
+        }
+    },
+    "UuidVariant": {
+        "kind": "enum",
+        "final": true,
+        "readonly": false,
+        "interfaces": [
+            "BackedEnum",
+            "UnitEnum"
+        ],
+        "parent": null,
+        "constants": {},
+        "cases": {
+            "Ncs": 1,
+            "Rfc9562": 2,
+            "Microsoft": 3,
+            "Future": 4
+        },
+        "methods": {
+            "cases": {
+                "static": true,
+                "params": [],
+                "return": "array"
+            },
+            "from": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "value",
+                        "type": "string|int",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "static"
+            },
+            "tryFrom": {
+                "static": true,
+                "params": [
+                    {
+                        "name": "value",
+                        "type": "string|int",
+                        "optional": false,
+                        "default": null
+                    }
+                ],
+                "return": "?static"
+            }
+        }
+    },
+    "CounterExhaustedException": {
+        "kind": "class",
+        "final": true,
+        "readonly": false,
+        "interfaces": [
+            "Stringable",
+            "Throwable"
+        ],
+        "parent": "RuntimeException",
+        "constants": {},
+        "cases": {},
+        "methods": {}
+    },
+    "RandomSourceException": {
+        "kind": "class",
+        "final": true,
+        "readonly": false,
+        "interfaces": [
+            "Stringable",
+            "Throwable"
+        ],
+        "parent": "RuntimeException",
+        "constants": {},
+        "cases": {},
+        "methods": {}
+    },
+    "TimestampOutOfRangeException": {
+        "kind": "class",
+        "final": true,
+        "readonly": false,
+        "interfaces": [
+            "Stringable",
+            "Throwable"
+        ],
+        "parent": "RuntimeException",
+        "constants": {},
+        "cases": {},
+        "methods": {}
+    },
+    "removed": [
+        "HyperUuid::isAvailable"
+    ]
+}

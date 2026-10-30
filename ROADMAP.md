@@ -12,7 +12,7 @@ HyperUuid now ships nine bindings over one Rust core, with TypeScript and R land
 | Java | JNI (21–24), FFM (25+) | Maven Central | JDK 21 | 2.8-5.1x faster than `UUID.randomUUID()` |
 | Python | PyO3 extension | PyPI, wheels and an sdist | 3.11 | 3.4-4.2x faster than stdlib |
 | Ruby | Magnus, Fiddle fallback | RubyGems | 3.3 (on Fiddle) | 2.1-5.5x faster than `SecureRandom.uuid` |
-| PHP | ext-ffi | Packagist, binaries in git | 8.3 | 1.2-1.4x faster than a naive inline v4 |
+| PHP | ext-php-rs extension | PIE: Packagist, 21 zips on the GitHub Release | 8.3 | 1.2-1.4x faster than a naive inline v4 (1.0's FFI package; the extension not yet measured) |
 | Swift | static library | git tag; core zips on the GitHub Release | 6.2 | 11-16x faster than `Foundation.UUID()` |
 | Go | cgo | git tag, binaries in git | 1.26 | slower than `google/uuid` (control group) |
 | TypeScript (new) | napi-rs addon | npm: root package + 8 platform packages | Node 22, Bun | v4 4.1-6.4x slower than `crypto.randomUUID()`; v7 2.3x faster than `uuid` `v7()` on Node, 1.2x slower on Bun |
@@ -63,13 +63,7 @@ C# and Java are the floors that lock out the financial and insurance buyers; the
 
 The end state is a main repo of source only, with every binary an attested release asset.
 
-**PHP: move to an ext-php-rs extension installed by PIE.**
-
-- Composer does not install extensions; PIE, the PHP Foundation's installer, does. It resolves the package on Packagist and downloads the matching prebuilt zip from GitHub release assets on Linux and macOS.
-- Set `"type": "php-ext"` in the root `composer.json`, and name assets `php_<ext>-<version>_php<X.Y>-<arch>-<os>-<libc>.zip`.
-- Build once per supported minor (the ABI changes per minor, not per patch): 8.3, 8.4, 8.5, NTS only, plus musl for Alpine. About 21 zips per release.
-- Add ZTS when someone asks (FrankenPHP).
-- Retire the FFI binding, or move it to its own repo. It is the only reason PHP still needs binaries in git, and production PHP-FPM often cannot use FFI.
+[x] **PHP: an ext-php-rs extension installed by PIE.** Done 2026-10-30, in the tree: the whole API is a Zend extension built from the core, the root `composer.json` is a `php-ext` package, and PIE downloads the prebuilt zip for the platform and minor from the GitHub Release: 8.3, 8.4 and 8.5, NTS only, on seven platforms (Windows on stable Rust with `RUSTC_BOOTSTRAP=1` on that one build step), 21 zips a release, each attested and named in the release attestation. The FFI package is retired, not kept beside it, and `php/src/` with its committed libraries is gone. `release.yml` ends with PIE installing the release on every platform and minor; the first install from Packagist is proved at the rehearsal or 1.1.0. ZTS waits until someone asks (FrankenPHP). Ships in 1.1.0.
 
 [x] **Swift: remote `binaryTarget`.** Done 2026-10-29, in the tree: the root `Package.swift` names the bundle and the XCFramework as two zips on the GitHub Release by URL and checksum, and the binaries left git. A spike proved remote static-library bundles on Swift 6.2.4 and 6.4.1 (glibc, musl, wasm, macOS, iOS, Mac Catalyst); Windows and Android are CI's. Ships in 1.1.0.
 

@@ -1,7 +1,7 @@
 # Every text file is UTF-8 without a BOM and ends its lines with LF, on every platform, Windows
 # checkouts included: eol overrides a contributor's core.autocrlf. .editorconfig asks editors
 # for the same, and .github/scripts/tests/test_text_files.py fails CI on a CR, a BOM or a file
-# that is not UTF-8. The native libraries committed for Go and PHP are binary, named so that
+# that is not UTF-8. The native libraries committed for Go are binary, named so that
 # no heuristic decides it.
 * text=auto eol=lf
 *.a     binary
@@ -12,32 +12,40 @@
 *.jar   binary
 *.png   binary
 
-# What a `git archive` of this repository leaves out. Packagist serves the Composer package
-# as GitHub's archive of the tag, so without this every `composer require` downloads all
-# nine bindings and their bundled native libraries to use one of them. Composer needs
-# composer.json, php/src (the sources and php/src/native), LICENSE and the READMEs.
+# What a `git archive` of this repository leaves out. PIE (the PHP extension installer) reads
+# the Composer package from Packagist, which serves GitHub's archive of the tag, and takes
+# only its metadata from it: the extension itself is a pre-packaged binary attached to the
+# release. So the archive carries composer.json, LICENSE, README.md and go/, nothing else,
+# and `test_git_archive_is_metadata_only` pins that set.
 #
 # A deny-list on purpose, and `go/` is deliberately not on it: the Go module proxy builds
 # the module zip with `git archive` of that directory, so an export-ignore that reached it
-# would publish an empty or partial Go module. A new top-level directory that is not listed
-# here only costs download size. SwiftPM clones, and every other registry gets a built
-# package, so nothing else reads these attributes. They apply from the tree being archived:
-# a tag made before this file existed keeps its full archive.
-/.github          export-ignore
-/.gitattributes   export-ignore
-/.gitignore       export-ignore
-/Package.swift    export-ignore
-/global.json      export-ignore
-/csharp           export-ignore
-/java             export-ignore
-/python           export-ignore
-/r                export-ignore
-/ruby             export-ignore
-/rust             export-ignore
-/swift            export-ignore
-/typescript       export-ignore
-/php/bench        export-ignore
-/php/tests        export-ignore
-/php/phpbench.json export-ignore
-/php/phpcs.xml    export-ignore
-/php/phpunit.xml  export-ignore
+# would publish an empty or partial Go module. A new top-level path that is not listed
+# here only costs download size, and that test fails until it is listed. SwiftPM clones,
+# and every other registry gets a built package, so nothing else reads these attributes.
+# They apply from the tree being archived: a tag made before this file existed keeps its
+# full archive.
+/.claude           export-ignore
+/.editorconfig     export-ignore
+/.gitattributes    export-ignore
+/.github           export-ignore
+/.gitignore        export-ignore
+/CHANGELOG.md      export-ignore
+/CLAUDE.md         export-ignore
+/CRAN_CHECKLIST.md export-ignore
+/global.json       export-ignore
+/Package.swift     export-ignore
+/ROADMAP.md        export-ignore
+/c                 export-ignore
+/corpus            export-ignore
+/csharp            export-ignore
+/docs              export-ignore
+/include           export-ignore
+/java              export-ignore
+/php               export-ignore
+/python            export-ignore
+/r                 export-ignore
+/ruby              export-ignore
+/rust              export-ignore
+/swift             export-ignore
+/typescript        export-ignore

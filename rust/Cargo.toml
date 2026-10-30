@@ -44,7 +44,7 @@ chacha20 = { version = "0.10.2", default-features = false, features = ["cipher"]
 
 # One crate, three optional native-extension entry points instead of three satellite
 # crates each path-depending back on this one. Nothing in a plain `cargo cdylib` (the
-# Fiddle/ext-ffi-consumed shared library every non-extension binding dlopens) changes —
+# shared library every C-ABI binding loads) changes —
 # these are additive, off by default, and only one is ever enabled per build invocation
 # (each produces a different C entry point — PyInit__native, Init_hyperuuid_native, PHP's
 # module struct — under the same crate, not meant to coexist in one binary).

@@ -174,9 +174,9 @@ there is no clock, because `now_v7` is compiled out on `wasm32` and every other 
 the host's timestamp. Nothing in this repo ships that module: the Go and Swift bindings link
 the crate's `wasm32-wasip1` static archive instead ([WebAssembly](../docs/platforms.md#webassembly)).
 `ffi.rs` itself is untouched by any of this; on every native target the C ABI is still
-exactly those thirteen exports. They are what the C#, Java, Go, Swift and PHP bindings, Ruby's
-Fiddle backend and R's `.Call` shim (linked against the `staticlib` build) call; Python's and
-Ruby's extensions and the TypeScript addon call the crate's Rust API instead.
+exactly those thirteen exports. They are what the C#, Java, Go and Swift bindings, Ruby's
+Fiddle backend and R's `.Call` shim (linked against the `staticlib` build) call; Python's,
+Ruby's and PHP's extensions and the TypeScript addon call the crate's Rust API instead.
 
 The C# binding's Blazor WebAssembly support takes a second wasm build, the
 `wasm32-unknown-emscripten` static library its NuGet package links into the app:
@@ -275,8 +275,8 @@ Windows std's clock read cannot fail, so it is used as is.
 ## Optional native-extension features
 
 This crate also carries the native-extension entry points for this repo's Python, Ruby, and
-PHP bindings — `python` (PyO3), `ruby` (Magnus), and `php` (ext-php-rs, a benchmark spike,
-not the shipped PHP backend) — instead of each living in a satellite crate that
+PHP bindings — `python` (PyO3), `ruby` (Magnus), and `php` (ext-php-rs, the whole PHP
+binding) — instead of each living in a satellite crate that
 path-depends back on this one. Two bindings do have one: the TypeScript binding's napi-rs
 addon in `typescript/`, and R's wrapper crate in `r/src/rust/`, which links the `staticlib`
 build of a copy of this crate that `r/tools/vendor.sh` stages. All three are `optional`, off by default, and additive: a

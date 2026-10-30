@@ -9,7 +9,7 @@ use HyperUuid\Namespaces;
 use PhpBench\Attributes as Bench;
 
 /**
- * Single-item generation, one FFI call per iteration — the same shape as the
+ * Single-item generation, one call into the extension per iteration — the same shape as the
  * single-item benchmarks in rust/benches/uuid_benchmarks.rs, csharp/HyperUuid.Benchmarks,
  * and go/uuidgen_bench_test.go.
  */

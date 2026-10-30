@@ -135,7 +135,8 @@ keeps all of it:
   (`O:14:"HyperUuid\Uuid":1:{s:21:"\0HyperUuid\Uuid\0bytes";s:16:"…";}`, which sits in sessions and
   caches today) unserializes under 1.1, and vice versa. ext-php-rs marks every Rust-backed class
   `NotSerializable` (`builders/class.rs`, "disable serialization if the class has an associated
-  object"). The extension clears that flag on `Uuid`'s class entry at module startup and implements
+  object"). The extension clears that flag on `Uuid`'s class entry after every module's startup
+  (a chained `zend_post_startup_cb`), with a `dl()` RINIT fallback, and implements
   `__serialize`/`__unserialize` with the same mangled key. `__unserialize` validates the length,
   refusing anything but 16 bytes as the constructor does.
 - `clone` gives an equal, independent value.

@@ -85,13 +85,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   *(repository only)*
 - **Every binding reports an exhausted v7 stream as its own error.** The core's new
   `NewV7Error::CounterExhausted` (return code 6 over the C ABI) reaches each binding as a
-  state error, never as a random source failure, at the single and the batch site alike,
-  with the core's message: Python raises `RuntimeError`, Ruby
-  `HyperUuid::CounterExhaustedError`, PHP `CounterExhaustedException` (the generic exception
-  on the ext-php-rs door), TypeScript an error with code `ERR_HYPERUUID_COUNTER_EXHAUSTED`, R
-  a plain error condition, Go `ErrCounterExhausted`, Java `IllegalStateException`, C#
-  `InvalidOperationException` (the `Try` forms return false) and Swift
-  `UuidGenerator.Error.counterExhausted`. *(C#, Java, Go, Python, Ruby, PHP, Swift,
+  state error, never as a random source failure, at the single and the batch site alike, with
+  the core's message: Python raises `RuntimeError`, Ruby `HyperUuid::CounterExhaustedError`,
+  PHP `CounterExhaustedException`, TypeScript an error with code
+  `ERR_HYPERUUID_COUNTER_EXHAUSTED`, R a plain error condition, Go `ErrCounterExhausted`, Java
+  `IllegalStateException`, C# `InvalidOperationException` (the `Try` forms return false) and
+  Swift `UuidGenerator.Error.counterExhausted`. *(C#, Java, Go, Python, Ruby, PHP, Swift,
   TypeScript, R)*
 - **Rust — `uuid1` feature.** `From<uuid::Uuid> for Uuid`, `From<Uuid> for uuid::Uuid`,
   `From<&Uuid> for uuid::Uuid` and `==` across the two types, behind an off-by-default feature
@@ -100,6 +99,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **PHP — breaking: the package is a native extension, installed with PIE.**
+  <!-- owner's words -->
+  `pie install skunkwerkx/hyperuuid` downloads a prebuilt Zend extension, `hyperuuid`, built
+  from the core with ext-php-rs, from the GitHub Release: 21 zips, PHP 8.3, 8.4 and 8.5 (NTS
+  only) on seven platforms (Linux x64 and arm64 on glibc and on musl, macOS x64 and arm64,
+  Windows x64), each attested and named in the release attestation. `composer require` no
+  longer installs it, and no FFI package is kept. `ext-ffi`, `ffi.enable` and preloading,
+  `HYPERUUID_NATIVE_LIBRARY` and `HyperUuid::isAvailable()` are gone;
+  `extension_loaded('hyperuuid')` is the check. The classes, methods, defaults, exceptions and
+  messages are 1.0's otherwise, `==` on two `Uuid`s is still PHP's loose property comparison,
+  and a `Uuid` serialized by 1.0 unserializes unchanged (and the other way). Arguments are
+  taken as 1.0's userland methods took them: weak-mode callers get PHP's coercion
+  (`newV7("1700000000000")` still works), strict callers get the same `TypeError`s, and a
+  `DateTimeInterface` whose `getTimestamp()` returns a non-int goes through 1.0's arithmetic.
+  What does differ: a call with too many arguments is an `ArgumentCountError` (1.0 ignored the
+  extras), and one with too few is worded as for a built-in function; the private `bytes`
+  property is untyped and not `readonly` in reflection; and a `DateTimeInterface` past the
+  64-bit millisecond range is a `TimestampOutOfRangeException` rather than a `TypeError`. Errors
+  name the caller's file and line, and `isRfc()` never matches a version outside 0–15.
+  `php/README.md` lists them under "Differences from 1.0". Stubs for IDEs
+  and PHPStan are in the repository, in `php/stubs/`. No PHP binary is left in git: `php/src/`
+  is gone, and `stage-native-binaries.yml` no longer stages one. After every publish,
+  `release.yml` has PIE install the release on every platform and minor. *(PHP)*
 - **The v7 counter is re-seeded on every new millisecond.** The stream used to be one 26-bit
   counter, seeded once per process and never reset, so two ids revealed how many were minted
   between them, and it wrapped every 67,108,864 UUIDs, rolling a batch's tail a millisecond

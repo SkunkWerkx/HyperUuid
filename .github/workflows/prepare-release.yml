@@ -4,10 +4,11 @@ name: Prepare release
 # text (rust/Cargo.toml, the csproj, build.gradle.kts, the gemspec and lib/hyperuuid.rb's
 # VERSION constant, together, so they never disagree), refresh the lock files, push the bump
 # straight to master and dispatch ci.yml against it. Python needs nothing: pyproject.toml
-# sources its version from rust/Cargo.toml. PHP, Swift and Go have no version field, but the
-# native libraries committed for them report the crate version (`hyperuuid_version()`), so
-# ci.yml's release-mode run on the bump commit (A) is what stage-native-binaries.yml stages
-# onto it as B. The order of a release:
+# sources its version from rust/Cargo.toml. PHP, Swift and Go have no version field, but what
+# they ship reports the crate version (`hyperuuid_version()`, and `phpversion('hyperuuid')` for
+# PHP's extension), so ci.yml's release-mode run on the bump commit (A) builds it, and
+# stage-native-binaries.yml stages Go's libraries and Swift's checksums onto it as B. The order
+# of a release:
 #
 #   1. this workflow: bump every manifest, push A, dispatch ci.yml on A;
 #   2. ci.yml goes green on A, its last job dispatches stage-native-binaries.yml, which

@@ -126,8 +126,9 @@ jobs:
       # then and 3.4 consumers fall back to the universal Fiddle gem, which is exactly what
       # it's there for.
       ruby_compat_version: "3.4"
-      # The floor composer.json declares; the musl job runs the PHP suite on it beside
-      # php_version. Explicit because the Forge's default (8.2) serves the siblings.
+      # The floor composer.json declares; a pr-mode run builds and tests the PHP extension on
+      # it on linux-x64 beside the newest minor (release builds every minor in the Forge's
+      # php_versions). Explicit because the Forge's default (8.2) serves the siblings.
       php_floor_version: "8.3"
       # attest_native defaults to true in the forge — each native library gets SLSA
       # provenance tying it to this run and commit. It matters here specifically because the

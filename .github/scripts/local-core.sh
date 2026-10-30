@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Builds the core from this checkout for the bindings that do not build their own: PHP and Go,
-# whose suites otherwise run against committed binaries (php/src/native, go/staticlib), and
-# Swift, which has no core until one is built. It touches nothing committed: PHP's and Go's
-# land under rust/target/, and Swift's in swift/HyperUuidCore.artifactbundle/, which git
-# ignores but for its include/.
+# Builds the core from this checkout for the bindings that do not build their own: Go, whose
+# suite otherwise runs against the committed go/staticlib, and Swift, which has no core until
+# one is built. (PHP builds its own extension: `cargo php-ext` in rust/, then `composer test`
+# in php/.) It touches nothing committed: Go's lands under rust/target/, and Swift's in
+# swift/HyperUuidCore.artifactbundle/, which git ignores but for its include/.
 #
-#   PHP    rust/target/release/libhyperuuid.so     HYPERUUID_NATIVE_LIBRARY=<that path> vendor/bin/phpunit
 #   Go     rust/target/local-core/go/staticlib/    go test -tags hyperuuid_local ./...
 #   Swift  swift/HyperUuidCore.artifactbundle/     swift test
 #
@@ -38,10 +37,10 @@ fi
 [ -f "$forge" ] || { echo "error: $forge not found; set FORGE to the SkunkWerkx/.github checkout" >&2; exit 1; }
 
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) targets=(x86_64-unknown-linux-musl x86_64-unknown-linux-gnu) lib=libhyperuuid.so ;;
-  Linux-aarch64) targets=(aarch64-unknown-linux-musl aarch64-unknown-linux-gnu) lib=libhyperuuid.so ;;
-  Darwin-x86_64) targets=(x86_64-apple-darwin) lib=libhyperuuid.dylib ;;
-  Darwin-arm64) targets=(aarch64-apple-darwin) lib=libhyperuuid.dylib ;;
+  Linux-x86_64) targets=(x86_64-unknown-linux-musl x86_64-unknown-linux-gnu) ;;
+  Linux-aarch64) targets=(aarch64-unknown-linux-musl aarch64-unknown-linux-gnu) ;;
+  Darwin-x86_64) targets=(x86_64-apple-darwin) ;;
+  Darwin-arm64) targets=(aarch64-apple-darwin) ;;
   *) echo "error: no local core for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 
@@ -65,7 +64,6 @@ cp "$bundle/info.json" "$repo/swift/HyperUuidCore.artifactbundle/info.json"
 cat <<EOF
 
 local core built from $(git -C "$repo" rev-parse --short HEAD)$(git -C "$repo" diff --quiet HEAD -- rust || echo ' plus uncommitted changes'):
-  php/    HYPERUUID_NATIVE_LIBRARY=$repo/rust/target/release/$lib vendor/bin/phpunit
   go/     go test -tags hyperuuid_local ./...
   swift/  swift test
 EOF
