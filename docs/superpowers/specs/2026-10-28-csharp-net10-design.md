@@ -1,7 +1,7 @@
 # C#: multi-target `net10.0;net11.0`
 
 Written 2026-10-28 from ROADMAP Phase 1 (C#), the C# brief and the owner's decisions of the
-same day (`.superpowers/brainstorm/2026-10-28-phase1/`). **Draft for owner review.** Ships in
+same day (`docs/superpowers/brainstorm/2026-10-28-phase1/`). **Draft for owner review.** Ships in
 1.1.0; `docs/superpowers/plans/` will hold the implementation plan.
 
 ## Goal

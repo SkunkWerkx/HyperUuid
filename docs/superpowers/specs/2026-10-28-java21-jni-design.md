@@ -1,7 +1,7 @@
 # Java 21: a JNI base in a multi-release jar
 
 2026-10-28 · ROADMAP Phase 1, Java row · **Draft for owner review.** Built from
-`.superpowers/brainstorm/2026-10-28-phase1/java-brief.md` under the owner's decisions; the brief's
+`docs/superpowers/brainstorm/2026-10-28-phase1/java-brief.md` under the owner's decisions; the brief's
 claims were re-checked against the tree (corrections in Open items). Ships in 1.1.0.
 
 ## Goal

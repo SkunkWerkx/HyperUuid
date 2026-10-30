@@ -15,7 +15,7 @@
 
 **Tech Stack:** maturin 1.15 (`maturin-action` v1.51.0), PyO3 0.30, twine, Docker (`quay.io/pypa/manylinux2014_x86_64`, `python:3.11-alpine`, `php:8.x-cli-alpine`), qemu-user, Composer, GitHub Actions reusable workflows and composite actions in the Forge.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-python-sdist-php83-design.md`. It is plan 2 of 5 for Phase 1. Plan 1 (MSRV 1.89, `uuid1`) is already in the working tree, and `rust/Cargo.toml:5` reads `rust-version = "1.89"`. The order is in `.superpowers/brainstorm/2026-10-28-phase1/integration.md`.
+**Spec:** `docs/superpowers/specs/2026-10-28-python-sdist-php83-design.md`. It is plan 2 of 5 for Phase 1. Plan 1 (MSRV 1.89, `uuid1`) is already in the working tree, and `rust/Cargo.toml:5` reads `rust-version = "1.89"`. The order is in `docs/superpowers/brainstorm/2026-10-28-phase1/integration.md`.
 
 ## Global Constraints
 

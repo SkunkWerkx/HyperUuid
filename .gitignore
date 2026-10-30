@@ -142,3 +142,6 @@ go/testdata/corpus/
 
 # What Finder writes into any folder it opens.
 .DS_Store
+
+# superpowers skill scratch (brainstorms worth keeping go in docs/superpowers/)
+.superpowers/

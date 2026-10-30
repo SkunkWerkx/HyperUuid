@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust (edition 2024, MSRV 1.89), `libc` 0.2.191, Criterion 0.8.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-apple-entropy-design.md`. It is plan 5 of 5 for Phase 1. It lands after the v7 re-seed (merged, PR #47) and before the system-wide M6 receipts pass (`.superpowers/brainstorm/2026-10-28-phase1/integration.md`, "Order" 4).
+**Spec:** `docs/superpowers/specs/2026-10-28-apple-entropy-design.md`. It is plan 5 of 5 for Phase 1. It lands after the v7 re-seed (merged, PR #47) and before the system-wide M6 receipts pass (`docs/superpowers/brainstorm/2026-10-28-phase1/integration.md`, "Order" 4).
 
 ## Global Constraints
 

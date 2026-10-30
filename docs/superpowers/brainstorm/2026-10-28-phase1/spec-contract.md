@@ -3,7 +3,7 @@
 You turn one approved design into a written spec for HyperUuid (/Users/buvy/Developer/SkunkWerkx/HyperUuid). Your inputs are a design brief written by a researcher and the owner's decisions.
 
 ## Authority, highest first
-1. `.superpowers/brainstorm/2026-10-28-phase1/decisions.md`. The owner's decisions are binding. Where the brief disagrees, the decisions win: siblings frozen, net10 scope, Apple exclusion, release vehicle, names and so on.
+1. `docs/superpowers/brainstorm/2026-10-28-phase1/decisions.md`. The owner's decisions are binding. Where the brief disagrees, the decisions win: siblings frozen, net10 scope, Apple exclusion, release vehicle, names and so on.
 2. The repo's `CLAUDE.md`, except "floors move together" and the sibling cascade, which are suspended until v1.1 ships.
 3. Your item's design brief. It is a researcher's work: re-check any `file:line` or upstream fact you rely on, and fix it if it is wrong.
 

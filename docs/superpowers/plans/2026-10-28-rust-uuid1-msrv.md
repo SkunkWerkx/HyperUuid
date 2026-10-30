@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust (edition 2024), `uuid` 1.29, `no-panic`, the Forge's `hyper-check-core.yml`.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-rust-uuid1-msrv-design.md`. It is plan 1 of 5 for Phase 1. Its order relative to the other four is in `.superpowers/brainstorm/2026-10-28-phase1/integration.md`.
+**Spec:** `docs/superpowers/specs/2026-10-28-rust-uuid1-msrv-design.md`. It is plan 1 of 5 for Phase 1. Its order relative to the other four is in `docs/superpowers/brainstorm/2026-10-28-phase1/integration.md`.
 
 ## Global Constraints
 
