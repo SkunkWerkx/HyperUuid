@@ -180,9 +180,12 @@ Ruby's extensions and the TypeScript addon call the crate's Rust API instead.
 
 The C# binding's Blazor WebAssembly support takes a second wasm build, the
 `wasm32-unknown-emscripten` static library its NuGet package links into the app:
-`cargo wasm-staticlib`, which leaves Rust's standard library out of it (the `staticlib`
+`cargo +<pin> wasm-staticlib`, which leaves Rust's standard library out of it (the `staticlib`
 feature supplies the panic handler in its place), so it can be linked into one app beside
-HyperCast's.
+HyperCast's. It is the one build on a nightly, the dated one `.github/hyper.json` pins as
+`wasm.toolchain`, installed with `rust-src`: `-Zbuild-std` rebuilds core and compiler_builtins
+for the plain wasm feature set both .NET 10 and .NET 11 load, without the prebuilt sysroot's
+legacy exception handling (`.cargo/config.toml` has the detail).
 
 ## `no_std`
 

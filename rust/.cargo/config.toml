@@ -36,8 +36,24 @@ rustflags = ["-C", "target-feature=-crt-static"]
 # without Rust's standard library, and a no_std artifact cannot unwind, so panics abort on
 # this target — rustc refuses the build otherwise ("unwinding panics are not supported
 # without std"). A panic is then the wasm `unreachable` trap from lib.rs's handler.
+# The CPU and features are the archive's whole wasm feature set, and every object in it is
+# compiled with them, because `cargo wasm-staticlib` rebuilds core and compiler_builtins rather
+# than taking Rust's prebuilt sysroot (see the alias). That sysroot carries the legacy
+# exception-handling encoding, which a browser refuses beside .NET 11's new one, and declares
+# bulk-memory-opt and call-indirect-overlong, which .NET 10's wasm-opt does not know
+# (dotnet/runtime#132858). And a .NET 10 Release publish runs the SDK's own wasm-opt after
+# Emscripten's, enabling nothing past Binaryen's defaults (sign-ext, mutable-globals) but
+# simd, bulk memory and exception handling, so an instruction from any other feature (a
+# saturating float-to-int conversion, say) fails it. `mvp` plus those two, Binaryen's
+# defaults, is a set every run in both runtimes accepts with no flag, and all the archive
+# needs. This section applies only to cargo runs from rust/; the Pyodide wheel builds from
+# python/.
 [target.wasm32-unknown-emscripten]
-rustflags = ["-C", "panic=abort"]
+rustflags = [
+  "-C", "panic=abort",
+  "-C", "target-cpu=mvp",
+  "-C", "target-feature=+sign-ext,+mutable-globals",
+]
 
 [alias]
 # The shared library every binding loads: libhyperuuid.so / .dylib / hyperuuid.dll in
@@ -70,8 +86,11 @@ php-ext = "rustc --release --crate-type cdylib --features php --target-dir targe
 # one invocation. `--no-default-features --features staticlib` is what leaves
 # std out and supplies the panic handler in its place; two Hyper* libraries that each
 # carried std could not be linked into one app (`duplicate symbol: rust_eh_personality`).
+# `-Zbuild-std` compiles core and compiler_builtins with the target section's flags above, so
+# it needs the nightly `.github/hyper.json` pins as `wasm.toolchain`, with rust-src:
+# `cargo +<pin> wasm-staticlib`. On stable it stops at cargo's nightly-only error.
 # Output: target/wasm32-unknown-emscripten/release/libhyperuuid.a.
-wasm-staticlib = "rustc --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features staticlib"
+wasm-staticlib = "rustc -Zbuild-std=core,compiler_builtins --release --target wasm32-unknown-emscripten --crate-type staticlib --no-default-features --features staticlib"
 # The same no_std static library for any other target: `cargo staticlib --target <triple>`.
 # Three bindings link one rather than load the shared library — Swift on Linux and
 # WebAssembly, Go's cgo backend, a C# Native AOT publish — and the forge's

@@ -7,5 +7,6 @@
     "prefixes": ["uuid_", "hyperuuid_"]
   },
   "cdylib_smoke": ".github/scripts/cdylib_smoke.py",
-  "sdist": true
+  "sdist": true,
+  "wasm": { "toolchain": "nightly-2026-10-27" }
 }

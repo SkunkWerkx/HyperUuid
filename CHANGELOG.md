@@ -132,12 +132,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `actions/cache-poisoning/poisonable-step`; and `pypi-recovery.yml` is gone. *(repository only)*
 - **Rust, R — minimum Rust is now 1.89** (was 1.85), the floor of current `uuid` 1.x. Source
   installs of the R package and builds from this repository need `rustc` 1.89. *(Rust, R)*
-- **C# — .NET 10 is supported, on desktop and server.** The package builds `net10.0` and
-  `net11.0` from one source, and package validation holds their public APIs identical. On .NET
-  10 it covers Windows, Linux (glibc and musl) and macOS, framework-dependent and Native AOT;
-  Blazor WebAssembly, iOS, Mac Catalyst and Android stay .NET 11 and later, and a .NET 10
-  project for any of them stops at build with the new error `HYPERUUID003`, which names the
-  platform (for WebAssembly, dotnet/runtime#132858: .NET 10's toolchain cannot link the core).
+- **C# — .NET 10 is supported, on desktop, server and in the browser.** The package builds
+  `net10.0` and `net11.0` from one source, and package validation holds their public APIs
+  identical. On .NET 10 it covers Windows, Linux (glibc and musl) and macOS, framework-dependent
+  and Native AOT, and Blazor WebAssembly; iOS, Mac Catalyst and Android stay .NET 11 and later,
+  and a .NET 10 project for any of them stops at build with the new error `HYPERUUID003`, which
+  names the platform.
   `HyperUuid.targets` moves to `build/net10.0/` (and `buildTransitive/net10.0/`), one copy NuGet
   selects for both frameworks. CI runs the suite and the Native AOT smoke test on both
   frameworks on every desktop and musl leg, and a new `test-nuget-package` job proves from the
@@ -152,6 +152,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **C# — a Debug Blazor WebAssembly build loads** ([#50](https://github.com/SkunkWerkx/HyperUuid/issues/50)).
+  Chromium refused an unstripped Debug build's `dotnet.native.wasm` with "module uses a mix
+  of legacy and new exception handling instructions": the package translated the archive's
+  legacy exception handling with a `wasm-opt` pass that rides the SDK's post-link step, and the
+  SDK skips that step for an unstripped module. The archive no longer needs translating: it is
+  built on a pinned nightly with `-Zbuild-std`, for plain wasm, so it holds no
+  exception-handling instructions and none of the features .NET 10's toolchain rejects
+  (dotnet/runtime#132858), and the package's `--translate-to-exnref` item is gone. The same
+  build is what lets .NET 10 link it, and the archive in the package shrinks from 3.3 MB to
+  350 KB. *(C#)*
 - **A v7 batch past 64 MiB of random bytes no longer traps on WASI.** `getrandom` handed
   the host the whole request in one `random_get`, and wasmtime refuses one past 64 MiB, so a
   batch of more than about 11 million v7 ids (a `MAX_BATCH` draws 402 MB) aborted the
