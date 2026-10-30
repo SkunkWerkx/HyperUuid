@@ -90,6 +90,8 @@ jobs:
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master
     permissions:
       contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
 
   build-native:
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master

@@ -181,12 +181,16 @@ def test_v7_timestamp_extracts_from_the_stdlib_native_generator():
     bit-layout read, so it recovers the real embedded timestamp from a version 7 UUID minted by
     Python's own stdlib generator too.
     """
-    before = time.time()
+    before = time.time_ns() // 1_000_000
     native = uuid.uuid7()
-    after = time.time()
+    after = time.time_ns() // 1_000_000
 
+    # Whole milliseconds, as v7 holds them: a float comparison at today's epoch seconds rounds
+    # the 1 ms slack itself, and failed when uuid7()'s clock read 1 ms behind time.time()'s.
     got = hyperuuid.v7_timestamp(native)
-    assert before - 0.001 <= got.timestamp() <= after + 0.001
+    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    got_ms = (got - epoch) // datetime.timedelta(milliseconds=1)
+    assert before - 1 <= got_ms <= after + 1
 
 
 def test_new_v7_accepts_a_datetime_in_place_of_a_millisecond_int():
