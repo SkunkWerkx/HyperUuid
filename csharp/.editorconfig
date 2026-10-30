@@ -1,8 +1,8 @@
 # The formatter's settings for every C# file under csharp/ — the library, its tests, the
 # benchmarks and the smoke tests. `dotnet format whitespace HyperUuid.slnx` applies them; CI
 # runs it with --verify-no-changes. The style is tabs, LF and a final newline, as in HyperCast
-# and HyperTabular.
-root = true
+# and HyperTabular. Not root: every file here also takes the repository's UTF-8 and LF from
+# ../.editorconfig, which keeps Visual Studio from writing a BOM into a .csproj or .razor.
 
 [*.cs]
 charset = utf-8

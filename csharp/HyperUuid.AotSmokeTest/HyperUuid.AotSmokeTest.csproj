@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <!-- Two modes. By default it references the library project and imports the package's
        targets file by hand, which is what the in-tree publish proves. With
        -p:HyperUuidVersion=<v> -p:RestoreAdditionalProjectSources=<feed> (the Android smoke

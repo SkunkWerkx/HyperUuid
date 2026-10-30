@@ -4,13 +4,16 @@ This is a new submission.
 
 ## Test environments
 
-* macOS 27.0.1 on Apple M6 (aarch64-apple-darwin27.0.0), R 4.6.1 (Homebrew build),
-  rustc and cargo 1.99.1.
+* macOS 27.2 on Apple M6 (aarch64-apple-darwin27.0.0), R 4.6.2 (Homebrew build), rustc and
+  cargo 1.99.1.
+* Debian forky/sid on x86-64 (the `rocker/r-devel` image), R Under development (unstable)
+  (2026-10-25 r90763), with the distribution's rustc and cargo 1.97.1.
 
 ## R CMD check results
 
-`R CMD check --as-cran hyperuuid_1.0.0.tar.gz` with the incoming checks on (TinyTeX with
-`makeindex` for the PDF manual, `checkbashisms`, `qpdf` and `pandoc` installed):
+`R CMD check --as-cran hyperuuid_1.0.0.tar.gz`, with `_R_CHECK_CRAN_INCOMING_REMOTE_=TRUE`.
+
+macOS, R 4.6.2, with the PDF manual (TinyTeX), `checkbashisms`, `qpdf` and `pandoc` installed:
 
     Status: 1 NOTE
 
@@ -19,8 +22,21 @@ This is a new submission.
 
     New submission
 
-The NOTE is the new-submission notice only. The 1,226 testthat expectations pass,
-including the replay of the five bundled corpus files.
+R-devel on Debian, `--no-manual`:
+
+    Status: 2 NOTEs
+
+    * checking CRAN incoming feasibility ... NOTE
+    New submission
+
+    * checking compilation flags used ... NOTE
+    Compilation used the following non-portable flag(s):
+      '-Wdate-time' '-Werror=format-security' '-Wformat'
+
+The first NOTE is the new-submission notice. The second names flags from that image's R
+build configuration (Debian's hardening defaults in `R CMD config CFLAGS`), not from this
+package's `Makevars`, which sets no compiler flags. On both, the 1,228 testthat expectations
+pass, including the replay of the five bundled corpus files.
 `NEWS.md`'s heading carries the version number, which R's NEWS parser requires.
 
 ## Compiled code

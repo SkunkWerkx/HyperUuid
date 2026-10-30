@@ -6,8 +6,8 @@
 //! Two places cannot check it, and every other leg does. wasm: cbindgen runs `cargo
 //! metadata`, a subprocess wasmtime cannot start, so the test is compiled out. A copy of rust/
 //! without the repository around it (the Forge's musl build takes only rust/ and corpus/ into
-//! its container): the test says so and passes. On Windows, git may check the headers out with
-//! CRLF line endings, so a committed CRLF reads as LF before the comparison.
+//! its container): the test says so and passes. Line endings are LF on every checkout,
+//! Windows' included (.gitattributes), so the comparison is byte for byte.
 #![cfg(not(target_family = "wasm"))]
 
 use std::path::Path;
@@ -38,9 +38,9 @@ fn committed_headers_are_what_cbindgen_generates() {
             std::fs::write(&header, &generated).unwrap();
             continue;
         }
-        let committed = std::fs::read_to_string(&header).unwrap_or_default();
+        let committed = std::fs::read(&header).unwrap_or_default();
         assert!(
-            committed.replace("\r\n", "\n").as_bytes() == generated,
+            committed == generated,
             "{} is not what cbindgen generates from src/ffi.rs; \
              run `HYPERUUID_BLESS=1 cargo test --test header` in rust/",
             header.display()

@@ -209,8 +209,9 @@ jobs:
   # (hyper-check-core.yml): no_std and no-panic proofs, the C ABI held to rust/src/ffi.rs
   # (.github/scripts/check_exports.py and the cdylib built on every RID, dlopen'd and called by
   # .github/scripts/cdylib_smoke.py), the conformance corpus re-derived by corpus/oracle.py, the
-  # workflow-contract and ABI-probe tests in .github/scripts/tests, rustfmt and clippy, the MSRV, cargo-semver-checks against the last
-  # crates.io release, and actionlint over this directory. The inputs below are what is HyperUuid
+  # workflow-contract, ABI-probe and text-file tests in .github/scripts/tests (the last holds
+  # every tracked text file to UTF-8, no BOM and LF), rustfmt and clippy, the MSRV,
+  # cargo-semver-checks against the last crates.io release, and actionlint over this directory. The inputs below are what is HyperUuid
   # about it: off std there is no OS for `getrandom` to read, so the no_std builds name the custom
   # backend, clippy also runs the Android configuration, whose entropy path (entropy.rs:
   # ChaCha20 for batches, no pool) nothing else compiles, and `extra_features: uuid1` with the
