@@ -19,20 +19,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-  <!-- The managed-static registrar on Mac Catalyst, the default there before .NET 11 made it
-       trimmable-static for every CoreCLR app. With trimmable-static, the Release app on SDK
-       11.0.100-rc.2.26504.105 (maccatalyst workload 27.0.12212-net11-rc.2) aborts before
-       Main: xamarin_bridge_call_runtime_initialize fails to create its delegate with
-       0x80070002 (file not found). Nothing here is HyperUuid's; lift this once a .NET 11
-       workload runs the default. The SDK's props, read before this file, have
-       already turned PrepareAssemblies and PostProcessAssemblies on for trimmable-static, so
-       they are turned back off: the SDK leaves them off for an app on managed-static. -->
-  <PropertyGroup Condition="$(TargetFramework.EndsWith('-maccatalyst'))">
-    <Registrar>managed-static</Registrar>
-    <PrepareAssemblies>false</PrepareAssemblies>
-    <PostProcessAssemblies>false</PostProcessAssemblies>
-  </PropertyGroup>
-
   <ItemGroup>
     <Compile Include="../HyperUuid.AotSmokeTest/Program.cs" Link="Program.cs" />
     <Compile Include="../HyperUuid.AotSmokeTest/SmokeTest.cs" Link="SmokeTest.cs" />
@@ -44,14 +30,5 @@
        that file a .NET iOS or Mac Catalyst consumer takes. The archive it links is
        csharp/HyperUuid/staticlibs/{rid}/, staged from the static-libs artifact. -->
   <Import Project="../HyperUuid/build/net10.0/HyperUuid.targets" />
-
-  <!-- UIKit, by hand, because this app never touches it. From .NET 11 the SDK links only the
-       frameworks the trimmer sees the app use, and the runtime's own libxamarin still
-       references UIApplicationDidReceiveMemoryWarningNotification, so a Release build that
-       uses no UIKit type fails its native link on that symbol. Every real iOS or Mac Catalyst
-       app uses UIKit, so the package itself does not ask for it; only this test does. -->
-  <ItemGroup Condition="'$(_HyperUuidAppleMobile)' == 'true'">
-    <NativeReference Update="$(_HyperUuidAppleMobileLibrary)" Frameworks="UIKit" />
-  </ItemGroup>
 
 </Project>

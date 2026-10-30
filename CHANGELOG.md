@@ -149,6 +149,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on Apple platforms. It replaces a `getentropy` syscall per id: a single v7 on an Apple M6
   went from 594 to 60 ns. iOS, tvOS, watchOS, visionOS and Mac Catalyst already used it through
   `getrandom`. *(core, and every binding on macOS)*
+- **C# — the iOS and Mac Catalyst smoke test runs on the SDK's defaults.** Its Mac Catalyst
+  build set `Registrar` to `managed-static`, after a Release app on .NET 11's default,
+  `trimmable-static`, aborted before `Main`, a fault then put down to the SDK. It was the
+  test's own: its code touches no Apple API, so the trimmer dropped the platform assembly the
+  runtime calls into at startup, and the iOS device build, linked in CI but never run, dropped
+  it as well. One UIKit symbol used in a module initializer, as every real app uses UIKit,
+  keeps that assembly and puts UIKit back in the native link, so the hand-added UIKit
+  framework is gone too. The package is unchanged. *(repository only)*
+- **C# — the benchmarks float to BenchmarkDotNet's prereleases.** 0.15.x, the newest
+  stable, knows no runtime past .NET 10 and stops in its SDK validation on net11.0; the 0.16
+  previews know .NET 11, and the harness takes them (`*-*`) until 0.16.0 ships stable.
+  The harness had stopped there since the C# floor moved to .NET 11, so the C# tables
+  predate that move. *(repository only)*
 
 ### Fixed
 

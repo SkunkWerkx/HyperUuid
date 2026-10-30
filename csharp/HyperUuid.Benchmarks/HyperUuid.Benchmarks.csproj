@@ -11,7 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="*" />
+    <!-- Prereleases too: 0.15.x knows no runtime past .NET 10 and stops in its SDK validation
+         on net11.0, and the 0.16 previews know .NET 11. Back to * when 0.16.0 ships stable. -->
+    <PackageReference Include="BenchmarkDotNet" Version="*-*" />
     <ProjectReference Include="..\HyperUuid\HyperUuid.csproj" />
   </ItemGroup>
 
