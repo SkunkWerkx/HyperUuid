@@ -94,9 +94,10 @@ numbers without re-running the harness, and don't soften the Go section.
 - The PHP minors the extension is built for (8.3, 8.4, 8.5; an extension is tied to one
   minor): the Forge's `php_versions` default in `hyper-build-native.yml` and
   `hyper-build-php-extension.yml`, `MINORS` in its `php_ext_package.py` (with
-  `WINDOWS_COMPILERS`, the `vsNN` each minor's Windows build uses), the `minors` default in
-  `hyper-pie-acceptance.yml` (`test_forge_producers.py` holds those equal), and the platform
-  and minor table in `php/README.md`. A new minor is 7 more zips on the release; the count
+  `WINDOWS_COMPILERS`, the `vsNN` each minor's Windows build uses, and `WINDOWS_TOOLSETS`, the
+  MSVC toolset each `vsNN` links with: PHP refuses a DLL linked newer than its core), the
+  `minors` default in `hyper-pie-acceptance.yml` (`test_forge_producers.py` holds those
+  equal), and the platform and minor table in `php/README.md`. A new minor is 7 more zips on the release; the count
   (21 today) is in `php/README.md`, `docs/platforms.md`, `.github/RELEASING.md` and the
   CHANGELOG.
 - The Python sdist: built in the Forge's `hyper-build-wheels.yml` when `.github/hyper.json`
