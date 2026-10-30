@@ -1,0 +1,48 @@
+goos: windows
+goarch: amd64
+pkg: spike/cgostatic
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkCgoVersion-16          	31919137	        37.37 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-16          	33094226	        38.28 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-16          	32705210	        38.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-16          	34094589	        38.19 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-16          	29214139	        38.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-16          	31534300	        38.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-16            	13089876	        97.08 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-16            	12525376	        98.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-16            	12945248	        95.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-16            	12740990	        97.68 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-16            	12303162	        96.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-16            	12142257	        97.37 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4Ptr-16         	13015861	        92.12 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-16         	12928330	        91.36 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-16         	12882903	        92.37 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-16         	13138446	        91.94 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-16         	13367746	        91.76 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-16         	13427398	        92.66 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV7-16            	13314514	        90.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-16            	12967575	        96.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-16            	12409988	        95.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-16            	12442839	        92.04 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-16            	13080814	        96.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-16            	13053878	        99.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-16         	30134474	        38.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-16         	30618805	        38.92 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-16         	30498109	        38.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-16         	32309568	        38.92 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-16         	30492375	        39.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-16         	33955760	        38.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-16      	  392884	      3068 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-16      	  411376	      3120 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-16      	  381319	      3181 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-16      	  391837	      3121 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-16      	  376171	      3166 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-16      	  390913	      3255 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-16    	14185670	        85.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-16    	14048791	        85.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-16    	14042296	        85.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-16    	13915915	        85.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-16    	14111719	        85.02 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-16    	14226874	        84.67 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/cgostatic	51.996s

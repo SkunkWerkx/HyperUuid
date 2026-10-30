@@ -1,0 +1,17 @@
+BenchmarkW2gNewV4        	 4640486	       265.4 ns/op
+BenchmarkW2gNewV4        	 4616966	       258.7 ns/op
+BenchmarkW2gNewV4        	 4635008	       263.8 ns/op
+BenchmarkW2gNewV7        	 4397568	       258.8 ns/op
+BenchmarkW2gNewV7        	 4835055	       253.9 ns/op
+BenchmarkW2gNewV7        	 4758786	       253.4 ns/op
+BenchmarkW2gV7Millis     	23185129	        51.64 ns/op
+BenchmarkW2gV7Millis     	23257832	        51.18 ns/op
+BenchmarkW2gV7Millis     	23164390	        51.96 ns/op
+BenchmarkW2gV7Batch1000  	   27748	     42544 ns/op
+BenchmarkW2gV7Batch1000  	   27769	     43471 ns/op
+BenchmarkW2gV7Batch1000  	   28363	     42674 ns/op
+BenchmarkParallelW2gNewV7	1000000000	         0.0000776 ns/op
+BenchmarkParallelW2gNewV7	1000000000	         0.0000794 ns/op
+BenchmarkParallelW2gNewV7	1000000000	         0.0000860 ns/op
+PASS
+ok  	spike/w2g	17.647s

@@ -1,0 +1,42 @@
+goos: linux
+goarch: amd64
+pkg: spike/w2g20
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gVersion-12          	97479338	        11.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	100000000	        11.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	100000000	        10.89 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	100000000	        10.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	100000000	        10.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	100000000	        10.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	14868627	        81.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	15005035	        82.08 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	14322632	        83.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	15836382	        81.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	14875395	        83.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	16089860	        81.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	15528236	        79.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	15706800	        81.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	16039356	        80.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	15473539	        81.73 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	15592749	        80.86 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	14983116	        81.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	92839052	        12.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	95159754	        13.23 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	93735324	        13.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	91141023	        13.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	87744338	        13.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	94821302	        13.69 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	   75450	     16088 ns/op	       1 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	   76174	     15687 ns/op	       1 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	   72876	     16093 ns/op	       1 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	   73420	     16297 ns/op	       1 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	   73372	     16146 ns/op	       1 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	   76522	     15938 ns/op	       1 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7314974	       162.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7405465	       164.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7325684	       161.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7498071	       153.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7762861	       153.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7655697	       156.0 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/w2g20	44.344s

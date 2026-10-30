@@ -64,7 +64,7 @@ if [[ -n "${SPIKE_BROWSER:-}" ]]; then
 	fi
 	if command -v tinygo >/dev/null; then
 		echo "== TinyGo wasm under node"
-		tinygo test -tags $TAGS -target=wasm -bench 'NewV4$|NewV7$|V7Millis$|V7Batch1000$' -count 3 ./w2g \
+		tinygo test -tags $TAGS -target=wasm -run '^$' -bench 'NewV4$|NewV7$|V7Millis$|V7Batch1000$' -count 3 ./w2g \
 			> "$RESULTS/$LABEL-tinygo-wasm.txt" 2>&1
 	fi
 fi

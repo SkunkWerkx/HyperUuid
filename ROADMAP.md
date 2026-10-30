@@ -100,28 +100,37 @@ C is next because it is nearly free and opens the core to every language that sp
    | wasm2go, Go-side ChaCha8 (`math/rand/v2`) | 3.4 / 3.5 | 24 / 41 | 24 / 41 | 4.2 / 4.1 | 5,130 / 4,570 |
    | wasm2go, the core's ChaCha20 pool in the guest | 3.2 / 5.1 | 56 / 86 | 50 / 78 | 3.8 / 7.0 | 11,000 / 10,960 |
 
-   - **Calls cost nothing to cross.** The translated core is ordinary Go code, so `version` and `v7_unix_millis` run 3–4x faster than cgo.
-   - **Generation is decided by the random source.** On Linux about 45% of a `crypto/rand` v7 is `vgetrandom` and its locking (CPU profile). A Go-side stream keyed from `crypto/rand` and rekeyed after 1 MiB or one second (the native pool's rule) brings Linux to cgo's level with ChaCha8, or 1.4x behind with ChaCha20. Go programs cannot fork without exec, so a Go-side stream needs no fork guard; the one-second rule covers snapshot restores, as it does natively. The core's own pool inside the guest keeps entropy policy in the core but is scalar code: slowest batch.
-   - **The batch is the one loss:** 1.3x behind cgo on Linux and 2.7x on macOS with the Go-side streams.
-   - **Persisted bytes hold.** 194 corpus vectors (v5, SQL order both ways, refusals, timestamps, inspection) are byte-identical through the translated core on arm64 natively and, under emulation, on amd64, 386, riscv64, ppc64le and big-endian s390x. A corrupted v5 vector and a corrupted SQL-order vector each fail (negative control). `v7_layout.json` needs injected entropy and was not run.
+   The same harness on x64, 2026-10-30: the Dell XPS 15 9510 (i9-11900H), Go 1.27.3, rustc 1.99.1, Linux amd64 in WSL2 (Fedora 44, kernel 6.18) and Windows 11 natively (MinGW-w64 gcc 16.2 for cgo); `-count 6`, benchstat medians, within ±8% except Windows' `version` cells (up to ±12%), WSL2's cgo `new_v7` (±17%) and the starred cell (±39%). Both cgo controls link the current core: on Windows the archive the Forge's `build-static-libs.sh` trims for Go, built from this checkout, not the committed 1.0.0 one. The wasm and the translated Go are byte-identical on both. wazero was not re-run. Zero allocations in every row.
+
+   | ns/op, Linux amd64 (WSL2) / Windows amd64 | `version` | `new_v4` | `new_v7` | `v7_unix_millis` | batch ×1000 |
+   | --- | --- | --- | --- | --- | --- |
+   | cgo (today) | 27.9 / 38.3 | 64 / 97 | 69 / 96 | 29.4 / 38.9 | 4,840 / 3,140 |
+   | wasm2go, `crypto/rand` | 12.1 / 11.9 | 78 / 127 | 69 / 127 | 14.3 / 13.7 | 16,350 / 7,700 |
+   | wasm2go, Go-side ChaCha20 (`x/crypto`) | 10.8 / 11.8 | 82 / 62 | 81 / 62 | 13.1 / 13.8 | 16,090 / 16,140 |
+   | wasm2go, Go-side ChaCha8 (`math/rand/v2`) | 10.9 / 12.6 | 61 / 40 | 67 / 42 | 14.0 / 14.0 | 10,710 / 10,720 |
+   | wasm2go, the core's ChaCha20 pool in the guest | 10.8 / 12.1 | 118 / 84 | 110 / 74 | 13.5 / 16.0* | 24,790 / 28,630 |
+
+   - **Calls cost nothing to cross.** The translated core is ordinary Go code, so `version` and `v7_unix_millis` run 3–4x faster than cgo on arm64 and 2–3x on x64, where a cgo crossing costs 28 ns (WSL2) to 38 ns (Windows).
+   - **Generation is decided by the random source.** On Linux about 45% of a `crypto/rand` v7 is `vgetrandom` and its locking (CPU profile). A Go-side stream keyed from `crypto/rand` and rekeyed after 1 MiB or one second (the native pool's rule) brings Linux arm64 to cgo's level with ChaCha8, or 1.4x behind with ChaCha20. Linux amd64 is at cgo's level with ChaCha8 and 1.2–1.3x behind with ChaCha20. On Windows every Go-side stream beats cgo, whose v4 and v7 cost 96 ns there: ChaCha8 by 2.3x, ChaCha20 by 1.6x. `crypto/rand` per call is 1.3x behind there. `x/crypto/chacha20` has assembly for arm64, loong64, ppc64x and s390x but not amd64, where it runs generic Go; `math/rand/v2`'s ChaCha8 has amd64 assembly. Go programs cannot fork without exec, so a Go-side stream needs no fork guard; the one-second rule covers snapshot restores, as it does natively. The core's own pool inside the guest keeps entropy policy in the core but is scalar code: slowest batch.
+   - **The batch is the one loss, and it is larger on x64.** With the Go-side streams it is 1.3x behind cgo on Linux arm64 and 2.7x on macOS. On Linux amd64 it is 2.2x behind with ChaCha8 and 3.3x with ChaCha20; on Windows, 3.4x and 5.1x. There, `crypto/rand` per call has the fastest translated batch (2.5x behind).
+   - **Persisted bytes hold.** 194 corpus vectors (v5, SQL order both ways, refusals, timestamps, inspection) are byte-identical through the translated core natively on arm64 (macOS, Linux) and amd64 (Linux, Windows) and, under emulation, on 386, riscv64, ppc64le and big-endian s390x. A corrupted v5 vector and a corrupted SQL-order vector each fail (negative control). `v7_layout.json` needs injected entropy and was not run.
    - **Every target.** The package cross-compiles for linux/{amd64, 386, arm, riscv64, ppc64le, s390x, loong64, mips64}, windows/{amd64, arm64}, freebsd, openbsd, plan9, aix, illumos, android and ios (an iOS executable needs external linking under any backend; that is Go's rule).
-   - **The browser, without TinyGo-only code.** Translated Go compiles under stock Go and TinyGo alike. Under node (V8), macOS:
+   - **The browser, without TinyGo-only code.** Translated Go compiles under stock Go and TinyGo alike. Under node (V8), on the M6 (macOS) and the i9-11900H (Linux amd64 in WSL2: node 24, TinyGo 0.44.0, `-count 3`):
 
-     | ns/op | `new_v4` | `new_v7` | `v7_unix_millis` | batch ×1000 |
+     | ns/op, macOS / Linux amd64 | `new_v4` | `new_v7` | `v7_unix_millis` | batch ×1000 |
      | --- | --- | --- | --- | --- |
-     | TinyGo today (the core's archive linked in) | 480 | 445 | 4.9 | 2,100 |
-     | TinyGo, wasm2go, `crypto/rand` | 99 | 89 | 24 | 18,400 |
-     | stock Go `GOOS=js`, wasm2go, ChaCha8 | 88 | 103 | 14 | 11,540 |
-     | stock Go `GOOS=js`, wazero (interpreter) | ~6,000 | ~7,800 | ~920 | 1,530,000 |
+     | TinyGo today (the core's archive linked in) | 480 / — | 445 / — | 4.9 / — | 2,100 / — |
+     | TinyGo, wasm2go, `crypto/rand` | 99 / 264 | 89 / 254 | 24 / 52 | 18,400 / 42,700 |
+     | stock Go `GOOS=js`, wasm2go, ChaCha8 | 88 / 196 | 103 / 247 | 14 / 31 | 11,540 / 26,700 |
+     | stock Go `GOOS=js`, wazero (interpreter) | ~6,000 / — | ~7,800 / — | ~920 / — | 1,530,000 / — |
 
-     Single calls are 4–5x faster than today's TinyGo path; the batch is 5–9x slower.
-   - **Reproducible.** The wasm is byte-identical built on macOS and on Linux (rustc 1.99.1), and wasm2go's output is deterministic, so the generated file can be committed and checked the way `include/hyperuuid.h` is: CI regenerates and diffs. wasm2go pins through `go.mod`'s `tool` directive, as `go-sqlite3-wasm` does.
+     Single calls are 4–5x faster than today's TinyGo path on macOS; the batch is 5–9x slower. Today's TinyGo path was not measured on x64. Stock Go `GOOS=js` with `crypto/rand` per call costs 1,160 ns a v4 on x64, so a browser build wants a Go-side stream.
+   - **Reproducible.** The wasm is byte-identical built on macOS, on Linux arm64 and amd64, and on Windows (rustc 1.99.1), and wasm2go's output is deterministic, so the generated file can be committed and checked the way `include/hyperuuid.h` is: CI regenerates and diffs. wasm2go pins through `go.mod`'s `tool` directive, as `go-sqlite3-wasm` does.
    - **The sandbox is real** (wasm2go's SECURITY.md): code lives outside linear memory, the call stack is Go's and can't be addressed from it, and every access is bounds-checked, so a core bug panics instead of corrupting the Go heap. Its stated threat model assumes a trusted module, which ours is.
    - **Ruled out:** wazero (the table above; its defaults are also a deterministic random source and a fake wall clock, and it interprets on any GOARCH other than amd64 and arm64 and inside wasm), purego (`SyscallN` 107–125 ns on Linux, 1–2 allocs) and goffi (113–124 ns, an allocation per call in `layoutArgs`, contrary to its README). purego and goffi also each ship a `fakecgo`, so they can't link into one binary, and both need a shared library extracted at run time.
 
    Decided (owner, 2026-10-30): one Go backend, the translated core, committed as generated source with a regenerate-and-diff check. cgo, the thirteen archives, `backend_tinygo.go` and its archive, the core freshness check and the release-only-commit plan (Phase 2) all go. Go binds the same way on every target, and `go get` is the whole install, with or without a C toolchain. The batch loss is accepted for that reach and for one way of binding. Still open:
-   - Linux amd64 and Windows numbers from real hardware (the XPS 15 9510, i9-11900H): emulation proves correctness, not speed.
-   - The random source: Go-side ChaCha20 (`x/crypto`, the same construction as the native pool; recommended), Go-side ChaCha8 (fastest, standard library, but 8 rounds is a nitpick waiting to happen), or the core's own pool in the guest (entropy policy stays in the core; slowest).
+   - The random source: Go-side ChaCha20 (`x/crypto`, the same construction as the native pool; recommended), Go-side ChaCha8 (fastest, standard library, but 8 rounds is a nitpick waiting to happen), or the core's own pool in the guest (entropy policy stays in the core; slowest). On amd64 `x/crypto/chacha20` has no assembly, so its batch is 1.5x ChaCha8's there (3.3x behind cgo on Linux, 5.1x on Windows), against 1.0–1.15x on arm64.
    - wasm2go is pre-1.0 (one maintainer, two production users of size).
    - Optional: shrink the guest's 1 MiB default stack (`-z stack-size`) to cut each instance's 1.06 MB of linear memory.
 
