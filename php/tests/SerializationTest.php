@@ -235,10 +235,12 @@ final class SerializationTest extends TestCase
         self::assertIsResource($socket);
         $address = (string) stream_socket_get_name($socket, false);
         fclose($socket);
+        // Quoted: `-d` values are INI expressions, and Windows' temp directory is a short path
+        // (`C:\Users\RUNNER~1\...`) whose `~` would otherwise be read as an operator.
         $server = proc_open(
             [
                 PHP_BINARY, '-n', '-d', 'extension=' . self::ext(),
-                '-d', 'session.auto_start=1', '-d', "session.save_path={$dir}/save",
+                '-d', 'session.auto_start=1', '-d', "session.save_path=\"{$dir}/save\"",
                 '-d', 'session.use_strict_mode=0', '-d', 'display_errors=1',
                 '-S', $address, '-t', "{$dir}/root",
             ],

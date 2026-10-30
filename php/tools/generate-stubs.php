@@ -12,9 +12,10 @@
  *    --target-dir target/php` in rust/ (on Linux with `-- -C link-arg=-Wl,-z,lazy`, below):
  *    ext-php-rs exports the description cargo-php reads (`ext_php_rs_describe_module_v2`) only
  *    from a debug build. Release builds are untouched.
- * 2. Runs `cargo php stubs --stdout` on it, preloading a library that defines the PHP data
- *    symbols the extension references but cargo-php doesn't stand in for (its own list covers
- *    ext-php-rs's bindings only), since a data symbol must resolve when the library loads.
+ * 2. Runs `cargo php stubs --stdout` on it, preloading a library that defines the PHP symbols
+ *    the extension references but cargo-php doesn't stand in for (its own list covers
+ *    ext-php-rs's bindings only): its data, and on x86-64 Linux its functions too, which Rust
+ *    calls through the GOT, so they must resolve when the library loads, `-z lazy` or not.
  * 3. Applies REWRITES (what the extension sets after registration, which cargo-php's view of
  *    the builders can't show), each of which must match exactly as often as recorded, and
  *    appends EXCEPTIONS (classes registered by hand, which cargo-php can't see).
@@ -29,10 +30,15 @@ declare(strict_types=1);
 
 const CARGO_PHP_VERSION = '0.2.1';
 
-/** PHP data symbols the extension imports beyond cargo-php's stand-ins, as null pointers. */
+/**
+ * PHP symbols the extension imports beyond cargo-php's stand-ins: data as null pointers,
+ * functions as bodies that never run (stub generation calls none of them).
+ */
 const SYMBOLS_C = <<<'C'
     void *php_json_serializable_ce, *spl_ce_InvalidArgumentException, *spl_ce_RuntimeException;
     void *zend_empty_string, *zend_one_char_string[256], *zend_post_startup_cb;
+    int mul_function(void) { return -1; }
+    int zend_verify_scalar_type_hint(void) { return 0; }
     C;
 
 /** [search, replace, occurrences]. */
