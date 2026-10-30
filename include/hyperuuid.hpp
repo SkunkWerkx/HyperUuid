@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -32,7 +33,8 @@
 
 namespace hyperuuid {
 
-// The core's failures, numbered as its C return codes.
+// The core's failures, numbered as its C return codes, and name_too_long, which this header
+// checks itself before calling the core (numbered past the C codes so none can collide).
 enum class errc : int {
   random_source_failure = 1,  // the operating system's random source failed
   timestamp_out_of_range = 2, // the timestamp does not fit the 48-bit millisecond field
@@ -40,6 +42,7 @@ enum class errc : int {
   batch_too_large = 4,        // count is over max_v7_batch
   wrong_version = 5,          // not the version 7 (or SQL-ordered version 7) the conversion takes
   counter_exhausted = 6,      // the v7 stream cannot advance; nothing was reserved
+  name_too_long = 256,        // a v5 name over 2^32 - 1 bytes, the C ABI's length limit
 };
 
 // The byte order a UUID is held in.
@@ -69,6 +72,8 @@ public:
       return "the value is not of the version the conversion takes";
     case errc::counter_exhausted:
       return "the version 7 stream cannot advance";
+    case errc::name_too_long:
+      return "the name is longer than 2^32 - 1 bytes";
     }
     return "unknown hyperuuid error " + std::to_string(code);
   }
@@ -196,8 +201,12 @@ inline std::expected<uuid, errc> new_v4() {
 }
 
 // A UUID version 5 (RFC 9562 §5.5) from a namespace and a name's bytes: the same pair gives
-// the same UUID in every binding, and in Python's uuid.uuid5.
+// the same UUID in every binding, and in Python's uuid.uuid5. A name over 2^32 - 1 bytes is
+// name_too_long: the C ABI takes a 32-bit length, and narrowing it would hash a prefix.
 inline std::expected<uuid, errc> new_v5(const uuid &ns, std::span<const std::uint8_t> name) {
+  if (name.size() > std::numeric_limits<std::uint32_t>::max()) {
+    return std::unexpected(errc::name_too_long);
+  }
   uuid u;
   return detail::made(::uuid_new_v5(detail::in(ns), name.data(),
                                     static_cast<std::uint32_t>(name.size()), detail::out(u)),
