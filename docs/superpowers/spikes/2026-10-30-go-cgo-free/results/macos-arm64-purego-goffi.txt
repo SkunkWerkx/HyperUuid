@@ -1,0 +1,96 @@
+goos: darwin
+goarch: arm64
+pkg: ffibench/pg
+cpu: Apple M6
+BenchmarkPuregoVersion-12        	11315696	       101.0 ns/op	      28 B/op	       2 allocs/op
+BenchmarkPuregoVersion-12        	12005776	       100.6 ns/op	      28 B/op	       2 allocs/op
+BenchmarkPuregoVersion-12        	11910984	       100.4 ns/op	      28 B/op	       2 allocs/op
+BenchmarkPuregoVersion-12        	11988081	       100.3 ns/op	      28 B/op	       2 allocs/op
+BenchmarkPuregoVersion-12        	11925762	       100.4 ns/op	      28 B/op	       2 allocs/op
+BenchmarkPuregoVersion-12        	12045678	       100.0 ns/op	      28 B/op	       2 allocs/op
+BenchmarkPuregoNewV4-12          	 4152444	       291.8 ns/op	      44 B/op	       3 allocs/op
+BenchmarkPuregoNewV4-12          	 4094806	       297.7 ns/op	      44 B/op	       3 allocs/op
+BenchmarkPuregoNewV4-12          	 3849555	       300.3 ns/op	      44 B/op	       3 allocs/op
+BenchmarkPuregoNewV4-12          	 4089086	       293.7 ns/op	      44 B/op	       3 allocs/op
+BenchmarkPuregoNewV4-12          	 4099800	       305.7 ns/op	      44 B/op	       3 allocs/op
+BenchmarkPuregoNewV4-12          	 3964584	       304.4 ns/op	      44 B/op	       3 allocs/op
+BenchmarkPuregoNewV7-12          	 6356044	       187.0 ns/op	      80 B/op	       4 allocs/op
+BenchmarkPuregoNewV7-12          	 6403383	       185.5 ns/op	      80 B/op	       4 allocs/op
+BenchmarkPuregoNewV7-12          	 6554772	       194.0 ns/op	      80 B/op	       4 allocs/op
+BenchmarkPuregoNewV7-12          	 5923150	       213.5 ns/op	      80 B/op	       4 allocs/op
+BenchmarkPuregoNewV7-12          	 6523688	       220.7 ns/op	      80 B/op	       4 allocs/op
+BenchmarkPuregoNewV7-12          	 5559160	       216.6 ns/op	      80 B/op	       4 allocs/op
+BenchmarkPuregoV7Millis-12       	 9356043	       121.6 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoV7Millis-12       	10762621	       112.1 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoV7Millis-12       	10832523	       119.9 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoV7Millis-12       	 9571160	       124.2 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoV7Millis-12       	10138028	       116.2 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoV7Millis-12       	 9550610	       115.5 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoV7Batch1000-12    	  577279	      2380 ns/op	      96 B/op	       4 allocs/op
+BenchmarkPuregoV7Batch1000-12    	  558380	      2210 ns/op	      96 B/op	       4 allocs/op
+BenchmarkPuregoV7Batch1000-12    	  440876	      2684 ns/op	      96 B/op	       4 allocs/op
+BenchmarkPuregoV7Batch1000-12    	  475268	      2470 ns/op	      96 B/op	       4 allocs/op
+BenchmarkPuregoV7Batch1000-12    	  561874	      2126 ns/op	      96 B/op	       4 allocs/op
+BenchmarkPuregoV7Batch1000-12    	  570578	      2016 ns/op	      96 B/op	       4 allocs/op
+BenchmarkPuregoRawVersion-12     	23056748	        48.81 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPuregoRawVersion-12     	29210908	        41.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPuregoRawVersion-12     	29116348	        41.15 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPuregoRawVersion-12     	29252655	        41.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPuregoRawVersion-12     	29096668	        41.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPuregoRawVersion-12     	29028746	        41.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPuregoRawNewV4-12       	 5247205	       228.5 ns/op	      24 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV4-12       	 5249300	       228.5 ns/op	      24 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV4-12       	 5281977	       227.3 ns/op	      24 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV4-12       	 5270408	       229.3 ns/op	      24 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV4-12       	 5243194	       228.5 ns/op	      24 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV4-12       	 5188365	       237.6 ns/op	      24 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV7-12       	10726800	       112.1 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV7-12       	10712200	       114.9 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV7-12       	 9250767	       116.7 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV7-12       	10897256	       110.1 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV7-12       	10860681	       110.4 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoRawNewV7-12       	10878416	       109.9 ns/op	      32 B/op	       2 allocs/op
+BenchmarkPuregoRawV7Millis-12    	26436496	        45.57 ns/op	       8 B/op	       1 allocs/op
+BenchmarkPuregoRawV7Millis-12    	26325290	        45.51 ns/op	       8 B/op	       1 allocs/op
+BenchmarkPuregoRawV7Millis-12    	26305573	        45.49 ns/op	       8 B/op	       1 allocs/op
+BenchmarkPuregoRawV7Millis-12    	26045692	        45.72 ns/op	       8 B/op	       1 allocs/op
+BenchmarkPuregoRawV7Millis-12    	26512329	        45.38 ns/op	       8 B/op	       1 allocs/op
+BenchmarkPuregoRawV7Millis-12    	26056651	        45.91 ns/op	       8 B/op	       1 allocs/op
+PASS
+ok  	ffibench/pg	65.131s
+goos: darwin
+goarch: arm64
+pkg: ffibench/gf
+cpu: Apple M6
+BenchmarkGoffiVersion-12        	26609326	        44.95 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoffiVersion-12        	26928243	        44.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoffiVersion-12        	26717602	        46.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoffiVersion-12        	26737371	        44.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoffiVersion-12        	27032302	        44.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoffiVersion-12        	26982688	        44.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoffiNewV4-12          	 4849965	       244.5 ns/op	      96 B/op	       4 allocs/op
+BenchmarkGoffiNewV4-12          	 4921963	       243.6 ns/op	      96 B/op	       4 allocs/op
+BenchmarkGoffiNewV4-12          	 4955990	       242.4 ns/op	      96 B/op	       4 allocs/op
+BenchmarkGoffiNewV4-12          	 4952860	       243.7 ns/op	      96 B/op	       4 allocs/op
+BenchmarkGoffiNewV4-12          	 4917637	       244.7 ns/op	      96 B/op	       4 allocs/op
+BenchmarkGoffiNewV4-12          	 4922372	       244.3 ns/op	      96 B/op	       4 allocs/op
+BenchmarkGoffiNewV7-12          	 9013184	       132.9 ns/op	     152 B/op	       4 allocs/op
+BenchmarkGoffiNewV7-12          	 9017428	       133.1 ns/op	     152 B/op	       4 allocs/op
+BenchmarkGoffiNewV7-12          	 9087483	       132.6 ns/op	     152 B/op	       4 allocs/op
+BenchmarkGoffiNewV7-12          	 8998629	       133.4 ns/op	     152 B/op	       4 allocs/op
+BenchmarkGoffiNewV7-12          	 9005017	       132.7 ns/op	     152 B/op	       4 allocs/op
+BenchmarkGoffiNewV7-12          	 9073412	       132.4 ns/op	     152 B/op	       4 allocs/op
+BenchmarkGoffiV7Millis-12       	20655792	        57.99 ns/op	      72 B/op	       2 allocs/op
+BenchmarkGoffiV7Millis-12       	20701774	        58.28 ns/op	      72 B/op	       2 allocs/op
+BenchmarkGoffiV7Millis-12       	20739058	        58.04 ns/op	      72 B/op	       2 allocs/op
+BenchmarkGoffiV7Millis-12       	20696032	        58.16 ns/op	      72 B/op	       2 allocs/op
+BenchmarkGoffiV7Millis-12       	20732698	        58.08 ns/op	      72 B/op	       2 allocs/op
+BenchmarkGoffiV7Millis-12       	20774888	        61.41 ns/op	      72 B/op	       2 allocs/op
+BenchmarkGoffiV7Batch1000-12    	  596272	      2069 ns/op	     200 B/op	       2 allocs/op
+BenchmarkGoffiV7Batch1000-12    	  585439	      2017 ns/op	     200 B/op	       2 allocs/op
+BenchmarkGoffiV7Batch1000-12    	  608468	      2135 ns/op	     200 B/op	       2 allocs/op
+BenchmarkGoffiV7Batch1000-12    	  568500	      2005 ns/op	     200 B/op	       2 allocs/op
+BenchmarkGoffiV7Batch1000-12    	  629588	      1926 ns/op	     200 B/op	       2 allocs/op
+BenchmarkGoffiV7Batch1000-12    	  634147	      1917 ns/op	     200 B/op	       2 allocs/op
+PASS
+ok  	ffibench/gf	36.411s

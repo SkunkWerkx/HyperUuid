@@ -1,0 +1,36 @@
+goos: darwin
+goarch: arm64
+pkg: ffibench/wz
+cpu: Apple M6
+BenchmarkWazero/CompilerVersion-12 	108797796	        11.04 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	100000000	        10.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	100000000	        10.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	100000000	        10.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	100000000	        11.01 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	100000000	        11.02 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	11042136	       108.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	11070348	       108.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	11068830	       108.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	11089965	       108.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	11042106	       108.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	11049541	       108.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	12081494	        99.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	12086443	        98.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	12249486	        97.71 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	12252044	        97.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	12298462	        98.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	12107504	        98.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	92947599	        12.89 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	93281768	        12.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	93133651	        12.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	93638131	        12.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	93930096	        12.86 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	92517934	        12.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   84438	     14230 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   84404	     14236 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   84510	     14323 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   84717	     14188 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   84423	     14201 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   84477	     14213 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/wz	35.620s

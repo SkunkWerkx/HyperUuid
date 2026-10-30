@@ -1,0 +1,30 @@
+goos: darwin
+goarch: arm64
+pkg: ffibench/gf
+cpu: Apple M6
+BenchmarkGoffiHoistedNewV4-12          	 5060998	       232.4 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV4-12          	 5214145	       230.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV4-12          	 5215519	       229.9 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV4-12          	 5218718	       229.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV4-12          	 5229490	       229.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV4-12          	 5166750	       242.0 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV7-12          	 9336706	       121.3 ns/op	     112 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV7-12          	10058038	       119.8 ns/op	     112 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV7-12          	10022264	       120.0 ns/op	     112 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV7-12          	10025522	       119.7 ns/op	     112 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV7-12          	10012417	       119.8 ns/op	     112 B/op	       1 allocs/op
+BenchmarkGoffiHoistedNewV7-12          	10037322	       119.3 ns/op	     112 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Millis-12       	22180650	        54.16 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Millis-12       	22348015	        54.22 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Millis-12       	22331605	        53.91 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Millis-12       	22123026	        54.15 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Millis-12       	22353288	        54.24 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Millis-12       	21869192	        54.54 ns/op	      64 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Batch1000-12    	  619881	      1919 ns/op	     176 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Batch1000-12    	  627480	      2029 ns/op	     176 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Batch1000-12    	  599932	      2008 ns/op	     176 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Batch1000-12    	  607004	      2081 ns/op	     176 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Batch1000-12    	  496633	      2059 ns/op	     176 B/op	       1 allocs/op
+BenchmarkGoffiHoistedV7Batch1000-12    	  612600	      2144 ns/op	     176 B/op	       1 allocs/op
+PASS
+ok  	ffibench/gf	28.984s

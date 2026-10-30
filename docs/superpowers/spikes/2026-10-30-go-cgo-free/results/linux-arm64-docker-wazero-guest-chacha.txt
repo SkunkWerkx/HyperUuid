@@ -1,0 +1,35 @@
+goos: linux
+goarch: arm64
+pkg: ffibench/wz
+BenchmarkWazero/CompilerVersion-12 	72316200	        16.48 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	72780754	        16.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	72115926	        16.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	73107021	        16.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	72451005	        16.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerVersion-12 	73114815	        16.49 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	 8244982	       144.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	 8179010	       146.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	 8167582	       146.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	 8013446	       168.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	 7666849	       161.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV4-12   	 6667652	       171.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	 8150528	       154.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	 7260854	       154.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	 8655658	       138.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	 8700382	       138.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	 8773684	       137.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerNewV7-12   	 8728636	       137.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	56097046	        21.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	71464728	        16.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	71009764	        16.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	71180004	        17.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	60659620	        19.24 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Millis-12         	64292601	        19.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   51580	     20496 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   68052	     20996 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   67666	     16710 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   72690	     16519 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   72760	     16520 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/CompilerV7Batch1000-12      	   72664	     16538 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/wz	36.139s

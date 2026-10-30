@@ -1,0 +1,47 @@
+goos: linux
+goarch: arm64
+pkg: ffibench/cgostatic
+BenchmarkCgoVersion-12          	60698410	        21.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	53433967	        28.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	74834740	        13.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	89295679	        14.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	65691876	        16.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	79400305	        19.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	31747362	        39.71 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	26922278	        39.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	32287465	        38.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	31964412	        37.82 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	33125721	        37.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	32477746	        37.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4Ptr-12         	34412862	        35.12 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	35089086	        32.85 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	37213677	        32.39 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	36923738	        32.69 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	36426692	        32.52 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	37100205	        32.52 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV7-12            	30568088	        39.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30413432	        39.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30117930	        39.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30229618	        39.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30450379	        39.62 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30417608	        39.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	86411496	        14.13 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	87453727	        13.71 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	85748480	        13.60 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	90252992	        13.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	85818235	        13.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	85876069	        13.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  296942	      3579 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  346234	      3495 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  345806	      3492 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  347839	      3470 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  347766	      3469 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  346479	      3476 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 9008814	       132.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 8998683	       136.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 8873360	       135.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 8972710	       134.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 8974596	       132.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 8835620	       134.0 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/cgostatic	51.754s

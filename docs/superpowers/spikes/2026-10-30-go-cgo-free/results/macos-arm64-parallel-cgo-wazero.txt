@@ -1,0 +1,24 @@
+goos: darwin
+goarch: arm64
+pkg: ffibench/wz
+cpu: Apple M6
+BenchmarkParallelWazeroNewV7-12    	 7700414	       146.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelWazeroNewV7-12    	 8189521	       146.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelWazeroNewV7-12    	 8181968	       146.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelWazeroNewV7-12    	 8190170	       146.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelWazeroNewV7-12    	 8195535	       146.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelWazeroNewV7-12    	 8208895	       145.8 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/wz	8.161s
+goos: darwin
+goarch: arm64
+pkg: ffibench/cgostatic
+cpu: Apple M6
+BenchmarkParallelCgoNewV7-12    	 5706328	       211.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5597961	       214.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5703356	       215.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5388502	       211.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5721818	       217.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5480900	       213.0 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/cgostatic	8.596s

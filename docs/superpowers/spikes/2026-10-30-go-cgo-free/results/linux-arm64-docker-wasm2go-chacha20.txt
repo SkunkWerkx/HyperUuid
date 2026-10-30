@@ -1,0 +1,41 @@
+goos: linux
+goarch: arm64
+pkg: ffibench/w2g20
+BenchmarkW2gVersion-12          	254085526	         4.707 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	255248276	         4.700 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	255880770	         4.688 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	255666950	         4.682 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	256171804	         4.683 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	256197418	         4.681 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	21426386	        55.71 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	21713774	        55.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	21892582	        55.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	21567556	        55.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	21626686	        55.52 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	21783789	        55.08 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22346090	        53.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22509442	        53.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22711590	        53.28 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22577610	        53.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22633555	        53.23 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22604296	        53.24 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	196104746	         6.112 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	176407915	         6.803 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	175723118	         6.824 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	176153823	         6.813 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	175596596	         6.817 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	176321233	         6.811 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  228393	      5285 ns/op	       2 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  227997	      5254 ns/op	       2 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  228777	      5246 ns/op	       2 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  228458	      5249 ns/op	       2 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  228619	      5257 ns/op	       2 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  228298	      5254 ns/op	       2 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8702028	       139.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8720988	       139.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8687517	       139.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8721465	       139.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8565733	       139.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8509840	       140.2 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/w2g20	44.132s

@@ -1,0 +1,6 @@
+github.com/ncruces/wasm2go v0.4.19 h1:KqLqDXEBu+A5v5GHWsAd8LXowT5XbIJvDXkgO9v9ViE=
+github.com/ncruces/wasm2go v0.4.19/go.mod h1:hRP9QM9bslvwCsS8PTP364oviN6+l9L0VjSSZABYOn4=
+golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
+golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+golang.org/x/tools v0.52.0 h1:ryxg4U63oaUYk7uOLTF37n43f4qgtGvqV4Ioit1BaEs=
+golang.org/x/tools v0.52.0/go.mod h1:ItcP5UNaVGG+Yc4eIYmaFLNJ4soEopkx5Y2d4lcEurs=

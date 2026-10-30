@@ -1,0 +1,36 @@
+goos: darwin
+goarch: arm64
+pkg: ffibench/wz
+cpu: Apple M6
+BenchmarkWazero/simd-Version-12 	109718697	        10.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-Version-12 	100000000	        10.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-Version-12 	100000000	        10.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-Version-12 	100000000	        11.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-Version-12 	100000000	        10.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-Version-12 	100000000	        11.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV4-12   	 5541873	       218.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV4-12   	 5598286	       215.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV4-12   	 5583756	       216.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV4-12   	 5561073	       216.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV4-12   	 5517459	       216.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV4-12   	 5578268	       215.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV7-12   	12497336	        96.10 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV7-12   	12625753	        95.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV7-12   	11657973	        95.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV7-12   	12457884	        95.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV7-12   	12520448	        95.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-NewV7-12   	12576160	        95.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Millis-12         	93575458	        12.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Millis-12         	94016565	        12.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Millis-12         	93533214	        12.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Millis-12         	93833695	        12.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Millis-12         	93363721	        12.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Millis-12         	93305341	        12.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Batch1000-12      	  314685	      3708 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Batch1000-12      	  325370	      3703 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Batch1000-12      	  323499	      3715 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Batch1000-12      	  322999	      3721 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Batch1000-12      	  309308	      3721 ns/op	       0 B/op	       0 allocs/op
+BenchmarkWazero/simd-V7Batch1000-12      	  322617	      3717 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/wz	35.519s

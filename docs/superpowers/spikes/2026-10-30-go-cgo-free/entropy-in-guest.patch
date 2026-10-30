@@ -1,0 +1,145 @@
+--- a/rust/src/entropy.rs
++++ b/rust/src/entropy.rs
+@@ -55,7 +55,7 @@
+ /// The zero is spelled `Default::default()` rather than `[0u8; 12]` because it is the absence of
+ /// a nonce, not a chosen one — and a zero literal in the IV argument is what
+ /// `rust/hard-coded-cryptographic-value` reads as a hard-coded IV.
+-#[cfg(any(target_os = "linux", target_os = "android"))]
++#[cfg(any(target_os = "linux", target_os = "android", target_os = "wasi"))]
+ #[inline(always)]
+ fn keyed_once(key: &[u8; 32]) -> chacha20::ChaCha20 {
+     use chacha20::cipher::KeyIvInit;
+@@ -63,7 +63,7 @@
+     chacha20::ChaCha20::new(&(*key).into(), &Default::default())
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "android"))]
++#[cfg(any(target_os = "linux", target_os = "android", target_os = "wasi"))]
+ #[inline(always)]
+ fn fill_with(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+     use chacha20::cipher::StreamCipher;
+@@ -74,7 +74,9 @@
+     if buf.len() < STRETCH_THRESHOLD {
+         #[cfg(target_os = "linux")]
+         return pool::fill(buf, unix_millis);
+-        #[cfg(not(target_os = "linux"))]
++        #[cfg(target_os = "wasi")]
++        return pool::fill_wasi(buf, unix_millis);
++        #[cfg(not(any(target_os = "linux", target_os = "wasi")))]
+         {
+             let _ = unix_millis;
+             return getrandom::fill(buf);
+@@ -126,14 +128,6 @@
+ /// random bytes) is well past. 64 KiB is the smallest cap any host is known to set (the Web
+ /// Crypto limit that browser shims inherit), and a request that size costs the same as one
+ /// call, so a batch of 1000 never sees the loop.
+-#[cfg(target_os = "wasi")]
+-#[inline(always)]
+-fn fill_with(buf: &mut [u8], _unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+-    for chunk in buf.chunks_mut(65_536) {
+-        getrandom::fill(chunk)?;
+-    }
+-    Ok(())
+-}
+ 
+ /// Windows: `ProcessPrng` into a buffer of its own, then copied out, never into `buf` directly.
+ /// `ProcessPrng` fail-fasts the whole process (`0xC0000409`) when another thread writes the
+@@ -220,7 +214,7 @@
+ /// not be created, the request goes to `getrandom` directly. Nothing ever waits, so a signal
+ /// handler that generates a UUID while its own thread holds a slot gets another slot or the OS,
+ /// never a deadlock.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "wasi"))]
+ mod pool {
+     use chacha20::cipher::StreamCipher;
+     use core::cell::UnsafeCell;
+@@ -264,10 +258,13 @@
+     const POOL_BYTES: usize = SLOTS * core::mem::size_of::<Slot>();
+ 
+     /// Null until first use; then the mapping, or [`UNAVAILABLE`] if one could not be made.
++    #[cfg(target_os = "linux")]
+     static POOL: AtomicPtr<Slot> = AtomicPtr::new(core::ptr::null_mut());
+     /// A sentinel no mapping can have (`mmap` never returns the first page).
++    #[cfg(target_os = "linux")]
+     const UNAVAILABLE: *mut Slot = core::ptr::dangling_mut::<Slot>();
+ 
++    #[cfg(target_os = "linux")]
+     fn pool() -> *mut Slot {
+         let current = POOL.load(Ordering::Acquire);
+         if !current.is_null() {
+@@ -319,6 +316,7 @@
+         }
+     }
+ 
++    #[cfg(target_os = "linux")]
+     pub(super) fn fill(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
+         let base = pool();
+         if base == UNAVAILABLE {
+@@ -348,6 +346,7 @@
+ 
+     /// The calling thread's thread pointer, unique among live threads, or on an architecture
+     /// without one wired up here, its stack address, which spreads threads almost as well.
++    #[cfg(target_os = "linux")]
+     #[inline(always)]
+     fn thread_pointer() -> usize {
+         #[cfg(target_arch = "x86_64")]
+@@ -384,6 +383,7 @@
+         }
+     }
+ 
++    #[cfg(target_os = "linux")]
+     /// The wall clock in Unix-epoch milliseconds, to the kernel's last tick (1 to 10 ms): all a
+     /// one-second limit needs, at a quarter of what the exact clock costs.
+     fn coarse_millis() -> Option<u64> {
+@@ -398,8 +398,40 @@
+                 .wrapping_mul(1000)
+                 .wrapping_add(ts.tv_nsec as u64 / 1_000_000),
+         )
++    }
++
++
++    /// SPIKE: a wasm32-wasip1 instance is single-threaded and cannot fork, so one generator
++    /// with the same refill/rekey/staleness rules stands in for the slot pool.
++    #[cfg(target_os = "wasi")]
++    struct One(UnsafeCell<Generator>);
++    #[cfg(target_os = "wasi")]
++    unsafe impl Sync for One {}
++    #[cfg(target_os = "wasi")]
++    static ONE: One = One(UnsafeCell::new(Generator { keyed_at: 0, seeded: 0, pos: 0, refills: 0, key: [0; 32], stream: [0; STREAM] }));
++
++    #[cfg(target_os = "wasi")]
++    #[link(wasm_import_module = "wasi_snapshot_preview1")]
++    unsafe extern "C" {
++        #[link_name = "clock_time_get"]
++        fn wasi_clock_time_get(id: u32, precision: u64, out: *mut u64) -> u16;
+     }
+ 
++    #[cfg(target_os = "wasi")]
++    fn wasi_millis() -> Option<u64> {
++        let mut ns = 0u64;
++        // SAFETY: realtime clock (id 0); writes one u64 through the pointer.
++        (unsafe { wasi_clock_time_get(0, 1_000_000, &mut ns) } == 0).then_some(ns / 1_000_000)
++    }
++
++    #[cfg(target_os = "wasi")]
++    pub(super) fn fill_wasi(buf: &mut [u8], unix_millis: Option<u64>) -> Result<(), getrandom::Error> {
++        // SAFETY: single-threaded instance; no reentrancy (no callbacks out of this function
++        // reach back into the core).
++        let generator = unsafe { &mut *ONE.0.get() };
++        take(generator, buf, unix_millis, wasi_millis)
++    }
++
+     /// Whether a key stamped `keyed_at` may still be used at `now`.
+     #[inline(always)]
+     fn fresh(keyed_at: u64, now: u64) -> bool {
+--- a/rust/Cargo.toml
++++ b/rust/Cargo.toml
+@@ -39,7 +39,7 @@
+ # the two shapes, the measurements, and why it is only these two).
+ # `cipher` is the one feature used. The crate is no_std, picks AVX2 or SSE2 at run time on x86,
+ # and uses NEON on aarch64.
+-[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "wasi"))'.dependencies]
+ chacha20 = { version = "0.10.2", default-features = false, features = ["cipher"] }
+ 
+ # One crate, three optional native-extension entry points instead of three satellite

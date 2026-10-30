@@ -1,0 +1,42 @@
+goos: darwin
+goarch: arm64
+pkg: ffibench/cgostatic
+cpu: Apple M6
+BenchmarkCgoVersion-12        	83747709	        12.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12        	96706280	        12.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12        	94696034	        12.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12        	97074937	        12.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12        	96457206	        12.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12        	95921343	        12.59 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12          	 6305328	       188.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12          	 6365457	       188.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12          	 6372682	       187.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12          	 6432486	       187.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12          	 6403802	       187.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12          	 6414202	       187.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4Ptr-12       	 6234717	       193.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12       	 6216254	       192.6 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12       	 6230353	       194.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12       	 6162738	       193.1 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12       	 6211561	       192.4 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12       	 6260515	       192.1 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV7-12          	16247072	        74.34 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12          	16126981	        74.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12          	16269044	        74.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12          	16237170	        74.24 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12          	16248979	        74.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12          	16106454	        74.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12       	85711738	        14.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12       	85584886	        14.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12       	83642391	        14.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12       	85887078	        14.10 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12       	85413555	        14.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12       	83351901	        14.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12    	  648121	      1844 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12    	  660268	      1855 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12    	  649014	      1864 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12    	  651219	      1858 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12    	  657843	      1857 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12    	  649077	      1855 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	ffibench/cgostatic	43.246s
