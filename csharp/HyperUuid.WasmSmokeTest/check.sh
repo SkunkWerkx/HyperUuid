@@ -7,9 +7,8 @@
 #   loadable as linked, with nothing rewriting it afterwards.
 #   Needs: the .NET SDK global.json pins with the wasm-tools and wasm-tools-net10 workloads
 #   (the second relinks the net10.0 legs), and chromium or Chrome
-#   (CHROMIUM=/path/to/browser to override); plus the nightly .github/hyper.json pins as
-#   wasm.toolchain, with rust-src and the wasm32-unknown-emscripten target, and emsdk on PATH,
-#   unless STATICLIB names an already-built libhyperuuid.a to use instead — which is how CI
+#   (CHROMIUM=/path/to/browser to override); plus stable Rust with rust-src and the
+#   wasm32-unknown-emscripten target, and emsdk on PATH, unless STATICLIB names an already-built libhyperuuid.a to use instead — which is how CI
 #   runs it, with the archive hyper-build-wasm.yml just built.
 set -euo pipefail
 legs=("$@")
@@ -31,8 +30,7 @@ trap '[ -z "$server" ] || kill "$server" 2>/dev/null || true; rm -rf "$out"' EXI
 
 staticlib="${STATICLIB:-}"
 if [ -z "$staticlib" ]; then
-  toolchain="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("wasm", {}).get("toolchain", "stable"))' "$repo/.github/hyper.json")"
-  (cd "$repo/rust" && cargo +"$toolchain" wasm-staticlib)
+  (cd "$repo/rust" && RUSTC_BOOTSTRAP=1 cargo wasm-staticlib)
   staticlib="$repo/rust/target/wasm32-unknown-emscripten/release/libhyperuuid.a"
 fi
 dest="$here/../HyperUuid/runtimes/browser-wasm/nativeassets/net11.0"

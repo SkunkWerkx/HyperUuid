@@ -783,7 +783,7 @@ jobs:
             || { echo "::error::the net9.0 restore failed, but not with NU1202"; cat restore-net9.log; exit 1; }
           echo "net9.0 does not restore the package (NU1202)"
 
-      # The wasm archive is built with -Zbuild-std for a feature set both .NET 10's and .NET 11's
+      # The wasm archive is built with -Zbuild-std (on stable, RUSTC_BOOTSTRAP=1) for a feature set both .NET 10's and .NET 11's
       # wasm toolchains accept, so the gate stands aside for Blazor on both. Evaluation shows the
       # gate's answer; the build is to show HYPERUUID002, since this job installs no wasm
       # workload. The Android evaluation is the control: the property is read, and does flag.
