@@ -20,7 +20,7 @@
 #   ANDROID=1 .github/scripts/local-core.sh
 #   .github/scripts/android_build_suite.sh go x86_64 /tmp/go hyperuuid_local
 #   .github/scripts/android_device_test.sh /tmp/go ./hyperuuid.test -test.v -test.short
-#   HYPERUUID_LOCAL_CORE=1 .github/scripts/android_build_suite.sh swift x86_64 /tmp/swift
+#   .github/scripts/android_build_suite.sh swift x86_64 /tmp/swift
 #   .github/scripts/android_device_test.sh /tmp/swift ./HyperUuidPackageTests.xctest
 set -euo pipefail
 

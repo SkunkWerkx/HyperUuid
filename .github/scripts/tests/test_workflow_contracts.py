@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / '.github/workflows'
 FORGE = ROOT.parent / 'HyperForge'
 PUBLISHERS = ('nuget-org-publish', 'rubygems-publish', 'pypi-publish', 'npm-publish', 'pack-crates', 'maven-publish')
-PACKERS = ('nuget-org-pack', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack', 'crate-pack', 'maven-pack')
+PACKERS = ('nuget-org-pack', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack', 'c-pack', 'crate-pack', 'maven-pack')
 ACTION_JOBS = {'find-ci-run': 'release-guard', 'ruby-pack': 'pack-gems', 'pypi-pack': 'verify-wheels',
-               'npm-pack': 'pack-npm', 'r-pack': 'pack-r',
+               'npm-pack': 'pack-npm', 'r-pack': 'pack-r', 'c-pack': 'pack-c',
                'publication-gate': 'release-gate', 'nuget-org-publish': 'publish-nuget',
                'rubygems-publish': 'publish-rubygems', 'pypi-publish': 'publish-pypi',
                'npm-publish': 'publish-npm', 'finalize-release': 'finalize-release'}
@@ -124,7 +124,7 @@ class ReleaseFlowTests(unittest.TestCase):
                 self.assertIn('persist-credentials: false', body)
                 if job != 'find-ci-run':
                     self.assertIn('ref: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
-                if job not in ('find-ci-run', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack'):
+                if job not in ('find-ci-run', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack', 'c-pack'):
                     # The actions that write the inventory or publish record the Forge commit.
                     self.assertIn('forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
 

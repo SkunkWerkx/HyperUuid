@@ -291,30 +291,30 @@ The same package runs under Bun: `bun test tests/` runs this package's whole sui
 
 ## Benchmarks
 
-Apple M6 (Mac18,5), macOS, Node 26.12.1 / Bun 1.4.4, measured 2026-10-27, with
+Apple M6 (Mac18,5), macOS, Node 26.13.0 / Bun 1.4.4, measured 2026-10-30, with
 [mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`; see
-`bench/bench.ts`). These numbers are not comparable to the root README's tables, which were
-measured on linux-x64 on an Intel Core i9-11900H. The three v7 generation rows are from a
-later run the same day, after the last core change. Bun's `uuid` `v7()` is the noisiest
-baseline here: 99.0 ns in that run and 132 ns in the first, so read its ratio with that
-spread. Averages per call:
+`bench/bench.ts`). These numbers are not comparable to the [linux-x64 tables](../docs/benchmarks.md), which were
+measured on linux-x64 on an Intel Core i9-11900H. A second run the same night landed within 4%
+of every figure below except Node's `newV7BatchBytes(1000)` (3.07 µs). Bun's `uuid` `v7()` is
+the noisiest baseline here (41 ns to 178 µs per call within one run), so read its ratio with
+that spread. Averages per call:
 
 | Call | Node 26 | Bun 1.4 | vs. |
 | --- | ---: | ---: | --- |
-| `newV4()` | 780 ns | 800 ns | `crypto.randomUUID()`: 66.1 ns / 37.7 ns: **11.8x / 21x slower** |
-| `newV7()` | 677 ns | 697 ns | `uuid`'s `v7()`: 348 ns / 99.0 ns: **1.9x / 7.0x slower** |
-| `newV7Batch(1000)` | 60.1 µs | 42.5 µs | 1000x `newV7()`: 679 µs / 696 µs: **11x / 16x faster** |
-| `newV7BatchBytes(1000)` | 19.7 µs | 19.3 µs | `newV7Batch(1000)`: **3.1x / 2.2x faster** |
-| `v7UnixMillis(id)` | 112 ns | 107 ns | |
+| `newV4()` | 239 ns | 258 ns | `crypto.randomUUID()`: 58.0 ns / 40.5 ns: **4.1x / 6.4x slower** |
+| `newV7()` | 155 ns | 166 ns | `uuid`'s `v7()`: 350 ns / 135 ns: 2.3x faster / **1.2x slower** |
+| `newV7Batch(1000)` | 44.2 µs | 27.3 µs | 1000x `newV7()`: 155 µs / 169 µs: 3.5x / 6.2x faster |
+| `newV7BatchBytes(1000)` | 3.62 µs | 2.93 µs | `newV7Batch(1000)`: 12x / 9.3x faster |
+| `v7UnixMillis(id)` | 115 ns | 156 ns | |
 
-The single-id losses are real, and most of each is one system call. On macOS the core
-fetches its randomness from the operating system on every call (`getentropy`; the user-space
-ChaCha20 path in `rust/src/entropy.rs` is Linux and Android only), where a round trip into
-the addon that touches no randomness (`v7UnixMillis`) is 112 ns. `crypto.randomUUID()` and `uuid` draw from
-a buffer of random bytes they refill in bulk, so they pay that cost once per many ids. A batch
-does the same: one fetch for the whole batch, about 60 ns an id as strings and 20 ns as bytes
-in the table above. If you mint ids one at a time and only need v4, `crypto.randomUUID()` is
-the faster call.
+`newV4()` loses on both runtimes and `newV7()` on Bun. A call into the addon that touches no
+randomness (`v7UnixMillis`) is 115 ns on Node; the rest is the random source. On Apple
+platforms the core asks `CCRandomGenerateBytes` for every id (the user-space ChaCha20 path in
+`rust/src/entropy.rs` is Linux and Android only), and Apple's generator costs more from 12
+bytes up: a v4 draws 16, a v7 11. `crypto.randomUUID()` draws from a buffer of random bytes it
+refills in bulk, so it pays that cost once per many ids. A batch does the same: one fetch for
+the whole batch, about 44 ns an id as strings on Node and 3.6 ns as bytes. If you mint ids one
+at a time and only need v4, `crypto.randomUUID()` is the faster call.
 
 String ids are built as latin1 JavaScript strings straight from 36 bytes on the stack, not
 returned as a Rust `String`, which V8 would decode as UTF-8. The choice was made on a

@@ -1,0 +1,33 @@
+# find_package(hyperuuid <version>): the package's version, written when the release archive
+# is packed from rust/Cargo.toml's. Any version of the same major satisfies a request for an
+# older or equal one (a minor release only adds functions), and the archive's pointer width
+# must be the build's. Ships as lib/cmake/hyperuuid/hyperuuidConfigVersion.cmake.
+
+set(PACKAGE_VERSION "@VERSION@")
+set(_hyperuuid_major "@MAJOR@")
+
+if(PACKAGE_FIND_VERSION_RANGE)
+  if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION_MIN
+      OR (PACKAGE_FIND_VERSION_RANGE_MAX STREQUAL "INCLUDE" AND PACKAGE_VERSION VERSION_GREATER PACKAGE_FIND_VERSION_MAX)
+      OR (PACKAGE_FIND_VERSION_RANGE_MAX STREQUAL "EXCLUDE" AND PACKAGE_VERSION VERSION_GREATER_EQUAL PACKAGE_FIND_VERSION_MAX))
+    set(PACKAGE_VERSION_COMPATIBLE FALSE)
+  else()
+    set(PACKAGE_VERSION_COMPATIBLE TRUE)
+  endif()
+elseif(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION
+    OR NOT PACKAGE_FIND_VERSION_MAJOR STREQUAL _hyperuuid_major)
+  set(PACKAGE_VERSION_COMPATIBLE FALSE)
+else()
+  set(PACKAGE_VERSION_COMPATIBLE TRUE)
+  if(PACKAGE_FIND_VERSION STREQUAL PACKAGE_VERSION)
+    set(PACKAGE_VERSION_EXACT TRUE)
+  endif()
+endif()
+unset(_hyperuuid_major)
+
+if(NOT CMAKE_SIZEOF_VOID_P STREQUAL "" AND NOT CMAKE_SIZEOF_VOID_P STREQUAL "@POINTER_SIZE@")
+  math(EXPR _hyperuuid_bits "@POINTER_SIZE@ * 8")
+  set(PACKAGE_VERSION "${PACKAGE_VERSION} (${_hyperuuid_bits}-bit)")
+  set(PACKAGE_VERSION_UNSUITABLE TRUE)
+  unset(_hyperuuid_bits)
+endif()

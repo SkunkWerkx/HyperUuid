@@ -214,6 +214,32 @@ jobs:
         with:
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
 
+  # The C archives, one per platform, for the GitHub Release: the CI run's attested libraries
+  # with the header and c/'s package files, attested here because the inventory records the c/
+  # group as signed by this repository at B, like the gems.
+  c-pack:
+    needs: find-ci-run
+    if: inputs.prepared_run_id == ''
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-c
+        with:
+          run_id: ${{ needs.find-ci-run.outputs.run_id }}
+          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+          token: ${{ github.token }}
+
   pypi-pack:
     needs: find-ci-run
     if: inputs.prepared_run_id == ''
@@ -242,13 +268,14 @@ jobs:
   # shipped file and whose predicate is the inventory. Preserved for 90 days as
   # release-packages; a recovery run verifies the preserved bytes and never re-attests.
   publication-gate:
-    needs: [find-ci-run, nuget-org-pack, ruby-pack, pypi-pack, npm-pack, r-pack, crate-pack, maven-pack]
+    needs: [find-ci-run, nuget-org-pack, ruby-pack, pypi-pack, npm-pack, r-pack, c-pack, crate-pack, maven-pack]
     if: >-
       always() && !cancelled() && needs.find-ci-run.result == 'success' &&
       (inputs.prepared_run_id != '' ||
        (needs.nuget-org-pack.result == 'success' && needs.ruby-pack.result == 'success' &&
         needs.pypi-pack.result == 'success' && needs.npm-pack.result == 'success' &&
-        needs.r-pack.result == 'success' && needs.crate-pack.result == 'success' &&
+        needs.r-pack.result == 'success' && needs.c-pack.result == 'success' &&
+        needs.crate-pack.result == 'success' &&
         needs.maven-pack.result == 'success'))
     runs-on: ubuntu-26.04
     permissions:

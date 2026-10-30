@@ -45,10 +45,13 @@ java/src/main/resources/native/
 **/.pytest_cache/
 
 # Swift
-# The static libraries under swift/HyperUuidCore.artifactbundle/{triple}/ are committed, not
-# ignored — SwiftPM has no packing step for a git-URL dependency, unlike every other registry
-# this repo publishes to — and only by stage-native-binaries.yml, after their provenance checks.
+# The core in the artifact bundle and the XCFramework is build output: CI and
+# .github/scripts/local-core.sh write it, and consumers get it from the release's assets (the
+# root Package.swift). Only the bundle's include/ (header and module map) is source.
 **/.build/
+swift/HyperUuidCore.artifactbundle/*
+!swift/HyperUuidCore.artifactbundle/include/
+swift/HyperUuidCoreApple.xcframework/
 
 # Ruby
 # Same story — CI places each leg's native lib here for `bundle exec rspec` at build-native

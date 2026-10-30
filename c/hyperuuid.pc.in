@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: hyperuuid
+Description: RFC 9562 UUIDs (v4, v5, v7) and the SQL Server order, from the HyperUuid core
+URL: https://github.com/SkunkWerkx/HyperUuid
+Version: @VERSION@
+Libs: -L${libdir} -lhyperuuid
+Cflags: -I${includedir}
