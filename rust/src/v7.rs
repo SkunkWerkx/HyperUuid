@@ -322,11 +322,33 @@ fn batch_region(
 /// overwrites entropy that has already been consumed, and item i's own share is moved
 /// before its own 16 bytes are written. Hence `.rev()`, which is load-bearing, not taste.
 ///
-/// `inline(always)`, not a hint: the indexing below is proven in bounds only by
-/// [`batch_region`]'s narrowing of `out` to `count * 16`, so it has to be optimized as one
-/// function for `no-panic` to see that proof (without it the check fails the link).
+/// Two walks write the same bytes, one per kind of target, because the cheapest way to write
+/// a big-endian field differs: [`fill_batch_stores`] everywhere but WebAssembly, and
+/// [`fill_batch_words`] on it. Both are compiled for tests, which hold them to each other.
+/// `--cfg hyperuuid_words_walk` selects the WebAssembly walk on any target, for the no-panic
+/// proof: WebAssembly builds abort on panic, and `no-panic` sees only an unwinding one, so
+/// that walk is proved on the host, the way the rest of the WebAssembly build is.
+///
+/// `inline(always)`, not a hint, here and on both walks: the indexing in them is proven in
+/// bounds only by [`batch_region`]'s narrowing of `out` to `count * 16`, so it has to be
+/// optimized as one function for `no-panic` to see that proof (without it the check fails the
+/// link).
 #[inline(always)]
 fn fill_batch(count: u32, out: &mut [u8], item: impl Fn(u32) -> (u64, u32)) {
+    #[cfg(not(any(target_family = "wasm", hyperuuid_words_walk)))]
+    fill_batch_stores(count, out, item);
+    #[cfg(any(target_family = "wasm", hyperuuid_words_walk))]
+    fill_batch_words(count, out, item);
+}
+
+/// [`fill_batch`] off WebAssembly: each item's share moved out with one 6-byte copy, then
+/// octets 0-9 as a big-endian u64 and a big-endian u16. A real CPU swaps bytes in one
+/// instruction (or none, folded into the store), and this was measured faster natively than
+/// [`fill_batch_words`]: 5.2 against 5.7 µs for 1000 items on Linux x86-64, 3.45 against 3.9
+/// on Windows (i9-11900H, 2026-10-30).
+#[cfg(any(test, not(any(target_family = "wasm", hyperuuid_words_walk))))]
+#[inline(always)]
+pub(crate) fn fill_batch_stores(count: u32, out: &mut [u8], item: impl Fn(u32) -> (u64, u32)) {
     for i in (0..count as usize).rev() {
         let src = i * RAND_BYTES_PER_ITEM;
         // rand_b's trailing 48 bits (octets 10-15), straight from the packed entropy.
@@ -344,6 +366,55 @@ fn fill_batch(count: u32, out: &mut [u8], item: impl Fn(u32) -> (u64, u32)) {
         // ...then the variant (10) and the lower 14 bits of the counter (octets 8-9).
         let tail = 0x8000 | (counter_val & 0x3FFF) as u16;
         slot[8..10].copy_from_slice(&tail.to_be_bytes());
+    }
+}
+
+/// [`fill_batch`] on WebAssembly, which has no byte-swap instruction: every big-endian store
+/// there is a chain of shifts and masks, and a small copy is a `memory.copy`. So each item is
+/// one 8-byte load and two 8-byte stores, the words built in little-endian order from the same
+/// byte expressions as [`write_fields`], with no byte swap per item at all. Measured through
+/// the core translated to Go by wasm2go: 7.7 against 5.4 µs for 1000 items on Linux x86-64,
+/// 7.5 against 5.6 on Windows (i9-11900H, 2026-10-30; `walk-ab.sh` in the spike in
+/// `docs/superpowers/spikes/2026-10-30-go-cgo-free/`).
+///
+/// The load takes item i's 6 bytes and the 2 after them, which are item i+1's (already
+/// consumed) or, for the last item, the seed draw's (the region always has them: `count * 6 +
+/// 4` bytes of entropy), and the 2 are shifted out. It is read before the stores, which for
+/// item 0 overlap it. The timestamp's six octets change at most once in a batch (a split's
+/// tail), so they are rebuilt only when the ms does.
+#[cfg(any(test, target_family = "wasm", hyperuuid_words_walk))]
+#[inline(always)]
+pub(crate) fn fill_batch_words(count: u32, out: &mut [u8], item: impl Fn(u32) -> (u64, u32)) {
+    // unix_ts_ms as octets 0-5 of a little-endian word, and the ms it was built from. No
+    // item's ms is u64::MAX (it is at most one past MAX_UNIX_MILLIS), so the first item
+    // builds it.
+    let (mut stamped, mut stamp) = (u64::MAX, 0);
+    for i in (0..count as usize).rev() {
+        let src = i * RAND_BYTES_PER_ITEM;
+        let mut packed = [0u8; 8];
+        packed.copy_from_slice(&out[src..src + 8]);
+
+        let (millis, counter_val) = item(i as u32);
+        let counter_val = counter_val & COUNTER_MASK;
+        if millis != stamped {
+            stamped = millis;
+            stamp = u64::from_le_bytes((millis << 16).to_be_bytes());
+        }
+
+        // Octets 0-7: unix_ts_ms, then the version nibble (0111) over rand_a, the upper 12
+        // bits of the 26-bit counter.
+        let head = stamp
+            | u64::from(0x70 | (counter_val >> 22)) << 48
+            | u64::from((counter_val >> 14) & 0xFF) << 56;
+        // Octets 8-15: the variant (10) over the lower 14 bits of the counter, then rand_b's
+        // trailing 48 bits, straight from the packed entropy.
+        let tail = u64::from(0x80 | ((counter_val >> 8) & 0x3F))
+            | u64::from(counter_val & 0xFF) << 8
+            | u64::from_le_bytes(packed) << 16;
+
+        let slot = &mut out[i * 16..(i + 1) * 16];
+        slot[..8].copy_from_slice(&head.to_le_bytes());
+        slot[8..].copy_from_slice(&tail.to_le_bytes());
     }
 }
 

@@ -12,9 +12,19 @@ with a regenerate-and-diff check (as `include/hyperuuid.h` is). No cgo, no archi
 TinyGo-specific archive, no release-only commits. The batch loss is accepted in exchange for
 reach (no C toolchain anywhere) and one way of binding. It ships in 1.1.
 
+Direction (owner, 2026-10-30): close the batch gap inside the translated path, with no native
+regression: AES-256-CTR for `random_get` and the core's WebAssembly batch walk
+(`rust/src/v7.rs`, `fill_batch_words`, which only WebAssembly builds compile). Measured on x64;
+arm64 is still to come (`walk-ab.sh` and `run.sh` on the M6, below).
+
 Still open:
 
 1. **Where `random_get` gets its bytes**, the one choice that decides generation speed:
+   - Go-side AES-256-CTR (`crypto/aes`, `cipher.NewCTR`), keyed from `crypto/rand`, same rule:
+     standard library, on the CPU's AES instructions (AES-NI, the ARMv8 crypto extensions), a
+     CTR-DRBG like Windows' `ProcessPrng` and Apple's `CCRandomGenerateBytes`. The 6 KB a batch
+     of 1000 draws costs under 1 µs on x64. Where there is no AES hardware (riscv64, 386, the
+     browser) Go's AES is slow constant-time software; not measured.
    - Go-side ChaCha20 (`golang.org/x/crypto/chacha20`), keyed from `crypto/rand` and rekeyed
      after 1 MiB or one second: the native pool's construction and rule. Recommended. It has
      no amd64 assembly, so on x64 its batch is 1.5x ChaCha8's.
@@ -39,7 +49,14 @@ grown past the core's memory, and nothing allocates.
 | `harness/w2g` | Translated core, `random_get` from `crypto/rand` |
 | `harness/w2g8` | Translated core, `random_get` from a Go-side ChaCha8 stream |
 | `harness/w2g20` | Translated core, `random_get` from a Go-side ChaCha20 stream |
+| `harness/w2gaes` | Translated core, `random_get` from a Go-side AES-256-CTR stream |
 | `harness/w2gc` | Translated core with the in-guest pool (`entropy-in-guest.patch`), `random_get` used only for keys, plus a `clock_time_get` import |
+| `harness/w2gfloor` | Not a random source: `random_get` writes nothing, so its batch is the translated walk alone, the floor every source adds to. Batch benchmark only |
+
+`walk-ab.sh` measures the batch walk on its own: the core at `WALK_BASE` (default `bb390d5`, the
+last commit with one walk) against the checkout, natively (the core's Criterion
+`batch_1000/v7_batch`, where the two should match) and translated (`w2gaes` and `w2gfloor`),
+alternating sides each round.
 
 Every translated package also runs the corpus (194 vectors: v5, SQL order both ways,
 refusals, timestamps, inspection; `v7_layout.json` needs injected entropy and is not run).
@@ -54,11 +71,31 @@ or later, a C compiler for the cgo control, and `benchstat`
 (`go install golang.org/x/perf/cmd/benchstat@latest`). Optional for `SPIKE_BROWSER=1`: node,
 TinyGo.
 
+**macOS (the M6):**
+
+```sh
+cd docs/superpowers/spikes/2026-10-30-go-cgo-free/harness
+SPIKE_LABEL=macos-arm64-m6 ./walk-ab.sh
+SPIKE_LABEL=macos-arm64-m6 SPIKE_BROWSER=1 ./run.sh
+```
+
+**Linux arm64, in Docker on the M6** (virtualized, not emulated), from the repository root:
+
+```sh
+docker run --rm -v "$PWD:/src" -w /src/docs/superpowers/spikes/2026-10-30-go-cgo-free/harness \
+  golang:1.27-bookworm bash -c '
+    curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --target wasm32-wasip1 >/dev/null
+    . "$HOME/.cargo/env" && go install golang.org/x/perf/cmd/benchstat@latest
+    git config --global --add safe.directory /src
+    SPIKE_LABEL=linux-arm64-docker-m6 ./walk-ab.sh && SPIKE_LABEL=linux-arm64-docker-m6 ./run.sh'
+```
+
 **WSL2 (Linux amd64):**
 
 ```sh
 cd docs/superpowers/spikes/2026-10-30-go-cgo-free/harness
-SPIKE_LABEL=linux-amd64-wsl2-i9-11900H ./run.sh
+SPIKE_LABEL=linux-amd64-wsl2-i9-11900H ./walk-ab.sh
+SPIKE_LABEL=linux-amd64-wsl2-i9-11900H SPIKE_BROWSER=1 ./run.sh
 ```
 
 **Windows (amd64), from Git Bash:** run from a checkout with LF line endings
@@ -83,8 +120,11 @@ RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu \
 SPIKE_LABEL=windows-amd64-i9-11900H HYPERUUID_CGO_ARCHIVE=<the trimmed archive> ./run.sh
 ```
 
-Results land in `results/<label>-{env,cgo,w2g,w2g8,w2g20,w2gc}.txt` (and `-js-node`,
-`-tinygo-wasm` with `SPIKE_BROWSER=1`); benchstat medians go into ROADMAP item 6.
+`walk-ab.sh` takes the same `RUSTUP_TOOLCHAIN` there. Results land in
+`results/<label>-{env,cgo,w2g,w2g8,w2g20,w2gaes,w2gc,w2gfloor}.txt` (and `-js-node`,
+`-tinygo-wasm` with `SPIKE_BROWSER=1`) from `run.sh`, and
+`results/<label>-walk-ab-{env,native,translated}.txt` from `walk-ab.sh`; benchstat medians go
+into ROADMAP item 6.
 
 ## Results so far (`results/`)
 
@@ -96,7 +136,9 @@ Results land in `results/<label>-{env,cgo,w2g,w2g8,w2g20,w2gc}.txt` (and `-js-no
 | `windows-amd64-i9-11900H-*` | The same XPS, Windows 11 natively, Go 1.27.3, MSYS2 UCRT gcc 16.2; cgo control on the Forge-trimmed archive of the current core |
 
 The x64 sets are `run.sh`'s own output (`-w2g` is `crypto/rand`, `-w2g8` ChaCha8, `-w2g20`
-ChaCha20, `-w2gc` the guest pool); the arm64 sets predate it and spell those out.
+ChaCha20, `-w2gaes` AES-256-CTR, `-w2gc` the guest pool, `-w2gfloor` no entropy) and
+`walk-ab.sh`'s (`-walk-ab-*`), all on the core with the WebAssembly batch walk; the arm64 sets
+predate both, and spell the variants out.
 
 Also there: the backends that were ruled out (purego v0.11.2, goffi v0.6.7, wazero v1.12.0)
 and the wazero tuning runs (`+simd128`, `wasm-opt -O4`). Those came from an earlier scratch

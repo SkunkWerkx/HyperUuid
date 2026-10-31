@@ -30,7 +30,7 @@ tar -C "$ROOT" --exclude=rust/target -cf - rust | tar -C build/guest -xf -
 cp build/guest-target/wasm32-wasip1/release/hyperuuid.wasm build/guest.wasm
 
 echo "== translate (wasm2go pinned in go.mod)"
-for pkg in w2g w2g8 w2g20; do
+for pkg in w2g w2g8 w2g20 w2gaes w2gfloor; do
 	mkdir -p $pkg/core && go tool wasm2go -pkg core -tags $TAGS -o $pkg/core/core.go build/base.wasm
 done
 mkdir -p w2gc/core && go tool wasm2go -pkg core -tags $TAGS -o w2gc/core/core.go build/guest.wasm
@@ -47,12 +47,12 @@ echo "   $ARCHIVE"
 
 echo "== correctness"
 CGO_ENABLED=1 CGO_LDFLAGS="$ARCHIVE" go test -count=1 -tags $TAGS -run Sanity ./cgostatic
-CGO_ENABLED=0 go test -count=1 -tags $TAGS -run 'Sanity|Corpus' -v ./w2g ./w2g8 ./w2g20 ./w2gc | grep -E 'vectors|^ok|FAIL'
+CGO_ENABLED=0 go test -count=1 -tags $TAGS -run 'Sanity|Corpus' -v ./w2g ./w2g8 ./w2g20 ./w2gaes ./w2gc | grep -E 'vectors|^ok|FAIL'
 
 echo "== benchmarks (-count $COUNT) -> $RESULTS/$LABEL-*.txt"
 { go version; uname -a 2>/dev/null || true; } > "$RESULTS/$LABEL-env.txt"
 CGO_ENABLED=1 CGO_LDFLAGS="$ARCHIVE" go test -tags $TAGS -run '^$' -bench . -benchmem -count "$COUNT" ./cgostatic > "$RESULTS/$LABEL-cgo.txt"
-for pkg in w2g w2g8 w2g20 w2gc; do
+for pkg in w2g w2g8 w2g20 w2gaes w2gc w2gfloor; do
 	CGO_ENABLED=0 go test -tags $TAGS -run '^$' -bench . -benchmem -count "$COUNT" ./$pkg > "$RESULTS/$LABEL-$pkg.txt"
 done
 
@@ -71,5 +71,5 @@ fi
 
 if command -v benchstat >/dev/null; then
 	benchstat "$RESULTS/$LABEL-cgo.txt" | grep -E 'Cgo|sec/op'
-	for pkg in w2g w2g8 w2g20 w2gc; do benchstat "$RESULTS/$LABEL-$pkg.txt" | grep -E 'W2g' | head -6; done
+	for pkg in w2g w2g8 w2g20 w2gaes w2gc w2gfloor; do benchstat "$RESULTS/$LABEL-$pkg.txt" | grep -E 'W2g' | head -6; done
 fi

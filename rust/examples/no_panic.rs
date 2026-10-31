@@ -5,7 +5,9 @@
 //!
 //!     cargo build --release --example no_panic --features no-panic
 //!     cargo build --release --example no_panic --features no-panic,uuid1
+//!     RUSTFLAGS='--cfg hyperuuid_words_walk' cargo build --release --example no_panic --features no-panic,uuid1
 //!
+//! The last links the WebAssembly batch walk in place of the host's (v7.rs, `fill_batch`).
 //! A panic path left in any of them fails the link with `ERROR[no-panic]` naming the
 //! function. Running the binary proves nothing further.
 

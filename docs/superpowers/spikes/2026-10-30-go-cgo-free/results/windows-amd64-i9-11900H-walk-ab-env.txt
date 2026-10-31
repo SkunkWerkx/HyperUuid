@@ -1,0 +1,5 @@
+go version go1.27.3 windows/amd64
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+MINGW64_NT-10.0-26100 xps-15-9510 3.6.10-5a1665c8.x86_64 2026-09-28 10:40 UTC x86_64 Msys
+base: bb390d5 (bb390d5)
+tree: bb390d5 + uncommitted rust/

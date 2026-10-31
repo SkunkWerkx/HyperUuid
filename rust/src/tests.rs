@@ -577,6 +577,36 @@ fn batch_items_match_the_pinned_single_item_layout() {
     }
 }
 
+// The batch walk is two functions, one per kind of target (v7.rs, `fill_batch`), and only one
+// of them is compiled anywhere but here. Every other batch test runs the host's; this holds the
+// other to it, byte for byte: arbitrary entropy, counters across all 26 bits (and the bits
+// above, which the walks mask), and a split, its tail a millisecond later.
+#[test]
+fn both_batch_walks_write_the_same_bytes() {
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for count in [1u32, 2, 3, 63, 64, 65, 130, 1000] {
+        let mut stores = vec![0u8; count as usize * 16];
+        for byte in &mut stores {
+            *byte = next() as u8;
+        }
+        let mut words = stores.clone();
+        let base = next() as u32;
+        let item = |i: u32| {
+            let millis = v7::MAX_UNIX_MILLIS - 1 + u64::from(i >= count / 2);
+            (millis, base.wrapping_add(i.wrapping_mul(0x0123_4567)))
+        };
+        v7::fill_batch_stores(count, &mut stores, item);
+        v7::fill_batch_words(count, &mut words, item);
+        assert_eq!(stores, words, "count {count}");
+    }
+}
+
 #[test]
 fn inspection_of_the_special_values_and_every_variant_class() {
     assert_eq!(
@@ -804,7 +834,9 @@ mod v7_stream {
     // The exact counter a reservation produces, the per-millisecond sort key. The corpus pins
     // only where `write_fields` puts a counter; this pins which counter each path composes,
     // `step << 6 | low6` for a single and `step << 6 | i % 64` for a batch's item i, and the
-    // empty-head placement of a reservation that starts past the stream's last step.
+    // empty-head placement of a reservation that starts past the stream's last step. It pins
+    // which drawn bytes become each tail too: a batch's item i takes bytes 6i to 6i + 5 of the
+    // packed draw, which no other test would notice going to the wrong item.
     #[test]
     fn v7_reservations_compose_the_exact_counter() {
         // A single clamped onto step 9 takes step 10, its low 6 bits from octet 9, the fifth
@@ -823,6 +855,8 @@ mod v7_stream {
             let id = item(&out, i as usize);
             assert_eq!(v7::unix_millis(&id), M, "item {i}");
             assert_eq!(counter26(&id), ((10 + i / 64) << 6) | (i % 64), "item {i}");
+            let drawn: [u8; 6] = core::array::from_fn(|k| (6 * i as usize + k + 1) as u8);
+            assert_eq!(id.as_bytes()[10..], drawn, "item {i}");
         }
 
         // A single on a stream at its millisecond's last step has an empty head: it lands at

@@ -340,6 +340,9 @@ class CiTests(unittest.TestCase):
         self.assertIn('no_std_rustflags: --cfg getrandom_backend="custom"', core)
         self.assertIn('extra_features: uuid1', core)
         self.assertIn('no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1', core)
+        # The second link proves the WebAssembly batch walk, which only that cfg builds on a host.
+        self.assertIn(' && RUSTFLAGS="--cfg hyperuuid_words_walk" cargo build --release --example no_panic'
+                      ' --features no-panic,uuid1\n', core)
         self.assertIn('clippy_targets: aarch64-linux-android', core)
         self.assertIn('lint_node: true', core)
         self.assertIn('lint_r: true', core)

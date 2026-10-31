@@ -213,6 +213,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   comments through cbindgen, and a test fails when the committed copy differs; the Swift
   bundle carries the same file. The hand-written header it replaces never mentioned return
   code 6. *(repository only)*
+- **WebAssembly builds assemble a v7 batch without byte swaps.** WebAssembly has no byte-swap
+  instruction, so each item's big-endian stores were chains of shifts and masks; on it, each
+  item is now one 8-byte load and two 8-byte stores built in little-endian order. The bytes
+  are the same, and every other target keeps the walk it had, which measured faster natively.
+  Through the core translated to Go by wasm2go, a batch of 1000 went from 7.7 to 5.4 µs on
+  Linux x86-64 and from 7.5 to 5.6 µs on Windows (i9-11900H); the browser builds are not
+  measured. A test holds the two walks to each other, and the no-panic proof links the
+  WebAssembly one on the host (`--cfg hyperuuid_words_walk`), since `no-panic` cannot see an
+  aborting panic. *(crate, C# Blazor, Go TinyGo, Swift WebAssembly)*
 
 ### Fixed
 

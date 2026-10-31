@@ -1,0 +1,12 @@
+goos: windows
+goarch: amd64
+pkg: spike/w2gfloor
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-16    	  283642	      4271 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-16    	  277746	      4301 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-16    	  293056	      4252 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-16    	  296205	      4107 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-16    	  293637	      4083 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-16    	  302144	      4226 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/w2gfloor	7.720s
