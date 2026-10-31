@@ -59,7 +59,15 @@ run() {
   server=""
   echo "== $leg: results"
   sed -n '/id="results"/,/<\/pre>/p' "$out/$leg.html"
-  grep -q '<title>PASS</title>' "$out/$leg.html" || { echo "== $leg: FAIL"; return 1; }
+  grep -q '<title>PASS</title>' "$out/$leg.html" && return 0
+  # What the dump caught instead: the title the page had reached, how far Blazor's loader had
+  # got (the percentage it writes on <html>), whether its error banner was shown, and the size.
+  echo "== $leg: FAIL"
+  echo "   title: $(grep -o '<title>[^<]*</title>' "$out/$leg.html" | head -1)"
+  echo "   load:  $(grep -o 'blazor-load-percentage: [0-9.]*%' "$out/$leg.html" | head -1 || echo 'not started')"
+  echo "   error banner: $(grep -o '<div id="blazor-error-ui"[^>]*>' "$out/$leg.html" | head -1)"
+  echo "   dom bytes: $(wc -c < "$out/$leg.html")"
+  return 1
 }
 
 for leg in "${legs[@]}"; do

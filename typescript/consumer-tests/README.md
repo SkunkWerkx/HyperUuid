@@ -48,11 +48,8 @@ REGISTRY_HOST=host.docker.internal typescript/consumer-tests/run.sh /tmp/npm-loc
 REGISTRY_HOST=host.docker.internal typescript/consumer-tests/run.sh /tmp/npm-local s390x
 ```
 
-`mac-lockfile` refuses to run unless all eight native packages are in the registry (a partial
-pack would let its lockfile assertion pass for the wrong reason), so its first run is CI's
-Linux leg; CI's PR mode, which builds no osx-x64 addon, passes `SKIP_NATIVES=darwin-x64` so the
-guard excludes that one package. The scenario installs npm 11.20.0 exactly (`LOCKFILE_NPM` in `run.sh`,
-not an environment knob). Negative controls: `CORPUS_DIR=$(mktemp -d) run.sh <dir> plain` fails on the
+`mac-lockfile` needs only the darwin-arm64 package in the registry, so it runs from a local
+pack too (`run.sh <dir> mac-lockfile`). Negative controls: `CORPUS_DIR=$(mktemp -d) run.sh <dir> plain` fails on the
 vector check; `FLOOR_IMAGE=node:22.12.0-alpine run.sh <dir> floor` fails the install with
 `EBADENGINE`.
 
@@ -66,6 +63,17 @@ vector check; `FLOOR_IMAGE=node:22.12.0-alpine run.sh <dir> floor` fails the ins
   `--external:hyperuuid`, webpack `externals: { hyperuuid: 'commonjs hyperuuid' }`, with
   `hyperuuid` installed beside the bundle (`npm install --omit=dev` of the deployment's
   `package.json`). That is the configuration to document for bundled deployments.
+- **npm bug 4828 is fixed in npm 11.20.0 and alive in Node 22's npm.** The scenario reproduces
+  npm/cli#4828 live: install for darwin-arm64, delete the lockfile, install again beside
+  `node_modules`, and the regenerated lockfile names only the platform package on disk; `npm ci`
+  from it elsewhere installs no native. With npm 11.20.0 that no longer happens on either side:
+  the regenerated lockfile names every platform (CI's first run, 2026-10-31, failed the scenario's
+  shape assertion; the same with esbuild's 25 platform packages), and `npm ci` from a lockfile
+  missing optional platform packages refuses with `EUSAGE`, naming each missing one. npm 10.9.2,
+  the npm Node 22.13.0 bundles, still does both (esbuild: one platform entry after regeneration,
+  `npm ci --os=linux --cpu=x64` exits 0 with nothing installed), so the scenario installs that npm
+  into `work/` and reproduces with it (`LOCKFILE_NPM`), as the Linux x64 consumer `--os=linux
+  --cpu=x64` makes it on any host. Node 22 users with a lockfile a Mac wrote are who this is for.
 - **Big-endian hosts.** In `node:24-alpine` for `linux/s390x` under QEMU the install resolves
   no native package, the fallback loads, and every check of `smoke.cjs` passes, but the process
   never exits: `node ./smoke.cjs` sat idle (main thread in `epoll_wait`, 0% CPU) with one

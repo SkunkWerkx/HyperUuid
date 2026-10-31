@@ -76,8 +76,9 @@ re-running the harness, and don't drop a loss.
   `typescript/package.json`, the same string in `WASI_NODE_ENGINES` in the Forge's
   `npm_package.py` (the packer refuses a WASI manifest that differs), the Forge's
   `node_floor_versions` default (`"22 24"`, an input override in `ci.yml` if this repo ever
-  differs), `FLOOR_IMAGE`'s default `node:22.13.0-alpine` in
-  `typescript/consumer-tests/run.sh`, and the floor sentences in `typescript/README.md`,
+  differs), `FLOOR_IMAGE`'s default `node:22.13.0-alpine` and `LOCKFILE_NPM` (`10.9.2`, the npm that Node
+  bundles, the one npm bug 4828 still reproduces with) in `typescript/consumer-tests/run.sh`,
+  and the floor sentences in `typescript/README.md`,
   `README.md` and the CHANGELOG. Node 22 reaches EOL on 2027-04-30: then drop it from all of
   them.
 - The JDK floor: `jdkFloor` (`21`) in `java/build.gradle.kts`, `jdk_floor_version` in
@@ -279,12 +280,12 @@ target add wasm32-wasip1`): `npm run build:wasi`, then `NAPI_RS_FORCE_WASI=error
 (the suite on the fallback, failing rather than falling back; Bun 1.4.4 cannot load it). The
 consumer tests, `typescript/consumer-tests/README.md`: pack the ten tarballs with the Forge's
 `npm_package.py pack` (`--allow-missing-natives` locally, never in CI; CI's PR mode passes
-`--skip osx-x64` and `SKIP_NATIVES=darwin-x64`, since no osx-x64 addon is built there, as
-`test-c` does) and run
+`--skip osx-x64`, since no osx-x64 addon is built there, as `test-c` does) and run
 `consumer-tests/run.sh <dir> <scenarios>`, which serves them from Verdaccio on port 4873 (one
 run at a time) and installs them in fresh consumers; `floor` and `s390x` need Docker
-(`REGISTRY_HOST=host.docker.internal` on Docker Desktop), and `mac-lockfile` refuses a pack
-without all eight natives. The browser page, `typescript/browser-smoke/`, is CI's: a Vite
+(`REGISTRY_HOST=host.docker.internal` on Docker Desktop), and `mac-lockfile` needs the
+darwin-arm64 tarball in the pack (it reproduces npm bug 4828 with the floor's npm, 10.9.2,
+which it installs itself; npm 11.20.0 has the fix). The browser page, `typescript/browser-smoke/`, is CI's: a Vite
 build against the packed WASI tarball, run in headless Chrome and judged by `check-dom.mjs`.
 
 Java's JNI path needs its own library: `cargo build --release --locked --lib` in `java/jni/`,

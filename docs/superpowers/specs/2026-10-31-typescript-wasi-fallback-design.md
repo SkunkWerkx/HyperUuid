@@ -250,7 +250,12 @@ On Linux only:
    `wasm32-wasip1` loads. If the pinned npm repairs the lockfile instead (the thread reports
    fixes and regressions across 11.x), the assertion fails loudly and a committed
    damaged-lockfile fixture (`typescript/consumer-tests/fixtures/mac-lockfile/`) becomes the
-   regression test, run the same way.
+   regression test, run the same way. *Amended 2026-10-31:* npm 11.20.0 repaired it on the
+   first CI run, and its `npm ci` refuses a lockfile missing optional platform packages, so
+   with that npm the bug is gone on both sides; npm 10.9.2, the one Node 22.13.0 bundles,
+   still has it, and the scenario pins that npm instead (it moves with the Node floor). The
+   all-eight-natives guard went: the scenario needs only darwin-arm64 in the registry and runs
+   from a local pack, as a Linux x64 consumer (`--os=linux --cpu=x64`) on any host.
 7. **The exact floor.** Scenario 2 inside `node:22.13.0-alpine`, with `engine-strict=true` so an
    `engines` mismatch anywhere in the packed graph fails the install, and again inside the
    floating `node:22-alpine` and `node:24-alpine` for coverage (review finding 3).

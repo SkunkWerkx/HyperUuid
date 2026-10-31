@@ -23,10 +23,11 @@
 #                           ERR_HYPERUUID_UNAVAILABLE whose cause chain names the native
 #                           attempts and the WASI one
 #   negative-deleted-wasm   the same with only the .wasm deleted, the loader left in place
-#   mac-lockfile            npm/cli#4828's shape: a darwin-arm64 install, the lockfile deleted
-#                           and regenerated with node_modules kept, then `npm ci` here with no
-#                           native package in the lockfile loads wasm32-wasip1 (needs all eight
-#                           native packages in the registry and the pinned npm below)
+#   mac-lockfile            npm/cli#4828 with the npm the Node floor bundles (LOCKFILE_NPM below):
+#                           a darwin-arm64 install, the lockfile deleted and regenerated beside
+#                           node_modules names darwin-arm64 only, and `npm ci` from it as a Linux
+#                           x64 consumer installs no native and loads wasm32-wasip1 (needs the
+#                           darwin-arm64 package in the registry; runs on any host)
 #   floor                   container/consumer.sh in node:22.13.0-alpine with engine-strict,
 #                           then node:22-alpine and node:24-alpine (Docker)
 #   s390x                   container/consumer.sh in node:24-alpine for linux/s390x under QEMU, a
@@ -43,14 +44,13 @@
 # Containers reach the registry over --network host at 127.0.0.1 on Linux; on Docker Desktop
 # set REGISTRY_HOST=host.docker.internal (Verdaccio listens on 0.0.0.0 either way).
 # FLOOR_IMAGE overrides the exact-floor image (the negative control uses node:22.12.0-alpine).
-# SKIP_NATIVES lists (space-separated) the platform suffixes the pack left out on purpose, so
-# the mac-lockfile guard excludes them: CI's PR mode has no osx-x64 build and passes darwin-x64.
 set -euo pipefail
 
-# The npm the mac-lockfile scenario reproduces npm/cli#4828 with: the tool of the reproduction,
-# re-verified by hand when moved, not a floor. The scenario asserts the lockfile shape it
-# writes, so a different npm fails loudly instead of passing for another reason.
-LOCKFILE_NPM=11.20.0
+# The npm the mac-lockfile scenario reproduces npm/cli#4828 with: the one Node 22.13.0, the
+# floor, bundles, so it moves with the floor (CLAUDE.md, "The Node floor"). npm 11.20.0 has
+# the fix on both sides (a regenerated lockfile names every platform, and `npm ci` refuses one
+# that does not), so the scenario asserts the shape this npm writes and fails loudly on another.
+LOCKFILE_NPM=10.9.2
 
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -265,12 +265,8 @@ scenario_negative_deleted_wasm() {
 }
 
 scenario_mac_lockfile() {
-  local missing=()
-  for suffix in linux-x64-gnu linux-arm64-gnu linux-x64-musl linux-arm64-musl darwin-x64 darwin-arm64 win32-x64-msvc win32-arm64-msvc; do
-    case " ${SKIP_NATIVES:-} " in *" $suffix "*) echo "  skipped on purpose: $scope-$suffix"; continue ;; esac
-    npm view "$scope-$suffix@$version" version --registry "$registry" > /dev/null 2>&1 || missing+=("$scope-$suffix")
-  done
-  [ ${#missing[@]} -eq 0 ] || die "mac-lockfile: refusing to run against a partial pack; missing from the registry: ${missing[*]}"
+  npm view "$scope-darwin-arm64@$version" version --registry "$registry" > /dev/null 2>&1 \
+    || die "mac-lockfile: $scope-darwin-arm64@$version is not in the registry, and the lockfile has to name it"
   local prefix="$here/work/npm-lockfile"
   npm install -g "npm@$LOCKFILE_NPM" --prefix "$prefix" --registry "$registry" > work/npm-lockfile-install.log 2>&1 \
     || { cat work/npm-lockfile-install.log; die "mac-lockfile: could not install npm@$LOCKFILE_NPM"; }
@@ -279,17 +275,20 @@ scenario_mac_lockfile() {
   [ "$("$lnpm" --version)" = "$LOCKFILE_NPM" ] || die "mac-lockfile: the pinned npm is $("$lnpm" --version), not $LOCKFILE_NPM"
   local dir; dir="$(consumer mac-lockfile)"
   (cd "$dir" && "$lnpm" install --cache "$dir/cache" --os=darwin --cpu=arm64 "$crate@$version" > install1.log 2>&1) || { cat "$dir/install1.log"; die "mac-lockfile: first install"; }
+  local natives_first; natives_first="$(grep -c "node_modules/$scope-" "$dir/package-lock.json" || true)"
   rm "$dir/package-lock.json"
   (cd "$dir" && "$lnpm" install --cache "$dir/cache" --os=darwin --cpu=arm64 > install2.log 2>&1) || { cat "$dir/install2.log"; die "mac-lockfile: second install"; }
-  grep -q "node_modules/$scope-darwin-arm64" "$dir/package-lock.json" || die "mac-lockfile: the regenerated lockfile does not name darwin-arm64"
+  grep -q "node_modules/$scope-darwin-arm64\"" "$dir/package-lock.json" || die "mac-lockfile: the regenerated lockfile does not name darwin-arm64"
   for suffix in linux-x64-gnu linux-arm64-gnu linux-x64-musl linux-arm64-musl darwin-x64 win32-x64-msvc win32-arm64-msvc; do
-    if grep -q "node_modules/$scope-$suffix" "$dir/package-lock.json"; then
-      die "mac-lockfile: npm $LOCKFILE_NPM repaired the lockfile (it names $suffix); the 4828 shape no longer reproduces, see README.md"
+    if grep -q "node_modules/$scope-$suffix\"" "$dir/package-lock.json"; then
+      die "mac-lockfile: npm $LOCKFILE_NPM repaired the lockfile (it names $suffix); npm/cli#4828 no longer reproduces with the floor's npm, see README.md"
     fi
   done
-  echo "  lockfile: names darwin-arm64 only (npm $LOCKFILE_NPM reproduces npm/cli#4828)"
+  echo "  lockfile: the first install named $natives_first @skunkwerkx packages, the regenerated one names darwin-arm64 and the WASI package only (npm $LOCKFILE_NPM reproduces npm/cli#4828)"
   rm -rf "$dir/node_modules"
-  (cd "$dir" && "$lnpm" ci --cache "$dir/cache" > ci.log 2>&1) || { cat "$dir/ci.log"; die "mac-lockfile: npm ci"; }
+  # A Linux x64 consumer: what CI's leg is, and what lets a Mac run the scenario without its
+  # own native getting installed.
+  (cd "$dir" && "$lnpm" ci --cache "$dir/cache" --os=linux --cpu=x64 > ci.log 2>&1) || { cat "$dir/ci.log"; die "mac-lockfile: npm ci"; }
   [ -z "$(platform_packages "$dir")" ] || die "mac-lockfile: npm ci installed a platform package: $(platform_packages "$dir")"
   smoke "$dir" || die "mac-lockfile: smoke failed"
   expect_target "$dir" "$wasi" mac-lockfile

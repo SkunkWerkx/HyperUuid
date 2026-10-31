@@ -931,27 +931,21 @@ jobs:
         working-directory: typescript/consumer-tests
         run: npm ci
 
-      # s390x for the emulated-host scenario; the floor and lockfile scenarios need Docker and
-      # the pinned npm, which only this leg has.
+      # s390x for the emulated-host scenario; the floor and s390x scenarios need Docker, which
+      # only this leg has, and the lockfile scenario runs beside them.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         if: matrix.os == 'ubuntu-26.04'
         with:
           platforms: s390x
 
-      # SKIP_NATIVES names the platform package the pack left out, so the mac-lockfile guard
-      # (which otherwise wants all eight in the registry) excludes it in PR mode.
       - name: Every installation scenario
         if: matrix.os == 'ubuntu-26.04'
         shell: bash
-        env:
-          SKIP_NATIVES: ${{ github.event_name == 'pull_request' && 'darwin-x64' || '' }}
         run: bash typescript/consumer-tests/run.sh "$GITHUB_WORKSPACE/npm-packages" all
 
       - name: The installation scenarios this OS can run
         if: matrix.os != 'ubuntu-26.04'
         shell: bash
-        env:
-          SKIP_NATIVES: ${{ github.event_name == 'pull_request' && 'darwin-x64' || '' }}
         run: >-
           bash typescript/consumer-tests/run.sh "$GITHUB_WORKSPACE/npm-packages"
           negative-unpublished plain omit-optional absent-native forced-wasi

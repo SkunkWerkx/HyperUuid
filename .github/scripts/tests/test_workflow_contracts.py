@@ -320,16 +320,14 @@ class CiTests(unittest.TestCase):
                 self.assertIn(needle, job)
         self.assertNotIn('--allow-missing-natives', job)
         # PR mode has no osx-x64 build (hyper-build-native skips it), so the pack leaves that
-        # platform package out by name, as test-c does, and the consumer harness is told which
-        # native is absent so its mac-lockfile guard excludes it; release mode skips nothing.
+        # platform package out by name, as test-c does; release mode skips nothing. The consumer
+        # harness needs no list of absent natives: its lockfile scenario names darwin-arm64 only.
         pack = next(step for step in re.split(r'\n      - ', job)[1:] if 'npm_package.py" pack' in step)
         self.assertIn("MODE: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}", pack)
         self.assertIn('release) skip=() ;;', pack)
         self.assertIn('pr) skip=(--skip osx-x64) ;;', pack)
         self.assertIn('"${skip[@]}"', pack)
-        for step in re.split(r'\n      - ', job)[1:]:
-            if 'run.sh' in step:
-                self.assertIn("SKIP_NATIVES: ${{ github.event_name == 'pull_request' && 'darwin-x64' || '' }}", step)
+        self.assertNotIn('SKIP_NATIVES', job, 'the harness no longer takes a list of absent natives')
         bun = next(step for step in re.split(r'\n      - ', job)[1:] if 'test:bun' in step)
         self.assertIn('continue-on-error: true', bun, "Bun's forced-WASI result is recorded, never a failure")
         self.assertEqual(job.count('continue-on-error: true'), 1, 'nothing but Bun is tolerated')

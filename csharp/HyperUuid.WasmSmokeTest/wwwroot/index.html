@@ -27,6 +27,26 @@
         <a href="." class="reload">Reload</a>
         <span class="dismiss">🗙</span>
     </div>
+    <script>
+        // check.sh reads this page with headless Chrome's --dump-dom under --virtual-time-budget.
+        // That budget is virtual: it fast-forwards whenever the main thread idles with no fetch
+        // pending, which it does while the module compiles after its download, and the dump
+        // then captures the loading screen with no results (the Debug legs, whose module is
+        // unstripped, lost that race on CI). A pending fetch pauses virtual time, so one small
+        // request stays in flight until the page has set its PASS or FAIL title, Blazor has
+        // shown its error banner, or 20,000 requests have gone by. A browser a person opens
+        // runs the same loop for the few seconds the app takes to report.
+        (function () {
+            var left = 20000;
+            function done() {
+                var banner = document.getElementById('blazor-error-ui');
+                return document.title === 'PASS' || document.title === 'FAIL' || --left < 0
+                    || (banner && getComputedStyle(banner).display !== 'none');
+            }
+            function tick() { if (!done()) fetch('css/app.css?' + left, { cache: 'no-store' }).then(tick, tick); }
+            tick();
+        })();
+    </script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
 </body>
 
