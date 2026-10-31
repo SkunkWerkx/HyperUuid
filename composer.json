@@ -1,8 +1,8 @@
 {
     "name": "skunkwerkx/hyperuuid",
-    "description": "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order — direct native FFI into a Rust core, no runtime bridge.",
-    "type": "library",
-    "keywords": ["uuid", "guid", "rfc9562", "uuidv4", "uuidv5", "uuidv7", "ffi", "rust"],
+    "description": "RFC 9562 UUID v4/v5/v7 generation, with a version 8 SQL Server order — a PHP extension over a Rust core, installed with PIE.",
+    "type": "php-ext",
+    "keywords": ["uuid", "guid", "rfc9562", "uuidv4", "uuidv5", "uuidv7", "extension", "rust"],
     "license": "MIT",
     "authors": [
         {
@@ -15,24 +15,13 @@
         "source": "https://github.com/SkunkWerkx/HyperUuid"
     },
     "require": {
-        "php": ">=8.3",
-        "ext-ffi": "*"
+        "php": ">=8.3"
     },
-    "require-dev": {
-        "phpunit/phpunit": "^11.0",
-        "phpbench/phpbench": "^1.7",
-        "ramsey/uuid": "^4.9",
-        "squizlabs/php_codesniffer": "^3.10 || ^4.0"
-    },
-    "autoload": {
-        "psr-4": {
-            "HyperUuid\\": "php/src/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "HyperUuid\\Tests\\": "php/tests/",
-            "HyperUuid\\Bench\\": "php/bench/"
-        }
+    "php-ext": {
+        "extension-name": "hyperuuid",
+        "support-nts": true,
+        "support-zts": false,
+        "download-url-method": ["pre-packaged-binary"],
+        "os-families": ["linux", "darwin", "windows"]
     }
 }

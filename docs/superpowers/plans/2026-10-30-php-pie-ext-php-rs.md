@@ -705,7 +705,7 @@ Every step that creates or publishes something waits for the owner's named go.
   (`gh release create <release_tag> --repo SkunkWerkx/hyperuuid-pie-rehearsal <zips>`).
 - [ ] **Step 4 (owner's go: "dispatch PIE acceptance").** Run `gh workflow run hyper-pie-acceptance.yml
   --repo SkunkWerkx/.github --ref master -f package=skunkwerkx/hyperuuid-pie-rehearsal
-  -f package_version=<package_version> -f repository=https://github.com/SkunkWerkx/hyperuuid-pie-rehearsal
+  -f extension=hyperuuid -f package_version=<package_version> -f repository=https://github.com/SkunkWerkx/hyperuuid-pie-rehearsal
   -f minors="8.3 8.4 8.5"`. That's the reviewed workflow at the Forge commit merged in Step 2; record
   that SHA in the report. Expected: all 21 legs green.
 - [ ] **Step 5.** Record the names PIE actually matched (from the leg logs) against Task 9's pinned

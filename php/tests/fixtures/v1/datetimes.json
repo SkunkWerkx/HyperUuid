@@ -1,0 +1,28 @@
+[
+    {
+        "input": "2026-10-30T12:34:56.789999Z",
+        "millis": 1793363696789
+    },
+    {
+        "input": "2026-10-30T12:34:56.000500+05:30",
+        "millis": 1793343896000
+    },
+    {
+        "input": "1970-01-01T00:00:00.000Z",
+        "millis": 0
+    },
+    {
+        "input": "1969-12-31T23:59:59.999Z",
+        "exception_class": "HyperUuid\\TimestampOutOfRangeException",
+        "message": "unix_millis must fit within the RFC 9562 48-bit field"
+    },
+    {
+        "input": "@281474976710.655000",
+        "millis": 281474976710655
+    },
+    {
+        "input": "@281474976710.656000",
+        "exception_class": "HyperUuid\\TimestampOutOfRangeException",
+        "message": "unix_millis must fit within the RFC 9562 48-bit field"
+    }
+]

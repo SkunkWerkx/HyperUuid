@@ -4,19 +4,20 @@ declare(strict_types=1);
 
 namespace HyperUuid\Tests;
 
-use HyperUuid\CounterExhaustedException;
 use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
+use HyperUuid\Tests\Support\ChildProcess;
 use HyperUuid\TimestampOutOfRangeException;
 use HyperUuid\Uuid;
 use HyperUuid\UuidLayout;
 use HyperUuid\UuidVariant;
 use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 final class HyperUuidTest extends TestCase
 {
+    use ChildProcess;
+
     private const RFC_TEST_VECTOR_MS = 1_645_557_742_000;
 
     private const WRONG_VERSION = 'the value is not a UUID of the version this conversion takes';
@@ -521,119 +522,270 @@ final class HyperUuidTest extends TestCase
         self::assertSame($expected, self::embeddedMillis(HyperUuid::newV7($dt)));
     }
 
+    public function testAnAnonymousObjectIsATypeErrorNamingItsClass(): void
+    {
+        // The engine's name for an anonymous class runs on past a NUL byte to where it was
+        // declared; the message stops at the NUL, as PHP's own do.
+        $this->expectException(\TypeError::class);
+        $this->expectExceptionMessage(
+            'HyperUuid\HyperUuid::newV7(): Argument #1 ($unixMillis) must be of type '
+            . 'DateTimeInterface|int|null, class@anonymous given'
+        );
+        HyperUuid::newV7(new class {
+        });
+    }
+
     /**
      * Drives the real stream to its ceiling, which poisons the process-wide v7 state for
-     * everything after it, so the whole script runs in a process of its own.
+     * everything after it, so the whole script runs in a PHP of its own, with the extension
+     * loaded as this run loaded it (PHPUnit's separate process can't load an extension).
      */
-    #[RunInSeparateProcess]
     public function testCounterExhaustion(): void
     {
-        $m = 17_592_186_044_414; // 2**44 - 2, the last millisecond the stream holds
-        $message = 'version 7 counter exhausted: the stream cannot advance without running more than '
-            . '1000 ms ahead of the supplied timestamp or past its last millisecond';
-        $exhausted = static function (callable $call) use ($message): bool {
-            try {
-                $call();
-            } catch (CounterExhaustedException $e) {
-                self::assertSame($message, $e->getMessage());
-                return true;
+        $code = <<<'PHP'
+            use HyperUuid\CounterExhaustedException;
+            use HyperUuid\HyperUuid;
+
+            $m = 17_592_186_044_414; // 2**44 - 2, the last millisecond the stream holds
+            $messages = [];
+            $exhausted = static function (callable $call) use (&$messages): bool {
+                try {
+                    $call();
+                } catch (CounterExhaustedException $e) {
+                    $messages[] = $e->getMessage();
+                    return true;
+                }
+                return false;
+            };
+            $seen = [];
+
+            // 1. One single v7 at M succeeds.
+            HyperUuid::newV7($m);
+
+            // 2. Batches of 65,536 at M until the first error: the batch site.
+            $batchExhausted = false;
+            for ($i = 0; $i < 1025 && !$batchExhausted; $i++) {
+                $batchExhausted = $exhausted(static fn () => HyperUuid::newV7BatchBytes(65536, $m));
             }
-            return false;
+            $seen['batch'] = $batchExhausted;
+
+            // 3. Singles at M until the first error: the single site.
+            $singleExhausted = false;
+            for ($i = 0; $i < 1024 && !$singleExhausted; $i++) {
+                $singleExhausted = $exhausted(static fn () => HyperUuid::newV7($m));
+            }
+            $seen['single'] = $singleExhausted;
+
+            // 4. Every other v7 door now fails at once.
+            $seen['newV7'] = $exhausted(static fn () => HyperUuid::newV7($m));
+            $seen['newV7Batch'] = $exhausted(static fn () => HyperUuid::newV7Batch(1, $m));
+            $seen['newV7BatchBytes'] = $exhausted(static fn () => HyperUuid::newV7BatchBytes(1, $m));
+            echo json_encode(['seen' => $seen, 'messages' => array_values(array_unique($messages))]);
+            PHP;
+        $result = json_decode(
+            self::child(['-d', 'extension=' . self::ext()], $code),
+            true,
+            flags: JSON_THROW_ON_ERROR
+        );
+
+        self::assertSame(
+            ['batch' => true, 'single' => true, 'newV7' => true, 'newV7Batch' => true, 'newV7BatchBytes' => true],
+            $result['seen']
+        );
+        self::assertSame(
+            [
+                'version 7 counter exhausted: the stream cannot advance without running more than '
+                . '1000 ms ahead of the supplied timestamp or past its last millisecond',
+            ],
+            $result['messages']
+        );
+    }
+
+    /**
+     * Every row Task 1 captured from the 1.0 binding: the same millis, or the same exception
+     * class and message. A row whose input starts with '@' was built from 'U.u' in UTC.
+     */
+    public function testDateTimesMatchV1(): void
+    {
+        $rows = json_decode(
+            (string) file_get_contents(__DIR__ . '/fixtures/v1/datetimes.json'),
+            true,
+            flags: JSON_THROW_ON_ERROR
+        );
+        self::assertNotEmpty($rows);
+        foreach ($rows as $row) {
+            $input = $row['input'];
+            $dt = str_starts_with($input, '@')
+                ? \DateTimeImmutable::createFromFormat('U.u', substr($input, 1), new \DateTimeZone('UTC'))
+                : new \DateTimeImmutable($input);
+            self::assertInstanceOf(\DateTimeImmutable::class, $dt, $input);
+            try {
+                $id = HyperUuid::newV7($dt);
+            } catch (\Throwable $e) {
+                self::assertArrayHasKey('exception_class', $row, "{$input}: " . $e::class . ': ' . $e->getMessage());
+                self::assertSame($row['exception_class'], $e::class, $input);
+                self::assertSame($row['message'], $e->getMessage(), $input);
+                continue;
+            }
+            self::assertArrayHasKey('millis', $row, "{$input} was accepted");
+            self::assertSame($row['millis'], self::embeddedMillis($id), $input);
+        }
+    }
+
+    public function testV5AcceptsNonUtf8Names(): void
+    {
+        // Python's stdlib, independent of this core:
+        // uuid.uuid5(uuid.NAMESPACE_DNS, b"\xff\xfe\x00x")
+        $expected = '918925cd-e4be-56b9-9213-9520426a47eb';
+        self::assertSame($expected, (string) HyperUuid::newV5(Namespaces::dns(), "\xff\xfe\0x"));
+    }
+
+    public function testNamespacesAreTheRfcValuesAndOneInstancePerRequest(): void
+    {
+        $expected = [
+            'dns' => '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+            'url' => '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+            'oid' => '6ba7b812-9dad-11d1-80b4-00c04fd430c8',
+            'x500' => '6ba7b814-9dad-11d1-80b4-00c04fd430c8',
+        ];
+        foreach ($expected as $name => $string) {
+            self::assertSame($string, (string) Namespaces::$name(), $name);
+            self::assertSame(Namespaces::$name(), Namespaces::$name(), $name);
+        }
+    }
+
+    /**
+     * `Uuid::nil()`, `Uuid::max()` and the `Namespaces` called after this extension's request
+     * shutdown, here from a session save handler, which ext/session runs from its own request
+     * shutdown, later than ours. The values are still right, and the process exits cleanly
+     * instead of releasing them again once the engine's heap is gone.
+     */
+    public function testConstantsAfterRequestShutdownExitCleanly(): void
+    {
+        if (!\function_exists('session_set_save_handler')) {
+            self::markTestSkipped('needs ext-session');
+        }
+        $code = <<<'PHP'
+            final class LateHandler implements SessionHandlerInterface
+            {
+                public function open(string $path, string $name): bool { return true; }
+                public function close(): bool { return true; }
+                public function read(string $id): string|false { return ''; }
+                public function write(string $id, string $data): bool
+                {
+                    $nil = HyperUuid\Uuid::nil();
+                    echo $nil, ' ', HyperUuid\Uuid::max(), ' ', HyperUuid\Namespaces::dns(), ' ',
+                        HyperUuid\Namespaces::url(), ' ', HyperUuid\Namespaces::oid(), ' ',
+                        HyperUuid\Namespaces::x500(), ' ', var_export($nil->equals(HyperUuid\Uuid::nil()), true);
+                    $GLOBALS['kept'] = $nil;
+                    return true;
+                }
+                public function destroy(string $id): bool { return true; }
+                public function gc(int $max): int|false { return 0; }
+            }
+            session_set_save_handler(new LateHandler(), false);
+            ini_set('session.use_cookies', '0');
+            session_id('late');
+            session_start();
+            $_SESSION['n'] = 1;
+            PHP;
+        [$status, $stdout, $stderr] = self::childRun(['-d', 'extension=' . self::ext()], $code);
+        self::assertSame(0, $status, "child exited {$status}: {$stdout}{$stderr}");
+        self::assertSame(
+            '00000000-0000-0000-0000-000000000000 ffffffff-ffff-ffff-ffff-ffffffffffff '
+            . '6ba7b810-9dad-11d1-80b4-00c04fd430c8 6ba7b811-9dad-11d1-80b4-00c04fd430c8 '
+            . '6ba7b812-9dad-11d1-80b4-00c04fd430c8 6ba7b814-9dad-11d1-80b4-00c04fd430c8 true',
+            trim($stdout)
+        );
+    }
+
+    /**
+     * A batch past `memory_limit` ends in the engine's own fatal error, as 1.0's did. The batch
+     * is built in the request's heap, which counts against the limit and which the engine frees
+     * after the error; a Rust allocation would do neither. The 64 MiB batch is then copied into
+     * the 64 MiB string returned, so a 96 MiB limit is crossed. A PHP with delayed out-of-memory
+     * handling (current 8.3, 8.4 and 8.5 releases) raises the error after the call, unless the
+     * call goes past its hard limit, twice the limit by default, which this one stays under; an
+     * older release stops at the allocation that crosses it.
+     */
+    public function testABatchPastTheMemoryLimitIsTheEnginesFatalError(): void
+    {
+        [$status, $stdout, $stderr] = self::childRun(
+            [
+                '-n', '-d', 'extension=' . self::ext(), '-d', 'memory_limit=96M',
+                '-d', 'display_errors=stderr', '-d', 'log_errors=0',
+            ],
+            "HyperUuid\\HyperUuid::newV7BatchBytes(1 << 22, 1_800_000_000_000); echo 'returned';"
+        );
+        self::assertNotSame(0, $status, "child exited 0: {$stdout}{$stderr}");
+        self::assertStringContainsString('Allowed memory size of 100663296 bytes exhausted', $stderr);
+        self::assertStringNotContainsString('returned', $stdout);
+    }
+
+    #[DataProvider('batchDoors')]
+    public function testABatchCountAboveTheLimitNamesTheLimit(string $door): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(
+            'count must be between 0 and 67108864 (a single version 7 batch takes at most the 26-bit '
+            . 'counter space), got 67108865'
+        );
+        HyperUuid::$door(HyperUuid::MAX_V7_BATCH + 1, self::RFC_TEST_VECTOR_MS);
+    }
+
+    /**
+     * A process forked after its first v7 (an FPM master's preload, say) shares the parent's
+     * stream state and entropy pool; the two must still never mint the same UUID.
+     */
+    public function testForkAfterFirstUseGivesDistinctV7s(): void
+    {
+        if (!\function_exists('pcntl_fork')) {
+            self::markTestSkipped('needs ext-pcntl');
+        }
+        $ms = 1_800_000_000_000;
+        // The parent's first v7 at the same millisecond, so both processes continue one stream.
+        HyperUuid::newV7($ms);
+        $mint = static function () use ($ms): string {
+            $bytes = '';
+            for ($i = 0; $i < 1000; $i++) {
+                $bytes .= HyperUuid::newV7($ms)->bytes();
+            }
+            return $bytes;
         };
 
-        // 1. One single v7 at M succeeds.
-        HyperUuid::newV7($m);
-
-        // 2. Batches of 65,536 at M until the first error: the batch site.
-        $batchExhausted = false;
-        for ($i = 0; $i < 1025 && !$batchExhausted; $i++) {
-            $batchExhausted = $exhausted(static fn () => HyperUuid::newV7BatchBytes(65536, $m));
+        $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        self::assertNotFalse($pair);
+        $pid = pcntl_fork();
+        self::assertNotSame(-1, $pid, 'fork failed');
+        if ($pid === 0) {
+            // Leave without PHPUnit's shutdown handlers, which belong to the parent, even if
+            // minting throws: the parent then sees a short read.
+            try {
+                fclose($pair[0]);
+                fwrite($pair[1], $mint());
+                fclose($pair[1]);
+            } finally {
+                if (\function_exists('posix_kill')) {
+                    posix_kill(getmypid(), SIGKILL);
+                }
+                exit(0);
+            }
         }
-        self::assertTrue($batchExhausted, 'no batch exhausted the stream');
+        fclose($pair[1]);
+        $ours = $mint();
+        $theirs = stream_get_contents($pair[0]);
+        fclose($pair[0]);
+        pcntl_waitpid($pid, $status);
 
-        // 3. Singles at M until the first error: the single site.
-        $singleExhausted = false;
-        for ($i = 0; $i < 1024 && !$singleExhausted; $i++) {
-            $singleExhausted = $exhausted(static fn () => HyperUuid::newV7($m));
-        }
-        self::assertTrue($singleExhausted, 'no single exhausted the stream');
-
-        // 4. Every other v7 door now fails at once.
-        self::assertTrue($exhausted(static fn () => HyperUuid::newV7($m)), 'newV7');
-        self::assertTrue($exhausted(static fn () => HyperUuid::newV7Batch(1, $m)), 'newV7Batch');
-        self::assertTrue($exhausted(static fn () => HyperUuid::newV7BatchBytes(1, $m)), 'newV7BatchBytes');
+        self::assertSame(16_000, \strlen($ours));
+        self::assertSame(16_000, \strlen($theirs), 'the child did not mint 1000 v7s');
+        $all = array_merge(str_split($ours, 16), str_split($theirs, 16));
+        self::assertCount(2000, array_unique($all), 'the two processes minted the same v7');
     }
 
     public function testNativeVersionNamesTheLoadedLibrary(): void
     {
         self::assertSame(self::crateVersion(), HyperUuid::nativeVersion());
-    }
-
-    public function testIsAvailableIsTheNonThrowingProbe(): void
-    {
-        self::assertTrue(HyperUuid::isAvailable());
-        // Cached and idempotent — the second answer is the first, no reload.
-        self::assertTrue(HyperUuid::isAvailable());
-    }
-
-    public function testIsAvailableAnswersFalseWhenFfiIsDisabled(): void
-    {
-        // ffi.enable=0 refuses the FFI API even on the CLI, which is exactly what a
-        // restricted web SAPI looks like from inside the binding.
-        self::assertSame('unavailable ffi', self::probe(\dirname(__DIR__) . '/src', '-d', 'ffi.enable=0'));
-    }
-
-    public function testIsAvailableAnswersFalseWhenTheExtensionIsMissing(): void
-    {
-        // -n drops every ini file, and with them a shared ext-ffi. A PHP with ext-ffi
-        // compiled in statically has nothing to drop, so there is nothing to prove there.
-        $answer = self::probe(\dirname(__DIR__) . '/src', '-n');
-        if (str_ends_with($answer, ' ffi')) {
-            self::markTestSkipped('ext-ffi is compiled into this PHP and cannot be unloaded');
-        }
-        self::assertSame('unavailable no-ffi', $answer);
-    }
-
-    public function testIsAvailableAnswersFalseWhenTheLibraryIsMissing(): void
-    {
-        // A copy of the binding with no native/ directory beside it, far from any cargo
-        // build the development fallback could find.
-        $root = sys_get_temp_dir() . '/hyperuuid-probe-' . bin2hex(random_bytes(6));
-        $src = $root . '/php/src';
-        mkdir($src, 0o777, true);
-        try {
-            foreach (glob(\dirname(__DIR__) . '/src/*.php') as $file) {
-                copy($file, $src . '/' . basename($file));
-            }
-            self::assertSame('unavailable ffi', self::probe($src));
-        } finally {
-            array_map('unlink', glob($src . '/*.php'));
-            rmdir($src);
-            rmdir($root . '/php');
-            rmdir($root);
-        }
-    }
-
-    /**
-     * Runs tests/fixtures/probe.php in a child PHP — the only way to observe a process in
-     * which the binding cannot load — and returns what it printed.
-     */
-    private static function probe(string $src, string ...$phpFlags): string
-    {
-        // Without the dev-loop override, or the probe would load the library it names.
-        $env = array_diff_key(getenv(), ['HYPERUUID_NATIVE_LIBRARY' => true]);
-        $process = proc_open(
-            [PHP_BINARY, ...$phpFlags, __DIR__ . '/fixtures/probe.php', $src],
-            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes,
-            null,
-            $env
-        );
-        self::assertIsResource($process);
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        self::assertSame(0, proc_close($process), "probe failed: {$stdout}{$stderr}");
-        return $stdout;
     }
 
     /** The crate's own manifest version, walked up to from here. */

@@ -114,13 +114,15 @@ class JavaSiteTests(unittest.TestCase):
             line = '    native!("uuidNewV4", "([J)I", native_uuid_new_v4),\n'
             self.assertIn(line, text)
             lib.write_text(text.replace(line, line + line), encoding='utf-8')
-            saved = (mod.ROOT, mod.SITES, mod.core_exports, mod.napi_catch_unwind)
+            saved = (mod.ROOT, mod.SITES, mod.core_exports, mod.napi_catch_unwind, mod.php_guard)
             self.addCleanup(lambda: (setattr(mod, 'ROOT', saved[0]), setattr(mod, 'SITES', saved[1]),
                                      setattr(mod, 'core_exports', saved[2]),
-                                     setattr(mod, 'napi_catch_unwind', saved[3])))
+                                     setattr(mod, 'napi_catch_unwind', saved[3]),
+                                     setattr(mod, 'php_guard', saved[4])))
             mod.ROOT, mod.SITES = Path(tmp), [table]
             mod.core_exports = lambda: exports
             mod.napi_catch_unwind = lambda path: None
+            mod.php_guard = lambda path: None
             out = io.StringIO()
             with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as caught:
                 mod.main()
@@ -147,6 +149,100 @@ class JavaSiteTests(unittest.TestCase):
 
     def test_jni_no_panic_holds_on_the_shim(self):
         self.mod.jni_no_panic('java/jni/src/lib.rs')
+
+
+class PhpGuardTests(unittest.TestCase):
+    """The PHP extension's panic rule: every PHP-callable fn starts with `guard(`."""
+
+    def setUp(self):
+        self.mod = load('check_exports')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def source(self, text):
+        (Path(self.tmp.name) / 'a.rs').write_text(text, encoding='utf-8')
+        return self.tmp.name
+
+    GUARDED = (
+        '#[php_impl]\nimpl U {\n    const X: i64 = 1;\n'
+        '    #[php(name = "newV4")]\n    pub fn new_v4(\n        unixMillis: i64,\n    ) -> PhpResult<U> {\n'
+        '        guard(|| { let s = "}"; Ok(U) })\n    }\n}\n'
+    )
+
+    def test_an_unguarded_method_is_named(self):
+        text = self.GUARDED.replace('}\n}\n', '}\n    pub fn bare(&self) -> i64 { 1 }\n}\n')
+        with self.assertRaises(SystemExit) as caught:
+            self.mod.php_guard(self.source(text))
+        self.assertIn('php_ext has PHP-callable functions without guard: bare', str(caught.exception))
+        self.assertNotIn('new_v4', str(caught.exception))
+
+    def test_all_guarded_passes(self):
+        self.mod.php_guard(self.source(self.GUARDED))
+
+    def test_a_php_function_needs_guard_too(self):
+        with self.assertRaisesRegex(SystemExit, 'loose'):
+            self.mod.php_guard(self.source('#[php_function]\npub fn loose() -> i64 { 1 }\n'))
+        self.mod.php_guard(self.source('#[php_function]\npub fn ok() -> PhpResult<i64> { guard(|| Ok(1)) }\n'))
+
+    def test_a_modifier_handler_must_call_guard(self):
+        text = (
+            '#[php(modifier = add)]\nstruct S;\n'
+            'fn add(b: B) -> B { b.method(FunctionBuilder::new("__unserialize", handler), F) }\n'
+            'zend_fastcall! {\n    extern "C" fn handler(ex: &mut E) {\n        %s\n    }\n}\n'
+        )
+        with self.assertRaisesRegex(SystemExit, 'handler'):
+            self.mod.php_guard(self.source(text % 'run_handler(|| work(ex));'))
+        self.mod.php_guard(self.source(text % 'run_handler(|| { let _ = guard(|| work(ex)); });'))
+
+    def test_a_lifecycle_callback_must_catch_unwinds(self):
+        text = (
+            self.GUARDED
+            + 'extern "C" fn request_shutdown(_t: i32, _m: i32) -> i32 {\n    %s\n    0\n}\n'
+            + 'static CB: Option<unsafe extern "C" fn() -> i32> = None;\n'
+        )
+        with self.assertRaisesRegex(
+            SystemExit, 'extern "C" functions without catch_unwind or run_handler: request_shutdown$'
+        ):
+            self.mod.php_guard(self.source(text % 'release();'))
+        self.mod.php_guard(self.source(text % 'let _ = catch_unwind(release);'))
+        self.mod.php_guard(self.source(text % 'run_handler(AssertUnwindSafe(|| release()));'))
+
+    def test_a_return_type_with_a_semicolon_is_not_a_declaration(self):
+        bare = '#[php_impl]\nimpl U {\n    pub fn b(&self) -> [u8; 16] { self.x }\n}\n'
+        with self.assertRaisesRegex(SystemExit, 'without guard: b$'):
+            self.mod.php_guard(self.source(bare))
+        with self.assertRaisesRegex(SystemExit, 'without guard: c$'):
+            self.mod.php_guard(self.source(
+                '#[php_impl]\nimpl U {\n    pub fn c() -> PhpResult<Option<[u8; 4]>> { Ok(None) }\n}\n'))
+        self.mod.php_guard(self.source(
+            '#[php_impl]\nimpl U {\n    pub fn b(&self) -> PhpResult<[u8; 16]> { guard(|| Ok(self.x)) }\n}\n'))
+
+    def test_a_fn_without_a_body_in_an_impl_fails(self):
+        with self.assertRaisesRegex(SystemExit, 'without guard: d$'):
+            self.mod.php_guard(self.source('#[php_impl]\nimpl U {\n    pub fn d();\n}\n'))
+
+    def test_no_callable_functions_at_all_fails(self):
+        with self.assertRaisesRegex(SystemExit, 'php_ext has no PHP-callable functions to check'):
+            self.mod.php_guard(self.source('fn helper() {}\n#[php_class]\nstruct S;\n'))
+
+    def test_the_real_extension_holds(self):
+        self.mod.php_guard('rust/src/php_ext')
+
+    def test_main_runs_the_rule(self):
+        import contextlib
+        import io
+        mod = self.mod
+        calls = []
+        saved = (mod.SITES, mod.php_guard)
+        self.addCleanup(lambda: (setattr(mod, 'SITES', saved[0]), setattr(mod, 'php_guard', saved[1])))
+        mod.SITES = []
+        mod.php_guard = calls.append
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            mod.main()
+        self.assertEqual(calls, ['rust/src/php_ext'])
+
+    def test_the_ffi_site_is_gone(self):
+        self.assertNotIn('PHP (FFI cdef)', [s[0] for s in self.mod.SITES])
 
 
 if __name__ == '__main__':

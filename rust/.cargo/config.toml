@@ -73,9 +73,9 @@ rustflags = [
 cdylib = ["rustc", "--release", "--crate-type", "cdylib", "--no-default-features", "--features", "cdylib", "--config", 'profile.release.panic="abort"']
 # Local-dev builds of the extension features, each in its own target dir. The ruby and php
 # features produce a differently-shaped libhyperuuid.so (Init_hyperuuid_native / the PHP module
-# entry point) at the same path as the plain cdylib that Fiddle, ctypes-free FFI, P/Invoke,
-# FFM, cgo and PHP's ext-ffi all dlopen from target/release/, so building one over the other
-# silently breaks the rest. `cargo ruby-ext` / `cargo php-ext` keep them apart; the python feature
+# entry point) at the same path as the plain cdylib that Fiddle, P/Invoke, FFM, cgo and the
+# other C-ABI bindings load from target/release/, so building one over the other silently
+# breaks the rest. `cargo ruby-ext` / `cargo php-ext` keep them apart; the python feature
 # gets the same isolation from python/.cargo/config.toml, since maturin runs cargo from there.
 # Output lands in target/ruby/release/ and target/php/release/.
 ruby-ext = "rustc --release --crate-type cdylib --features ruby --target-dir target/ruby"

@@ -22,6 +22,11 @@
 
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// The PHP extension's handlers are `extern "vectorcall"` on Windows (ext-php-rs's
+// `zend_fastcall!`, which every `#[php_impl]` method and `uuid.rs`'s `__unserialize` expand
+// to), and that ABI is unstable (rust-lang/rust#124485); the Forge's Windows extension build
+// is the one step that sets RUSTC_BOOTSTRAP=1 for it. Every other build leaves it out.
+#![cfg_attr(all(windows, feature = "php"), feature(abi_vectorcall))]
 // The crate publishes the `no-std` and `no-std::no-alloc` categories, and this is what makes
 // both compiler-enforced rather than claimed. Five things reached past `core` and none do
 // now: the error types implement `core::error::Error` (stable since 1.81), `getrandom`'s
@@ -141,6 +146,10 @@ pub mod v4;
 pub mod v5;
 pub mod v7;
 
+/// The PHP extension; none of it is the C ABI, and its `extern` declarations of engine
+/// functions would otherwise land in the generated header.
+///
+/// cbindgen:ignore
 #[cfg(feature = "php")]
 mod php_ext;
 #[cfg(feature = "python")]

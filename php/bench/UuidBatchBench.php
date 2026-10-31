@@ -11,9 +11,9 @@ use PhpBench\Attributes as Bench;
  * Batch generation vs. an individual-call loop of the same size — the same comparison
  * every other binding's benchmark suite makes — and the byte form beside the object form.
  *
- * Each iteration is a fresh process, so the first call in it loads the native library
- * (~0.7 ms: the cdef parse and the dlopen). With one unwarmed revolution that load was
- * inside every figure here and larger than any of them; the warmup revolution takes it out.
+ * Each iteration is a fresh process, so its first call pays one-time costs (the random
+ * source's first draw, the first allocations of each size); the warmup revolution keeps them
+ * out of every figure.
  */
 #[Bench\BeforeMethods('readClock')]
 #[Bench\Iterations(5)]

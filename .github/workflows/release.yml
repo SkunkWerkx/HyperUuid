@@ -15,9 +15,13 @@ name: Release — prepare, verify, preserve, publish, finalize
 # never rebuilds the native matrix and never re-attests; it verifies the preserved bytes
 # against the attestations the tag run made. The job bodies live in the Forge: the composite
 # actions (SkunkWerkx/.github/.github/actions/*) run from the one Forge commit this run
-# resolved, checked out as .hyperforge; the five reusable workflows (the NuGet, crate and
-# Maven packing, the crate and Maven publishing) are called at master, which GitHub resolves
-# when the run is queued.
+# resolved, checked out as .hyperforge; the six reusable workflows (the NuGet, crate and
+# Maven packing, the crate and Maven publishing, the PIE acceptance) are called at master,
+# which GitHub resolves when the run is queued.
+#
+# The publish dispatch ends with pie-acceptance: PIE installs the PHP extension from the
+# GitHub Release the finalizer wrote, on every platform and PHP minor. It runs after
+# publication, so a failure there is fixed with a patch release, never in place.
 on:
   push:
     tags: ["v*"]
@@ -514,3 +518,21 @@ jobs:
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
           token: ${{ github.token }}
+
+  # PIE itself installs the extension the finalizer just attached: from Packagist and this
+  # GitHub Release, on every platform and PHP minor, each leg holding PHP and the pinned PIE
+  # only, then a fresh `php` checks it. A red leg is fixed with a patch release, never by
+  # renaming, repacking or re-attesting an asset of this one (RELEASING.md).
+  pie-acceptance:
+    needs: [find-ci-run, finalize-release]
+    if: >-
+      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      needs.find-ci-run.result == 'success' && needs.finalize-release.result == 'success'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pie-acceptance.yml@master
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      package: skunkwerkx/hyperuuid
+      extension: hyperuuid
+      package_version: ${{ needs.find-ci-run.outputs.version }}

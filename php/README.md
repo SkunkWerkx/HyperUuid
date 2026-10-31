@@ -4,21 +4,16 @@
 [![Packagist](https://img.shields.io/packagist/v/skunkwerkx/hyperuuid.svg)](https://packagist.org/packages/skunkwerkx/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
-**PHP core has no built-in UUID generation at all — nothing beyond the optional PECL `uuid` extension. This package needs zero Composer dependency, not even `ramsey/uuid` — just PHP's own built-in `FFI` extension.**
+**PHP core has no built-in UUID generation at all — nothing beyond the optional PECL `uuid` extension. This is an extension too, installed prebuilt by [PIE](https://github.com/php/pie): no compiler, no Composer dependency, no FFI.**
 
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
-version 8 SQL Server order for v7, calling
-directly into the native `libhyperuuid` shared library via PHP's built-in
-[`FFI`](https://www.php.net/manual/en/book.ffi.php) extension — dlopen/dlsym plus a raw C-ABI
-call, no runtime bridge, no Composer dependency beyond `ext-ffi` itself. PHP 8.3 is the
-floor. Bundles a native build for every supported platform (see
-[Requirements](#requirements)) and picks the right one at runtime — Composer has no
-per-platform native selection, so the package carries them all and resolves at load.
+version 8 SQL Server order for v7, from `hyperuuid`, a Zend extension built from the Rust
+core with [ext-php-rs](https://ext-php.rs). The whole API is the extension's: the classes
+below exist once it is loaded, with no PHP code in your `vendor/`. PHP 8.3 is the floor, and
+every supported platform and PHP minor gets a prebuilt, attested zip (see [Install](#install)).
 
 ```php
 <?php
-
-require __DIR__ . '/vendor/autoload.php';
 
 use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
@@ -78,7 +73,7 @@ UUIDs sharing one timestamp capture and one native call, instead of `count` of e
 
 ## Inspecting a UUID
 
-Every read below is one call into the native core; the binding does no bit-reading of its own.
+Every read below is one call into the native core; the extension does no bit-reading of its own.
 
 ```php
 use HyperUuid\HyperUuid;
@@ -123,6 +118,27 @@ value. Without a layout argument, `version()` and `isRfc()` read RFC order, so
 there without saying whether it is a SQL-ordered value. `isRfc(7, UuidLayout::SqlServer)` is
 the guard for those.
 
+## Comparing and serializing
+
+`$a->equals($b)` is the bytewise check. `==` on two `Uuid`s is PHP's loose property
+comparison, not an identity test: PHP compares the private `bytes` strings with `==`, numeric
+strings included, so two different UUIDs whose bytes both read as the same number compare
+equal, and `<=>` orders by those strings the same way:
+
+```php
+use HyperUuid\Uuid;
+
+$a = new Uuid('0000000000000001');
+$b = new Uuid('1e00000000000000');
+var_dump($a == $b, $a <=> $b, $a->equals($b)); // bool(true), int(0), bool(false)
+```
+
+A `Uuid` survives `serialize()`/`unserialize()`, and the payload is 1.0's, byte for byte, so
+one written to a session or a cache by 1.0 unserializes under this version and the other way
+round. A payload whose bytes are not 16 long is refused with `\InvalidArgumentException`, as
+the constructor refuses them. `clone` gives an equal, independent value, and `var_dump`,
+`print_r` and `(array)` show the `bytes` property.
+
 ## Binding to SQL Server
 
 Bind `->toSqlOrder()`'s result as its raw `->bytes()`, as binary. pdo_sqlsrv 5.13 sends a string
@@ -131,6 +147,7 @@ loses the creation order ([details](https://github.com/SkunkWerkx/HyperUuid#sql-
 `PDO` connection through pdo_sqlsrv):
 
 ```php
+use HyperUuid\HyperUuid;
 use HyperUuid\Uuid;
 
 $sql = HyperUuid::newV7()->toSqlOrder();
@@ -148,111 +165,134 @@ UTF-8 text and throws, since the bytes are never valid UTF-8. `bindValue` takes 
 use `bindParam`. Reading needs the `CAST` too: pdo_sqlsrv returns a `uniqueidentifier` as text
 with those groups reversed, while a plain `fetch()` of the `binary(16)` hands back the raw bytes.
 
-## Requirements
+## Install
 
-- **PHP 8.3 or later**, 64-bit.
-- **`ext-ffi`**, loaded and permitted for your SAPI — see [Enabling FFI](#enabling-ffi)
-  below. No other extension and no Composer dependency.
-- **A supported platform.** The package bundles one native library per platform and picks
-  at load:
+```sh
+pie install skunkwerkx/hyperuuid
+```
 
-  | Platform | Bundled library |
-  | --- | --- |
-  | Linux x64 / arm64, glibc 2.34 or newer | `linux-x64`, `linux-arm64` |
-  | Linux x64 / arm64, musl (Alpine) | `linux-musl-x64`, `linux-musl-arm64` |
-  | macOS x64 / arm64 | `osx-x64`, `osx-arm64` |
-  | Windows x64 | `win-x64` |
+[PIE](https://github.com/php/pie), the PHP Foundation's extension installer, resolves the
+package on [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid), downloads the zip
+built for your platform and PHP minor from the GitHub Release, installs it into the
+extension directory and enables it. Nothing compiles: the package has no source build, so where
+no zip fits, PIE stops with its own error that no matching asset exists. `composer require`
+does not install an extension; to have Composer check that it is loaded, put
+`"ext-hyperuuid": "*"` in your project's `require`.
 
-  glibc 2.34 means Debian 12, Ubuntu 22.04, RHEL 9, Amazon Linux 2023 or newer; an older
-  glibc fails when the library loads. musl is detected from the running process, so an
-  Alpine image needs nothing extra. Windows on ARM hardware loads the x64 library, because
-  PHP itself is an x64 process there — PHP has never shipped a native Windows ARM64 build.
-  Anything else (a 32-bit PHP, another architecture, another OS family) is a clear
-  unsupported-platform error rather than a wrong-library load.
+PIE itself needs:
 
-### Enabling FFI
+- PHP 8.1 or newer to run, with the `iconv` and `openssl` extensions: the phar's requirement
+  checker stops without them.
+- The `zip` extension or an `unzip` binary, to unpack the download.
+- On macOS, the Xcode Command Line Tools (`xcode-select --install`). PIE tells macOS's libc
+  from glibc with `otool`; without it, it looks for a glibc zip, which does not exist for
+  macOS. Homebrew's PHP needs them already.
 
-`ext-ffi` ships with PHP, but the `ffi.enable` ini setting decides who may use it, and its
-default is `preload`:
+### Platforms and PHP versions
 
-| `ffi.enable` | CLI | Web SAPIs (FPM, Apache, `php -S`) |
-| --- | --- | --- |
-| `preload` (the default) | works | works only from preloaded code |
-| `1` | works | works |
-| `0` | refused | refused |
+Every zip is NTS (non-thread-safe) only, the build every distribution's `php` CLI and FPM
+packages ship; a ZTS PHP (FrankenPHP, for one) has no zip yet. 21 zips a release, each one
+load-checked into the PHP it is named for, and run through the full suite there, before it is
+packed:
 
-So the CLI works out of the box, and a web SAPI needs one of two things in `php.ini`
-(`ffi.enable` is a system-level setting — `ini_set()` and per-directory overrides cannot
-change it):
+| Platform | PHP 8.3 | PHP 8.4 | PHP 8.5 | Zip on the release |
+| --- | :---: | :---: | :---: | --- |
+| Linux x64, arm64 (glibc 2.34 or newer) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-glibc-nts.zip` |
+| Linux x64, arm64 (musl: Alpine) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-musl-nts.zip` |
+| macOS x64, arm64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-darwin-bsdlibc-nts.zip` |
+| Windows x64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>-<minor>-nts-{vs16,vs17}-x86_64.zip` (VS16 for 8.3, VS17 from 8.4) |
 
-- `ffi.enable=1`, which permits FFI to every script the server runs; or
-- keep the default and preload this package, which permits FFI to it alone:
+glibc 2.34 means Debian 12, Ubuntu 22.04, RHEL 9, Amazon Linux 2023 or newer. An extension is
+tied to one PHP minor, so a zip built for 8.4 is refused by 8.5; PIE picks by the PHP it runs
+against. Windows on ARM hardware takes the x64 zip, because PHP itself is an x64 process there:
+PHP has never shipped a native Windows ARM64 build. A 32-bit PHP is not supported.
 
-  ```ini
-  opcache.preload=/path/to/your/preload.php
-  ; opcache.preload_user=www-data   ; required when the server starts as root
-  ```
+### Checking it is loaded
 
-  ```php
-  <?php
-
-  // preload.php
-  foreach (glob(__DIR__ . '/vendor/skunkwerkx/hyperuuid/php/src/*.php') as $file) {
-      opcache_compile_file($file);
-  }
-  ```
-
-  PHP has no preloading on Windows; use `ffi.enable=1` there.
-
-Without either, the first call throws `FFI\Exception: FFI API is restricted by "ffi.enable"
-configuration directive`. Under a web SAPI the library is bound once per request — PHP's
-statics reset between requests — while the operating system keeps it mapped for the
-worker's lifetime.
-
-## Checking availability
-
-`HyperUuid::isAvailable()` answers whether the native library can be used at all, and never
-throws: a missing `ext-ffi`, an `ffi.enable` that restricts FFI for this SAPI, a missing or
-unloadable library, an unsupported platform, and a stale library lacking a symbol this
-binding declares all answer `false`. It attempts the same load every generator makes and
-caches the answer for the request, so it is what a consumer with a fallback gates on (here
-`$fallback` is a ramsey/uuid `UuidFactory`):
+Without the extension the classes don't exist, so `extension_loaded('hyperuuid')` is the
+check for a consumer with a fallback (here `$fallback` is a ramsey/uuid `UuidFactory`):
 
 ```php
-$id = HyperUuid::isAvailable()
+use HyperUuid\HyperUuid;
+
+$id = extension_loaded('hyperuuid')
     ? (string) HyperUuid::newV7()
     : (string) $fallback->uuid7();
 ```
 
-`HyperUuid::nativeVersion()` returns the loaded library's own `"major.minor.patch"` — a
-zero-argument probe the core exports, so a host can prove the `libhyperuuid` it resolved is
-the one this binding was written against before minting the first UUID. It throws exactly
-where `isAvailable()` answers `false`. If you catch instead of asking, catch `\Throwable`:
-ext-ffi reports its own failures as `\Error`s (`FFI\Exception` extends `\Error`, and a
-missing extension is a plain `Error: Class "FFI" not found`), which `catch (\Exception)`
-does not see.
+`HyperUuid::nativeVersion()` returns the extension's own `"major.minor.patch"`, the same string
+as `phpversion('hyperuuid')`, which is the version of the core it links. `php -m` lists
+`hyperuuid` when it is loaded.
 
-Setting the `HYPERUUID_NATIVE_LIBRARY` environment variable to a path makes the binding load
-that library in place of the bundled one. It is there for running the suite against a core
-built from a checkout of this repository (`.github/scripts/local-core.sh` builds one and
-prints the command), and `nativeVersion()` reports whichever library answered. Without it,
-outside CI, the suite refuses to run when the checkout's `rust/` differs from the commit the
-committed libraries were built from.
+### Stubs for IDEs and static analysis
+
+An extension's classes have no PHP source for an IDE or an analyser to read, so the repository
+carries a stub, [`php/stubs/hyperuuid.stub.php`](stubs/hyperuuid.stub.php): every class,
+method, constant and enum case with its types and doc comment, regenerated from the extension
+and compared in CI. PIE installs only the extension, so fetch the stub from the release's tag:
+
+```sh
+curl -LO https://raw.githubusercontent.com/SkunkWerkx/HyperUuid/v<version>/php/stubs/hyperuuid.stub.php
+```
+
+PhpStorm indexes it like any PHP file in the project: copy it in, or add its directory under
+*Settings | PHP | Include Path*. PHPStan needs it under `scanFiles`, which is how it discovers
+classes that have no source (`stubFiles` alone only overrides classes it has already found, and
+leaves these unknown):
+
+```neon
+parameters:
+    scanFiles:
+        - stubs/hyperuuid.stub.php
+```
+
+## Differences from 1.0
+
+1.0 was a Composer package over PHP's FFI extension. The API, defaults, exceptions and
+messages are the same in this extension, except:
+
+- `HyperUuid::isAvailable()` is gone; use `extension_loaded('hyperuuid')`.
+- The private `bytes` property is untyped and not `readonly` in reflection
+  (`ReflectionProperty::isReadOnly()` is `false`): ext-php-rs cannot declare a typed readonly
+  property. Reflection, `isset` and other property internals of that private property differ;
+  comparison, serialization and clone are unchanged.
+- A call with more arguments than the method declares is an `ArgumentCountError`; 1.0, as
+  userland PHP, ignored the extras. A call with too few is an `ArgumentCountError` as before,
+  worded as for a built-in function (`HyperUuid\Uuid::__construct() expects exactly 1
+  argument, 0 given`).
+- Exceptions, warnings and deprecations are reported at the caller's file and line; 1.0's came
+  from inside its own source files.
+- A `DateTimeInterface` beyond the 64-bit millisecond range is a
+  `TimestampOutOfRangeException` (1.0: `TypeError`).
+- `isRfc($version)` with a `$version` outside 0-15 is never matched; 1.0 could truncate a large
+  value into that range.
+
+Arguments are taken as 1.0 took them. A caller without `declare(strict_types=1)` gets PHP's
+weak-mode coercion of each declared type, with its deprecations (`newV7("1700000000000")`,
+`newV7Batch("10")` and `timestamp(0)` work as they did), and a strict caller gets the same
+`TypeError`s, worded the same. A `DateTimeInterface` whose `getTimestamp()` returns something
+other than an int goes through 1.0's arithmetic, `getTimestamp() * 1000`, with its warnings and
+errors. One trace of the extension shows on a debug (`ZEND_DEBUG`) build of PHP 8.5, which
+checks a built-in method's arguments before the call: a `NAN` given to `timestamp()`'s
+`$throwOnMismatch` in weak mode raises PHP 8.5's "unexpected NAN value was coerced to bool"
+warning twice.
 
 ## Bulk generation into bytes
 
 `newV7BatchBytes` returns the batch as one binary string of raw RFC 9562-ordered bytes — 16 per UUID — instead of an array of `Uuid` objects:
 
 ```php
+use HyperUuid\HyperUuid;
+
 $bytes = HyperUuid::newV7BatchBytes(1000);
 $first = substr($bytes, 0, 16);   // ready for a BINARY(16) bind parameter
 ```
 
-**About 16x faster than `newV7Batch`** for a 1000-UUID batch (4.2 µs versus 67.1 µs), and 64x faster than a thousand `newV7()` calls. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects and 1000 substrings on top of it. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
+**About 16x faster than `newV7Batch`** for a 1000-UUID batch (4.2 µs versus 67.1 µs), and 64x faster than a thousand `newV7()` calls, in the [table below](#benchmarks), which predates the extension. The native call is identical in both; `newV7Batch` simply allocates 1000 `Uuid` objects on top of it.
 
 The catch, and it inverts the advice: **if you need `Uuid` objects, keep using `newV7Batch`.** Slicing these bytes into objects yourself just relocates the identical allocations into your own code, and measures no better — sometimes worse. Reach for the byte form only when bytes are the destination: a bind parameter, a wire format, a bulk load.
 
-Slice it with `substr($bytes, $i * 16, 16)` — which is exactly what `newV7Batch` does internally.
+Slice it with `substr($bytes, $i * 16, 16)`.
 
 A batch count below 0 is an `InvalidArgumentException` on both batch methods; 0 returns
 an empty array or an empty string. A batch takes at most `HyperUuid::MAX_V7_BATCH` (67,108,864);
@@ -264,7 +304,8 @@ anything is allocated.
 Every batch is in strictly increasing order, and every v7 call, single or batch, reserves
 from one process-wide stream that is re-seeded at random whenever a timestamp moves it
 forward. A single call consumes one of a millisecond's 2^20 steps and a batch of n consumes
-⌈n/64⌉. For timestamps up to 2^44 − 2 (the year 2527):
+⌈n/64⌉. The stream is per process: each FPM worker has its own. For timestamps up to
+2^44 − 2 (the year 2527):
 
 - **Ordering.** A call whose timestamp is within 10 s of the newest stream timestamp either
   throws `CounterExhaustedException` (below) or reserves from the stream, and its UUIDs then
@@ -292,23 +333,23 @@ forward. A single call consumes one of a millisecond's 2^20 steps and a batch of
 
 `ramsey/uuid` is the de facto PHP standard, and it's genuinely a solid library — it supports v7 with its own monotonic-generation story too. This package isn't claiming to out-generate it; the real differentiators are elsewhere:
 
-1. **Zero Composer dependency.** This package needs nothing beyond PHP's own built-in `FFI` extension — no `ramsey/uuid`, no `composer require` at all beyond this package itself. If you're already pulling in `ramsey/uuid` for something else, that's a fine reason to stick with it; if not, this avoids adding it just for ID generation.
+1. **Nothing in `vendor/`.** The API is the extension, installed once per PHP — no `ramsey/uuid`, no Composer dependency at all. If you're already pulling in `ramsey/uuid` for something else, that's a fine reason to stick with it; if not, this avoids adding it just for ID generation.
 2. **Batch generation.** `newV7Batch(count)` shares one timestamp capture, one random-bytes fetch, and one counter reservation across the whole batch — one native call instead of `count` separate ones.
 3. **Cross-language consistency.** The same Rust core mints v5 namespace UUIDs for Python, Go, C#, Ruby, and every other binding in this repo — verified in CI to match Python's own `uuid.uuid5` byte-for-byte. A pure-PHP library, however good, can't structurally guarantee that against a codebase written in a different language.
 4. **`timestamp()` isn't tied to how the UUID was minted.** It's a plain RFC 9562 bit-layout read, verified (in this package's own test suite) to correctly extract from a `ramsey/uuid`-generated v7 value too, not just this package's own — so you can keep `ramsey/uuid` for generation and still get this package's (faster, see below) extraction on its output.
 
 ## Benchmarks
 
-Real numbers, measured with [PHPBench](https://phpbench.readthedocs.io/) on linux-x64 (an
-Intel Core i9-11900H), PHP 8.5 (`XDEBUG_MODE=off vendor/bin/phpbench run --report=aggregate
---retry-threshold=5`, mode across 5 iterations × 1000 revs each, repeated until the
-iterations agree within 5%; a loaded Xdebug inflates everything ~14x uniformly, hence
-`XDEBUG_MODE=off`). PHP core has
-nothing to compare against — the honest baseline here is a naive inline v4 built from
-`random_bytes(16)` with no FFI call at all, to isolate what the FFI boundary itself
-actually costs:
+**These tables predate the extension.** They measured 1.0's FFI package, and are kept
+until the extension is measured on the same machine; the benchmarks in `php/bench/` now run
+against the extension. Measured with [PHPBench](https://phpbench.readthedocs.io/) on linux-x64
+(an Intel Core i9-11900H), PHP 8.5 (`XDEBUG_MODE=off vendor/bin/phpbench run
+--report=aggregate --retry-threshold=5`, mode across 5 iterations × 1000 revs each, repeated
+until the iterations agree within 5%; a loaded Xdebug inflates everything ~14x uniformly, hence
+`XDEBUG_MODE=off`). PHP core has nothing to compare against — the honest baseline here is a
+naive inline v4 built from `random_bytes(16)`, with no call into native code at all:
 
-| Call | Time | vs. naive inline (no FFI) |
+| Call | Time | vs. naive inline |
 | --- | --- | --- |
 | Naive inline v4 (`random_bytes`, no RFC validation) | 308ns | — |
 | `newV4()` | 224ns | **1.4x faster** |
@@ -317,13 +358,11 @@ actually costs:
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
-Read that top row again: the full RFC-complete v4 — real entropy, correct version and
-variant bits, crossing into native code and back — costs **less than the naive pure-PHP
-three-liner that doesn't even validate anything**, and v7 beats it too. How far ahead depends on the machine, because most of the naive version is
-`random_bytes` and the operating system prices that: where the system random source is
-slow the gap is wider. The calls are this cheap because there is no wrapper left around
-the boundary: a single static out-buffer and zero-copy `const char *` string passes
-(inputs cross as plain PHP strings, no copy at all).
+The full RFC-complete v4 — real entropy, correct version and variant bits, crossing into
+native code and back — costs less than the naive pure-PHP three-liner that doesn't validate
+anything, and v7 beats it too. How far ahead depends on the machine, because most of the naive
+version is `random_bytes` and the operating system prices that: where the system random source
+is slow the gap is wider.
 
 Batch generation amortizes the per-call cost — one crossing instead of a thousand — and
 the [byte form](#bulk-generation-into-bytes) then skips building a thousand `Uuid` objects,
@@ -339,8 +378,7 @@ which is most of what is left:
 
 `ramsey/uuid` has real extraction logic of its own (`UuidInterface::getDateTime()`), so this is a genuine head-to-head, not a strawman — each call
 measured against a UUID generated once outside the timed loop, so only the extraction itself
-is timed. Unlike generation, where PHP's `FFI` boundary was the honest cost, extraction
-flips the result:
+is timed:
 
 | Call | Time | vs. `ramsey/uuid` |
 | --- | ---: | ---: |
@@ -349,102 +387,26 @@ flips the result:
 
 `ramsey/uuid`'s `getDateTime()` does real work this package's native extraction doesn't have
 to: parsing a lazily-decoded UUID string representation and constructing a `DateTimeImmutable`
-through its own codec layer, versus this package's single zero-copy FFI call plus a
-`DateTimeImmutable` built from exact integers (`createFromTimestamp`/`setMicrosecond` on PHP
-8.4+; a `createFromFormat` fallback keeps older PHP correct).
+through its own codec layer, versus one native call and a `DateTimeImmutable` built from exact
+integers.
 
-Reproduce: `composer require --dev phpbench/phpbench ramsey/uuid && XDEBUG_MODE=off vendor/bin/phpbench run --report=aggregate --retry-threshold=5`.
+Reproduce, in `php/` of a checkout with the extension built (see [Development](#development)):
+`composer install && XDEBUG_MODE=off composer bench -- --report=aggregate --retry-threshold=5`.
 
-### The native extension spike
+## WebAssembly: not shipped, and unproven for these classes
 
-**The `skunkwerkx/hyperuuid` Composer package (see Install below) is `ext-ffi` only** —
-everything above (`HyperUuid`, `Uuid`, `Namespaces`) — chosen because it needs zero
-compilation to install and already benchmarks level with or ahead of a naive pure-PHP v4 (see above). It
-is not the fastest thing this repo can produce.
-
-The same Rust core also links straight into a real Zend extension via
-[`ext-php-rs`](https://ext-php.rs) (`rust/src/php_ext.rs`, gated behind the crate's `php`
-Cargo feature) — the same move Python (PyO3) and Ruby (Magnus) get a shipped native backend
-for. PHP's does not ship, for two reasons. The mechanism is not the bottleneck here the way
-ctypes and Fiddle are: the `ext-ffi` crossing measured ~105ns, so what a Zend extension
-removes is the PHP-level wrapper around the call, not the call. And a Zend extension is
-pinned to one PHP ABI per build — the API number plus NTS or ZTS — with no Windows build on
-stable Rust, so shipping it means a binary per PHP version where the `ext-ffi` package ships
-one library per platform. CI's weekly and release runs build the extension on linux-x64,
-linux-arm64 and osx-arm64, load-check it, and upload and attest the result, so it cannot silently bit-rot; no `phpunit` runs
-against it and nothing in the Composer package loads it. HyperCast carries the same spike on
-the same terms. If you want to chase the last bit of single-call latency anyway, here's how
-to build and load it yourself:
-
-1. **Prerequisites:** a Rust toolchain ([rustup](https://rustup.rs)) and PHP's development
-   headers (the `php-dev` / `php8.5-dev` / `php-devel` package for your distro — `ext-php-rs`'s
-   build script needs these to link against `libphp`).
-2. **Build it** with the `php` feature, not the plain default build — that produces the
-   `ext-ffi` binding's cdylib, a different entry point from the same crate; don't load both
-   at once. `cargo php-ext` is an alias in `rust/.cargo/config.toml` that builds into its own
-   `target/php/` directory, so it can't overwrite the plain cdylib the other bindings load:
-   ```sh
-   git clone https://github.com/SkunkWerkx/HyperUuid
-   cd HyperUuid/rust
-   cargo php-ext
-   ```
-   Produces `target/php/release/libhyperuuid.so` (`.dylib` on macOS; Windows isn't supported —
-   `ext-php-rs`'s Windows path needs a nightly-only Rust feature, confirmed via a real E0554
-   build failure on stable, so every CI leg here builds Linux/macOS only).
-3. **Load it** — either add `extension=/absolute/path/to/target/php/release/libhyperuuid.so` to
-   `php.ini`, or pass it ad hoc: `php -d extension=/absolute/path/to/target/php/release/libhyperuuid.so your_script.php`.
-   Verify with `php -m | grep hyperuuid`.
-4. **Call it.** This extension is a benchmark spike, not a polished second backend, so it
-   exposes flat functions taking/returning raw 16-byte binary strings — not this package's
-   `Uuid` value object. Wrap the bytes yourself if you want `->__toString()`/`->timestamp()`/etc.:
-   ```php
-   $bytes = hyperuuid_native_new_v4();   // 16 raw RFC-9562-ordered bytes
-   $id = new \HyperUuid\Uuid($bytes);    // wrap it to get the Uuid API back
-
-   // v7 takes the timestamp; there is no "now" default, as there is none at the C ABI
-   $v7 = hyperuuid_native_new_v7((int) floor(microtime(true) * 1000));
-   ```
-   See [`rust/src/php_ext.rs`](../rust/src/php_ext.rs) for the full function list —
-   `hyperuuid_native_new_v5`/`_new_v7`(`_batch`)/`_v7_unix_millis`, same signatures as `Runtime.php`'s own internal FFI calls, plus
-   `hyperuuid_native_version`, which returns the packed integer (`major << 16 | minor << 8 |
-   patch`) rather than `nativeVersion()`'s string. The SQL-order conversions are not part of
-   the spike.
-
-Last measured on linux-arm64, PHP 8.5, `XDEBUG_MODE=off`, same 5-iterations × 1000-revs shape
-as the table above (min of the 5 iteration means). The comparison script that produced these
-numbers is not in this repository, so the table cannot be re-run from it as-is:
-
-| Call | `ext-ffi` (`Runtime.php`) | `ext-php-rs` native | Speedup |
-| --- | ---: | ---: | ---: |
-| `newV4` | 223ns | 135ns | **1.65x** |
-| `newV5` | 244ns | 175ns | 1.40x |
-| `newV7` † | 210ns | 107ns | **1.98x** |
-| `newV7Batch(1000)` † | 16.0µs | 15.8µs | 1.02x |
-
-† Measured before the per-millisecond re-seed (core change, 2026-10-27).
-
-Worth it for single-item calls (the ~105ns FFI floor is real, but so is a further ~100ns of
-PHP-level `Runtime::` call overhead around it that a native extension skips entirely — nearly
-2x on `newV7`); not worth it for batch calls, where 1000 UUIDs' worth of native
-computation dwarfs the one-time crossing cost either way — which, with the per-PHP-version
-packaging cost above, is why this stays a spike rather than a second shipped backend. See
-[`php_ext.rs`](../rust/src/php_ext.rs)'s own module doc comment for the full reasoning. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
-
-The same extension is also the route to PHP in the browser, proven and documented under
-[WebAssembly](#webassembly).
-
-## WebAssembly
-
-**In the browser: proven, not shipped.** The [native extension spike](#the-native-extension-spike)
-runs inside WordPress Playground's prebuilt PHP for the browser (`@php-wasm/web`, and
-`@php-wasm/node` for node) as a side module — no custom PHP build — verified under node and in
-headless Chromium against PHP 8.5.10 (`@php-wasm/*` 3.1.56, October 2026): the version probe,
-v4, the v5 RFC 9562 vector, v7 to and from a millisecond timestamp, a 1000-UUID batch and the
-out-of-range error. It is not shipped because of what shipping it costs, not because it does
-not work: one module per supported PHP minor (each must match its PHP version exactly), a
-~4 GB Docker image in CI to build them, and a distribution channel still to choose, for a
-binding whose Composer package is FFI only. If someone asks for it, the recipe below is
-everything it takes.
+The extension is not built for the browser, and the recipe below has not been run with these
+classes: they import `spl_ce_RuntimeException`, `spl_ce_InvalidArgumentException`,
+`zend_post_startup_cb` and `php_json_serializable_ce` from PHP, which a side module has to
+resolve from WordPress Playground's main module, and that is untested. What is proven is a
+raw-byte build of the same crate, functions over 16-byte strings in place of the classes,
+loaded as a side module into Playground's prebuilt PHP for the browser (`@php-wasm/web`, and
+`@php-wasm/node` for node), with no custom PHP build: verified under node and in headless
+Chromium against PHP 8.5.10 (`@php-wasm/*` 3.1.56, October 2026) for the version probe, v4,
+the v5 RFC 9562 vector, v7 to and from a millisecond timestamp, a 1000-UUID batch and the
+out-of-range error. Shipping it would cost one module per supported PHP minor (each must
+match its PHP version exactly), a ~4 GB Docker image in CI to build them, and a distribution
+channel still to choose.
 
 What it runs on, and the two upstream problems found on the way:
 
@@ -452,8 +414,8 @@ What it runs on, and the two upstream problems found on the way:
 - **A 64-bit `zend_long` only.** Playground builds PHP with `-DZEND_ENABLE_ZVAL_LONG64
   -D__x86_64__`, so `PHP_INT_SIZE` is 8 and millisecond timestamps are ints. On a 32-bit PHP
   ext-php-rs does not compile ([ext-php-rs#800](https://github.com/extphprs/ext-php-rs/issues/800),
-  five one-line fixes), and the binding's `u64` millisecond arguments would not fit a PHP int
-  there anyway.
+  five one-line fixes), and the extension's 64-bit millisecond arguments would not fit a PHP
+  int there anyway.
 - **Playground's `@php-wasm/compile-extension` drops four flags for Rust's C code**
   ([wordpress-playground#4377](https://github.com/WordPress/wordpress-playground/issues/4377)):
   without them the module fails to load with `bad export type for '__THREW__'`. The recipe
@@ -511,7 +473,7 @@ What it runs on, and the two upstream problems found on the way:
      --php-versions 8.5 --extra-ldflags /build/libhyperuuid.a --out dist
    ```
 
-   That writes `hyperuuid-php8.5-jspi.so` (128 KB; 50 KB gzipped) and `manifest.json`.
+   That writes `hyperuuid-php8.5-jspi.so` and `manifest.json`.
 
 5. Load it into the runtime and call it:
 
@@ -522,11 +484,8 @@ What it runs on, and the two upstream problems found on the way:
      emscriptenOptions: { processId: 1 },
      extensions: [{ source: { format: 'manifest', manifestUrl: 'dist/manifest.json' } }],
    }));
-   const r = await php.run({ code: '<?php echo bin2hex(hyperuuid_native_new_v4());' });
+   const r = await php.run({ code: '<?php echo HyperUuid\\HyperUuid::newV4();' });
    ```
-
-   The functions are the spike's `hyperuuid_native_*` raw-byte API; a browser rollout would
-   wrap them the way `Uuid`/`HyperUuid` wrap the FFI calls.
 
 Rolling it out would mean a CI job per PHP minor (steps 1–5, about ten minutes each cold, then
 the same calls in headless Chrome) and somewhere to publish the modules and manifests. The
@@ -541,27 +500,23 @@ binding.
 
 ## Verifying provenance
 
-Packagist has nothing of its own to attest: there is no packed artifact, just a git tag it
-resolves against this repo. What is worth checking is the native libraries committed under
-`php/src/native/`, and each verifies from the release tag alone: the release attestation,
-signed by this repository's `release.yml` at the tag, names every one of them, with the
-release inventory as its predicate.
+PIE does not check attestations on what it downloads, so verify the zip yourself before you
+trust it. Each one is named by the release attestation, signed by this repository's
+`release.yml` at the tag, with the release inventory as its predicate:
 
 ```sh
-composer require skunkwerkx/hyperuuid:<version>
-gh attestation verify vendor/skunkwerkx/hyperuuid/php/src/native/linux-x64/libhyperuuid.so \
+gh release download v<version> --repo SkunkWerkx/HyperUuid \
+  --pattern 'php_hyperuuid-v<version>_php8.5-x86_64-linux-glibc-nts.zip'
+gh attestation verify php_hyperuuid-v<version>_php8.5-x86_64-linux-glibc-nts.zip \
   --repo SkunkWerkx/HyperUuid --source-ref refs/tags/v<version> --predicate-type https://github.com/SkunkWerkx/.github/predicates/release/v1
 ```
 
-Each library also carries build provenance from `hyper-build-native.yml` in
-`SkunkWerkx/.github`, at the preparation commit the tagged commit was staged from
-(`stage-native-binaries.yml` verifies that before committing a byte, and the staging commit's
-`Release-Source-SHA` and `Release-CI-Run-ID` trailers name the commit and the run), so that
-check needs `--signer-repo` beside `--repo`:
+Each zip also carries build provenance from `hyper-build-php-extension.yml` in
+`SkunkWerkx/.github`, the workflow that built, tested and packed it at the release's
+preparation commit, so that check needs `--signer-repo` beside `--repo`:
 
 ```sh
-gh attestation verify vendor/skunkwerkx/hyperuuid/php/src/native/linux-x64/libhyperuuid.so \
-  --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
+gh attestation verify <zip> --repo SkunkWerkx/HyperUuid --signer-repo SkunkWerkx/.github
 ```
 
 Get the signer wrong and `gh` reports a bare `verifying with issuer "sigstore.dev"`, which
@@ -569,31 +524,38 @@ reads like a bad signature but is only an identity mismatch. The root README's
 [Provenance](../README.md#provenance) section has the whole picture: the inventory, which
 artifacts are signed from where, and the gates every byte passes before publication.
 
-## Install
+## Development
+
+The Composer package Packagist serves is the root [`composer.json`](../composer.json), a
+`php-ext` package that PIE reads for its `php-ext` block alone: Packagist requires the manifest
+at the top of the git repository it watches. This directory's `composer.json` is the
+development project, never published: PHPUnit, PHPBench, PHP_CodeSniffer and `ramsey/uuid` for
+the comparisons. To build the extension from a checkout and run the suite against it (a Rust
+toolchain and PHP's development headers, `php-config` on `PATH`):
 
 ```sh
-composer require skunkwerkx/hyperuuid
+git clone https://github.com/SkunkWerkx/HyperUuid
+cd HyperUuid/rust
+cargo php-ext                  # target/php/release/libhyperuuid.so (.dylib on macOS)
+cd ../php
+composer install
+composer test                  # PHPUnit with -d extension= pointing at that build
+composer bench                 # PHPBench, the same way
 ```
 
-Published to [Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid) — no extra
-repository configuration needed. See [Requirements](#requirements) for the PHP floor,
-`ffi.enable` and the supported platforms.
+To load the build by hand, name the file for your platform:
 
-There are two `composer.json` files in this repo: this directory's own (what CI actually
-`composer install`s/tests against) and a second one at [the repo root](../composer.json),
-which exists purely because Packagist requires `composer.json` at the top of the git
-repository it's watching, with no subdirectory support — confirmed against Packagist's own
-submission docs, not assumed. Its `autoload` PSR-4 mapping points into `php/src/`. A symlink
-from the root to this file would not do: Composer resolves a symlinked `composer.json`'s
-relative autoload paths against where the symlink itself sits, not the real file's directory,
-so `"src/"` would resolve to a nonexistent `<repo-root>/src/` instead of `php/src/`. Keep both in sync by hand when `require`/`autoload` change here.
+```sh
+# Linux
+php -d extension=$PWD/../rust/target/php/release/libhyperuuid.so -r 'echo HyperUuid\HyperUuid::newV4(), PHP_EOL;'
+# macOS
+php -d extension=$PWD/../rust/target/php/release/libhyperuuid.dylib -r 'echo HyperUuid\HyperUuid::newV4(), PHP_EOL;'
+```
 
-The native libraries under `src/native/{rid}/` are committed to git, not built by Packagist —
-unlike NuGet/Maven Central/PyPI/crates.io, Packagist has no packing step of its own, so
-whatever's literally in the git tree at a tagged commit is what a real `composer require`
-ships ([`src/native/README.md`](src/native/README.md) has which library loads where).
-Verified end to end: a fresh scratch project's `composer require skunkwerkx/hyperuuid`
-pulling straight from Packagist, generating real UUIDs.
+`HYPERUUID_PHP_EXTENSION` names another build for `composer test` and `composer bench`.
+`HYPERUUID_CHECK_STUBS=1 composer test` also regenerates the stub and compares it with the
+committed one (`php tools/generate-stubs.php` rewrites it; it needs the cargo-php version the
+script names, on Linux or macOS). `vendor/bin/phpcs` checks the tests and the benchmarks.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

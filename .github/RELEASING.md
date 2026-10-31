@@ -27,13 +27,16 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
    ```
 
    This is the recovery path, so every release exercises it. After all six publishers
-   succeed it creates `go/vX.Y.Z` and the GitHub Release. An npm package that does not exist
-   yet (the first release, or a new platform) has no trusted publisher to accept the upload,
-   so before this dispatch the owner bootstraps it as the shared runbook says: a placeholder
-   `0.0.1` under each new name, published by hand with a granular token, then `release.yml`
-   registered as its trusted publisher and the token revoked. The release version itself is
-   never published by hand, so its first real version is this run's Trusted Publishing
-   upload and carries npm provenance.
+   succeed it creates `go/vX.Y.Z` and the GitHub Release, with the 21 PHP extension zips
+   attached (PIE installs from there; Packagist sees the tag at once, so `pie install` fails
+   until this step has run). Its last job, `pie-acceptance`, then has PIE install
+   `skunkwerkx/hyperuuid:vX.Y.Z` on every platform and PHP minor and checks it from a fresh
+   `php`. An npm package that does not exist yet (the first release, or a new platform) has
+   no trusted publisher to accept the upload, so before this dispatch the owner bootstraps it
+   as the shared runbook says: a placeholder `0.0.1` under each new name, published by hand
+   with a granular token, then `release.yml` registered as its trusted publisher and the token
+   revoked. The release version itself is never published by hand, so its first real version
+   is this run's Trusted Publishing upload and carries npm provenance.
 6. Submit the R package to CRAN by hand: download `release-packages` from the tag run and
    upload its `cran/hyperuuid_X.Y.Z.tar.gz`, the attested bytes. No job uploads it.
 7. Verify one file of each kind from the tag alone, exactly as a consumer would:
@@ -49,3 +52,9 @@ override or native rebuild is allowed. Keep the package artifact (90-day retenti
 by policy). NuGet symbols and ambiguous Central uploads require the receipt/deployment
 reconciliation described in the shared runbook. Registry versions can never be replaced:
 never retag, never rebuild.
+
+A red `pie-acceptance` after publication is fixed with a patch release, never in place: no
+renamed asset (the inventory records its path), no repacked zip (the release attestation
+names its digest) and no re-attest. Re-run the failed leg once if the failure was transient;
+otherwise fix the cause and release X.Y.Z+1, noting in the CHANGELOG that X.Y.Z's PHP zips
+don't install.
