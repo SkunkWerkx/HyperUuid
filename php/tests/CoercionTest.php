@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace HyperUuid\Tests;
 
 use HyperUuid\Tests\Support\CoercionMatrix;
+use HyperUuid\Tests\Support\V1Differences;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -13,7 +14,8 @@ use PHPUnit\Framework\TestCase;
  * get PHP's standard coercion, with its deprecations and warnings; strict callers get the
  * `TypeError`s, worded as for a userland function (`..., called in F on line L`); and a
  * `DateTimeInterface` whose `getTimestamp()` returns a non-int goes through 1.0's arithmetic.
- * The expected outcomes are 1.0's own, recorded by tools/capture-v1-fixtures.php --coercion.
+ * The expected outcomes are 1.0's own, recorded by tools/capture-v1-fixtures.php --coercion,
+ * through the documented differences (V1Differences).
  */
 final class CoercionTest extends TestCase
 {
@@ -80,6 +82,7 @@ final class CoercionTest extends TestCase
         $expected = self::expected()[$mode][$case];
         $this->assertSame(array_keys($expected), array_keys(self::$actual[$mode][$case] ?? []));
         foreach ($expected as $input => $outcome) {
+            $outcome = V1Differences::expected($outcome);
             if (self::debugEngineWarnsTwice($mode, $case, $input)) {
                 $outcome['errors'] = [...$outcome['errors'], ...$outcome['errors']];
             }

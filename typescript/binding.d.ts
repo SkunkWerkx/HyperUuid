@@ -12,7 +12,10 @@ export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-was
 /** Fills `buffer` with `buffer.length / 16` ordered v7 ids in place, with no allocation. */
 export declare function fillV7(buffer: Uint8Array, time?: number | Date | undefined | null): void
 
-/** The `Date` an id carries, or `null` when it is not an RFC 9562 v7 id in `layout`. */
+/**
+ * The `Date` an id carries, or `null` when it is not an RFC 9562 v7 id in `layout`, or is one
+ * dated past 9999-12-31T23:59:59.999Z, the generation cap (`v7UnixMillis` reads that field).
+ */
 export declare function getTimestamp(id: string | Uint8Array, layout?: Layout | undefined | null): Date | null
 
 /**

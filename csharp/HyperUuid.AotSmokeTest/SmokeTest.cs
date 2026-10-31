@@ -84,13 +84,13 @@ internal static class SmokeTest
 		}
 
 		// Non-throwing construction path — must be AOT-clean too, and must actually report failure
-		// rather than throw (2^48 ms overflows v7's 48-bit unix_ts_ms field).
+		// rather than throw (one past the generation cap, 253402300800000 ms, is refused).
 		if (!UuidGenerator.TryNewV7(FixedMs, out var tryV7) || tryV7 == Guid.Empty)
 		{
 			Console.WriteLine("FAIL: TryNewV7 rejected a valid timestamp");
 			return 1;
 		}
-		if (UuidGenerator.TryNewV7(1L << 48, out var overflowed) || overflowed != Guid.Empty)
+		if (UuidGenerator.TryNewV7(253_402_300_800_000L, out var overflowed) || overflowed != Guid.Empty)
 		{
 			Console.WriteLine("FAIL: TryNewV7 accepted an out-of-range timestamp");
 			return 1;

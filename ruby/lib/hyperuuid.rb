@@ -94,13 +94,13 @@ module HyperUuid
   end
 
   # Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time; pass
-  # an explicit `Time` or Unix-epoch millisecond integer (non-negative, fitting in 48 bits) to
-  # embed a specific time instead.
+  # an explicit `Time` or Unix-epoch millisecond integer (non-negative, at most 253402300799999:
+  # 9999-12-31T23:59:59.999Z, the generation cap) to embed a specific time instead.
   #
   # Every call reserves the next step of one process-wide stream: see #new_v7_batch for the
   # ordering and the embedded timestamp.
   #
-  # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
+  # @raise [TimestampOutOfRangeError] if the time is before 1970 or after 9999-12-31T23:59:59.999Z.
   # @raise [CounterExhaustedError] if the stream cannot advance without running more than
   #   1000 ms ahead of the supplied time or past its last millisecond; nothing is reserved.
   # @raise [TypeError] if +unix_millis+ isn't a Time, an Integer or nil.
@@ -125,7 +125,7 @@ module HyperUuid
   # or past 2**44 - 2, is minted at itself, outside the stream and ordered against nothing.
   #
   # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
-  # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
+  # @raise [TimestampOutOfRangeError] if the time is before 1970 or after 9999-12-31T23:59:59.999Z.
   # @raise [CounterExhaustedError] if the stream cannot advance without running more than
   #   1000 ms ahead of the supplied time or past its last millisecond; nothing is reserved.
   def self.new_v7_batch(count, unix_millis = nil)
@@ -150,7 +150,7 @@ module HyperUuid
   # ordering, embedded timestamp and the MAX_V7_BATCH limit are #new_v7_batch's.
   #
   # @raise [TypeError, ArgumentError] if +count+ isn't an Integer between 0 and MAX_V7_BATCH.
-  # @raise [TimestampOutOfRangeError] if the time is negative or past the 48-bit v7 field.
+  # @raise [TimestampOutOfRangeError] if the time is before 1970 or after 9999-12-31T23:59:59.999Z.
   # @raise [CounterExhaustedError] if the stream cannot advance without running more than
   #   1000 ms ahead of the supplied time or past its last millisecond; nothing is reserved.
   def self.new_v7_batch_bytes(count, unix_millis = nil)

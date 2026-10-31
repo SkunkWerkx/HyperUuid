@@ -145,8 +145,9 @@ func ExampleV7ToSqlOrder() {
 }
 
 func ExampleNewV7At_outOfRange() {
-	// Version 7 holds 48 bits of Unix milliseconds; one past that is an error, not a wrap.
-	_, err := hyperuuid.NewV7At(1 << 48)
+	// Version 7 is minted up to 9999-12-31T23:59:59.999Z; one millisecond past that is an
+	// error, not a wrap.
+	_, err := hyperuuid.NewV7At(253_402_300_800_000)
 	fmt.Println(errors.Is(err, hyperuuid.ErrTimestampOutOfRange))
 	// Output: true
 }

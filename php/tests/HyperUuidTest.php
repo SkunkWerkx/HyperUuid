@@ -7,6 +7,7 @@ namespace HyperUuid\Tests;
 use HyperUuid\HyperUuid;
 use HyperUuid\Namespaces;
 use HyperUuid\Tests\Support\ChildProcess;
+use HyperUuid\Tests\Support\V1Differences;
 use HyperUuid\TimestampOutOfRangeException;
 use HyperUuid\Uuid;
 use HyperUuid\UuidLayout;
@@ -171,13 +172,44 @@ final class HyperUuidTest extends TestCase
         self::assertEquals($expected, $id->timestamp());
     }
 
-    public function testV7TimestampRoundTripsZeroAndMax(): void
+    public function testV7TimestampRoundTripsZeroAndTheCap(): void
     {
         self::assertSame(0, HyperUuid::newV7(0)->timestamp()->getTimestamp());
 
-        $maxMs = 0x0000_FFFF_FFFF_FFFF;
+        $maxMs = 253_402_300_799_999;
         $recovered = HyperUuid::newV7($maxMs)->timestamp();
         self::assertSame($maxMs, $recovered->getTimestamp() * 1000 + (int) $recovered->format('v'));
+    }
+
+    public function testV7TimestampsStopAtTheLastMillisecondOf9999InBothDirections(): void
+    {
+        // The cap is the last instant .NET's DateTime and Python's datetime can name. One
+        // millisecond more is TimestampOutOfRangeException; a version 7 another generator dated
+        // past the cap has no timestamp, as a version 6 has none: both doors here check the
+        // version, so both answer null for it (the 48-bit field itself reaches 10889).
+        $last = new \DateTimeImmutable('9999-12-31T23:59:59.999Z');
+        $past = \DateTimeImmutable::createFromFormat('U.u', '253402300800.000000', new \DateTimeZone('UTC'));
+        self::assertInstanceOf(\DateTimeImmutable::class, $past);
+        self::assertSame(253_402_300_799_999, HyperUuid::newV7($last)->unixMillis());
+        self::assertSame(253_402_300_799_999, HyperUuid::newV7(253_402_300_799_999)->unixMillis());
+        foreach ([253_402_300_800_000, $past] as $time) {
+            try {
+                HyperUuid::newV7($time);
+                self::fail('newV7 accepted a timestamp past the cap');
+            } catch (TimestampOutOfRangeException $e) {
+                self::assertSame(
+                    'unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)',
+                    $e->getMessage()
+                );
+            }
+        }
+
+        $foreign = Uuid::parse('ffffffff-ffff-7000-8000-010203040506');
+        self::assertTrue($foreign->isRfc(7));
+        self::assertNull($foreign->timestamp(false));
+        self::assertNull($foreign->unixMillis());
+        $this->expectException(\InvalidArgumentException::class);
+        $foreign->timestamp();
     }
 
     public function testTimestampThrowsForNonTimeBasedVersionByDefault(): void
@@ -228,8 +260,9 @@ final class HyperUuidTest extends TestCase
 
     public function testEveryV7ConvertsToSqlOrderUpToTheLargestTimestamp(): void
     {
-        // The layout holds all 122 free bits of a version 7, so no timestamp is out of range.
-        foreach ([0, (1 << 47) - 1, 1 << 47, 0x0000_FFFF_FFFF_FFFF] as $millis) {
+        // The layout holds all 122 free bits of a version 7, so every timestamp newV7 takes
+        // converts, the generation cap included.
+        foreach ([0, (1 << 47) - 1, 1 << 47, 253_402_300_799_999] as $millis) {
             $id = HyperUuid::newV7($millis);
             $sql = $id->toSqlOrder();
             self::assertSame($millis, $sql->unixMillis(UuidLayout::SqlServer), (string) $id);
@@ -604,7 +637,8 @@ final class HyperUuidTest extends TestCase
 
     /**
      * Every row Task 1 captured from the 1.0 binding: the same millis, or the same exception
-     * class and message. A row whose input starts with '@' was built from 'U.u' in UTC.
+     * class and message, through the documented differences (V1Differences). A row whose input
+     * starts with '@' was built from 'U.u' in UTC.
      */
     public function testDateTimesMatchV1(): void
     {
@@ -615,6 +649,7 @@ final class HyperUuidTest extends TestCase
         );
         self::assertNotEmpty($rows);
         foreach ($rows as $row) {
+            $row = V1Differences::expected($row);
             $input = $row['input'];
             $dt = str_starts_with($input, '@')
                 ? \DateTimeImmutable::createFromFormat('U.u', substr($input, 1), new \DateTimeZone('UTC'))

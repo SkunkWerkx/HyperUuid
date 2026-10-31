@@ -424,7 +424,7 @@ public static partial class UuidGenerator
 
 	/// <summary>Creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a Unix-epoch millisecond timestamp.</summary>
 	/// <exception cref="ArgumentOutOfRangeException">
-	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// <paramref name="unixMilliseconds"/> is negative or past 253402300799999 (9999-12-31T23:59:59.999Z, the generation cap).
 	/// </exception>
 	/// <exception cref="InvalidOperationException">
 	/// The random source failed, or the v7 stream is exhausted: it cannot advance without
@@ -444,7 +444,7 @@ public static partial class UuidGenerator
 	internal static Exception V7Failure(int rc, string entryPoint) => rc switch
 	{
 		2 => new ArgumentOutOfRangeException("unixMilliseconds",
-			"Unix millisecond timestamp must be non-negative and fit within 48 bits."),
+			"Unix millisecond timestamp must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)."),
 		6 => new InvalidOperationException(CounterExhaustedMessage),
 		_ => new InvalidOperationException($"{entryPoint} failed with code {rc} (random source failure)."),
 	};
@@ -452,7 +452,7 @@ public static partial class UuidGenerator
 	/// <summary>
 	/// Non-throwing counterpart to <see cref="NewV7(long)"/> — returns <see langword="false"/> for
 	/// every failure mode the native layer reports (random-source failure, a
-	/// <paramref name="unixMilliseconds"/> that is negative or doesn't fit 48 bits, and an
+	/// <paramref name="unixMilliseconds"/> that is negative or past the generation cap, and an
 	/// exhausted v7 stream) rather than throwing. See <see cref="TryNewV4"/> for why this is the cheaper shape at a
 	/// <c>Result</c>-style call site.
 	/// </summary>
@@ -500,9 +500,11 @@ public static partial class UuidGenerator
 	/// Recovers the UTC timestamp embedded in a version 7 UUID as a <see cref="DateTimeOffset"/>.
 	/// </summary>
 	/// <exception cref="ArgumentOutOfRangeException">
-	/// Thrown for a (spec-valid) embedded timestamp past year 9999 — the RFC's 48-bit
-	/// millisecond field holds values up to the year 10889, but <see cref="DateTimeOffset"/>
-	/// cannot represent a year beyond 9999.
+	/// Thrown for a (spec-valid) embedded timestamp past year 9999 — never minted here
+	/// (9999-12-31T23:59:59.999Z is the generation cap), but the RFC's 48-bit field holds values
+	/// up to the year 10889 and <see cref="DateTimeOffset"/> cannot represent them.
+	/// <see cref="V7UnixMillis(Guid)"/> reads those; <see cref="GetTimestamp(Guid)"/> answers
+	/// <see langword="null"/> for them.
 	/// </exception>
 	public static DateTimeOffset V7Timestamp(Guid uuid) =>
 		DateTimeOffset.FromUnixTimeMilliseconds(V7UnixMillis(uuid));
@@ -512,9 +514,10 @@ public static partial class UuidGenerator
 	/// if it isn't an RFC 9562 version 7 UUID: the variant is checked as well as the version
 	/// nibble (see <see cref="IsRfc(Guid, int)"/>), so a 7 under another variant carries no
 	/// timestamp, and nor does any other version — a version 1 or 6 from another generator
-	/// included. Unlike <see cref="V7Timestamp(Guid)"/>, this checks the version itself first,
-	/// so a caller doesn't need to before asking. Its one edge comes with it: a timestamp past
-	/// year 9999 throws <see cref="ArgumentOutOfRangeException"/>.
+	/// included, and nor does a version 7 another generator dated past 9999-12-31T23:59:59.999Z,
+	/// the generation cap (the 48-bit field reaches 10889; <see cref="V7UnixMillis(Guid)"/>
+	/// reads it that far). Unlike <see cref="V7Timestamp(Guid)"/>, this checks the version
+	/// itself first, so a caller doesn't need to before asking, and never throws for the value.
 	/// </summary>
 	/// <remarks>
 	/// Reads <paramref name="uuid"/> as RFC 9562 order. A SQL-ordered value is an RFC 9562
@@ -912,7 +915,7 @@ public static partial class UuidGenerator
 	/// </summary>
 	/// <exception cref="ArgumentOutOfRangeException">
 	/// <paramref name="destination"/> holds more than <see cref="MaxV7Batch"/> elements, or
-	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// <paramref name="unixMilliseconds"/> is negative or past 253402300799999 (9999-12-31T23:59:59.999Z, the generation cap).
 	/// </exception>
 	/// <exception cref="InvalidOperationException">
 	/// The random source failed, or the v7 stream is exhausted (see <see cref="MaxV7Batch"/>).
@@ -921,7 +924,7 @@ public static partial class UuidGenerator
 	public static void FillV7(Span<Guid> destination, long unixMilliseconds)
 	{
 		ThrowOnBatchFailure(CoreFillV7(destination, unixMilliseconds), "uuid_new_v7_batch",
-			"Unix millisecond timestamp must be non-negative and fit within 48 bits.",
+			"Unix millisecond timestamp must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z).",
 			nameof(destination));
 	}
 
@@ -959,7 +962,7 @@ public static partial class UuidGenerator
 	/// </exception>
 	/// <exception cref="ArgumentOutOfRangeException">
 	/// <paramref name="destination"/> holds more than <see cref="MaxV7Batch"/> UUIDs, or
-	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// <paramref name="unixMilliseconds"/> is negative or past 253402300799999 (9999-12-31T23:59:59.999Z, the generation cap).
 	/// </exception>
 	/// <exception cref="InvalidOperationException">
 	/// The random source failed, or the v7 stream is exhausted (see <see cref="MaxV7Batch"/>).
@@ -969,7 +972,7 @@ public static partial class UuidGenerator
 	{
 		RequireWholeUuids(destination, nameof(destination));
 		ThrowOnBatchFailure(CoreFillV7Bytes(destination, unixMilliseconds), "uuid_new_v7_batch",
-			"Unix millisecond timestamp must be non-negative and fit within 48 bits.",
+			"Unix millisecond timestamp must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z).",
 			nameof(destination));
 	}
 
@@ -1043,7 +1046,7 @@ public static partial class UuidGenerator
 	/// </summary>
 	/// <exception cref="ArgumentOutOfRangeException">
 	/// <paramref name="count"/> is negative or greater than <see cref="MaxV7Batch"/>, or
-	/// <paramref name="unixMilliseconds"/> is negative or does not fit within 48 bits.
+	/// <paramref name="unixMilliseconds"/> is negative or past 253402300799999 (9999-12-31T23:59:59.999Z, the generation cap).
 	/// </exception>
 	/// <exception cref="InvalidOperationException">
 	/// The random source failed, or the v7 stream is exhausted (see <see cref="MaxV7Batch"/>).

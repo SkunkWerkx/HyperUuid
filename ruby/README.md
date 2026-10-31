@@ -160,8 +160,10 @@ timestamps up to 2⁴⁴ − 2 (the year 2527):
 
 Three exceptions describe a failed call, and each carries the same message on every backend:
 
-- `HyperUuid::TimestampOutOfRangeError` — the time cannot be embedded in a version 7: past
-  its 48-bit millisecond field, or negative (a `Time` before the Unix epoch included).
+- `HyperUuid::TimestampOutOfRangeError` — the time cannot be embedded in a version 7: after
+  9999-12-31T23:59:59.999Z (253,402,300,799,999 ms, the generation cap; the 48-bit field itself
+  reaches 10889, and `#timestamp` reads a version 7 another generator dated past the cap as it
+  reads a version 6: no timestamp), or negative (a `Time` before the Unix epoch included).
 - `HyperUuid::CounterExhaustedError` — the version 7 stream cannot advance without running
   more than 1000 ms ahead of the supplied time or past its last millisecond (see
   [Version 7 ordering and the batch limit](#version-7-ordering-and-the-batch-limit)). Nothing is

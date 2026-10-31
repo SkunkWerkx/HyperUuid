@@ -67,15 +67,17 @@ int32_t uuid_new_v4(uint8_t *out_ptr);
 int32_t uuid_new_v5(const uint8_t *ns_ptr, const uint8_t *name_ptr, uint32_t name_len, uint8_t *out_ptr);
 
 // The version-agnostic timestamp read in one call: for an RFC 9562 version 7 UUID at
-// `uuid_ptr` (16 bytes, held in `layout`'s byte order), writes its Unix-epoch milliseconds to
+// `uuid_ptr` (16 bytes, held in `layout`'s byte order) dated at most 253402300799999
+// (9999-12-31T23:59:59.999Z, the generation cap), writes its Unix-epoch milliseconds to
 // `millis_out` and returns the version, 7. For anything else — another version, another
-// variant, an unknown layout code — returns 0 and leaves `millis_out` untouched.
+// variant, an unknown layout code, a version 7 dated past the cap — returns 0 and leaves
+// `millis_out` untouched. `uuid_v7_unix_millis` reads the field as it is.
 uint32_t uuid_get_timestamp(const uint8_t *uuid_ptr, uint32_t layout_code, uint64_t *millis_out);
 
 // Writes a time-sortable UUID version 7 (RFC 9562 §6.2) to `out_ptr` (16 bytes), embedding
 // `unix_millis` (milliseconds since the Unix epoch, supplied by the caller).
-// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
-// 6 if the version 7 stream cannot advance (its counter is exhausted).
+// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range
+// (past 253402300799999, the last millisecond of 9999), 6 if the version 7 stream cannot advance (its counter is exhausted).
 int32_t uuid_new_v7(uint64_t unix_millis, uint8_t *out_ptr);
 
 // Extracts the Unix-epoch millisecond timestamp embedded in a version 7 UUID at `uuid_ptr`
@@ -92,8 +94,8 @@ uint64_t uuid_v7_unix_millis_in(const uint8_t *uuid_ptr, uint32_t layout_code);
 // sharing one `unix_millis` timestamp capture and one contiguous reservation of the version 7
 // stream. A `count` of 0 is a no-op success. Items past the end of the stream's millisecond
 // are stamped the next one, so the batch is always in order.
-// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
-// 3 if `count * 16` bytes cannot be addressed (32-bit targets only), 4 if `count` exceeds
+// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range
+// (past 253402300799999, the last millisecond of 9999), 3 if `count * 16` bytes cannot be addressed (32-bit targets only), 4 if `count` exceeds
 // 2^26, 6 if the stream cannot advance. On 1 and 6 the front of the buffer may hold entropy.
 int32_t uuid_new_v7_batch(uint64_t unix_millis, uint32_t count, uint8_t *out_ptr);
 

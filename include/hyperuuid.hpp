@@ -3,7 +3,7 @@
 // (std::expected).
 //
 // A generating call returns std::expected<T, hyperuuid::errc>: the core's failures (the random
-// source, a timestamp the 48-bit field cannot hold, a batch too large, a value of the wrong
+// source, a timestamp before 1970 or after 9999, a batch too large, a value of the wrong
 // version, an exhausted v7 stream) are values, not exceptions. errc is also a std::error_code
 // enum. Nothing here throws except std::vector's allocation in new_v7_batch.
 //
@@ -37,7 +37,7 @@ namespace hyperuuid {
 // checks itself before calling the core (numbered past the C codes so none can collide).
 enum class errc : int {
   random_source_failure = 1,  // the operating system's random source failed
-  timestamp_out_of_range = 2, // the timestamp does not fit the 48-bit millisecond field
+  timestamp_out_of_range = 2, // the timestamp is before 1970 or after 9999-12-31T23:59:59.999Z
   batch_not_addressable = 3,  // count * 16 bytes cannot be addressed (32-bit targets only)
   batch_too_large = 4,        // count is over max_v7_batch
   wrong_version = 5,          // not the version 7 (or SQL-ordered version 7) the conversion takes
@@ -63,7 +63,7 @@ public:
     case errc::random_source_failure:
       return "the random source failed";
     case errc::timestamp_out_of_range:
-      return "the timestamp does not fit the 48-bit millisecond field";
+      return "the timestamp is before 1970 or after 9999-12-31T23:59:59.999Z";
     case errc::batch_not_addressable:
       return "the batch is larger than this platform can address";
     case errc::batch_too_large:
@@ -225,7 +225,8 @@ inline std::expected<uuid, errc> new_v7(std::uint64_t unix_millis) {
   return detail::made(::uuid_new_v7(unix_millis, detail::out(u)), u);
 }
 
-// A UUID version 7 at `when`, by default now. Before 1970 is timestamp_out_of_range.
+// A UUID version 7 at `when`, by default now. Before 1970 or after 9999-12-31T23:59:59.999Z
+// (253402300799999 ms, the last millisecond .NET's DateTime names) is timestamp_out_of_range.
 inline std::expected<uuid, errc>
 new_v7(std::chrono::system_clock::time_point when = std::chrono::system_clock::now()) {
   const auto millis = detail::unix_millis(when);
@@ -285,7 +286,8 @@ new_v7_batch(std::size_t count,
 }
 
 // The Unix-epoch milliseconds in a version 7 UUID. Bit-shifting only: meaningful for a genuine
-// version 7 (is_rfc is the check; get_timestamp checks for you).
+// version 7 (is_rfc is the check; get_timestamp checks for you), and read as the 48-bit field
+// holds it, past the generation cap included.
 inline std::uint64_t v7_unix_millis(const uuid &u) noexcept {
   return ::uuid_v7_unix_millis(detail::in(u));
 }
@@ -295,7 +297,9 @@ inline std::uint64_t v7_unix_millis(const uuid &u, uuid_layout layout) noexcept 
   return ::uuid_v7_unix_millis_in(detail::in(u), static_cast<std::uint32_t>(layout));
 }
 
-// The timestamp of an RFC 9562 version 7 UUID held in `layout`, or nullopt for anything else.
+// The timestamp of an RFC 9562 version 7 UUID held in `layout`, or nullopt for anything else:
+// another version or variant, or a version 7 dated past 9999-12-31T23:59:59.999Z, which new_v7
+// never mints and this does not read.
 inline std::optional<std::chrono::sys_time<std::chrono::milliseconds>>
 get_timestamp(const uuid &u, uuid_layout layout = uuid_layout::rfc9562) noexcept {
   std::uint64_t millis = 0;

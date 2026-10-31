@@ -317,7 +317,8 @@ func TestV7TimestampRoundTripsZeroAndTheRfc48BitMax(t *testing.T) {
 		t.Errorf("got %v, want unix epoch", got)
 	}
 
-	const maxMs uint64 = 0x0000_FFFF_FFFF_FFFF
+	// The generation cap: 9999-12-31T23:59:59.999Z.
+	const maxMs uint64 = 253_402_300_799_999
 	id, err := NewV7At(maxMs)
 	if err != nil {
 		t.Fatal(err)
@@ -640,7 +641,7 @@ func TestFillEmptyAndNilAreNoOps(t *testing.T) {
 
 func TestFillV7AtRejectsAnOutOfRangeTimestamp(t *testing.T) {
 	dst := make([]uuid.UUID, 4)
-	err := FillV7At(dst, 1<<48)
+	err := FillV7At(dst, 253_402_300_800_000) // one past the cap
 	if !errors.Is(err, ErrTimestampOutOfRange) {
 		t.Fatalf("got %v, want ErrTimestampOutOfRange", err)
 	}

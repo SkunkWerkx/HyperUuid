@@ -11,6 +11,8 @@ const {
   fillV7,
   MAX_V7_BATCH,
   v7UnixMillis,
+  getTimestamp,
+  isRfc,
 } = api
 
 const MS = 1645557742000
@@ -85,8 +87,31 @@ test('timestamp errors carry ERR_HYPERUUID_TIMESTAMP_RANGE', () => {
   const code = 'ERR_HYPERUUID_TIMESTAMP_RANGE'
   assert.throws(() => newV7(-1), { code })
   assert.throws(() => newV7(NaN), { code })
-  assert.throws(() => newV7(2 ** 48), { code })
+  assert.throws(() => newV7(253_402_300_800_000), { code })
   assert.throws(() => newV7(new Date(NaN)), { code })
+})
+
+test('v7 timestamps stop at the last millisecond of 9999 in both directions', () => {
+  // The cap is the last instant .NET's DateTime and Python's datetime can name. One
+  // millisecond more is ERR_HYPERUUID_TIMESTAMP_RANGE; a v7 another generator dated past the
+  // cap has no timestamp at getTimestamp, as a v6 has none, while v7UnixMillis trusts the
+  // caller and reads the 48-bit field as it is.
+  const last = new Date('9999-12-31T23:59:59.999Z')
+  assert.equal(last.getTime(), 253_402_300_799_999)
+  assert.equal(getTimestamp(newV7(last))?.getTime(), 253_402_300_799_999)
+  assert.equal(getTimestamp(newV7(253_402_300_799_999))?.getTime(), 253_402_300_799_999)
+  for (const past of [253_402_300_800_000, new Date('+010000-01-01T00:00:00Z')]) {
+    assert.throws(() => newV7(past), {
+      code: 'ERR_HYPERUUID_TIMESTAMP_RANGE',
+      message:
+        'unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)',
+    })
+  }
+
+  const past = 'ffffffff-ffff-7000-8000-010203040506'
+  assert.equal(isRfc(past, 7), true)
+  assert.equal(getTimestamp(past), null)
+  assert.equal(v7UnixMillis(past), 281_474_976_710_655)
 })
 
 test('oversize batches carry ERR_HYPERUUID_BATCH_TOO_LARGE', () => {

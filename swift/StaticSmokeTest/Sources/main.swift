@@ -77,8 +77,8 @@ do {
 
     // An out-of-range timestamp is the native core's refusal, surfaced as this binding's error.
     do {
-        _ = try UuidGenerator.newV7(unixMillis: 1 << 48)
-        check(false, "a 49-bit timestamp was accepted")
+        _ = try UuidGenerator.newV7(unixMillis: 253_402_300_800_000)
+        check(false, "a timestamp one past the cap was accepted")
     } catch UuidGenerator.Error.timestampOutOfRange {
     }
 

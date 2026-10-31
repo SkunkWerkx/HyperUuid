@@ -103,7 +103,7 @@ def test_v7_has_version_and_variant_bits_set():
 
 
 def test_v7_overflow_timestamp_raises():
-    """A v7 timestamp past 48 bits raises ValueError."""
+    """A v7 timestamp past the cap raises ValueError."""
     with pytest.raises(ValueError):
         hyperuuid.new_v7(0x0001_0000_0000_0000)
 
@@ -139,8 +139,8 @@ def test_v7_timestamp_round_trips_zero_and_a_large_timestamp():
     """v7_timestamp round-trips the epoch and the latest datetime can hold."""
     assert hyperuuid.v7_timestamp(hyperuuid.new_v7(0)).timestamp() == 0
 
-    # Largest ms value datetime.datetime (year <= 9999) can represent, not the RFC's own
-    # 48-bit max (valid to year 10889) — see test below for that boundary.
+    # Inside datetime's last year; the generation cap is its last millisecond (the test
+    # below pins that boundary).
     large_ms = int(datetime.datetime(9999, 1, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)
     recovered = hyperuuid.v7_timestamp(hyperuuid.new_v7(large_ms))
     assert int(recovered.timestamp() * 1000) == large_ms
@@ -150,10 +150,8 @@ def test_v7_unix_millis_returns_the_embedded_integer():
     """v7_unix_millis returns the millisecond minted."""
     assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(RFC_TEST_VECTOR_MS)) == RFC_TEST_VECTOR_MS
     assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(0)) == 0
-    # The integer form holds what datetime cannot: the top of the 48-bit field.
-    assert (
-        hyperuuid.v7_unix_millis(hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)) == 0x0000_FFFF_FFFF_FFFF
-    )
+    # The generation cap, 9999-12-31T23:59:59.999Z, exactly.
+    assert hyperuuid.v7_unix_millis(hyperuuid.new_v7(253_402_300_799_999)) == 253_402_300_799_999
 
 
 def test_unix_millis_agrees_with_the_datetime_doors():
@@ -166,11 +164,25 @@ def test_unix_millis_agrees_with_the_datetime_doors():
         assert hyperuuid.v7_timestamp(id_) == epoch + datetime.timedelta(milliseconds=millis)
 
 
-def test_v7_timestamp_raises_past_datetime_year_range():
-    """A legitimate RFC 9562 v7 UUID can embed a timestamp datetime.datetime can't hold."""
-    id_ = hyperuuid.new_v7(0x0000_FFFF_FFFF_FFFF)
+def test_v7_timestamps_stop_at_the_last_millisecond_of_9999_in_both_directions():
+    """Minting stops at 9999-12-31T23:59:59.999Z, the last instant datetime can name; one
+    millisecond more is the out-of-range ValueError. The version-agnostic door treats a version 7
+    another generator dated past that as it treats a version 6: no timestamp. The 48-bit field
+    reaches 10889, so the per-version millisecond reader still reads such a value, and
+    v7_timestamp, which builds a datetime, raises OverflowError for it as documented."""
+    last = datetime.datetime(9999, 12, 31, 23, 59, 59, 999_000, tzinfo=datetime.timezone.utc)
+    id_ = hyperuuid.new_v7(253_402_300_799_999)
+    assert hyperuuid.v7_timestamp(id_) == last
+    assert hyperuuid.get_timestamp(id_) == last
+    with pytest.raises(ValueError):
+        hyperuuid.new_v7(253_402_300_800_000)
+
+    past = uuid.UUID("ffffffff-ffff-7000-8000-010203040506")
+    assert hyperuuid.is_rfc(past, 7)
+    assert hyperuuid.get_timestamp(past) is None
+    assert hyperuuid.v7_unix_millis(past) == 0x0000_FFFF_FFFF_FFFF
     with pytest.raises(OverflowError):
-        hyperuuid.v7_timestamp(id_)
+        hyperuuid.v7_timestamp(past)
 
 
 @pytest.mark.skipif(
@@ -244,7 +256,7 @@ def test_v7_batch_count_zero_returns_empty_list():
 
 
 def test_v7_batch_overflow_timestamp_raises():
-    """A v7 batch at a timestamp past 48 bits raises ValueError."""
+    """A v7 batch at a timestamp past the cap raises ValueError."""
     with pytest.raises(ValueError):
         hyperuuid.new_v7_batch(1, 0x0001_0000_0000_0000)
 
@@ -324,9 +336,9 @@ def test_sql_order_conversions_refuse_the_other_version_and_the_other_order():
 
 
 def test_every_v7_converts_to_sql_order_and_back():
-    """The layout holds all 122 of a v7's free bits, so every timestamp converts, the top of the
-    48-bit field included, and the way back is exact."""
-    for millis in (0, RFC_TEST_VECTOR_MS, 2**47 - 1, 2**47, 2**48 - 1):
+    """The layout holds all 122 of a v7's free bits, so every timestamp converts, the generation
+    cap included, and the way back is exact."""
+    for millis in (0, RFC_TEST_VECTOR_MS, 2**47 - 1, 2**47, 253_402_300_799_999):
         id_ = hyperuuid.new_v7(millis)
         sql_ordered = hyperuuid.v7_to_sql_order(id_)
         assert hyperuuid.v7_from_sql_order(sql_ordered) == id_
@@ -395,9 +407,9 @@ def test_fill_empty_buffer_is_a_no_op():
 
 
 def test_fill_v7_rejects_an_out_of_range_timestamp():
-    """fill_v7 raises ValueError for a timestamp past 48 bits."""
+    """fill_v7 raises ValueError for a timestamp past the cap."""
     with pytest.raises(ValueError):
-        hyperuuid.fill_v7(bytearray(16), 1 << 48)
+        hyperuuid.fill_v7(bytearray(16), 253_402_300_800_000)
 
 
 def test_fill_v7_defaults_to_now():

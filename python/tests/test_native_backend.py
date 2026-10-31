@@ -59,13 +59,13 @@ def test_fast_constructed_uuids_are_indistinguishable():
 def test_exception_types_are_correct():
     """An out-of-range timestamp raises ValueError, as documented."""
     try:
-        hyperuuid.new_v7(2**48)
+        hyperuuid.new_v7(253_402_300_800_000)
     except ValueError:
         pass
     else:
-        raise AssertionError("expected ValueError for a 49-bit timestamp")
-    # A spec-valid v7 timestamp past year 9999 must raise OverflowError.
-    beyond = hyperuuid.new_v7(2**48 - 1)
+        raise AssertionError("expected ValueError for a timestamp one past the cap")
+    # A spec-valid v7 timestamp past year 9999 (never minted here) must raise OverflowError.
+    beyond = uuid.UUID("ffffffff-ffff-7000-8000-010203040506")
     try:
         hyperuuid.v7_timestamp(beyond)
     except OverflowError:
@@ -106,9 +106,9 @@ def test_an_empty_batch_or_fill_still_checks_its_timestamp():
     to slip a bad one through.
     """
     with pytest.raises(ValueError):
-        hyperuuid.new_v7_batch(0, 2**48)
+        hyperuuid.new_v7_batch(0, 253_402_300_800_000)
     with pytest.raises(ValueError):
-        hyperuuid.fill_v7(bytearray(0), 2**48)
+        hyperuuid.fill_v7(bytearray(0), 253_402_300_800_000)
 
 
 @pytest.mark.parametrize("batch", [hyperuuid.new_v7_batch])

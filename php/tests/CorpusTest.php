@@ -131,20 +131,30 @@ final class CorpusTest extends TestCase
             $id = self::uuid($vector['uuid']);
             $layout = self::layout($vector['layout']);
             $millis = $vector['unix_millis'];
+            // Both doors check the version, and answer only for a timestamp the core would mint:
+            // a version 7 dated past the generation cap, 253402300799999 ms, has none, as a
+            // version 6 has none (the corpus row carries the 48-bit field's value).
+            $expected = $millis !== null && $millis <= 253_402_300_799_999 ? $millis : null;
 
             self::assertSame($vector['version'], $id->version($layout), $context);
-            self::assertSame($millis, $id->unixMillis($layout), $context);
+            self::assertSame($expected, $id->unixMillis($layout), $context);
             $instant = $id->timestamp(false, $layout);
-            self::assertSame($millis, $instant === null ? null : self::millisOf($instant), $context);
-            if ($millis !== null) {
-                self::assertSame($millis, self::millisOf($id->timestamp(layout: $layout)), $context);
+            self::assertSame($expected, $instant === null ? null : self::millisOf($instant), $context);
+            if ($expected !== null) {
+                self::assertSame($expected, self::millisOf($id->timestamp(layout: $layout)), $context);
+            } else {
+                try {
+                    $id->timestamp(layout: $layout);
+                    self::fail("timestamp() answered for a value with none: $context");
+                } catch (\InvalidArgumentException) {
+                }
             }
 
             if ($layout === UuidLayout::Rfc9562) {
                 self::assertSame($vector['version'], $id->version(), $context);
-                self::assertSame($millis, $id->unixMillis(), $context);
+                self::assertSame($expected, $id->unixMillis(), $context);
                 $instant = $id->timestamp(false);
-                self::assertSame($millis, $instant === null ? null : self::millisOf($instant), $context);
+                self::assertSame($expected, $instant === null ? null : self::millisOf($instant), $context);
             }
         }
     }

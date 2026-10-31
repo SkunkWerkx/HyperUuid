@@ -98,7 +98,11 @@ fn timestamp() {
             vector["version"].as_u64().unwrap(),
             "{vector}"
         );
-        let expected = vector["unix_millis"].as_u64();
+        let field = vector["unix_millis"].as_u64();
+        // The version-agnostic door answers only for a timestamp the crate would mint: a
+        // version 7 dated past the generation cap has no timestamp there, as a version 6 has
+        // none, while the per-version field reader below reads the 48 bits as they are.
+        let expected = field.filter(|&millis| millis <= v7::MAX_UNIX_MILLIS);
         let found = get_timestamp_in(&id, layout).map(|t| t.to_unix_millis());
         assert_eq!(found, expected, "{vector}");
         if layout == Layout::Rfc9562 {
@@ -108,7 +112,7 @@ fn timestamp() {
                 "{vector}"
             );
         }
-        if let (7, Some(millis)) = (version, expected) {
+        if let (7, Some(millis)) = (version, field) {
             assert_eq!(v7::unix_millis_in(&id, layout), millis, "{vector}");
             if layout == Layout::Rfc9562 {
                 assert_eq!(v7::unix_millis(&id), millis, "{vector}");

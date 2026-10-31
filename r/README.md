@@ -117,7 +117,10 @@ outside the stream, and is ordered against nothing. See the root README's
 [v7 ordering, precisely](../README.md#v7-ordering-precisely).
 
 Any other length errors with both lengths named. A missing or non-finite element errors
-before the core is called, and a time before 1970 or past the 48-bit field errors too.
+before the core is called, and a time before 1970 or after 9999-12-31T23:59:59.999Z
+(253,402,300,799,999 ms, the generation cap) errors too. The 48-bit field itself reaches 10889:
+`uuid_timestamp` reads a version 7 another generator dated past the cap as it reads a version
+6, `NA`, and `uuid_v7_unix_millis` reads the field as it is.
 
 ### The raw door
 

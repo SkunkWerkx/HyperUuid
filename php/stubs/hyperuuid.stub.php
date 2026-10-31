@@ -54,10 +54,10 @@ namespace HyperUuid {
         /**
          * Creates a time-sortable UUID version 7 (RFC 9562 §6.2). Defaults to the current time;
          * pass an explicit DateTimeInterface or Unix-epoch millisecond timestamp (non-negative,
-         * fitting in 48 bits) to embed a specific time instead. The ordering contract is in the
+         * at most 253402300799999, 9999-12-31T23:59:59.999Z) to embed a specific time instead. The ordering contract is in the
          * README, "v7 ordering, precisely".
          *
-         * @throws TimestampOutOfRangeException If the timestamp doesn't fit 48 bits.
+         * @throws TimestampOutOfRangeException If the timestamp is before 1970 or after 9999-12-31T23:59:59.999Z.
          * @throws CounterExhaustedException If the stream can't advance.
          *
          * @param \DateTimeInterface|int|null $unixMillis
@@ -71,7 +71,7 @@ namespace HyperUuid {
          * current time.
          *
          * @throws \InvalidArgumentException If `$count` is negative or above `MAX_V7_BATCH`.
-         * @throws TimestampOutOfRangeException If the timestamp doesn't fit 48 bits.
+         * @throws TimestampOutOfRangeException If the timestamp is before 1970 or after 9999-12-31T23:59:59.999Z.
          * @throws CounterExhaustedException If the stream can't advance.
          *
          * @param int $count
@@ -86,7 +86,7 @@ namespace HyperUuid {
          * `newV7Batch()`.
          *
          * @throws \InvalidArgumentException If `$count` is negative or above `MAX_V7_BATCH`.
-         * @throws TimestampOutOfRangeException If the timestamp doesn't fit 48 bits.
+         * @throws TimestampOutOfRangeException If the timestamp is before 1970 or after 9999-12-31T23:59:59.999Z.
          * @throws CounterExhaustedException If the stream can't advance.
          *
          * @param int $count
@@ -324,7 +324,7 @@ namespace HyperUuid {
     final class RandomSourceException extends \RuntimeException {}
 
     /**
-     * A timestamp doesn't fit the RFC 9562 48-bit field.
+     * A timestamp before 1970 or after 9999-12-31T23:59:59.999Z, the generation cap.
      */
     final class TimestampOutOfRangeException extends \RuntimeException {}
 }

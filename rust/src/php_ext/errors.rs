@@ -48,7 +48,8 @@ pub(crate) fn invalid_argument_exception() -> &'static ClassEntry {
 pub(crate) enum Thrown {
     /// `HyperUuid\CounterExhaustedException`: the v7 stream cannot advance.
     CounterExhausted = 0,
-    /// `HyperUuid\TimestampOutOfRangeException`: a timestamp outside the 48-bit field.
+    /// `HyperUuid\TimestampOutOfRangeException`: a timestamp before 1970 or after
+    /// 9999-12-31T23:59:59.999Z (253402300799999 ms, the generation cap).
     TimestampOutOfRange = 1,
     /// `HyperUuid\RandomSourceException`: the operating system's random source failed.
     RandomSource = 2,
@@ -115,7 +116,7 @@ pub(crate) fn v7_error(e: v7::NewV7Error, op: &str) -> PhpException {
         v7::NewV7Error::TimestampOutOfRange => {
             return exception(
                 Thrown::TimestampOutOfRange,
-                "unix_millis must fit within the RFC 9562 48-bit field".into(),
+                "unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)".into(),
             );
         }
         v7::NewV7Error::CounterExhausted => {

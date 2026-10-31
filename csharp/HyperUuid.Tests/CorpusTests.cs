@@ -140,12 +140,19 @@ public sealed class CorpusTests
 			var millis = vector.GetProperty("unix_millis") is { ValueKind: JsonValueKind.Number } m ? m.GetInt64() : (long?)null;
 			UuidGenerator.Version(id, layout).ShouldBe(version, vector.ToString());
 
-			// A spec-valid v7 timestamp past year 9999 has no DateTimeOffset; the timestamp
-			// doors throw for it (documented on V7Timestamp) while the millisecond doors read it.
+			// DateTimeOffset's ceiling is the generation cap, so a v7 another generator dated past
+			// it has no timestamp at the version-agnostic doors (as a version 6 has none), while
+			// the per-version millisecond door reads the field and V7Timestamp, which builds a
+			// DateTimeOffset, throws for it as documented.
 			if (millis > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
 			{
 				UuidGenerator.V7UnixMillis(id, layout).ShouldBe(millis.Value, vector.ToString());
-				Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.GetTimestamp(id, layout));
+				UuidGenerator.GetTimestamp(id, layout).ShouldBeNull(vector.ToString());
+				if (layout == UuidLayout.Rfc9562)
+				{
+					UuidGenerator.GetTimestamp(id).ShouldBeNull(vector.ToString());
+					id.Timestamp.ShouldBeNull(vector.ToString());
+				}
 				Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.V7Timestamp(id, layout));
 				continue;
 			}

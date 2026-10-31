@@ -73,7 +73,7 @@ const EXCEPTIONS = <<<'PHP'
         final class RandomSourceException extends \RuntimeException {}
 
         /**
-         * A timestamp doesn't fit the RFC 9562 48-bit field.
+         * A timestamp before 1970 or after 9999-12-31T23:59:59.999Z, the generation cap.
          */
         final class TimestampOutOfRangeException extends \RuntimeException {}
     }

@@ -52,7 +52,8 @@ fn err(code: ErrorCode, message: &str) -> napi::Error<ErrorCode> {
     napi::Error::new(code, message)
 }
 
-const TIMESTAMP_MESSAGE: &str = "unix_millis must be non-negative and fit within 48 bits";
+const TIMESTAMP_MESSAGE: &str =
+    "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)";
 const BATCH_MESSAGE: &str = "batch count exceeds the 26-bit counter space (67108864 per call)";
 
 /// The 48-bit millisecond a `time` argument stands for: now when absent, otherwise a number
@@ -373,7 +374,8 @@ pub fn is_rfc(
     Ok(uuid.is_rfc_in(version as u8, layout_arg(layout)?))
 }
 
-/// The `Date` an id carries, or `null` when it is not an RFC 9562 v7 id in `layout`.
+/// The `Date` an id carries, or `null` when it is not an RFC 9562 v7 id in `layout`, or is one
+/// dated past 9999-12-31T23:59:59.999Z, the generation cap (`v7UnixMillis` reads that field).
 #[napi(catch_unwind)]
 pub fn get_timestamp<'env>(
     env: &'env Env,

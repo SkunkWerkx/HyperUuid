@@ -118,11 +118,13 @@ Section 6.6 well-known namespaces already in the standard library —
 `uuid.NAMESPACE_DNS`, `NAMESPACE_URL`, `NAMESPACE_OID`, `NAMESPACE_X500` — no need
 for this package to redefine them. `hyperuuid.NIL`/`MAX` are the RFC 9562
 §5.9/§5.10 special-value UUIDs. `hyperuuid.v7_timestamp(id)` recovers the embedded
-UTC `datetime.datetime` from a version 7 UUID (raises `OverflowError` past year
-9999 — the RFC's 48-bit field holds values up to year 10889, but
-`datetime.datetime` cannot). `hyperuuid.v7_unix_millis(id)` returns the same instant as
+UTC `datetime.datetime` from a version 7 UUID. A version 7 is minted with a timestamp up to
+9999-12-31T23:59:59.999Z (253,402,300,799,999 ms), the last instant `datetime` can name, and
+`get_timestamp` answers `None` for one another generator dated past that, as it does for a
+version 6; the 48-bit field itself reaches 10889, so `v7_timestamp` raises `OverflowError` for
+such a value. `hyperuuid.v7_unix_millis(id)` returns the same instant as
 an `int` of Unix-epoch milliseconds, with no `datetime` built around it — the cheaper call,
-and the one that carries the whole 48-bit field. `new_v7` also accepts a
+and the one that reads the whole 48-bit field as it is. `new_v7` also accepts a
 `datetime.datetime` directly in place of a raw millisecond count — converted in exact
 integer arithmetic and truncated to the millisecond, never rounded into the next one; a
 naive `datetime` is read as local time, the way `datetime.timestamp()` reads it.
@@ -136,8 +138,8 @@ generates `count` UUIDs sharing one timestamp capture and one native call, inste
 `count` of each.
 
 A caller's bug is an exception: an argument of the
-wrong type is a `TypeError`; a timestamp no field can hold (negative, or past v7's 48
-bits), a batch `count` outside 0 to `MAX_V7_BATCH` and a
+wrong type is a `TypeError`; a timestamp outside 1970-01-01T00:00:00Z to
+9999-12-31T23:59:59.999Z, a batch `count` outside 0 to `MAX_V7_BATCH` and a
 `layout` that is not a `Layout` are a `ValueError`, as is a refused SQL Server order
 conversion (below); a batch too large to allocate is a
 `MemoryError`, never a batch of some other size. The v7 stream running out

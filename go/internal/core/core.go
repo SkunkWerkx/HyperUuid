@@ -54,7 +54,8 @@ func (m *Module) Xhyperuuid_version() int32 {
 	return i32(65536)
 }
 func (m *Module) Xuuid_get_timestamp(v0, v1, v2 int32) int32 {
-	var v3, v4, v5, v6 int32
+	var v3, v4, v5, v6, v7 int32
+	var v8 int64
 	v3 = i32(0)
 	{
 		switch v1 + i32(-1) {
@@ -69,11 +70,11 @@ func (m *Module) Xuuid_get_timestamp(v0, v1, v2 int32) int32 {
 			if t1&i32(-16)&i32(255) != i32(112) {
 				goto l2
 			}
-			v3 = v0 + i32(1)
-			v1 = v0 + i32(2)
-			v4 = v0 + i32(3)
-			v5 = v0 + i32(4)
-			v6 = v0 + i32(5)
+			v1 = v0 + i32(1)
+			v4 = v0 + i32(2)
+			v5 = v0 + i32(3)
+			v6 = v0 + i32(4)
+			v7 = v0 + i32(5)
 			goto l3
 		case 1:
 			t2 := int32(int8(m.memory[uint64(uint32(v0))+7]))
@@ -84,21 +85,25 @@ func (m *Module) Xuuid_get_timestamp(v0, v1, v2 int32) int32 {
 			if t3 > i32(-65) {
 				goto l2
 			}
-			v3 = v0 + i32(11)
-			v1 = v0 + i32(12)
-			v4 = v0 + i32(13)
-			v5 = v0 + i32(14)
-			v6 = v0 + i32(15)
+			v1 = v0 + i32(11)
+			v4 = v0 + i32(12)
+			v5 = v0 + i32(13)
+			v6 = v0 + i32(14)
+			v7 = v0 + i32(15)
 			v0 = v0 + i32(10)
 		}
 	l3:
-		t4 := int64(m.memory[uint32(v3)])
-		t5 := int64(m.memory[uint32(v0)])
-		t6 := int64(m.memory[uint32(v1)])
-		t7 := int64(m.memory[uint32(v4)])
-		t8 := int64(m.memory[uint32(v5)])
-		t9 := int64(m.memory[uint32(v6)])
-		store64(m.memory, uint32(v2), uint64(t4<<32|t5<<40|t6<<24|t7<<16|t8<<8|t9))
+		t4 := int64(m.memory[uint32(v5)])
+		t5 := int64(m.memory[uint32(v6)])
+		t6 := int64(m.memory[uint32(v4)])
+		t7 := int64(m.memory[uint32(v1)])
+		t8 := int64(m.memory[uint32(v0)])
+		v8 = t4<<16 | t5<<8 | t6<<24 | t7<<32 | t8<<40
+		if uint64(v8) > uint64(i64(253402300799999)) {
+			goto l2
+		}
+		t9 := int64(m.memory[uint32(v7)])
+		store64(m.memory, uint32(v2), uint64(v8|t9))
 		v3 = i32(7)
 	}
 l2:
@@ -862,7 +867,7 @@ func (m *Module) Xuuid_new_v7(v0 int64, v1 int32) int32 {
 	m.g0 = v2
 	v3 = i32(2)
 	{
-		if uint64(v0) > uint64(i64(0xffffffffffff)) {
+		if uint64(v0) > uint64(i64(253402300799999)) {
 			goto l0
 		}
 		store64(m.memory, uint64(uint32(v2))+24, uint64(i64(0)))
@@ -1006,7 +1011,7 @@ func (m *Module) Xuuid_new_v7_batch(v0 int64, v1, v2 int32) int32 {
 	var v11 int32
 	var v12, v13, v14, v15 int64
 	var v16, v17 int32
-	if uint64(v0) <= uint64(i64(0xffffffffffff)) {
+	if uint64(v0) <= uint64(i64(253402300799999)) {
 		{
 			if v1 == 0 {
 				goto l1

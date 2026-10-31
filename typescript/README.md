@@ -100,8 +100,11 @@ guessed at. `Namespaces` holds the RFC 9562 section 6.6 namespaces (`dns`, `url`
 
 Time goes in as a `number` of Unix-epoch milliseconds or a `Date`, and leaving it out means
 now. A fractional number is floored to the millisecond, never rounded into the next one. A
-time v7's 48-bit field cannot hold (negative, past 2^48 - 1, `NaN`, an infinity, an invalid
-`Date`) is `ERR_HYPERUUID_TIMESTAMP_RANGE`.
+time outside 1970-01-01T00:00:00Z to 9999-12-31T23:59:59.999Z (253,402,300,799,999 ms, the
+generation cap), or no time at all (`NaN`, an infinity, an invalid `Date`), is
+`ERR_HYPERUUID_TIMESTAMP_RANGE`. The 48-bit field itself reaches 10889: `getTimestamp` reads a
+v7 another generator dated past the cap as it reads a v6, `null`, and `v7UnixMillis` reads the
+field as it is.
 
 ### API
 
@@ -148,7 +151,7 @@ try {
 try {
   newV7(-1)
 } catch (error) {
-  // ERR_HYPERUUID_TIMESTAMP_RANGE unix_millis must be non-negative and fit within 48 bits
+  // ERR_HYPERUUID_TIMESTAMP_RANGE unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)
   console.log(error.code, error.message)
 }
 try {

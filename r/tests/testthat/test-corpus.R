@@ -94,18 +94,22 @@ test_that("timestamp.json", {
     rfc <- lay == "rfc"
     id <- row$uuid
     expect_identical(uuid_version(id, lay), as.integer(row$version), info = id)
-    if (is.null(row$unix_millis)) {
+    # The version-agnostic door answers only for a timestamp the core would mint: a version 7
+    # dated past the generation cap, 253402300799999 ms, has none there, as a version 6 has
+    # none. uuid_v7_unix_millis reads the 48-bit field as it is.
+    minted <- !is.null(row$unix_millis) && row$unix_millis <= 253402300799999
+    if (!minted) {
       expect_true(is.na(uuid_timestamp(id, lay)), info = id)
       if (rfc) expect_true(is.na(uuid_timestamp(id)), info = id)
-      next
     }
+    if (is.null(row$unix_millis)) next
     ms <- row$unix_millis
     expect_identical(as.integer(row$version), 7L)
     expect_equal(uuid_v7_unix_millis(id, lay), ms, tolerance = 0, info = id)
-    expect_equal(round(as.numeric(uuid_timestamp(id, lay)) * 1000), ms, tolerance = 0, info = id)
-    if (rfc) {
-      expect_equal(uuid_v7_unix_millis(id), ms, tolerance = 0, info = id)
-      expect_equal(round(as.numeric(uuid_timestamp(id)) * 1000), ms, tolerance = 0, info = id)
+    if (rfc) expect_equal(uuid_v7_unix_millis(id), ms, tolerance = 0, info = id)
+    if (minted) {
+      expect_equal(round(as.numeric(uuid_timestamp(id, lay)) * 1000), ms, tolerance = 0, info = id)
+      if (rfc) expect_equal(round(as.numeric(uuid_timestamp(id)) * 1000), ms, tolerance = 0, info = id)
     }
   }
 })

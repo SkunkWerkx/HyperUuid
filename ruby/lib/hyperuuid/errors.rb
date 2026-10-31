@@ -4,9 +4,10 @@ module HyperUuid
   # arguments are valid. Carries the same message on every backend.
   class RandomSourceError < StandardError; end
 
-  # Raised when a timestamp cannot be embedded in the version 7 UUID being minted: one past
-  # RFC 9562's 48-bit millisecond field, or a negative one (a `Time` before the Unix epoch
-  # included). Carries the same message on every backend.
+  # Raised when a timestamp cannot be embedded in the version 7 UUID being minted: one after
+  # 9999-12-31T23:59:59.999Z (253402300799999 ms, the generation cap; the 48-bit field itself
+  # reaches 10889), or a negative one (a `Time` before the Unix epoch included). Carries the
+  # same message on every backend.
   class TimestampOutOfRangeError < StandardError; end
 
   # Raised when the version 7 stream cannot advance without running more than 1000 ms ahead of

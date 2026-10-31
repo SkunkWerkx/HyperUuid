@@ -119,6 +119,9 @@ namespace :native do
     built = File.join(rust, "target/ruby/release", "libhyperuuid.#{RUBY_PLATFORM.include?('darwin') ? 'dylib' : 'so'}")
     staged = "lib/hyperuuid/#{RUBY_VERSION[/\d+\.\d+/]}/hyperuuid_native.#{RbConfig::CONFIG['DLEXT']}"
     mkdir_p File.dirname(staged)
+    # A new inode, not a write over the old one: macOS caches a signed file's identity per
+    # vnode, and a dylib copied over a staged one is killed on load (SIGKILL in dyld).
+    rm_f staged
     cp built, staged
     puts "staged #{staged} for Ruby #{RUBY_VERSION} — HyperUuid::BACKEND is now :native under this Ruby"
   end

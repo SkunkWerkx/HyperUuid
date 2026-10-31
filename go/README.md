@@ -343,7 +343,7 @@ sentinels, all matched with `errors.Is`:
 | --- | --- |
 | `ErrRandomSource` | the random source failed: a failed or short read of `crypto/rand` (stock Go's never fails; TinyGo's can), or a rekey of the AES stream whose key could not be read — `NewV4`, the v7 generators, and their batch and Fill forms. `NewV5` draws no entropy and never returns it |
 | `ErrCounterExhausted` | the v7 stream can't advance without running more than 1000 ms ahead of the supplied timestamp or past 2^44 − 2 — every v7 generator, batch and Fill forms included. Nothing is reserved; a call whose timestamp is past the stream's millisecond succeeds |
-| `ErrTimestampOutOfRange` | `unixMillis` doesn't fit version 7's 48 bits of Unix milliseconds — every v7 generator |
+| `ErrTimestampOutOfRange` | `unixMillis` is past 253402300799999 (9999-12-31T23:59:59.999Z, the generation cap; the 48-bit field itself reaches 10889), or the `time.Time` is before 1970 or after that instant — every v7 generator |
 | `ErrWrongVersion` | a SQL-order conversion was given a value it doesn't take: to SQL order, anything but an RFC 9562 version 7; from SQL order, anything not converted from one |
 | `ErrNotTimeBased` | `GetTimestamp`/`GetTimestampIn` was given a UUID that isn't an RFC 9562 version 7 (in that layout): another version, version 6 included, or another variant |
 | `ErrNegativeCount` | `NewV7Batch`/`NewV7BatchAt` was given a negative count. A count of 0 returns a nil slice |

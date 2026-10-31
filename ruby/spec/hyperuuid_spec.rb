@@ -162,12 +162,32 @@ RSpec.describe HyperUuid do
       expect(id.timestamp).to eq(Time.at(RFC_TEST_VECTOR_MS / 1000.0).utc)
     end
 
-    it "round-trips zero and the max 48-bit timestamp" do
+    it "round-trips zero and the generation cap" do
       expect(described_class.new_v7(0).timestamp).to eq(Time.at(0).utc)
 
-      max_ms = 0x0000_FFFF_FFFF_FFFF
+      max_ms = 253_402_300_799_999
       id = described_class.new_v7(max_ms)
       expect((id.timestamp.to_r * 1000).to_i).to eq(max_ms)
+    end
+
+    it "stops at the last millisecond of 9999 in both directions" do
+      # The cap is the last instant .NET's DateTime and Python's datetime can name. One
+      # millisecond more is TimestampOutOfRangeError; a version 7 another generator dated past
+      # the cap has no timestamp, as a version 6 has none, while the version 7 millisecond
+      # read trusts the caller and reads the 48-bit field as it is.
+      last = Time.utc(9999, 12, 31, 23, 59, Rational(59_999, 1000))
+      expect(described_class.new_v7(last).timestamp).to eq(last)
+      expect(described_class.new_v7(253_402_300_799_999).timestamp).to eq(last)
+      [253_402_300_800_000, Time.utc(10_000, 1, 1)].each do |time|
+        expect { described_class.new_v7(time) }
+          .to raise_error(HyperUuid::TimestampOutOfRangeError, HyperUuid::Runtime::V7_TIMESTAMP_OUT_OF_RANGE)
+      end
+
+      past = HyperUuid::Uuid.parse("ffffffff-ffff-7000-8000-010203040506")
+      expect(past.rfc?(7)).to be(true)
+      expect(past.timestamp(raise_on_mismatch: false)).to be_nil
+      expect { past.timestamp }.to raise_error(ArgumentError)
+      expect(HyperUuid::Runtime.v7_unix_millis(past.bytes)).to eq(0xFFFF_FFFF_FFFF)
     end
 
     it "raises for a non-time-based version by default" do
@@ -215,8 +235,8 @@ RSpec.describe HyperUuid do
       expect(sql_ordered.bytes[10, 6]).to eq(described_class.new_v7(RFC_TEST_VECTOR_MS).bytes[0, 6])
     end
 
-    it "converts every version 7 timestamp, up to the 48-bit maximum" do
-      [0, (1 << 47) - 1, 1 << 47, (1 << 48) - 1].each do |millis|
+    it "converts every version 7 timestamp, up to the generation cap" do
+      [0, (1 << 47) - 1, 1 << 47, 253_402_300_799_999].each do |millis|
         id = described_class.new_v7(millis)
         sql_ordered = id.to_sql_order
         expect(sql_ordered.timestamp(layout: :sql_server)).to eq(id.timestamp)
@@ -327,9 +347,9 @@ RSpec.describe HyperUuid do
     doors.each do |name, door|
       it "#{name} raises TimestampOutOfRangeError, with one message, for every out-of-range time" do
         # The first three never reach a backend (they cannot cross the ABI as a u64); the
-        # last is in range for the ABI and refused by the core itself. Same class, same
-        # message, either way.
-        [-1, Time.at(-1), 2**64, 0xFFFF_FFFF_FFFF_FFFF].each do |time|
+        # last two are in range for the ABI and refused by the core itself, one past the
+        # generation cap and the top of the u64. Same class, same message, either way.
+        [-1, Time.at(-1), 2**64, 253_402_300_800_000, 0xFFFF_FFFF_FFFF_FFFF].each do |time|
           expect { door.call(time) }.to raise_error(HyperUuid::TimestampOutOfRangeError, message)
         end
       end

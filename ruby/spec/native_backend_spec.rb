@@ -46,7 +46,7 @@ RSpec.describe "native backend" do
   end
 
   it "agrees with the Fiddle backend on the v7 SQL-order permutations" do
-    [HyperUuid.new_v7(1_645_557_742_000), HyperUuid.new_v7((1 << 48) - 1)].each do |id|
+    [HyperUuid.new_v7(1_645_557_742_000), HyperUuid.new_v7(253_402_300_799_999)].each do |id|
       native = id.to_sql_order.to_s
       expect(fiddle_eval("HyperUuid::Uuid.parse(#{id.to_s.inspect}).to_sql_order.to_s")).to eq(native)
       expect(fiddle_eval("HyperUuid::Uuid.parse(#{native.inspect}).from_sql_order.to_s")).to eq(id.to_s)

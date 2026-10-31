@@ -37,7 +37,8 @@ See the root README, "v7 ordering, precisely".
 
 \code{time} is converted to whole Unix milliseconds as \code{floor(seconds * 1000)}; a \code{Date} is
 midnight UTC. \code{time} is an argument, so a missing or non-finite element, a time before
-1970 or past the 48-bit field, a length other than 1 or \code{n}, and \code{n} over
+1970 or after 9999-12-31T23:59:59.999Z (the generation cap), a length other than 1 or \code{n},
+and \code{n} over
 \link{uuid_v7_max_batch} with a scalar \code{time} are errors.
 }
 \examples{
