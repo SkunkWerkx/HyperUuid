@@ -1,0 +1,11 @@
+{
+  "name": "hyperuuid-consumer-tests",
+  "private": true,
+  "description": "Installs the packed npm tarballs from a local registry the way a consumer would and checks which backend loads; see README.md and run.sh.",
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "verdaccio": "7.0.2",
+    "webpack": "5.112.2",
+    "webpack-cli": "7.3.1"
+  }
+}

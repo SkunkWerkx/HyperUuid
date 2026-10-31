@@ -3,8 +3,9 @@
 ROADMAP Phase 3, item 2, moved from 1.2 into 1.1.0 by the owner (2026-10-31): the last feature
 before the tag, after the PHP extension and the Go translated core. One PR in the Forge, then one
 in HyperUuid, CI green before the next step. The owner's conditions from the design conversation
-and one review round (2026-10-31, eight findings and two corrections, all verified against the
-CLI source, npm issue 4828 and the rustc target page) are folded in below and marked where they
+and two review rounds (2026-10-31: eight findings and two corrections, then three more, all
+verified against the CLI source, npm issue 4828, the rustc target page and a rustc 1.99.1 build
+of a `wasm32-wasip1` cdylib with `-C panic=unwind`) are folded in below and marked where they
 shaped a decision.
 
 ## Goal
@@ -58,17 +59,34 @@ no claim).
   writing `cpu: ["wasm32"]` (the form the docs show) fails the pack rather than a mandatory
   dependency refusing to install on an ordinary CPU.
 - **Published tarballs are tested in clean consumers before the tag**, in ci.yml, from a
-  local registry, on Linux, macOS and Windows: `--omit=optional`, the damaged Mac lockfile on
+  local registry, on Linux, macOS and Windows, each after the full suite under forced WASI
+  on that OS: `--omit=optional`, the damaged Mac lockfile on
   Linux, an absent native binary, a present loader with a missing `.wasm`, forced WASI, an
   emulated non-x64/arm64 host (s390x under QEMU), the exact Node floor (22.13.0), and the
   negative controls. Bundler asset inclusion is a separate scenario that must end in a usable,
   documented path. `request-staging` needs the job (review finding 8).
-- **Panics on the WASI path abort; no containment is claimed there** (review finding 7).
-  `wasm32-wasip1` is compiled `-Cpanic=abort` by default, so the crate's `panic = "unwind"` and
-  every `#[napi(catch_unwind)]` are inert in the `.wasm`: a panic is a `RuntimeError` thrown out
-  of the call with the instance's state unknown. The probe records the strategy from the build
-  and the README states it. The core is proven no-panic; the napi layer's own code is the only
-  thing that could trap. A test-only export is not added to a shipped artifact.
+- **Panics on the WASI path abort; no containment is claimed there** (review findings 7 and,
+  in the second round, 1). The target's default is abort, and the crate's explicit
+  `panic = "unwind"` does not reach rustc: cargo emits `-C panic` only for abort, so a profile
+  that says unwind passes no flag and the target's default applies. (A raw `rustc --target
+  wasm32-wasip1 --crate-type cdylib -C panic=unwind` fails on rustc 1.99.1 with `the crate
+  panic_unwind does not have the panic strategy unwind`, but cargo never issues that line.)
+  So a release-profile WASI build is silently abort. The crate gains `[profile.wasi]`,
+  `inherits = "release"` with `panic = "abort"` and a comment saying why, so the strategy is
+  explicit and verifiable instead of a default; the WASI build is `napi build --profile wasi
+  --platform --target wasm32-wasip1` (the CLI takes `--profile`), and the release profile is
+  untouched. The probe verified the effective invocation on 2026-10-31: the WASI build's rustc
+  line, read from a verbose cargo run, carries `-C panic=abort`; the native and release-profile
+  lines carry no `-C panic` flag (rustc's default: unwind natively, abort on wasm32-wasip1).
+  The negative control the earlier draft expected, a release-profile WASI build failing, does
+  not occur; the control is the release-profile line's missing flag against the wasi
+  profile's explicit one. In the `.wasm`, every
+  `#[napi(catch_unwind)]` has nothing to catch; what a panic does from JavaScript's side (a
+  trap, surfaced however the runtime surfaces it, with the instance's state unknown) is
+  observed in the probe and written into the README from the observation, not promised here.
+  The core's no-panic proof covers the core's own code and excludes nothing else: memory
+  traps, allocation failure and faults in dependencies remain possible on this path. A
+  test-only export is not added to a shipped artifact.
 - **Bun under forced WASI is measured, not promised.** A forced-WASI failure on Bun does not
   block the release, since Bun fallback support is excluded above; native Bun must stay green.
   The README states the Bun version tested and the result, and the WebAssembly benchmark column
@@ -84,7 +102,10 @@ no claim).
 
 `typescript/package.json`:
 
-- `napi.targets` gains `wasm32-wasip1`. `napi build` then regenerates `binding.js` with the
+- `napi.targets` gains `wasm32-wasip1`, and `scripts` gains `build:wasi`: `napi build --profile
+  wasi --target wasm32-wasip1 --js binding.js --dts binding.d.ts`, the one command CI and the
+  local loop both run (CLAUDE.md's TypeScript paragraph names it). `napi build` then regenerates
+  `binding.js` with the
   flavour list `['wasm32-wasip1']` and its fallback chain (the local `./hyperuuid.wasip1.cjs`
   first, then the package `@skunkwerkx/hyperuuid-wasm32-wasip1`; its version is compared with the
   root's only when `NAPI_RS_ENFORCE_VERSION_CHECK` is set, so the pin in the root's
@@ -109,6 +130,7 @@ no claim).
 - `files` is unchanged: the root tarball carries JavaScript and types only. The local build's
   `hyperuuid.wasm32-wasip1.wasm`, `hyperuuid.wasip1.cjs`, `hyperuuid.wasip1-browser.js`, the
   deferred and workerd entries and their type definitions join `*.node` in `.gitignore`. The
+  `.cargo/config.toml` comment that says the wasm target is never built goes. The
   loader's first WASI candidate is that local file, so `NAPI_RS_FORCE_WASI=error npm test` runs
   in a checkout with nothing else installed.
 
@@ -135,20 +157,33 @@ nine.
   loaders, and a manifest with no `os`, `cpu` or `libc` and `dependencies` equal to the
   lockfile's versions; the root holds neither. The Forge tests that say nine say ten, and the
   WASI tarball shape gets its own cases, positive and negative.
-- A new `npm_package.py` owns the pack body: copy `typescript/` under a scratch directory,
+- A new `npm_package.py` owns the pack body, with two operations over one set of functions
+  (second-round finding 3: the browser leg has one artifact, not nine, and must not grow its
+  own packaging). `pack` is the complete pack: copy `typescript/` under a scratch directory,
   `npm ci --ignore-scripts`, `napi create-npm-dirs`, copy each artifact into its platform
   directory (the eight `.node` files; the WASI directory's `.wasm` and loaders), rewrite the
   WASI package's `dependencies` from the lockfile, `npm pkg set` the root's two maps, `npm
-  pack` each, then the tarball checks. `pack-npm` keeps the download, the provenance
-  verification (now over `node-wasm32-wasip1` too), the attestation and the upload, and calls
-  the script; ci.yml's consumer test calls the same script with the same artifacts and no
-  attestation. `test_forge_actions.py`'s pack-npm test follows.
+  pack` each, then the tarball checks (ten tarballs, one `.node` per native, the WASI shape,
+  none in the root). `pack-wasi` takes only the `node-wasm32-wasip1` artifact: the same
+  scratch copy, `create-npm-dirs`, the same dependency rewrite from the lockfile, `npm pack` of
+  the WASI directory alone, and the same WASI tarball checks; it writes no root maps and packs
+  no other tarball. `pack` calls the functions `pack-wasi` is made of for its WASI member, so the
+  tarball the browser leg tests has the same artifact inputs, dependency pinning and packaging
+  checks as the one the release packs (shared functions alone prove no more than that; the
+  tarballs are packed from different runs). `pack-npm` keeps the
+  download, the provenance verification (now over `node-wasm32-wasip1` too), the attestation
+  and the upload, and calls `pack`; ci.yml's consumer test calls `pack` with the same artifacts
+  and no attestation, from a Forge checkout at master under `.hyperforge`, as `release.yml`
+  does; `build-node-wasi` calls `pack-wasi` on the artifact it just built. `test_forge_actions.py`'s
+  pack-npm test follows, and `pack-wasi` gets its own tests, positive and negative.
 - `hyper-build-wasm.yml`: a `node_wasi` input (default false; ci.yml passes true) and a
   `build-node-wasi` job, first in the workflow's order as the newest code: `rustup target add
-  wasm32-wasip1`; `npm ci`; `napi build --release --target wasm32-wasip1 --js binding.js --dts
-  binding.d.ts`; the wrapper diff; `NAPI_RS_FORCE_WASI=error npm test` and `npm run typecheck`;
-  the browser page (below); upload `node-wasm32-wasip1` (the `.wasm` and the generated loaders,
-  as a directory) and attest it under the same conditions as the native legs. No wasi-sdk:
+  wasm32-wasip1`; `npm ci`; `napi build --profile wasi --platform --target wasm32-wasip1 --js binding.js
+  --dts binding.d.ts`; the wrapper diff; `NAPI_RS_FORCE_WASI=error npm test` and `npm run
+  typecheck`; `npm_package.py pack-wasi` over the build's output, from the workflow's own Forge
+  checkout; the browser page (below) against that tarball; upload `node-wasm32-wasip1` (the
+  `.wasm` and the generated loaders, as a directory) and attest it under the same conditions as
+  the native legs. No wasi-sdk:
   Rust's bundled wasi-libc links a pure-Rust addon through `rust-lld`, and the CLI picks the
   emnapi archive to match it.
 - `publish-npm` is unchanged: the WASI tarball matches its `skunkwerkx-<crate>-*-<version>.tgz`
@@ -157,18 +192,27 @@ nine.
 ## The consumer tests: ci.yml's `test-npm-package`
 
 Needs `build-native` and `build-wasm`; a matrix over `ubuntu-26.04`, `macos-26` (arm64) and
-`windows-2025` (x64), release mode and PR mode alike (review finding 5: a native pass on an OS
+`windows-2025` (x64), release mode and PR mode alike, PR mode packing without osx-x64 (`--skip osx-x64`, the native `hyper-build-native` does not build there, as `test-c` does) (review finding 5: a native pass on an OS
 proves nothing about WASI initialisation and file resolution there). Each leg packs the ten
 tarballs with `npm_package.py` from the run's artifacts and serves them from a local Verdaccio
 registry, so `npm install` resolves, selects platforms and writes lockfiles exactly as it would
 against npmjs. The npm that runs the scenarios is the one `setup-node` ships with the pinned
 Node; its version is printed and asserted, since finding 2 below depends on npm's behaviour.
-Every scenario is a fresh consumer directory with one script that requires `hyperuuid`,
-generates a v4 and a v7, checks one v5 corpus vector and one SQL-order vector, and prints
-`isAvailable()` and `binding.__napiBindingTarget` (`native` or `wasm32-wasip1`), which the step
-asserts. `request-staging` adds `test-npm-package` to its `needs`, and
-`test_workflow_contracts.py` pins it there beside `test-nuget-package` (review finding 8): the
-staging request waits on consumer success, not merely on the job existing.
+Each leg first runs the full suite under forced WASI (second-round finding 2: a smoke script
+proves installation, not the API; byte-buffer mutation, batches, timestamps and error
+propagation need the conformance tests, and on Windows the loader's filesystem preopen and
+path handling are untested until then). The leg checks out the repository, runs `npm ci` in
+`typescript/`, places the `node-wasm32-wasip1` artifact's files beside `binding.js`, where the
+loader's first WASI candidate looks, with no `.node` built or downloaded, and runs
+`NAPI_RS_FORCE_WASI=error npm test`, the same command `build-node-wasi` runs on Linux; on Bun
+too, where the native suite runs on Bun, with the result recorded under the Bun decision above.
+A Node conformance failure on any matrix OS is a failure of the job; Bun's stays recorded. Then the installation scenarios, each a
+fresh consumer directory with one script that requires `hyperuuid`, generates a v4 and a v7,
+checks one v5 corpus vector and one SQL-order vector, and prints `isAvailable()` and
+`binding.__napiBindingTarget` (`native` or `wasm32-wasip1`), which the step asserts.
+`request-staging` adds `test-npm-package` to its `needs`, and `test_workflow_contracts.py` pins
+it there beside `test-nuget-package` (review finding 8): the staging request waits on consumer
+success, not merely on the job existing.
 
 On every OS:
 
@@ -231,9 +275,13 @@ exports map does not expose the loader file as a subpath, so a direct file impor
 where every consumer fails). The package is installed from the packed tarball, not from a
 directory. The page runs the conformance corpus (v5, SQL order both ways, inspection, refusals)
 and the generation doors, and writes `PASS` or the first failure into the DOM. The
-`build-node-wasi` job packs the WASI tarball, installs it into the project, builds, serves
-`dist/` with plain static headers and no COOP/COEP, which is what the threadless flavour buys,
-and drives headless Chromium through Playwright, reading the DOM; the Ruby wasm leg's pattern.
+`build-node-wasi` job installs the tarball its `npm_package.py pack-wasi` step produced (the
+shared packer's WASI-only operation, above: the same dependency pinning and tarball checks as
+the release pack, with no need for the eight native artifacts), builds, serves `dist/` with
+plain static headers and no COOP/COEP, which is what the threadless flavour buys, and loads it
+in the runner's Chrome (`--headless=new --dump-dom` under a bounded timeout, the Ruby wasm leg's
+pattern, with the exit code enforced): the step fails unless Chrome exits 0 and the DOM's last
+line of output is `PASS` with no `FAIL` before it; a corrupted corpus expectation is the control.
 The page is a smoke test in the repository, not a shipped artifact; it is linted and formatted
 with the rest of `typescript/`. Claimed: tested in Chromium on Linux, without cross-origin
 isolation. Firefox and Safari: untested, in the words `docs/platforms.md` uses for the Blazor
@@ -257,8 +305,9 @@ archive.
   Node floor patch) and its open-follow-ups count; the Forge runbook's npm paragraph; ROADMAP
   item 2 marked done in 1.1.0 with the summary table's npm cell and the TypeScript landing note.
 - `check_exports.py` is untouched: the `.wasm` exports the same `#[napi]` set. `catch_unwind`
-  stays on every function for the native builds; on the WASI build it is inert (panics abort,
-  above), and the README's fallback section says so.
+  stays on every function for the native builds; on the WASI build, under the `wasi` profile,
+  there is no unwinder for it to catch with (panics abort, above), and the README's fallback
+  section says so with the observed behaviour.
 
 ## Failure modes and where each is caught
 
@@ -285,6 +334,6 @@ the Rust core's own tests.
 
 ## Open until the probe
 
-The `.wasm` size, the initial memory, the panic strategy the build actually used, the Bun result,
-and the bundler configuration that passes are measured, not assumed; each is written into the
-README from the measurement.
+The `.wasm` size, the initial memory, the panic strategy in the effective rustc invocation and
+what a panic looks like from JavaScript, the Bun result, and the bundler configuration that
+passes are measured, not assumed; each is written into the README from the measurement.

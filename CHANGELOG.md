@@ -32,8 +32,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   JNI, from a library built from the core for every platform, and JDK 25+ keeps FFM. The API
   and exceptions are the same on both, with two exceptions: the load failure's message and
   cause name the path's own library, and a fill above 64 KiB can throw `OutOfMemoryError` on
-  JNI. A `null` argument is a `NullPointerException` naming the parameter on both. The jar
-  grows by ⟨n⟩ KB. *(Java)*
+  JNI. A `null` argument is a `NullPointerException` naming the parameter on both. *(Java)*
 - **Python: a source distribution.** `hyperuuid-<version>.tar.gz` now ships with the wheels,
   so where no wheel fits, pip falls back to building from source (Rust 1.89 or newer and a
   C linker); CI proves that build on x86-64 glibc 2.17 and musl. Attested like the wheels.
@@ -60,24 +59,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A TypeScript binding for Node and Bun, on npm as `hyperuuid`.** A Node-API addon built
   with napi-rs, the core linked into the `.node` file, published as eight platform packages
   (`@skunkwerkx/hyperuuid-<platform>`, one per RID) that the root package picks through
-  `optionalDependencies`, so nothing compiles at install. Node 22 or newer and Bun, CommonJS
+  `optionalDependencies`, so nothing compiles at install. Node 22.13 or newer and Bun, CommonJS
   and ESM, ids in and out as strings or 16-byte `Uint8Array`s, and the doors every binding
   has: v4, v5 and v7, v7 batches and buffer fills, the SQL Server order, inspection in either
-  layout, and `isAvailable()`/`nativeVersion()`. A platform without an addon still loads the
-  package and says so through `isAvailable()`. No WebAssembly fallback yet. *(TypeScript)*
+  layout, and `isAvailable()`/`nativeVersion()`. Where no platform package fits
+  (`--omit=optional`, a platform outside the eight) the root falls back to a tenth package,
+  `@skunkwerkx/hyperuuid-wasm32-wasip1`, the core built for `wasm32-wasip1` and run through
+  `node:wasi`, a plain dependency of the root so it is always installed: the whole suite passes
+  on it on Linux x64 (glibc), macOS arm64 and Windows x64, the consumer smoke on Alpine at the
+  exact Node floor, 22.13.0, and its browser entry in Chromium. Big-endian hosts (s390x
+  under QEMU) are a printed loss: the smoke's checks pass and the process then never exits, the
+  runtime reading its reference counts host-endian over little-endian wasm memory.
+  Bun 1.4.4 cannot load it and stays on the addon; a panic aborts there rather than being
+  caught. The Node floor is the runtime's, `^22.13.0 || >=23.5.0`. *(TypeScript)*
 - **An R binding, as the source package `hyperuuid`.** A C shim over the core's C ABI,
   reached through `.Call`, with the core built as a static library from the Rust crates
   vendored into the tarball, so an install needs Rust but no network. Every function is
   vectorised and propagates `NA` element-wise through character, integer, logical and
   `POSIXct` results; arguments and the raw doors are strict and error. R 4.2 or newer.
   *(R)*
-- **Release plumbing for npm and CRAN.** The tag run packs, attests and preserves nine npm
-  tarballs (the root package, its `optionalDependencies` injected at pack time, and the eight
-  platform packages) and the R source tarball; the publish dispatch uploads the npm packages
+- **Release plumbing for npm and CRAN.** The tag run packs, attests and preserves ten npm
+  tarballs (the root package, its `optionalDependencies` injected at pack time, the eight
+  platform packages and the WebAssembly package, whose runtime dependencies are pinned from the
+  lockfile) and the R source tarball; the publish dispatch uploads the npm packages
   through Trusted Publishing, platform packages before the root. No job uploads the R tarball:
   it is submitted to CRAN by hand from the preserved bytes. CI builds the addon on every RID
   and runs its suite on Node there, and on Bun on every RID but win-arm64 and osx-x64 (the
-  cross-build leg runs Node alone), and runs `R CMD check --as-cran` on linux-x64,
+  cross-build leg runs Node alone), runs the suite on the WebAssembly fallback on Linux, macOS
+  and Windows and the consumer scenarios against the packed tarballs from a local registry
+  (`typescript/consumer-tests/`), and runs `R CMD check --as-cran` on linux-x64,
   linux-arm64, osx-arm64 and win-x64. Dependabot covers the TypeScript binding's npm and
   cargo manifests (the R wrapper crate's only dependency is the core itself at the release
   version, and its lock is derived from `rust/Cargo.lock` by `r/tools/vendor.sh`, never

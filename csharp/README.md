@@ -199,7 +199,7 @@ On any platform outside that table the package still restores and compiles — t
 
 The `.nupkg` carries compiled native code, which is a real thing to ask questions about before adopting it inside a trust boundary. What is and isn't currently guaranteed:
 
-**Where the binaries come from.** Nothing under `csharp/HyperUuid/runtimes/` is committed — it's `.gitignore`d. The native libraries are built from `rust/` by CI and staged into the package at pack time, so what ships is produced by the same workflow run that built and tested the source. (The Go binding is different: it *does* carry committed binaries, staged by `stage-native-binaries.yml`, whose commit message records the exact source SHA and CI run ID they came from — e.g. `chore: stage native binaries from ci.yml run 33438784689`.)
+**Where the binaries come from.** Nothing under `csharp/HyperUuid/runtimes/` is committed — it's `.gitignore`d. The native libraries are built from `rust/` by CI and staged into the package at pack time, so what ships is produced by the same workflow run that built and tested the source. (Nothing is committed for Go either: its core is the wasm2go translation `go/internal/core/core.go`, Go source regenerated and diffed in CI.)
 
 **Building it yourself.** The core is a normal Rust crate with no build-time codegen, so you never have to take the shipped binary at all:
 
@@ -214,7 +214,7 @@ Drop the result into `csharp/HyperUuid/runtimes/<rid>/native/` and the package's
 
 **Signed provenance.** Because rebuild-and-compare doesn't work across machines, the mechanism that does is a cryptographic attestation binding each artifact to the workflow run and commit that produced it. Two kinds cover the package.
 
-The *release attestation* is one statement, signed by this repository's `release.yml` at the release tag, whose subjects are every file the release ships — the `.nupkg` as packed and as nuget.org serves it, every other registry package, the files on the GitHub Release (Swift's two zips, the C archives and the PHP extension's zips), and every native library committed for Go — and whose predicate is the release inventory (`inventory.json`: every file's size, SHA-256 and the commit it was built from). One command verifies any of them from the tag alone:
+The *release attestation* is one statement, signed by this repository's `release.yml` at the release tag, whose subjects are every file the release ships — the `.nupkg` as packed and as nuget.org serves it, every other registry package, and the files on the GitHub Release (Swift's two zips, the C archives and the PHP extension's zips) — and whose predicate is the release inventory (`inventory.json`: every file's size, SHA-256 and the commit it was built from). One command verifies any of them from the tag alone:
 
 ```shell
 gh attestation verify HyperUuid.<version>.nupkg --repo SkunkWerkx/HyperUuid \

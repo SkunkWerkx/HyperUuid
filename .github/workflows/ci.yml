@@ -189,6 +189,13 @@ jobs:
       go_wasm_suite: true
       go_tinygo_smoke: go/internal/tinygosmoke
       ruby_wasm_smoke: ruby/wasm-smoke
+      # The TypeScript binding's WebAssembly fallback: the napi-rs module built for threadless
+      # wasm32-wasip1, the whole suite run against it with the native addon refused, the WASI
+      # npm package packed as the release packs it and run bundled into a page in headless
+      # Chrome; the module and its loaders are attested and uploaded as node-wasm32-wasip1,
+      # which pack-npm and test-npm-package below consume. First job in that workflow: the
+      # newest code fails first.
+      node_wasi: true
 
   # The 17 PyPI wheels, on every run rather than only at the tag: built by maturin,
   # installed on their own platform and on each interpreter they serve, free-threaded ones
@@ -819,6 +826,137 @@ jobs:
             echo "$f + browser-wasm passes the gate (and stops at HYPERUUID002 without the workload)"
           done
 
+  # The npm packages as a consumer gets them, on the three desktop OSes (a native pass on an OS
+  # proves nothing about WASI initialisation and file resolution there; Windows' preopen and
+  # path handling, macOS's resolution). Each leg first runs the whole conformance suite against
+  # the WASI module built above, with the native addon refused (NAPI_RS_FORCE_WASI=error), so
+  # byte-buffer mutation, batches, timestamps and error propagation are proven on the module
+  # on that OS, not just that it loads; then packs the ten tarballs with the Forge's
+  # npm_package.py, the release's own pack body, from the run's node-<rid> artifacts, and
+  # serves them from a local Verdaccio to the installation scenarios in
+  # typescript/consumer-tests/run.sh (its header lists them): a plain install loads native
+  # with the WASI package present and an empty stderr; --omit=optional, a deleted native and
+  # a forced run load wasm32-wasip1; three negative controls fail or report unavailability
+  # the documented way; on Linux also npm/cli#4828's damaged lockfile, the exact Node floor
+  # in node:22.13.0-alpine with engine-strict, an emulated s390x host (QEMU, so no native
+  # package fits; big-endian, so the smoke's checks pass and the documented exit hang is
+  # asserted, not hidden) and two bundlers. Bun runs the forced-WASI suite too, and its result is
+  # recorded in the step summary without failing the job: Bun's node:wasi cannot initialise
+  # the module today (the design spec's Bun decision); native Bun stays green in build-native.
+  # The Forge is checked out at master here, as release.yml does, for the pack script; the
+  # workflow calls above resolve the same way.
+  test-npm-package:
+    needs: [build-native, build-wasm]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, macos-26, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check out the Forge at master
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: master
+          path: .hyperforge
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: node-*
+          path: artifacts/node
+          merge-multiple: false
+
+      # The module and its loaders beside binding.js, where the loader's first WASI candidate
+      # looks; no .node is built or downloaded into the checkout, and the forced mode never
+      # consults one anyway.
+      - name: The conformance suite against the WASI module, native refused
+        shell: bash
+        working-directory: typescript
+        run: |
+          set -euo pipefail
+          npm ci
+          cp ../artifacts/node/node-wasm32-wasip1/* .
+          ls -l hyperuuid.wasm32-wasip1.wasm
+          NAPI_RS_FORCE_WASI=error npm test
+          npm run typecheck
+
+      - name: The same on Bun, recorded
+        id: bun
+        shell: bash
+        working-directory: typescript
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          NAPI_RS_FORCE_WASI=error npm run test:bun
+
+      - name: Record Bun's result
+        shell: bash
+        env:
+          BUN_OUTCOME: ${{ steps.bun.outcome }}
+          OS: ${{ matrix.os }}
+        run: |
+          echo "- Bun $(bun --version) forced-WASI suite on $OS: $BUN_OUTCOME (recorded, never a failure of this job)" >> "$GITHUB_STEP_SUMMARY"
+
+      # PR mode has no osx-x64 build (hyper-build-native skips it), so the pack leaves that
+      # platform package out by name, as test-c does; the root still pins all eight, and npm
+      # tolerates an optional dependency whose packument is missing. A release skips nothing.
+      - name: Pack the ten tarballs as the release does
+        shell: bash
+        env:
+          MODE: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            release) skip=() ;;
+            pr) skip=(--skip osx-x64) ;;
+            *) echo "::error::mode must be release or pr, not $MODE"; exit 1 ;;
+          esac
+          python3 ".hyperforge/.github/scripts/npm_package.py" pack --package typescript --artifacts artifacts/node --out npm-packages "${skip[@]}"
+          ls -l npm-packages
+
+      - name: The consumer-test harness
+        shell: bash
+        working-directory: typescript/consumer-tests
+        run: npm ci
+
+      # s390x for the emulated-host scenario; the floor and lockfile scenarios need Docker and
+      # the pinned npm, which only this leg has.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: matrix.os == 'ubuntu-26.04'
+        with:
+          platforms: s390x
+
+      # SKIP_NATIVES names the platform package the pack left out, so the mac-lockfile guard
+      # (which otherwise wants all eight in the registry) excludes it in PR mode.
+      - name: Every installation scenario
+        if: matrix.os == 'ubuntu-26.04'
+        shell: bash
+        env:
+          SKIP_NATIVES: ${{ github.event_name == 'pull_request' && 'darwin-x64' || '' }}
+        run: bash typescript/consumer-tests/run.sh "$GITHUB_WORKSPACE/npm-packages" all
+
+      - name: The installation scenarios this OS can run
+        if: matrix.os != 'ubuntu-26.04'
+        shell: bash
+        env:
+          SKIP_NATIVES: ${{ github.event_name == 'pull_request' && 'darwin-x64' || '' }}
+        run: >-
+          bash typescript/consumer-tests/run.sh "$GITHUB_WORKSPACE/npm-packages"
+          negative-unpublished plain omit-optional absent-native forced-wasi
+          negative-deleted-package negative-deleted-wasm bundlers
+
   # A release's run is dispatched by prepare-release.yml with a GITHUB_TOKEN, and GitHub raises
   # no workflow_run for a run that token started, so stage-native-binaries.yml would never hear
   # that it finished. workflow_dispatch is one of the two events the token may raise: once every
@@ -828,7 +966,7 @@ jobs:
   # requests and the weekly schedule never stage, and only this job may start a workflow.
   request-staging:
     needs: [build-static, build-android, test-swift-static, build-native, build-wasm, build-wheels,
-            check-core, test-apple-mobile, test-android, test-nuget-package, test-c]
+            check-core, test-apple-mobile, test-android, test-nuget-package, test-npm-package, test-c]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-26.04
     permissions:

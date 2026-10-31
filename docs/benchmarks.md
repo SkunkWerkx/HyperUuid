@@ -29,7 +29,7 @@ The scoreboard above wasn't free, and the mechanism behind it is the actual find
 
 PHP took the native-extension door for reach, not for the crossing: by default PHP allows its built-in FFI under a web SAPI only from preloaded code, so the binding is an ext-php-rs extension that PIE installs prebuilt, one per PHP minor, with no fallback. The extension has not been measured on the machine these tables come from yet.
 
-TypeScript and R were decided from the start rather than by measurement. TypeScript took the native-extension door: a Node-API addon built with napi-rs, the core linked into the `.node` file, which Node and Bun both load. R calls the C ABI from a hand-written shim reached through `.Call`, linked against the core's static library, which a source install builds from the Rust crates vendored into the package. Neither has a fallback.
+TypeScript and R were decided from the start rather than by measurement. TypeScript took the native-extension door: a Node-API addon built with napi-rs, the core linked into the `.node` file, which Node and Bun both load. R calls the C ABI from a hand-written shim reached through `.Call`, linked against the core's static library, which a source install builds from the Rust crates vendored into the package. TypeScript's fallback, where no addon fits, is the same core as WebAssembly under `node:wasi`, measured below; R has none.
 
 Go took a third door, the newest: no crossing at all. The core's `wasm32-wasip1` build is translated to Go source by [wasm2go](https://github.com/ncruces/wasm2go) and committed, so the Go compiler compiles the core beside the binding and a call into it is a Go call; what is left to price is the random source, and the binding serves the core's `random_get` from an AES-256-CTR keystream where Go's AES is hardware-accelerated ([its table](#go-typescript-and-r-on-an-apple-m6)).
 
@@ -126,13 +126,15 @@ The same binding on Linux arm64, in Docker on the same Mac (`golang:1.27`, 3 run
 
 TypeScript, Node 26.13.0 and Bun 1.4.4, with [mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`, from `typescript/`), averages per call; Bun's `uuid` `v7()` is the noisiest baseline here, so read its ratio with that spread:
 
-| Call | Node 26 | Bun 1.4 | vs. |
-| --- | ---: | ---: | --- |
-| `newV4()` | 239 ns | 258 ns | `crypto.randomUUID()`: 58.0 ns / 40.5 ns: **4.1x / 6.4x slower** |
-| `newV7()` | 155 ns | 166 ns | `uuid`'s `v7()`: 350 ns / 135 ns: 2.3x faster / **1.2x slower** |
-| `newV7Batch(1000)` | 44.2 µs | 27.3 µs | 1000x `newV7()`: 155 µs / 169 µs: 3.5x / 6.2x faster |
-| `newV7BatchBytes(1000)` | 3.62 µs | 2.93 µs | `newV7Batch(1000)`: 12x / 9.3x faster |
-| `v7UnixMillis(id)` | 115 ns | 156 ns | |
+| Call | Node 26 | Bun 1.4 | vs. | Node 26, WebAssembly fallback (2026-10-31) |
+| --- | ---: | ---: | --- | ---: |
+| `newV4()` | 239 ns | 258 ns | `crypto.randomUUID()`: 58.0 ns / 40.5 ns: **4.1x / 6.4x slower** | 1.50 µs (**22x slower** than `crypto.randomUUID()`) |
+| `newV7()` | 155 ns | 166 ns | `uuid`'s `v7()`: 350 ns / 135 ns: 2.3x faster / **1.2x slower** | 1.52 µs (**4.0x slower** than `uuid`'s `v7()`) |
+| `newV7Batch(1000)` | 44.2 µs | 27.3 µs | 1000x `newV7()`: 155 µs / 169 µs: 3.5x / 6.2x faster | 611 µs (2.5x faster than 1000 single calls) |
+| `newV7BatchBytes(1000)` | 3.62 µs | 2.93 µs | `newV7Batch(1000)`: 12x / 9.3x faster | 40.4 µs |
+| `v7UnixMillis(id)` | 115 ns | 156 ns | | 890 ns |
+
+The WebAssembly column is the fallback forced (`NAPI_RS_FORCE_WASI=error npm run bench`) a day later on the same machine; its session's native figures, within a few per cent of the table's, are beside it in [`typescript/README.md`](../typescript/README.md#benchmarks). Every call pays the WASI boundary (about 0.9 µs where the addon pays 0.1), so the fallback is 6x to 13x behind the addon and loses to both JavaScript baselines on single ids; batches still pay it once. Bun 1.4.4 cannot initialise the module, so it has no WebAssembly column.
 
 The losses are the random source: on Apple platforms the core asks `CCRandomGenerateBytes` for every id (the user-space ChaCha20 pool in `rust/src/entropy.rs` is Linux only), which costs more from 12 bytes up, and a v4 draws 16 where a v7 draws 11. A round trip into the addon that touches no randomness (`v7UnixMillis`) is 115 ns on Node. `crypto.randomUUID()` draws from a buffer of random bytes it refills in bulk, and a batch pays once in the same way.
 

@@ -9,7 +9,7 @@
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, and v7
 converted to a version 8 layout SQL Server sorts by creation, calling directly into the native `hyperuuid` Rust core through `@convention(c)` function
 pointers — no runtime bridge, no shim. On every platform it supports — Linux (glibc and
-musl), macOS, Windows and WebAssembly — the core is linked into your executable as a static
+musl), macOS, Windows, WebAssembly, iOS, Mac Catalyst and Android — the core is linked into your executable as a static
 library, so there is nothing to load at run time and nothing to deploy beside it.
 
 ```swift

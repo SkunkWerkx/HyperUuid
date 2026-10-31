@@ -167,7 +167,7 @@ Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s
 
 The cells that are not a plain ✅, and why each is deliberate:
 
-- **osx-x64 (Intel macOS): built, and tested at the core, in TypeScript and in Java only.** There is no Intel macOS CI leg. The library is cross-compiled on the Apple silicon runner, attested, and shipped in every package, and the Rust core's own suite runs on it there under Rosetta 2, which is why that row keeps its ✅. TypeScript's and Java's are the two binding suites that run on Intel macOS, TypeScript's on an x64 Node under Rosetta 2 against an addon cross-built there, Java's on x64 Temurin 21 and 25 under Rosetta 2 (the JNI path and the FFM path), which is why their rows have a ✅; every other one still runs on Apple silicon against the same source. Ruby there installs the universal gem and runs on Fiddle, since no precompiled gem is built for it. The leg took 37 minutes against 8 on Apple silicon, for hardware Apple stopped selling in 2023 on runners GitHub retires by Fall 2027.
+- **osx-x64 (Intel macOS): built, and tested at the core, in TypeScript and in Java only.** There is no Intel macOS CI leg. The library is cross-compiled on the Apple silicon runner, attested, and shipped in every package that carries one, and the Rust core's own suite runs on it there under Rosetta 2, which is why that row keeps its ✅. TypeScript's and Java's are the two binding suites that run on Intel macOS, TypeScript's on an x64 Node under Rosetta 2 against an addon cross-built there, Java's on x64 Temurin 21 and 25 under Rosetta 2 (the JNI path and the FFM path), which is why their rows have a ✅; every other one still runs on Apple silicon against the same source. Ruby there installs the universal gem and runs on Fiddle, since no precompiled gem is built for it. The leg took 37 minutes against 8 on Apple silicon, for hardware Apple stopped selling in 2023 on runners GitHub retires by Fall 2027.
 - **PHP on osx-x64 and win-arm64: no zip.** Intel macOS: Homebrew bottles no PHP for it any more, and no leg compiles a PHP to build against (the one that did was retired on 2026-10-31). Windows on ARM: PHP has never shipped a native Windows ARM64 build, so it runs as an x64 process there regardless of host CPU and takes the win-x64 zip — already exercised for real by the win-x64 leg.
 - **TypeScript on Bun.** The suite runs on Node on every leg and in both musl containers, and on Bun everywhere but win-arm64, where Bun is not yet verified, and osx-x64, whose cross-build leg runs Node alone.
 - **C and C++: one archive per RID, plus Android, iOS, Mac Catalyst and WebAssembly.** CI packs every archive from the run's own libraries with the release's packer, then on each RID's runner builds a C consumer and a C++23 one against it through CMake, and the C one through pkg-config, shared and static (osx-x64 under Rosetta 2, musl in Alpine). The iOS, iOS simulator and Mac Catalyst archives are static only and built against on a Mac: linked for a device, run in the simulator, and run as Mac Catalyst on both architectures. The android-arm64, android-x64 and wasi-wasm32 archives are packed but not run: no runner executes them, and their libraries are the ones C# and Swift already test there.
@@ -175,7 +175,7 @@ The cells that are not a plain ✅, and why each is deliberate:
 
 The musl libraries are built so that they depend on musl's libc and nothing else — the unwinder is linked statically — which is what lets them load on a bare `alpine` or `python:alpine` image with no `libgcc` installed. The glibc libraries need glibc 2.34 or newer. The TypeScript addon links Rust's std, so that floor is not its floor; its own is not stated here yet.
 
-**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is Go 1.26, Python 3.11, Ruby 3.3, PHP 8.3, Node 22 and .NET 10, and the musl job runs the Ruby, Python and TypeScript suites on those oldest versions as well as the newest (for Node, on 22, 24 and 26), and Go's once, on its floor, the one Go that job needs. PHP's extension is built per minor, so a release run builds and tests 8.3, 8.4 and 8.5 on every platform, and a pull request the newest everywhere and 8.3 on linux-x64. R follows CRAN's window instead: CI checks the current release and the previous minor, and the package declares R 4.2. C# covers Windows, Linux, macOS and Blazor WebAssembly on .NET 10; iOS, Mac Catalyst and Android need .NET 11. JDK 21 sits above that line, though 17 is still supported upstream (Temurin to 2027-10-31): Temurin builds no JDK 17 for Windows arm64 or musl arm64, two of the jar's eight platforms. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4. The crate's own floor is Rust 1.89 (`rust-version` in its manifest, the floor of the current `uuid` 1.x), and CI checks the library, with and without std, on exactly that toolchain.
+**Runtime floors** follow upstream support: a version that has reached end of life is not a floor. Today that is Go 1.26, Python 3.11, Ruby 3.3, PHP 8.3, Node 22.13 (the WebAssembly runtime's floor) and .NET 10, and the musl job runs the Ruby, Python and TypeScript suites on those oldest versions as well as the newest (for Node, on 22, 24 and 26), and Go's once, on its floor, the one Go that job needs. PHP's extension is built per minor, so a release run builds and tests 8.3, 8.4 and 8.5 on every platform, and a pull request the newest everywhere and 8.3 on linux-x64. R follows CRAN's window instead: CI checks the current release and the previous minor, and the package declares R 4.2. C# covers Windows, Linux, macOS and Blazor WebAssembly on .NET 10; iOS, Mac Catalyst and Android need .NET 11. JDK 21 sits above that line, though 17 is still supported upstream (Temurin to 2027-10-31): Temurin builds no JDK 17 for Windows arm64 or musl arm64, two of the jar's eight platforms. Swift's floor is 6.2 for a different reason: it is the first release whose package manager can link a static library, which is how the binding reaches musl and WebAssembly at all. CI runs it on 6.2 as well as 6.4. The crate's own floor is Rust 1.89 (`rust-version` in its manifest, the floor of the current `uuid` 1.x), and CI checks the library, with and without std, on exactly that toolchain.
 
 How each binding reaches the core (linked into the executable for Swift and C#'s Native AOT, compiled as Go source for Go), iOS, Mac Catalyst and Android, and how each one is published: [docs/platforms.md](docs/platforms.md).
 
@@ -185,7 +185,8 @@ Seven of these languages compile into a WebAssembly app with the core inside it:
 C# in Blazor WebAssembly (.NET 10+), Python under Pyodide, Ruby through `rbwasm build`, Go
 under stock Go (`GOOS=js`, `GOOS=wasip1`) and TinyGo alike, since its core is Go source, Swift
 with swift.org's WebAssembly SDK, and C from the wasi-wasm32 archive. PHP's
-is proven and unshipped, Java's is blocked on its compilers, and TypeScript and R are not built.
+is proven and unshipped, Java's is blocked on its compilers, TypeScript's is the fallback package
+every install carries (tested in Chromium), and R's is not built.
 [docs/platforms.md](docs/platforms.md#webassembly) has the table, binding by binding, and why
 each gap is where it is.
 
@@ -193,9 +194,9 @@ each gap is where it is.
 
 Every file a release ships verifies from the tag alone. One release attestation, signed by
 this repository's own `release.yml` at the tag, names every registry package (the `.nupkg` as
-packed and as nuget.org serves it, the gems, the wheels and the sdist, the crate, the Maven files, the nine
-npm tarballs and the R source tarball), Swift's two zips, the fifteen C archives and the 21 PHP
-extension zips on the GitHub Release, and every native library committed for Go, and its predicate is the release inventory: every file's path, size, SHA-256, the commit
+packed and as nuget.org serves it, the gems, the wheels and the sdist, the crate, the Maven files, the ten
+npm tarballs and the R source tarball), Swift's two zips, the fifteen C archives and the 18 PHP
+extension zips on the GitHub Release, and its predicate is the release inventory: every file's path, size, SHA-256, the commit
 it was built from and the repository that signed its build provenance. One command, any file:
 
 ```sh
@@ -219,7 +220,7 @@ Which identity signs each artifact's build provenance, and the gates on the way 
 - **No runtime bridge** — direct FFI (`P/Invoke`, FFM, JNI, `Fiddle`, R's `.Call`), the Rust core linked directly into the VM as a native extension (PyO3, Magnus, ext-php-rs, napi-rs), or, in Go, the core compiled as Go source, never a serialization protocol — with Ruby's zero-compile `Fiddle` fallback kept fully supported and test-verified against the Magnus fast path
 - **Genuinely allocation-free where it counts** — verified with a counting allocator in Rust and `[MemoryDiagnoser]` in C#, not just claimed
 - **AOT-friendly** — C# publishes cleanly under `PublishAot`, with the core linked into the executable rather than sitting beside it; Java's JVM binding survives a real GraalVM Native Image build into a standalone native binary, no JVM required to run it
-- **CI-proven, not CI-claimed** — 5 real-hardware platforms plus two musl RIDs in Alpine containers × 10 language/runtime targets (R is checked on four of the five hardware legs and not in Alpine; Intel macOS is cross-built and tested at the core, in TypeScript, in Java and in PHP), each running that language's actual test suite against a freshly-built native library on every dispatch
+- **CI-proven, not CI-claimed** — 5 real-hardware platforms plus two musl RIDs in Alpine containers × 10 language/runtime targets (R is checked on four of the five hardware legs and not in Alpine; Intel macOS is cross-built and tested at the core, in TypeScript and in Java), each running that language's actual test suite against a freshly-built native library on every dispatch
 
 ## Layout
 
@@ -236,7 +237,7 @@ go/         the Go binding: the core as Go source, translated by wasm2go from it
             stock Go and TinyGo alike, browser and WASI included
 ruby/       the 3.3+ binding: Magnus extension + Fiddle fallback
 php/        the 8.3+ binding's suite, benchmarks and stubs: the extension itself is rust/'s php feature (ext-php-rs), installed by PIE
-typescript/ the Node 22+ and Bun binding: a napi-rs addon with the core linked in, one npm platform package per RID
+typescript/ the Node 22.13+ and Bun binding: a napi-rs addon with the core linked in, one npm platform package per RID, and the WebAssembly fallback package loaded where none fits
 r/          the R 4.2+ binding: .Call into a C shim over the core's static library, built from vendored crates
 include/    hyperuuid.h, the C header, generated by cbindgen from rust/src/ffi.rs, and
             hyperuuid.hpp, the hand-written C++23 header over it

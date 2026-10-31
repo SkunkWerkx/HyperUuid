@@ -81,9 +81,10 @@ updates:
     cooldown:
       default-days: 7
 
-  # The TypeScript binding, and ruby/wasm-smoke's harness.
+  # The TypeScript binding, its browser smoke page and consumer-test harness, and
+  # ruby/wasm-smoke's harness.
   - package-ecosystem: npm
-    directories: ["/typescript", "/ruby/wasm-smoke"]
+    directories: ["/typescript", "/typescript/browser-smoke", "/typescript/consumer-tests", "/ruby/wasm-smoke"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
     cooldown:

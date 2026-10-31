@@ -1,7 +1,7 @@
 # hyperuuid for C and C++
 
 RFC 9562 UUIDs from the HyperUuid core: v4, v5 and v7, v7 batches, and the SQL Server order.
-It is the same library every HyperUuid binding calls, through the C ABI in
+It is the same core every HyperUuid binding uses, here through the C ABI in
 `include/hyperuuid.h`. C++23 has its own header over it, `include/hyperuuid.hpp`, linked
 against the same library.
 

@@ -331,13 +331,22 @@ that touches no randomness, 115 / 156 ns.
 README's explanation ("the rest is the random source") does not close arithmetically against
 the core's own probe numbers, and now says "most of the rest".
 
-**Packaging.** Nine npm packages (the root and eight platform packages), the root's
-`optionalDependencies` injected at pack time and never committed. The first publish of each
-name is the owner's, by hand with a granular token as a `0.0.1` placeholder, because npm
-Trusted Publishing attaches only to a package that exists; `release.yml` is registered after.
-Node 22 is the floor until 2027-04-30. `--omit=optional` or an unlisted platform means no
-addon; the wasm fallback is a 1.2 item. The addon links Rust's std, so the core's glibc 2.34
-floor is not its floor, and its own is not stated yet.
+**Packaging.** Ten npm packages (the root, eight platform packages and the WebAssembly
+fallback), the root's `optionalDependencies` injected at pack time and never committed. The
+first publish of each name is the owner's, by hand with a granular token as a `0.0.1`
+placeholder, because npm Trusted Publishing attaches only to a package that exists;
+`release.yml` is registered after. Node 22 is the floor until 2027-04-30, at 22.13 because the
+WebAssembly runtime needs it. The wasm fallback was a 1.2 item and landed 2026-10-31 instead,
+pulled forward because `--omit=optional` and an unlisted platform otherwise meant no addon; it
+is a tenth package the root depends on outright, 6x to 13x behind the addon, which the README
+prints, proven by installing the packed tarballs into fresh consumers rather than by the suite
+alone (that is where the bundler finding came from: neither esbuild nor webpack can fold the
+loader's platform `require`s into one file, so the working form is `hyperuuid` external; and
+the s390x scenario found that the runtime reads its reference counts through host-endian typed
+arrays over little-endian wasm memory, so on a big-endian host the process never exits: a
+printed loss the scenario now asserts, not a platform). The
+addon links Rust's std, so the core's glibc 2.34 floor is not its floor, and its own is not
+stated yet.
 
 ## R
 
@@ -494,7 +503,7 @@ beside the spike's; the others have the harness and the command.
   1.26, Python 3.11, Ruby 3.3 (on Fiddle), PHP 8.3, Node 22, .NET 10, JDK 21, Swift 6.2, R
   4.2, each with the date it moves and every file that moves with it listed in `CLAUDE.md`.
 - **Attestations over every file, and a first publish by hand where a registry needs one to
-  exist** (npm's nine names) before trusted publishing can attach.
+  exist** (npm's ten names) before trusted publishing can attach.
 
 ## Open debts, so they are not lost
 
@@ -504,7 +513,9 @@ beside the spike's; the others have the harness and the command.
 - Swift: an Apple-machine table.
 - Go: the x64 columns and the parallel v4 there, awaiting the XPS; the Alpine run, iOS,
   Android and the cross-compile sweep are proven by CI, not locally.
-- TypeScript: its own glibc floor, stated and enforced.
+- TypeScript: its own glibc floor, stated and enforced. The WebAssembly fallback on Bun (1.4.4's
+  `node:wasi` has no reactor `initialize`), and in Firefox and Safari: untested, stated so. The
+  big-endian exit hang is upstream's (emnapi's byte-order mix); not reported yet.
 - Ruby and PHP: the ABI decision written down as Python's is (which interpreter minors the
   native extension carries and why, what a new one costs, when one leaves, and what everyone
   else gets).

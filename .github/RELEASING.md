@@ -34,8 +34,8 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
    attached (PIE installs from there; Packagist sees the tag at once, so `pie install` fails
    until this step has run). Its last job, `pie-acceptance`, then has PIE install
    `skunkwerkx/hyperuuid:vX.Y.Z` on every platform and PHP minor and checks it from a fresh
-   `php`. An npm package that does not exist yet (the first release, or a new platform) has
-   no trusted publisher to accept the upload, so before this dispatch the owner bootstraps it
+   `php`. An npm package that does not exist yet (the first release, for all ten names, or a
+   new platform) has no trusted publisher to accept the upload, so before this dispatch the owner bootstraps it
    as the shared runbook says: a placeholder `0.0.1` under each new name, published by hand
    with a granular token, then `release.yml` registered as its trusted publisher and the token
    revoked. The release version itself is never published by hand, so its first real version

@@ -373,14 +373,15 @@ for {
 Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]byte`, so a `[]uuid.UUID` is contiguous 16-byte records in exactly the RFC order the core writes — the batch is copied out of the guest's scratch straight into your slice, with **no per-element conversion**. (C# and Java can't do that; their UUID types aren't RFC byte order, so they must rebuild every element.)
 
 `go test -bench=. -benchmem ./...` from `go/`, Apple M6 (Mac18,5), Go 1.27.3, `-count 6`,
-benchstat medians, 1000 UUIDs per op:
+medians, 1000 UUIDs per op, from the same run as the [Benchmarks](#benchmarks) below
+([`results/macos-arm64-m6-shipped-host.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-shipped-host.txt)):
 
 | method | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
-| `NewV7At` x1000 individually | 37,220 | 0 | 0 |
-| `NewV7BatchAt(1000)` | 2,809 | 16,384 | 1 |
-| `FillV7At` into an existing slice | 2,080 | **0** | **0** |
-| `FillV7BytesAt` into an existing buffer | 2,080 | **0** | **0** |
+| `NewV7At` x1000 individually | 37,320 | 0 | 0 |
+| `NewV7BatchAt(1000)` | 2,842 | 16,390 | 1 |
+| `FillV7At` into an existing slice | 2,072 | 5 | **0** |
+| `FillV7BytesAt` into an existing buffer | 2,074 | 5 | **0** |
 
 `FillV7Bytes`/`FillV7BytesAt` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms cost the same, since neither converts; the byte form exists for convenience, not speed.
 

@@ -305,6 +305,49 @@ class CiTests(unittest.TestCase):
         needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
         self.assertIn('test-nuget-package', re.split(r'[\s,]+', needs.strip()))
 
+    def test_npm_package_job_proves_the_fallback_in_consumers(self):
+        job = self.jobs['test-npm-package']
+        self.assertIn('    needs: [build-native, build-wasm]\n', header(job))
+        self.assertIn('    runs-on: ${{ matrix.os }}\n', header(job))
+        self.assertIn('        os: [ubuntu-26.04, macos-26, windows-2025]\n', header(job))
+        self.assertIn('      fail-fast: false\n', header(job))
+        self.assertNotRegex(header(job), r'^    if:', 'it runs on pull requests, like test-nuget-package')
+        for needle in ('npm_package.py" pack', 'NAPI_RS_FORCE_WASI=error npm test', 'npm run typecheck',
+                       'node-wasm32-wasip1', 'run.sh', 'setup-qemu-action', 'path: .hyperforge',
+                       'repository: SkunkWerkx/.github', 'ref: master', 'persist-credentials: false',
+                       'node-version: "26"', 'oven-sh/setup-bun@', 'merge-multiple: false', 'GITHUB_STEP_SUMMARY'):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, job)
+        self.assertNotIn('--allow-missing-natives', job)
+        # PR mode has no osx-x64 build (hyper-build-native skips it), so the pack leaves that
+        # platform package out by name, as test-c does, and the consumer harness is told which
+        # native is absent so its mac-lockfile guard excludes it; release mode skips nothing.
+        pack = next(step for step in re.split(r'\n      - ', job)[1:] if 'npm_package.py" pack' in step)
+        self.assertIn("MODE: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}", pack)
+        self.assertIn('release) skip=() ;;', pack)
+        self.assertIn('pr) skip=(--skip osx-x64) ;;', pack)
+        self.assertIn('"${skip[@]}"', pack)
+        for step in re.split(r'\n      - ', job)[1:]:
+            if 'run.sh' in step:
+                self.assertIn("SKIP_NATIVES: ${{ github.event_name == 'pull_request' && 'darwin-x64' || '' }}", step)
+        bun = next(step for step in re.split(r'\n      - ', job)[1:] if 'test:bun' in step)
+        self.assertIn('continue-on-error: true', bun, "Bun's forced-WASI result is recorded, never a failure")
+        self.assertEqual(job.count('continue-on-error: true'), 1, 'nothing but Bun is tolerated')
+        for step in re.split(r'\n      - ', job)[1:]:
+            if 'run:' in step:
+                self.assertIn('shell: bash', step, step.splitlines()[0])
+        linux = next(step for step in re.split(r'\n      - ', job)[1:] if 'run.sh' in step and ' all' in step)
+        self.assertIn("matrix.os == 'ubuntu-26.04'", linux)
+        others = next(step for step in re.split(r'\n      - ', job)[1:] if 'run.sh' in step and 'bundlers' in step)
+        self.assertIn("matrix.os != 'ubuntu-26.04'", others)
+        self.assertNotIn('mac-lockfile', others)
+        self.assertNotIn('floor', others)
+        wasm = self.jobs['build-wasm']
+        self.assertIn('      node_wasi: true\n', wasm)
+        request = self.jobs['request-staging']
+        needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
+        self.assertIn('test-npm-package', re.split(r'[\s,]+', needs.strip()))
+
     def test_gate_admits_blazor_webassembly_on_net10_and_net11(self):
         # The build-std archive links on both toolchains, so HYPERUUID003 no longer names Blazor.
         job = self.jobs['test-nuget-package']
