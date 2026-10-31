@@ -132,3 +132,30 @@ test('fillV7 writes only inside an offset view', () => {
 test('fillV7 on an empty view does nothing', () => {
   assert.doesNotThrow(() => fillV7(new Uint8Array(0)))
 })
+
+// Under WASI the loader starts the guest with napi.wasm.initialMemory pages (992, 65,011,712
+// bytes), so an 80 MB result can only exist after memory.grow; the stream must survive it.
+test('an 80 MB batch is whole and the stream survives it', () => {
+  const bytes = newV7BatchBytes(5_000_000)
+  assert.equal(bytes.length, 80_000_000)
+  for (const at of [0, 79_999_984]) {
+    assert.equal(bytes[at + 6] >> 4, 7)
+    assert.equal(bytes[at + 8] & 0xc0, 0x80)
+  }
+  const last = Buffer.from(bytes.subarray(79_999_984)).toString('hex')
+  assert.ok(Buffer.from(newV7Bytes()).toString('hex') > last)
+})
+
+// 160,000 random bytes cross the core's 64 KiB getrandom chunk on WASI (rust/src/entropy.rs).
+test('a fill past the WASI getrandom chunk is whole', () => {
+  const buf = new Uint8Array(16 * 10_000)
+  fillV7(buf)
+  let previous = ''
+  for (let i = 0; i < buf.length; i += 16) {
+    const id = Buffer.from(buf.subarray(i, i + 16)).toString('hex')
+    assert.equal(id[12], '7')
+    assert.equal(buf[i + 8] & 0xc0, 0x80)
+    assert.ok(id > previous)
+    previous = id
+  }
+})

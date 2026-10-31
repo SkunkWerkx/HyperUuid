@@ -2,3 +2,10 @@
 npm/
 target/
 node_modules/
+hyperuuid.wasm32-wasip1.*
+hyperuuid.wasip1*
+browser-smoke/dist/
+browser-smoke/node_modules/
+consumer-tests/node_modules/
+consumer-tests/work/
+browser.js

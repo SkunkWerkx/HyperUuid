@@ -202,7 +202,7 @@ pub fn new_v7_batch_bytes(count: f64, time: Option<Either<f64, JsDate>>) -> Resu
 
 /// Fills `buffer` with `buffer.length / 16` ordered v7 ids in place, with no allocation.
 #[napi(catch_unwind)]
-pub fn fill_v7(mut buffer: Uint8Array, time: Option<Either<f64, JsDate>>) -> Result<()> {
+pub fn fill_v7(env: &Env, mut buffer: Uint8Array, time: Option<Either<f64, JsDate>>) -> Result<()> {
     // SAFETY: the pointer is the caller's own buffer memory. No JavaScript runs between
     // conversion and the write (`value_of()` on a Date runs no user code), so the buffer
     // cannot be detached or resized, and only one buffer is taken, so nothing in Rust aliases
@@ -221,7 +221,16 @@ pub fn fill_v7(mut buffer: Uint8Array, time: Option<Either<f64, JsDate>>) -> Res
     }
     let ids = (out.len() / 16) as u32;
     hyperuuid::v7::new_v7_batch(millis(time)?, ids, out)
-        .map_err(|e| v7_error(e, "uuid_new_v7_batch: random source failure"))
+        .map_err(|e| v7_error(e, "uuid_new_v7_batch: random source failure"))?;
+    // On the WebAssembly build the slice above is emnapi's guest-memory copy of the caller's
+    // view, not the view itself, so the ids are copied back into JavaScript here. Natively the
+    // slice is the view's own memory and there is nothing to sync; napi only defines `sync` for
+    // wasm, hence the cfg.
+    #[cfg(target_family = "wasm")]
+    buffer.sync(env);
+    #[cfg(not(target_family = "wasm"))]
+    let _ = env;
+    Ok(())
 }
 
 /// The largest count one v7 batch call accepts.

@@ -1,0 +1,13 @@
+{
+  "name": "hyperuuid-browser-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Bundles the WASI package into a page and runs the corpus against it in a browser; see check-dom.mjs for the verdict.",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test check-dom.test.mjs"
+  },
+  "devDependencies": {
+    "vite": "8.3.5"
+  }
+}

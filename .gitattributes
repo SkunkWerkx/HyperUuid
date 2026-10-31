@@ -1,8 +1,7 @@
 # Every text file is UTF-8 without a BOM and ends its lines with LF, on every platform, Windows
 # checkouts included: eol overrides a contributor's core.autocrlf. .editorconfig asks editors
 # for the same, and .github/scripts/tests/test_text_files.py fails CI on a CR, a BOM or a file
-# that is not UTF-8. The native libraries committed for Go are binary, named so that
-# no heuristic decides it.
+# that is not UTF-8. Binary extensions are named below so that no heuristic decides it.
 * text=auto eol=lf
 *.a     binary
 *.lib   binary

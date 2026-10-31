@@ -55,18 +55,32 @@ re-running the harness, and don't drop a loss.
   the prefixes in `.github/hyper.json` (the Forge's symbol check reads them), the AOT and wasm
   smoke tests, and the export count in the READMEs. The Blazor archive needs no export list:
   the SDK's pinvoke table links every P/Invoke by symbol.
-- npm's nine packages: the root `hyperuuid` and eight `@skunkwerkx/hyperuuid-<suffix>`, one
-  per RID, mapped by `NODE_PLATFORMS` in the Forge's `hyper_config.py` (a `node.platforms`
+- npm's ten packages: the root `hyperuuid`, eight `@skunkwerkx/hyperuuid-<suffix>`, one per
+  RID, mapped by `NODE_PLATFORMS` in the Forge's `hyper_config.py` (a `node.platforms`
   override in `.github/hyper.json` if this repo ever differs) and listed as `napi.targets` in
-  `typescript/package.json`. The root's `optionalDependencies` are injected at pack time,
-  never committed, and nothing runs `napi prepublish`. The first publish of every package,
-  a new platform's included, is the owner's, by hand with a granular token: npm Trusted
-  Publishing attaches only to a package that exists, and `release.yml` is registered as its
-  trusted publisher after.
-- The Node floor: `engines.node` (`>=22`) in `typescript/package.json`, the Forge's
+  `typescript/package.json`, and the WebAssembly fallback `@skunkwerkx/hyperuuid-wasm32-wasip1`
+  (`NODE_WASI_PLATFORM` there, the last `napi.targets` entry, `node.wasi` in `hyper.json` to
+  override, `""` for none). The root's `optionalDependencies` are injected at pack time, never
+  committed, and nothing runs `napi prepublish`; the WASI package is the root's plain
+  dependency, with no `cpu`/`os`. The first publish of every package, a new platform's
+  included, is the owner's, by hand with a granular token: npm Trusted Publishing attaches
+  only to a package that exists, and `release.yml` is registered as its trusted publisher
+  after.
+- The WASI package's runtime: `@napi-rs/wasm-runtime`, `@emnapi/core` and `@emnapi/runtime`
+  (`WASI_RUNTIME` in the Forge's `release_package_metadata.py`), with `emnapi` beside them, all
+  exact devDependencies in `typescript/package.json` and pinned by its `package-lock.json`,
+  from which the Forge's `npm_package.py` writes the WASI package's `dependencies` at pack time
+  (napi's own manifest carries a range). Dependabot moves them with `@napi-rs/cli`; the emnapi
+  trio must stay at the one version the CLI accepts.
+- The Node floor: `engines.node` (`^22.13.0 || >=23.5.0`, the WASI runtime's floor) in
+  `typescript/package.json`, the same string in `WASI_NODE_ENGINES` in the Forge's
+  `npm_package.py` (the packer refuses a WASI manifest that differs), the Forge's
   `node_floor_versions` default (`"22 24"`, an input override in `ci.yml` if this repo ever
-  differs) and the floor sentence in `typescript/README.md`. Node 22 reaches EOL on
-  2027-04-30: then drop it from all three.
+  differs), `FLOOR_IMAGE`'s default `node:22.13.0-alpine` and `LOCKFILE_NPM` (`10.9.2`, the npm that Node
+  bundles, the one npm bug 4828 still reproduces with) in `typescript/consumer-tests/run.sh`,
+  and the floor sentences in `typescript/README.md`,
+  `README.md` and the CHANGELOG. Node 22 reaches EOL on 2027-04-30: then drop it from all of
+  them.
 - The JDK floor: `jdkFloor` (`21`) in `java/build.gradle.kts`, `jdk_floor_version` in
   `ci.yml`, and the floor sentences in `java/README.md` and README 'Platform support'. JDK 21
   reaches EOL at Temurin on 2029-12-31. Then the floor is 25: the JNI base, `java/jni/`,
@@ -258,9 +272,21 @@ Forge's `wasm_archive_guard.py` checks the result.
 
 TypeScript builds its own addon, a napi-rs crate path-depending on `rust/`: from
 `typescript/`, `npm ci && npm run build && npm test`, then `npm run test:bun` and `npm run
-lint`. `npm run build` passes `--js binding.js --dts binding.d.ts`; a `napi build` without
-them (a hand-run `--target` cross build, say) writes napi's own loader over the hand-written
-`index.js` and `index.d.ts`, and CI fails on that diff.
+lint`. Both build scripts pass `--platform --js binding.js --dts binding.d.ts`; a `napi build`
+without the last two (a hand-run `--target` cross build, say) writes napi's own loader over the
+hand-written `index.js` and `index.d.ts`, and CI fails on that diff; without `--platform` the
+WASI build deletes `binding.js` as a stale managed file. The WebAssembly fallback (`rustup
+target add wasm32-wasip1`): `npm run build:wasi`, then `NAPI_RS_FORCE_WASI=error npm test`
+(the suite on the fallback, failing rather than falling back; Bun 1.4.4 cannot load it). The
+consumer tests, `typescript/consumer-tests/README.md`: pack the ten tarballs with the Forge's
+`npm_package.py pack` (`--allow-missing-natives` locally, never in CI; CI's PR mode passes
+`--skip osx-x64`, since no osx-x64 addon is built there, as `test-c` does) and run
+`consumer-tests/run.sh <dir> <scenarios>`, which serves them from Verdaccio on port 4873 (one
+run at a time) and installs them in fresh consumers; `floor` and `s390x` need Docker
+(`REGISTRY_HOST=host.docker.internal` on Docker Desktop), and `mac-lockfile` needs the
+darwin-arm64 tarball in the pack (it reproduces npm bug 4828 with the floor's npm, 10.9.2,
+which it installs itself; npm 11.20.0 has the fix). The browser page, `typescript/browser-smoke/`, is CI's: a Vite
+build against the packed WASI tarball, run in headless Chrome and judged by `check-dom.mjs`.
 
 Java's JNI path needs its own library: `cargo build --release --locked --lib` in `java/jni/`,
 after `cargo cdylib`. Gradle stages both and refuses a stale one. Then, from `java/`,
@@ -342,7 +368,7 @@ library is staged, so stale ones link into the wrong build.
 - CRAN submission is by hand, from the R tarball the tag run preserved; no job uploads it.
 - 1.1.0 is the first release with npm and CRAN. What only it can prove: npm publishing
   under OIDC with provenance (after the owner's `0.0.1` placeholders and trusted-publisher
-  registration on all nine names), the nine attested npm tarballs and the CRAN tarball in
+  registration on all ten names), the ten attested npm tarballs and the CRAN tarball in
   the inventory and its release attestation, and the hand CRAN submission from those bytes;
   and the first Maven Central publish of the multi-release jar, sixteen native libraries with their
   `jni-{rid}` attestations verified at pack.

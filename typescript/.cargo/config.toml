@@ -1,7 +1,8 @@
 # The musl sections repeat rust/.cargo/config.toml's: an addon is a shared library, which
 # static-CRT musl cannot produce. The Windows sections below are this crate's own. The rest
 # of that file is not needed here: napi_build::setup() (build.rs) gives the macOS link its
-# dynamic_lookup, and the wasm target is never built.
+# dynamic_lookup, and the WASI build (`npm run build:wasi`, wasm32-wasip1) takes its panic
+# strategy from `[profile.wasi]` in Cargo.toml, not from a rustflags section here.
 [target.x86_64-unknown-linux-musl]
 rustflags = ["-C", "target-feature=-crt-static"]
 

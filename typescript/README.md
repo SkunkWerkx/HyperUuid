@@ -21,9 +21,12 @@ bindings, the SQL Server order, and batch and buffer generation that pay for ran
 npm install hyperuuid
 ```
 
-The package itself is JavaScript and types; the addon comes from a platform package that npm
-picks for you through `optionalDependencies`, so nothing compiles at install. One is
-published for each of eight platforms, as `@skunkwerkx/hyperuuid-<platform>`:
+The package itself is JavaScript and types; the core comes from one of ten packages. The
+native addon is a platform package that npm picks for you through `optionalDependencies`, so
+nothing compiles at install, one for each of eight platforms, as
+`@skunkwerkx/hyperuuid-<platform>`. The tenth, `@skunkwerkx/hyperuuid-wasm32-wasip1`, is the
+WebAssembly fallback: a plain dependency of the root, so it is always installed, and loaded only
+when no native addon fits.
 
 | | x64 | arm64 |
 | --- | :---: | :---: |
@@ -31,10 +34,17 @@ published for each of eight platforms, as `@skunkwerkx/hyperuuid-<platform>`:
 | Linux, musl (`linux-*-musl`, Alpine) | ✓ | ✓ |
 | macOS (`darwin-*`) | ✓ | ✓ |
 | Windows (`win32-*-msvc`) | ✓ | ✓ |
+| Everything else: the WebAssembly fallback (`wasm32-wasip1`) | ✓ | ✓ |
 
-Node 22 or newer (Node-API 5), or Bun. There is no WebAssembly fallback in this release: a
-platform outside the eight, or an install run with `--omit=optional`, has no addon, and the
-package says so through `isAvailable()` rather than failing at `require` ([below](#when-the-addon-is-missing)).
+The fallback is independent of the CPU, so the last row covers more than its two columns say:
+the whole suite passes on it on Linux x64 (glibc), macOS arm64 and Windows x64, and the
+consumer smoke on Alpine; elsewhere little-endian it should load, and is not tested. On a
+big-endian host (s390x) it loads and the consumer smoke's checks pass, and the process then
+never exits: a printed loss, [below](#when-no-native-addon-fits).
+It runs on Node 22.13 or newer
+(`^22.13.0 || >=23.5.0`, the floor of the WebAssembly runtime), or Bun. An install run with
+`--omit=optional`, or on a platform outside the eight, gets the fallback instead of the addon
+([below](#when-no-native-addon-fits)).
 
 ## Usage
 
@@ -151,20 +161,85 @@ try {
 An argument of the wrong JavaScript type, or a number that is not a member of `Layout`, is
 napi's own status code, `InvalidArg` or `NumberExpected` (numbers and enums report
 `NumberExpected`; string-or-bytes parameters report `InvalidArg`), not a HyperUuid code: that is a type error the compiler would have
-caught. Every door catches a Rust panic and throws it as napi's `GenericFailure` rather than
-taking the process down; the core is built to have none, so that is a backstop.
+caught. On the native addon, every door catches a Rust panic and throws it as napi's
+`GenericFailure` rather than taking the process down; the core is built to have none, so that
+is a backstop. On the WebAssembly fallback a panic aborts instead
+([below](#when-no-native-addon-fits)).
 
 Counts are checked, not coerced: `newV7Batch(1.5)`, `-1`, `NaN` and `Infinity` are
 `ERR_HYPERUUID_INVALID_COUNT`, and anything past `MAX_V7_BATCH` is
 `ERR_HYPERUUID_BATCH_TOO_LARGE`, before anything is allocated. A version passed to `isRfc` that
 names no UUID version (outside 0 to 15, or not a whole number) answers `false`.
 
-### When the addon is missing
+### When no native addon fits
 
-`require('hyperuuid')` always succeeds. If the platform package is absent, `isAvailable()` is
-`false`, the plain values (`Namespaces`, `NIL`, `MAX`, `MAX_V7_BATCH`) are still there, `Layout`
-and `Variant` are still there as frozen literals, and every door throws `ERR_HYPERUUID_UNAVAILABLE` with napi's
-loader error as its `cause`:
+`require('hyperuuid')` tries the platform package for the host first. When none fits (the
+install ran with `--omit=optional`, or the platform is not one of the eight) it loads the
+WebAssembly fallback instead: the same core compiled to `wasm32-wasip1`, run in-process
+through Node's `node:wasi` by [`@napi-rs/wasm-runtime`](https://www.npmjs.com/package/@napi-rs/wasm-runtime),
+from `@skunkwerkx/hyperuuid-wasm32-wasip1`, which the root depends on outright. The API is the
+same, the suite is the same, and `isAvailable()` is `true`. What differs:
+
+- Node prints, once, at `require`:
+
+  ```text
+  (node:NNN) ExperimentalWarning: WASI is an experimental feature and might change at any time
+  ```
+
+  That is Node's own warning about `node:wasi`, not this package's;
+  `node --disable-warning=ExperimentalWarning` silences it.
+- It is slower: about 1.5 µs for a single id against 0.2 µs natively, and the batch doors keep
+  their edge ([Benchmarks](#benchmarks)). The install also carries the runtime's three dependencies
+  (`@napi-rs/wasm-runtime`, `@emnapi/core`, `@emnapi/runtime`) and what they pull in
+  (`@tybys/wasm-util`, `@emnapi/wasi-threads`, `tslib`): six packages, about 3.1 MB on disk
+  beside the 174 KB module.
+- Each module instance has its own v7 stream. A `worker_threads` worker loads its own instance,
+  so its ids are strictly ordered among themselves and against nothing minted on the main
+  thread, where the native addon shares one process-wide stream.
+- Panics abort. `wasm32-wasip1` has no unwinder, so the fallback is built with `panic = "abort"`
+  and `catch_unwind` has nothing to catch: a panic surfaces as `RuntimeError: unreachable`
+  thrown from the call, after Rust's panic message on stderr. The core is proven to have no
+  panics in its own code, and nothing more is claimed: the instance's state after one is not
+  claimed sound.
+- Bun 1.4.4 cannot run it: its `node:wasi` has no reactor `initialize`, so Bun with no native
+  addon has `isAvailable()` `false`. Bun with the addon passes the whole suite.
+
+`NAPI_RS_FORCE_WASI=error` in the environment loads the fallback even where an addon is
+installed and fails rather than falling back further; that is how CI runs the whole suite
+against it on Linux x64 (glibc), macOS arm64 and Windows x64, and how to try it locally. The
+consumer smoke runs from the published tarballs on Alpine, at the exact floor, Node 22.13.0,
+and on the floating Node 22 and 24 images; the Node floor is enforced (`engines`), not
+advisory.
+
+**Big-endian hosts** (s390x, tested in `node:24-alpine` for `linux/s390x` under QEMU) are a
+loss, printed here: the fallback loads, and every check of the consumer smoke passes (v4, v7,
+the clock, a v5 vector and a SQL-order vector), but the process never exits on its own. The
+WebAssembly runtime (`@emnapi/runtime` 2.0.0-beta.2 through `@napi-rs/wasm-runtime` 1.2.6)
+writes the module's threadsafe-function reference count with a little-endian `DataView` and
+reads it back through a host-endian `Uint32Array`, so on a big-endian host the count reads as
+16,777,216, is never seen to reach zero, and the `MessagePort` the runtime holds to keep the
+event loop alive while work is pending is never released. The consumer tests record that the
+process has to be killed rather than claiming the platform, and fail the day it changes. A
+long-running process is not affected by the exit; the same byte-order mix is used elsewhere in
+the runtime, so nothing more is claimed for big-endian hosts than the smoke's checks.
+
+**Bundlers.** esbuild and webpack cannot fold the loader's platform `require`s into one file:
+webpack fails the build on them, and an esbuild bundle cannot load the module from a directory
+with no `node_modules`. The form that works, for both, is `hyperuuid` external (esbuild
+`--external:hyperuuid`, webpack `externals: { hyperuuid: 'commonjs hyperuuid' }`) with
+`hyperuuid` installed beside the bundle.
+
+**Browsers.** The fallback package's `browser` entry exports the same doors over a fetched
+module (`import('@skunkwerkx/hyperuuid-wasm32-wasip1')` under a bundler that honours the
+`browser` condition). It is tested in headless Chrome on Linux, from a Vite build served without
+cross-origin isolation (no `Cross-Origin-Opener-Policy` or `Cross-Origin-Embedder-Policy`
+headers). Firefox and Safari are not tested.
+
+When the fallback is missing too (a lockfile that pinned neither package, say, or a
+`node_modules` pruned by hand), `require` still succeeds, `isAvailable()` is `false`, the plain
+values (`Namespaces`, `NIL`, `MAX`, `MAX_V7_BATCH`) are still there, `Layout` and `Variant` are
+still there as frozen literals, and every door throws `ERR_HYPERUUID_UNAVAILABLE` with napi's
+loader error as its `cause`, whose own `cause` chain names every attempt, native and WebAssembly:
 
 ```js
 const hyperuuid = require('hyperuuid')
@@ -173,15 +248,15 @@ console.log(hyperuuid.isAvailable())
 try {
   hyperuuid.newV7()
 } catch (error) {
-  console.log(error.code, error.cause.code)
+  console.log(error.code, error.cause.message)
 }
 ```
 
-With the addon removed, that prints:
+With both packages removed, that prints:
 
 ```text
 false
-ERR_HYPERUUID_UNAVAILABLE undefined
+ERR_HYPERUUID_UNAVAILABLE Cannot find native binding. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
 ```
 
 ### SQL Server order
@@ -287,8 +362,10 @@ the version. `v7UnixMillis` is the cheaper one, with no `Date` built.
 
 ## Bun
 
-The same package runs under Bun: `bun test tests/` runs this package's whole suite (the same
-57 tests `node --test` runs), and the [Benchmarks](#benchmarks) below were taken on both.
+The same package runs under Bun on the native addon: `bun test tests/` runs this package's
+whole suite (the same 60 tests `node --test` runs), and the [Benchmarks](#benchmarks) below
+were taken on both. The WebAssembly fallback does not load on Bun 1.4.4
+([above](#when-no-native-addon-fits)).
 
 ## Benchmarks
 
@@ -317,6 +394,26 @@ refills in bulk, so it pays that cost once per many ids. A batch does the same: 
 the whole batch, about 44 ns an id as strings on Node and 3.6 ns as bytes. If you mint ids one
 at a time and only need v4, `crypto.randomUUID()` is the faster call.
 
+The WebAssembly fallback, measured 2026-10-31 on the same machine (`NAPI_RS_FORCE_WASI=error
+npm run bench`, Node 26.13.0, rustc 1.99.1, `@napi-rs/wasm-runtime` 1.2.6), with the native
+addon's figures from the same session beside it, since the night before's differ by a few
+per cent:
+
+| Call | Node 26, native | Node 26, WebAssembly | Bun 1.4, WebAssembly |
+| --- | ---: | ---: | ---: |
+| `newV4()` | 250 ns | 1.50 µs (`crypto.randomUUID()` 67.2 ns: **22x slower**) | unavailable |
+| `newV7()` | 171 ns | 1.52 µs (`uuid`'s `v7()` 378 ns: **4.0x slower**) | unavailable |
+| `newV7Batch(1000)` | 46.3 µs | 611 µs (1000x `newV7()` 1.53 ms: 2.5x faster) | unavailable |
+| `newV7BatchBytes(1000)` | 3.39 µs | 40.4 µs | unavailable |
+| `v7UnixMillis(id)` | 113 ns | 890 ns | unavailable |
+
+Every call pays the WASI boundary (about 0.9 µs where the native addon pays 0.1), so the
+fallback is 6x to 13x behind the addon and loses to both JavaScript baselines on single ids;
+batches still pay it once. Bun 1.4.4 cannot initialise the module (above), so its column is
+unavailable rather than a number. The module is 174,278 bytes (the `wasi` profile: release with LTO,
+stripped, `panic = "abort"`), and its runtime (`@napi-rs/wasm-runtime`, `@emnapi/core`,
+`@emnapi/runtime` and the three packages they pull in) adds about 3.1 MB to `node_modules`.
+
 String ids are built as latin1 JavaScript strings straight from 36 bytes on the stack, not
 returned as a Rust `String`, which V8 would decode as UTF-8. The choice was made on a
 measurement against the `String` form during development; the harness in the repo measures
@@ -336,9 +433,24 @@ npm run lint
 npm run bench
 ```
 
-Pass `--js binding.js --dts binding.d.ts` to any other `napi build --platform` (a
-`--target` cross build included), as `npm run build` does: without them napi writes its
-generated loader to `index.js` and `index.d.ts`, over this package's own.
+The WebAssembly fallback needs the `wasm32-wasip1` target (`rustup target add wasm32-wasip1`):
+
+```sh
+npm run build:wasi                  # hyperuuid.wasm32-wasip1.wasm and the hyperuuid.wasip1* loaders
+NAPI_RS_FORCE_WASI=error npm test   # the same suite on the fallback, failing rather than falling back
+NAPI_RS_FORCE_WASI=error npm run bench
+```
+
+Pass `--js binding.js --dts binding.d.ts` and `--platform` to any other `napi build` (a
+`--target` cross build included), as both build scripts do: without the first two napi writes
+its generated loader to `index.js` and `index.d.ts`, over this package's own, and without
+`--platform` the WASI build deletes `binding.js` as a stale managed file.
+
+What a consumer gets from the published tarballs is proven by installing them:
+[`consumer-tests/`](consumer-tests/README.md) packs the ten packages, serves them from a local
+registry and runs the install scenarios (plain, `--omit=optional`, no native for the host,
+forced fallback, deleted packages, a Mac-made lockfile on Linux, the exact Node floor, the
+big-endian loss on s390x under emulation, esbuild and webpack) against them.
 
 ## License
 

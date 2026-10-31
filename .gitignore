@@ -135,3 +135,6 @@ go/testdata/corpus/
 
 # superpowers skill scratch (brainstorms worth keeping go in docs/superpowers/)
 .superpowers/
+
+# What the Playwright MCP browser tool writes (page snapshots, console logs) when an agent drives a browser here.
+.playwright-mcp/

@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22"
+    "node": "^22.13.0 || >=23.5.0"
   },
   "license": "MIT",
   "repository": {
@@ -32,12 +32,17 @@
       "x86_64-apple-darwin",
       "aarch64-apple-darwin",
       "x86_64-pc-windows-msvc",
-      "aarch64-pc-windows-msvc"
-    ]
+      "aarch64-pc-windows-msvc",
+      "wasm32-wasip1"
+    ],
+    "wasm": {
+      "initialMemory": 992
+    }
   },
   "scripts": {
     "build": "napi build --release --platform --js binding.js --dts binding.d.ts",
     "build:debug": "napi build --platform --js binding.js --dts binding.d.ts",
+    "build:wasi": "napi build --profile wasi --platform --target wasm32-wasip1 --js binding.js --dts binding.d.ts",
     "test": "node --test \"tests/*.test.ts\" \"tests/*.test.mts\"",
     "test:bun": "bun test tests/",
     "typecheck": "tsc --noEmit",
@@ -48,8 +53,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",
+    "@emnapi/core": "2.0.0-beta.2",
+    "@emnapi/runtime": "2.0.0-beta.2",
     "@napi-rs/cli": "3.10.9",
+    "@napi-rs/wasm-runtime": "1.2.6",
     "@types/node": "26.6.5",
+    "emnapi": "2.0.0-beta.2",
     "mitata": "1.0.34",
     "typescript": "7.0.2",
     "uuid": "14.0.3"
