@@ -2,7 +2,9 @@
 # hyperuuid.so. Makevars.win differs only in passing --target $(TARGET), which makes Cargo
 # write to $(TARGET_DIR)/$(TARGET)/release; this file passes no --target, so LIBDIR here is
 # $(TARGET_DIR)/release. Keep the two LIBDIRs different. CARGO_HOME stays under src/ for the
-# build and is removed with the target.
+# build and is removed with the target. The build is offline from rust/vendor.tar.xz, which
+# tools/vendor.sh writes with the core among the crates; without it the build stops rather
+# than fetch the published core, since the wrapper pins that crate by version.
 TARGET_DIR = ./rust/target
 LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/librcore.a
@@ -14,13 +16,12 @@ all: $(SHLIB) rust_clean
 $(SHLIB): $(STATLIB)
 
 $(STATLIB):
-	if [ -f rust/vendor.tar.xz ]; then \
-	  tar xf rust/vendor.tar.xz -C rust && mkdir -p $(CARGO_HOME_DIR) && \
-	  cp rust/vendor-config.toml $(CARGO_HOME_DIR)/config.toml && OFFLINE=--offline; \
-	else OFFLINE=; fi; \
+	[ -f rust/vendor.tar.xz ] || { echo "hyperuuid: src/rust/vendor.tar.xz is missing; run tools/vendor.sh from r/ (README, Local loop). The Rust build is offline from that tarball only, so the core linked is this checkout's and never a fetched one." >&2; exit 1; }; \
+	tar xf rust/vendor.tar.xz -C rust && mkdir -p $(CARGO_HOME_DIR) && \
+	cp rust/vendor-config.toml $(CARGO_HOME_DIR)/config.toml; \
 	export CARGO_HOME=$(CARGO_HOME_DIR); export PATH="$(PATH):$(HOME)/.cargo/bin"; \
 	rustc --version; \
-	cargo build -j 2 --lib --release $$OFFLINE --manifest-path rust/Cargo.toml --target-dir $(TARGET_DIR)
+	cargo build -j 2 --lib --release --offline --manifest-path rust/Cargo.toml --target-dir $(TARGET_DIR)
 
 rust_clean: $(SHLIB)
 	rm -rf $(STATLIB) $(CARGO_HOME_DIR) rust/vendor $(TARGET_DIR)

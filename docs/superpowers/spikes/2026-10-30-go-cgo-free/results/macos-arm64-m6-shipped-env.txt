@@ -1,0 +1,6 @@
+go version go1.27.3 darwin/arm64
+Apple M6
+ProductName:		macOS ProductVersion:		27.2 BuildVersion:		26B123 
+2026-10-31T08:56Z
+cmd: go test -run '^$' -bench . -benchmem -count 6 . (shipped binding, host, CGO_ENABLED=0 implied: no cgo in the module)
+exit 0

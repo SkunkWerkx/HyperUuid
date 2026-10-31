@@ -1,4 +1,4 @@
-"""The TypeScript, R and Java sites of check_exports.py: the spelling map, the catch_unwind
+"""The TypeScript, R, Java and Go sites of check_exports.py: the spelling map, the catch_unwind
 rule, the R header, the JNI sites and the JNI no-panic attribute rule.
 
 Every napi function must carry `catch_unwind`, or a panic in the core aborts the Node
@@ -243,6 +243,50 @@ class PhpGuardTests(unittest.TestCase):
 
     def test_the_ffi_site_is_gone(self):
         self.assertNotIn('PHP (FFI cdef)', [s[0] for s in self.mod.SITES])
+
+
+class GoSiteTests(unittest.TestCase):
+    """The two Go sites read the translated core (every export is a method on the generated
+    Module) and the binding's calls into it (every export is called). The `(?:uuid|hyperuuid)_`
+    prefix is load-bearing: wasm2go also emits Xmemory, which a bare X(\\w+) would report as a
+    stale export."""
+
+    def setUp(self):
+        import re
+        self.re = re
+        self.mod = load('check_exports')
+        self.core = next(s for s in self.mod.SITES if s[0] == 'Go (translated core)')
+        self.calls = next(s for s in self.mod.SITES if s[0] == 'Go (binding calls)')
+
+    def test_the_go_sites_are_the_generated_core_and_the_binding(self):
+        self.assertEqual(self.core[1:], ([('go/internal/core/core.go', r'func \(m \*Module\) X((?:uuid|hyperuuid)_\w+)\(')], 'all', ()))
+        self.assertEqual(self.calls[1:], ([('go/core.go', r'\.X((?:uuid|hyperuuid)_\w+)\(')], 'all', ()))
+        for site in (self.core, self.calls):
+            self.assertEqual(self.mod.declared(site[1]), self.mod.core_exports(), site[0])
+
+    def found(self, site, text):
+        return set(self.re.findall(site[1][0][1], text, self.re.MULTILINE))
+
+    def test_a_call_the_binding_drops_is_missing(self):
+        text = (ROOT / 'go/core.go').read_text(encoding='utf-8')
+        self.assertIn('.Xuuid_new_v4(', text)
+        got = self.found(self.calls, text.replace('.Xuuid_new_v4(', '.Xnot_an_export('))
+        self.assertEqual(self.mod.core_exports() - got, {'uuid_new_v4'})
+
+    def test_an_export_the_core_grows_is_stale(self):
+        text = (ROOT / 'go/internal/core/core.go').read_text(encoding='utf-8')
+        got = self.found(self.core, text + '\nfunc (m *Module) Xuuid_bogus(v0 int32) int32 {\n\treturn 0\n}\n')
+        self.assertEqual(got - self.mod.core_exports(), {'uuid_bogus'})
+
+    def test_the_memory_accessor_is_not_an_export(self):
+        text = (ROOT / 'go/internal/core/core.go').read_text(encoding='utf-8')
+        self.assertIn('func (m *Module) Xmemory() Memory {', text)
+        self.assertFalse({'memory', 'Xmemory'} & self.found(self.core, text))
+
+    def test_the_cgo_sites_are_gone(self):
+        names = [s[0] for s in self.mod.SITES]
+        self.assertNotIn('Go (cgo)', names)
+        self.assertNotIn('Go (TinyGo)', names)
 
 
 if __name__ == '__main__':

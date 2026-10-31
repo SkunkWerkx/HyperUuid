@@ -1,7 +1,9 @@
 package hyperuuid
 
 // The README's zero-allocation claims, held as tests rather than as a benchmark somebody
-// has to remember to read. The by-value shims in backend_static.go are what make these zero.
+// has to remember to read. Every call copies its arguments into an instance's scratch region
+// in the translated core's memory and its result out (core.go), so nothing escapes to the
+// heap; a batch allocates only the caller's slice.
 
 import (
 	"testing"

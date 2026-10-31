@@ -79,8 +79,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and runs its suite on Node there, and on Bun on every RID but win-arm64 and osx-x64 (the
   cross-build leg runs Node alone), and runs `R CMD check --as-cran` on linux-x64,
   linux-arm64, osx-arm64 and win-x64. Dependabot covers the TypeScript binding's npm and
-  cargo manifests (the R wrapper crate's only dependency is the staged core, and its lock is
-  derived from `rust/Cargo.lock` by `r/tools/vendor.sh --stage`, never committed), and
+  cargo manifests (the R wrapper crate's only dependency is the core itself at the release
+  version, and its lock is derived from `rust/Cargo.lock` by `r/tools/vendor.sh`, never
+  committed), and
   `.gitattributes` keeps `r/` and `typescript/` out of the archive Packagist serves.
   *(repository only)*
 - **Every binding reports an exhausted v7 stream as its own error.** The core's new
@@ -99,11 +100,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Go — one backend: the core translated to Go source, no cgo, no binary in git.** The Rust
+  core built for `wasm32-wasip1` is translated to one Go file by
+  [wasm2go](https://github.com/ncruces/wasm2go) and committed as `go/internal/core/core.go`;
+  `go generate` in `go/` regenerates it with a pinned rustc (1.99.1, a reproducibility
+  constraint) and a 64 KiB guest stack, CI regenerates and diffs it on every push, and
+  `prepare-release.yml` regenerates it at the version. cgo, the thirteen committed archives
+  under `go/staticlib/`, the `hyperuuid_local` tag and the core freshness check are gone:
+  `go get` is the whole install, `CGO_ENABLED=0` is fine, and the module builds for every
+  GOOS and GOARCH Go has (a 23-pair cross-compile sweep in CI; iOS and `android/amd64` need
+  a C linker because Go's own ports link externally there). The whole suite now runs under
+  TinyGo on wasip1 and under stock Go on `js/wasm` and `wasip1/wasm` in CI, beside the
+  TinyGo browser page. The core's `random_get` is served from an AES-256-CTR keystream,
+  keyed from `crypto/rand` and rekeyed after 1 MiB or one second, where
+  `golang.org/x/sys/cpu` reports the CPU features Go's own AES assembly requires (amd64,
+  arm64, s390x; never under `purego`, TinyGo or FIPS 140 mode), and from `crypto/rand` per
+  call everywhere else; a failed or short read is `ErrRandomSource`, never a UUID.
+  `golang.org/x/sys` is the module's second dependency. v7 calls run on one primary instance
+  behind its mutex; v4, v5 and inspection run on the primary when its lock is free, else on a
+  pooled instance. A v7 batch lives in the primary's guest memory, which grows to the largest
+  batch asked for and never shrinks (1 GiB at `MaxV7Batch`, out of reach on 32-bit
+  WebAssembly hosts); `NewV5` takes a name of at most `MaxV5Name` bytes (2,147,483,647 on a
+  64-bit host) and returns the new `ErrNameTooLong` past it. On the Apple M6 a `NewV4` is 37.0
+  ns against `google/uuid`'s 167 and a `NewV7At` 37.3 against 202; the batch of 1000 is 2.84
+  µs against the cgo binding's 1.84 on the same machine, the batch loss; the README prints
+  the others beside it (2x under contention on Linux arm64, `V7Timestamp` 4.8x behind
+  `id.Time()`). *(Go)*
+- **R — the wrapper crate depends on the `hyperuuid` crate by exact version, as any
+  crates.io consumer does, instead of a copy of `rust/` staged into the package.**
+  `tools/vendor.sh` resolves that version from the checkout's `rust/` (a command-line patch,
+  never a committed file; it refuses a pin that differs from `rust/Cargo.toml`), vendors the
+  core as `cargo package` writes it beside the other crates (15 in `src/rust/vendor.tar.xz`),
+  and rewrites the lock offline so it names the crates.io source; the pin is a version file
+  `prepare-release.yml` bumps with `DESCRIPTION`. The Rust build is offline from that tarball
+  only, and stops without it rather than fetch the published core. The release's R tarball
+  check reads the pin and the vendored core's version. `cran-comments.md` states the core's
+  `no_std`, allocation-free and panic-free guarantees, and what is left to the binding and
+  to R. *(R)*
 - **PHP — breaking: the package is a native extension, installed with PIE.**
   <!-- owner's words -->
   `pie install skunkwerkx/hyperuuid` downloads a prebuilt Zend extension, `hyperuuid`, built
-  from the core with ext-php-rs, from the GitHub Release: 21 zips, PHP 8.3, 8.4 and 8.5 (NTS
-  only) on seven platforms (Linux x64 and arm64 on glibc and on musl, macOS x64 and arm64,
+  from the core with ext-php-rs, from the GitHub Release: 18 zips, PHP 8.3, 8.4 and 8.5 (NTS
+  only) on six platforms (Linux x64 and arm64 on glibc and on musl, macOS arm64,
   Windows x64), each attested and named in the release attestation. `composer require` no
   longer installs it, and no FFI package is kept. `ext-ffi`, `ffi.enable` and preloading,
   `HYPERUUID_NATIVE_LIBRARY` and `HyperUuid::isAvailable()` are gone;
@@ -218,8 +256,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   item is now one 8-byte load and two 8-byte stores built in little-endian order. The bytes
   are the same, and every other target keeps the walk it had, which measured faster natively.
   Through the core translated to Go by wasm2go, a batch of 1000 went from 7.7 to 5.4 µs on
-  Linux x86-64 and from 7.5 to 5.6 µs on Windows (i9-11900H); the browser builds are not
-  measured. A test holds the two walks to each other, and the no-panic proof links the
+  Linux x86-64 and from 7.5 to 5.6 µs on Windows (i9-11900H), and from 2.9 to 2.1 µs on an
+  Apple M6. The raw module gains less: in V8 (Node 24) its batch went from 2.65 to 2.11 µs,
+  under wasmtime 50 from 13.7 to 13.0 µs. The one loss is the translated core compiled to
+  WebAssembly a second time, by Go itself (`GOOS=js`): there the same batch went from 36.0 to
+  41.5 µs with the AES stream and from 5.8 to 10.6 µs with no entropy at all. The binding
+  takes the OS source there, where its batch is 13.0 µs (11.6 in the spike with the old
+  walk). All on the M6, interleaved A/B (`walk-ab.sh`). A test holds the two walks to each other, and the no-panic proof links the
   WebAssembly one on the host (`--cfg hyperuuid_words_walk`), since `no-panic` cannot see an
   aborting panic. *(crate, C# Blazor, Go TinyGo, Swift WebAssembly)*
 
@@ -243,8 +286,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the host the whole request in one `random_get`, and wasmtime refuses one past 64 MiB, so a
   batch of more than about 11 million v7 ids (a `MAX_BATCH` draws 402 MB) aborted the
   process. The draw now goes a 64 KiB chunk at a time on WASI; every other target is
-  unchanged. *(Rust, and the Go, Ruby and Swift WebAssembly builds, which link its
-  `wasm32-wasip1` archive)*
+  unchanged. *(Rust, the Ruby and Swift WebAssembly builds, which link its
+  `wasm32-wasip1` archive, and Go, whose core is that build translated)*
 
 ## [1.0.0] — 2026-10-25
 

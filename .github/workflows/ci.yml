@@ -175,13 +175,18 @@ jobs:
       project: HyperUuid
       # Every browser target runs in headless Chrome, not just built: the Blazor smoke app
       # linking the archive above, the crate itself for wasm32-unknown-unknown, and the Go
-      # binding compiled by TinyGo with this commit's wasm32-wasip1 archive linked in. And
+      # binding's smoke package compiled by TinyGo, its core being Go source (translated by
+      # wasm2go from the crate's wasm32-wasip1 build and committed). The Go suite itself runs
+      # on WebAssembly too: under TinyGo on wasip1 (wasmtime, the corpus mounted, with a
+      # negative control without the mount), and under stock Go on js/wasm (Node) and
+      # wasip1/wasm (wasmtime). And
       # in release mode (weekly and release, not PRs) the Magnus extension, built for each
       # Ruby minor the -wasm gem carries, linked into a ruby.wasm interpreter and run under
       # Node and in headless Chrome; those archives are uploaded as ruby-wasm-{minor} for
       # release.yml.
       blazor_check: csharp/HyperUuid.WasmSmokeTest/check.sh
       rust_browser_test: rust/browser-test
+      go_wasm_suite: true
       go_tinygo_smoke: go/internal/tinygosmoke
       ruby_wasm_smoke: ruby/wasm-smoke
 
@@ -259,14 +264,16 @@ jobs:
   #    device with signing off. No runner has a device, so that last one is proved as far as
   #    a link goes: the app's executable must define the core's symbols.
   #
-  #  * Go takes them from go/staticlib/, picked by build tag (the Forge's lint-go checks the picking
-  #    for every platform). The suite runs in the simulator through Go's own wrapper,
-  #    misc/ios/go_ios_exec.go, which is how the Go project tests its iOS port; the test that
-  #    reads rust/Cargo.toml is skipped there, since the wrapper carries the module into the
-  #    simulator and that file is outside it, and the corpus is staged as go/testdata/corpus
-  #    (corpus_test.go looks there too) for the same reason. A device build is linked and inspected. Mac
-  #    Catalyst is not linked from Go here: the same archive is linked and run by Swift and
-  #    C# above, and Go's part of it is the selection.
+  #  * Go takes none: its core is Go source (go/internal/core), so the suite here proves the
+  #    translated core on iOS, not a link. It runs in the simulator through Go's own
+  #    wrapper, misc/ios/go_ios_exec.go, which is how the Go project tests its iOS port; the
+  #    test that reads rust/Cargo.toml is skipped there, since the wrapper carries the module
+  #    into the simulator and that file is outside it, and the corpus is staged as
+  #    go/testdata/corpus (corpus_test.go looks there too) for the same reason. Go requires
+  #    external linking on ios/arm64, so both the simulator run and the device build go
+  #    through a C compiler (Go's clangwrap.sh, the iPhoneOS SDK's clang), with nothing of
+  #    the core's for it to link. The device build is built and kept, not run: no runner has
+  #    a device. Mac Catalyst is not a Go target.
   #
   # The simulator hands back neither an exit code nor a console to a launched app, so the C#
   # app also writes what it prints to a file in its container (SmokeLog.cs) and that file is
@@ -305,7 +312,6 @@ jobs:
           (cd swift && xcodebuild -list)
           find swift/HyperUuidCoreApple.xcframework -type f | sort
           ls csharp/HyperUuid/staticlibs/{ios-arm64,iossimulator-arm64,maccatalyst-arm64,maccatalyst-x64}/libhyperuuid.a
-          ls go/staticlib/{ios_arm64,iossimulator_arm64,maccatalyst_arm64,maccatalyst_amd64}/libhyperuuid.a
 
       - name: Boot an iPhone simulator
         id: sim
@@ -375,22 +381,23 @@ jobs:
           chmod +x "$RUNNER_TEMP/go-ios/bin/go_ios_arm64_exec"
           export PATH="$RUNNER_TEMP/go-ios/bin:$PATH"
           GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="$(go env GOROOT)/misc/ios/clangwrap.sh" \
-            go test -tags iossimulator -skip '^TestNativeVersionMatchesTheCrate$' -v . | tee "$RUNNER_TEMP/go-ios/test.log"
+            go test -skip '^TestNativeVersionMatchesTheCrate$' -v . | tee "$RUNNER_TEMP/go-ios/test.log"
           grep -q '^ok' "$RUNNER_TEMP/go-ios/test.log"
 
-      - name: Go — an iOS device build links the core in
+      - name: Go — an iOS device build of the suite
         if: ${{ !cancelled() }}
         working-directory: go
         run: |
           set -euo pipefail
+          # The device SDK's clang, because Go's ios/arm64 port links externally; the
+          # binary is the proof, there is no device to run it on.
           mkdir -p "$RUNNER_TEMP/go-ios"
           GOOS=ios GOARCH=arm64 CGO_ENABLED=1 \
             CC="$(xcrun --sdk iphoneos --find clang) -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0" \
             go test -c -o "$RUNNER_TEMP/go-ios/hyperuuid-device.test" .
-          nm "$RUNNER_TEMP/go-ios/hyperuuid-device.test" > "$RUNNER_TEMP/go-ios/device-symbols.txt"
-          grep -q " [Tt] _uuid_new_v7\$" "$RUNNER_TEMP/go-ios/device-symbols.txt" \
-            || { echo "::error::the iOS device test binary does not define uuid_new_v7; the core was not linked in"; exit 1; }
-          echo "the iOS device test binary defines the core's exports"
+          [ -s "$RUNNER_TEMP/go-ios/hyperuuid-device.test" ] \
+            || { echo "::error::the iOS device build of the Go suite produced no binary"; exit 1; }
+          echo "the Go suite builds for an iOS device"
 
       # The SDK global.json names, as build-native's legs take it.
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -494,9 +501,11 @@ jobs:
   # is linked into the app; the x64 one then passing in the emulator is the proof that it was.
   #
   # Go and Swift: each binding's whole suite, corpus replay included, cross-compiled for
-  # Android against this run's archives (the static-libs artifact lands them in go/staticlib
-  # and the Swift bundle) and run on the same emulator through adb, by the two scripts that
-  # also run it against a local one: android_build_suite.sh and android_device_test.sh. Go
+  # Android (Swift against this run's archives, which the static-libs artifact lands in the
+  # Swift bundle; Go from its translated core, linked through the NDK's clang only because
+  # Go itself requires external linking on android/amd64) and run on the same emulator
+  # through adb, by the two scripts that also run it locally: android_build_suite.sh and
+  # android_device_test.sh. Go
   # runs with -test.short and Swift skips them on Android: the two 1 GiB v7 batch tests,
   # which an emulator's memory is no place for (every other leg runs them). The aarch64
   # builds are linked, not run. Swift's SDK for Android needs Swift 6.3 or later.

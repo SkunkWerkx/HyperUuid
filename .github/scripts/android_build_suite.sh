@@ -6,20 +6,23 @@
 #   android_build_suite.sh go    <x86_64|aarch64> <stage-dir> [go build tags]
 #   android_build_suite.sh swift <x86_64|aarch64> <stage-dir>
 #
-# Needs ANDROID_NDK_HOME. Go links go/staticlib/android_{amd64,arm64} (or, with the
-# hyperuuid_local tag, what local-core.sh built), through the NDK's clang as cgo's CC, into
-# one static test binary. Swift needs a toolchain of 6.3 or later on PATH, the first with a
+# Needs ANDROID_NDK_HOME. Go links nothing of the core's: it is the Go translation in
+# go/internal/core. The test binary is still linked through the NDK's clang, because Go
+# itself requires external linking on android/amd64 (`go build` refuses CGO_ENABLED=0
+# there: "requires external (cgo) linking"), and the emulator CI runs is x86_64; android/arm64
+# links internally and a consumer's `go build` for it needs no NDK, but one path serves both
+# here. Swift needs a toolchain of 6.3 or later on PATH, the first with a
 # Swift SDK for Android; the SDK matching that toolchain's version is installed from
 # swift.org if it is not already, checked against the checksum swift.org publishes for it,
 # and pointed at the NDK. Its runtime is shared libraries, so they are staged beside the
 # test bundle along with the NDK's libc++_shared.so. Swift's Android floor is API 28, Go's
-# and the archives' 21.
+# 21.
 #
 # ci.yml's test-android job runs both, and so does a local emulator run:
 #
-#   ANDROID=1 .github/scripts/local-core.sh
-#   .github/scripts/android_build_suite.sh go x86_64 /tmp/go hyperuuid_local
+#   .github/scripts/android_build_suite.sh go x86_64 /tmp/go
 #   .github/scripts/android_device_test.sh /tmp/go ./hyperuuid.test -test.v -test.short
+#   ANDROID=1 .github/scripts/local-core.sh
 #   .github/scripts/android_build_suite.sh swift x86_64 /tmp/swift
 #   .github/scripts/android_device_test.sh /tmp/swift ./HyperUuidPackageTests.xctest
 set -euo pipefail
@@ -54,11 +57,17 @@ cp -r "$repo/corpus" "$stage/corpus"
 # Each test executable is linked with 16 KB pages, as NDK r28 and later do by default and an
 # older NDK on the machine would not: the emulator CI runs it on uses 16 KB pages, where a
 # 4 KB-aligned executable does not load, and that would fail the run for a reason that is
-# not the core's.
+# not the core's. The Go binary also takes --apply-dynamic-relocs: after external linking Go
+# reads the FIPS section addresses back out of the executable (go:fipsinfo) to hash them, GNU
+# ld writes dynamic-relocation addends into the data, and lld does not unless asked, so Go
+# hashes four empty ranges and GODEBUG=fips140=on panics at start with "fips140: verification
+# mismatch" before any test runs (seen in the emulator; reproduced on linux/amd64 with
+# -fuse-ld=lld, Go 1.26). android/arm64 links internally and is not affected.
 case "$binding" in
   go)
     CC="$prebuilt/bin/$arch-linux-android21-clang" GOOS=android GOARCH="$goarch" CGO_ENABLED=1 \
-      go -C "$repo/go" test -c ${tags:+-tags "$tags"} -ldflags=-extldflags=-Wl,-z,max-page-size=16384 \
+      go -C "$repo/go" test -c ${tags:+-tags "$tags"} \
+      -ldflags=-extldflags=-Wl,-z,max-page-size=16384,--apply-dynamic-relocs \
       -o "$stage/hyperuuid.test" .
     ;;
   swift)
@@ -75,11 +84,10 @@ sdk = next((p for p in release.get("platforms", []) if p.get("platform") == "and
 print(release.get("tag", "-"), sdk["checksum"] if sdk else "-")' "$version")
     [ "$checksum" != - ] || { echo "error: swift.org lists no Android SDK for Swift $version" >&2; exit 1; }
     sdk="${tag}_android"
-    if ! swift sdk list | grep -qx "$sdk"; then
-      swift sdk install \
-        "https://download.swift.org/${tag,,}/android-sdk/$tag/$sdk.artifactbundle.tar.gz" \
-        --checksum "$checksum"
-    fi
+    # Judged by the bundle on disk, not the install's exit status: swift_sdk_install.sh has why.
+    "$(dirname "${BASH_SOURCE[0]}")/swift_sdk_install.sh" "$sdk" \
+      "https://download.swift.org/${tag,,}/android-sdk/$tag/$sdk.artifactbundle.tar.gz" \
+      "$checksum" "$arch-unknown-linux-android28"
     bundle="$(swift sdk configure --show-configuration "$sdk" "$arch-unknown-linux-android28" \
       | sed -n 's|^sdkRootPath: \(.*\)/swift-android/ndk-sysroot$|\1|p')"
     [ -d "$bundle/swift-android" ] || { echo "error: cannot locate the $sdk bundle" >&2; exit 1; }

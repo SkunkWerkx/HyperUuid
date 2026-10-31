@@ -1,0 +1,8 @@
+# The rustc that generates go/internal/core/core.go. A reproducibility constraint, not a
+# floor: the wasm's bytes follow rustc's codegen, so the committed Go translation is made
+# with one named stable and CI regenerates with the same one and diffs. A floating stable
+# would turn every push red on each Rust release day until someone regenerated. Bump it by
+# regenerating (`go generate` in go/) and committing the new core alongside.
+[toolchain]
+channel = "1.99.1"
+targets = ["wasm32-wasip1"]

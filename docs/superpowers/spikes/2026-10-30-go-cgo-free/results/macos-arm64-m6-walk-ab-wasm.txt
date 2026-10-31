@@ -1,0 +1,8 @@
+base round 1 wasmtime batch_1000/v7_batch     time:   [13.669 µs 13.688 µs 13.707 µs]
+base round 1 v8 2702 ns/batch (10000 batches of 1000, node 24.22.1, v8 13.6.233.17-node.58)
+tree round 1 wasmtime batch_1000/v7_batch     time:   [13.105 µs 13.170 µs 13.289 µs]
+tree round 1 v8 2131 ns/batch (10000 batches of 1000, node 24.22.1, v8 13.6.233.17-node.58)
+base round 2 wasmtime batch_1000/v7_batch     time:   [13.723 µs 13.738 µs 13.755 µs]
+base round 2 v8 2650 ns/batch (10000 batches of 1000, node 24.22.1, v8 13.6.233.17-node.58)
+tree round 2 wasmtime batch_1000/v7_batch     time:   [13.004 µs 13.019 µs 13.037 µs]
+tree round 2 v8 2114 ns/batch (10000 batches of 1000, node 24.22.1, v8 13.6.233.17-node.58)

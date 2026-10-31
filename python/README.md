@@ -314,7 +314,7 @@ first = bytes(buf[0:16])  # ready for a BYTEA / uniqueidentifier parameter
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
-`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the Go (3.7 µs) and C# (3.8 µs) bindings hit for identical work. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
+`new_v7_batch` does not spend its time in the native call — it spends it building a thousand `uuid.UUID` instances. Skip that and Python lands at 3.7 µs, which is the same native ceiling the C# binding (3.8 µs) hits for identical work on this machine. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 
 The third row is the catch, and it inverts the advice: **if you need `uuid.UUID` objects, keep using `new_v7_batch`.** Filling bytes and constructing UUIDs from them in Python is more than six times as *slow*, because the extension builds them through a much faster path internally than you can from Python. Reach for `fill_v7` only when bytes are the destination — a database parameter, a wire format, a bulk `COPY` — not a step on the way to objects.
 

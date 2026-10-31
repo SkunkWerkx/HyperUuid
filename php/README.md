@@ -191,7 +191,7 @@ PIE itself needs:
 ### Platforms and PHP versions
 
 Every zip is NTS (non-thread-safe) only, the build every distribution's `php` CLI and FPM
-packages ship; a ZTS PHP (FrankenPHP, for one) has no zip yet. 21 zips a release, each one
+packages ship; a ZTS PHP (FrankenPHP, for one) has no zip yet. 18 zips a release, each one
 load-checked into the PHP it is named for, and run through the full suite there, before it is
 packed:
 
@@ -199,13 +199,15 @@ packed:
 | --- | :---: | :---: | :---: | --- |
 | Linux x64, arm64 (glibc 2.34 or newer) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-glibc-nts.zip` |
 | Linux x64, arm64 (musl: Alpine) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-musl-nts.zip` |
-| macOS x64, arm64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-darwin-bsdlibc-nts.zip` |
+| macOS arm64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-arm64-darwin-bsdlibc-nts.zip` |
 | Windows x64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>-<minor>-nts-{vs16,vs17}-x86_64.zip` (VS16 for 8.3, VS17 from 8.4) |
 
 glibc 2.34 means Debian 12, Ubuntu 22.04, RHEL 9, Amazon Linux 2023 or newer. An extension is
 tied to one PHP minor, so a zip built for 8.4 is refused by 8.5; PIE picks by the PHP it runs
 against. Windows on ARM hardware takes the x64 zip, because PHP itself is an x64 process there:
-PHP has never shipped a native Windows ARM64 build. A 32-bit PHP is not supported.
+PHP has never shipped a native Windows ARM64 build. Intel macOS has no zip: Homebrew bottles
+no PHP for it any more, and nothing here compiles a PHP to build against. A 32-bit PHP is not
+supported.
 
 ### Checking it is loaded
 

@@ -1,5 +1,3 @@
-//go:build cgo && !tinygo && (darwin || linux || windows) && (amd64 || arm64) && !(ios && amd64 && !maccatalyst)
-
 // Package exhaustiontest drives the real v7 stream to its ceiling through the public API.
 //
 // The stream is process-global and driving it to the ceiling poisons it for every call after,

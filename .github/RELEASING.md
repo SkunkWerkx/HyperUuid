@@ -11,8 +11,11 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
    `# hyperuuid X.Y.Z` to match. Fill every `⟨…⟩` placeholder in the section (the Java
    bullet's `⟨n⟩ KB`, measured once the jar is built); the Forge refuses a section that
    still holds one.
-2. Dispatch `prepare-release.yml` with the version. It bumps every manifest, pushes A and
-   runs `ci.yml` on it; `stage-native-binaries.yml` then commits the verified natives as B.
+2. Dispatch `prepare-release.yml` with the version. It bumps every manifest, regenerates the
+   Go core at the version (`go/internal/core/core.go`, whose version is a literal), pushes A
+   and runs `ci.yml` on it; `stage-native-binaries.yml` then writes the Swift zips' checksums
+   into `Package.swift` and commits that as B. No binary is committed: the release ships no
+   Go binary, since Go's core is that regenerated source.
 3. CodeQL runs weekly and on demand, not on pull requests: run it on B
    (`gh workflow run codeql.yml`, with master at B) and go on only once it is green and
    code scanning shows no open alerts.
@@ -27,7 +30,7 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
    ```
 
    This is the recovery path, so every release exercises it. After all six publishers
-   succeed it creates `go/vX.Y.Z` and the GitHub Release, with the 21 PHP extension zips
+   succeed it creates `go/vX.Y.Z` and the GitHub Release, with the 18 PHP extension zips
    attached (PIE installs from there; Packagist sees the tag at once, so `pie install` fails
    until this step has run). Its last job, `pie-acceptance`, then has PIE install
    `skunkwerkx/hyperuuid:vX.Y.Z` on every platform and PHP minor and checks it from a fresh

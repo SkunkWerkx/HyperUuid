@@ -324,6 +324,40 @@ class CiTests(unittest.TestCase):
         self.assertEqual(re.findall(r'^      (node|r): (.*)$', self.jobs['build-native'], re.M),
                          [('node', 'true'), ('r', 'true')])
 
+    def test_go_runs_from_the_translated_core_on_every_leg(self):
+        # Go's core is Go source (go/internal/core, translated from the wasm32-wasip1 build):
+        # no archive is staged for it anywhere, and the wasm workflow runs its whole suite
+        # under TinyGo and stock Go beside the browser build.
+        ci = (WORKFLOWS / 'ci.yml').read_text()
+        self.assertNotIn('go/staticlib', ci)
+        self.assertNotIn('go/staticlib', (WORKFLOWS / 'stage-native-binaries.yml').read_text())
+        wasm = self.jobs['build-wasm']
+        self.assertIn('      go_wasm_suite: true\n', wasm)
+        self.assertIn('      go_tinygo_smoke: go/internal/tinygosmoke\n', wasm)
+        # iOS: Go itself requires external linking on ios/arm64, so the simulator run keeps
+        # Go's own clang wrapper; the device build is built and must exist, and nothing is
+        # inspected for a core symbol, since there is no linked core.
+        apple = self.jobs['test-apple-mobile']
+        simulator = apple.split('- name: Go \u2014 the suite in the iOS simulator')[1].split('\n      - ')[0]
+        self.assertIn('GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="$(go env GOROOT)/misc/ios/clangwrap.sh"', simulator)
+        self.assertNotIn('-tags', simulator)
+        device = apple.split('- name: Go \u2014 an iOS device build')[1].split('\n      - ')[0]
+        self.assertIn('go test -c -o "$RUNNER_TEMP/go-ios/hyperuuid-device.test" .', device)
+        self.assertIn('[ -s "$RUNNER_TEMP/go-ios/hyperuuid-device.test" ]', device)
+        for gone in ('nm ', '_uuid_new_v7', 'links the core'):
+            self.assertNotIn(gone, device)
+        # Android: the script links the test binary through the NDK because Go requires it on
+        # android/amd64; the workflow names no compiler and no archive for Go.
+        android = self.jobs['test-android']
+        self.assertIn('.github/scripts/android_build_suite.sh go "$arch" "stage/go-$arch"', android)
+        self.assertNotIn('CC=', android)
+        self.assertNotIn('static-libs artifact lands them in go', android)
+        # The NDK's lld leaves dynamic-relocation addends out of the data unless asked, and Go's
+        # linker reads the FIPS section addresses back from the file after external linking:
+        # without the flag, GODEBUG=fips140=on panics at start with "verification mismatch".
+        script = (ROOT / '.github/scripts/android_build_suite.sh').read_text()
+        self.assertIn('-ldflags=-extldflags=-Wl,-z,max-page-size=16384,--apply-dynamic-relocs', script)
+
     def test_java_jni_legs_are_on(self):
         # The Forge's java_jni input defaults false; the jar's floor is JDK 21 beside the primary 25.
         build = self.jobs['build-native']

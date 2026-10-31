@@ -82,6 +82,43 @@ These come from CRAN's "Using Rust in CRAN packages" page.
 
 Not applicable: the package uses no extendr. If the bindings use extendr, `rextendr::use_cran_defaults()` and `rextendr::vendor_pkgs()` set up most of the Rust section for you. Between them they handle vendoring, `-j 2`, `--offline` and printing the rustc version.
 
+## Before HyperCast and HyperTabular go to CRAN
+
+_From a review of both repositories' master on 2026-10-31. Each finding marked confirmed was reproduced with a probe program; the inputs and outputs are kept so they can become corpus vectors. HyperUuid's own submission does not wait on any of this: it is the rehearsal, and these are the gates for the two packages that have to land right._
+
+### Fix in the cores first (wrong data, or a whole file refused)
+
+- [ ] **HyperTabular: a stray `"` in an unquoted cell.** Confirmed. The scanner's quote parity runs across the whole input, so one cell with an odd number of quotes (`12" pipe`) switches it into quoted mode. One such row aborts the read ("input ends inside a quoted cell"). Two such rows merge every record between them into one cell, with no error: `12" pipe,1⏎3,4⏎6" pipe` is one cell and the record `3,4` is gone. This contradicts `docs/delimited.md` ("a cell that does not start with `"` is delivered raw, quotes and all"), and `corpus/delimited.json` only has cells with an even number of quotes. Fix: a quote is a quote character only when it opens a cell or sits inside an open quoted cell. Add odd-count vectors.
+- [ ] **HyperTabular: ragged rows.** Confirmed. A short row, a long row or a single trailing comma (`1,2,` under two headers) is a structural error that ends the read. R users expect `fill = TRUE`. Add a declared policy: short rows padded with `Empty` verdicts, long rows a per-row fault or truncated.
+- [ ] **HyperTabular: no skip, header row or range.** Confirmed: a file that opens with title lines fails, and `SheetOptions` has only `header`, `skip_empty_rows` and `batch_rows`. Add leading rows to skip and a header row index for delimited text and sheets, and a cell range (`A5:F200`) for sheets, as readxl has.
+- [ ] **HyperCast: group sizes are not validated.** Confirmed and documented (`verdict.rs`, `NumFormat::GROUPING`): under `INVARIANT`, `1,2` reads as 12, `1,00` as 100, `123,4567` as 1234567, so European data read with the defaults comes back silently wrong. Add a strict-grouping flag (groups of three, and the Indian two-and-three pattern) and make it the R binding's default. `DETECT` already refuses `1,234` as ambiguous.
+- [ ] **HyperTabular: bytes that are not UTF-8.** Confirmed: `\xe9t\xe9` is handed out raw. R errors later on a string marked UTF-8 that is not. Add a declared encoding (single-byte code-page tables, which fit `no_std`, and UTF-16LE), or validate every text cell in the R binding.
+
+### Gaps that will cost adoption
+
+- [ ] **Fault detail.** Confirmed: `12.185` under `DETECT` and `12x185` both come back `Malformed` at a span, so a `problems()` table cannot say why. Add a detail code beside the reason (ambiguous separator, zone required, undeclared order, trailing input, which field is out of range), through new exports so the 1.0 ABI layout holds.
+- [ ] **Missing-value markers.** `NA`, `N/A`, `NULL`, `-` and `#N/A` are `Malformed`, not `Empty`. Add a declared token list per column or per dialect, the `na =` every R reader takes.
+- [ ] **Date and time shapes, all confirmed refused:** compact `20260107`; two-digit years (`01/07/26`, with a declared pivot); month names (`Jan 7, 2026`, Oracle's default `07-JAN-26`); Postgres' `timestamptz` text (`2026-01-02 15:04:05+00`: the space RFC 3339 allows, and an offset without minutes); a trailing no-break space (`42\u00A0`).
+- [ ] **Formulas with no cached value** read as `Empty`, the same as a blank cell. Workbooks written by openpyxl and report generators often have none, so a whole calculated column reads as blank with no hint. Give it its own signal.
+- [ ] Smaller: `"` is the only quote character, there is no escape or comment character, and the integer doors refuse `1.5e3`.
+
+### Decide in R before writing either binding
+
+- [ ] **`NA_integer_` is `INT_MIN`.** An i32 of `-2147483648` collides with R's missing value: make it `OutOfRange` in R, or return i32 as double.
+- [ ] **64-bit integers:** `bit64::integer64` (a dependency) or double (inexact above 2^53). u32 above 2^31 needs double too.
+- [ ] **Decimal:** R has no decimal type. Choose double (lossy, what R users expect), character, or a vctrs class, and document it.
+- [ ] **Timestamps:** `POSIXct` is a double of seconds, about a microsecond at today's dates, so nanoseconds truncate. Say so, as the Python and PHP bindings do.
+- [ ] **Time of day:** base R has no class for it: `hms` (a dependency) or `difftime`.
+- [ ] **Shape:** a `col_types`-style plan and readr's `problems()` attribute for faults. Nothing is sniffed, so offer a helper that suggests a plan for the user to read and pass back, never one applied silently.
+- [ ] **Text columns dominate the cost,** as in Ruby and Python: every cell becomes a `CHARSXP` in R's global string cache. vroom avoids that with ALTREP. The comparison will be vroom, `data.table::fread` (multi-threaded) and readxl: sell the verdicts, not raw speed.
+
+### CRAN packaging for the two
+
+- [ ] **HyperTabular's R package depends on HyperCast's,** as its crate does, so the dependency tree is honest on CRAN too. That means HyperCast is accepted first (one extra review cycle), and every HyperCast update is checked against HyperTabular, which blocks the update if it breaks. The Rust lockstep already works this way.
+- [ ] **Tarball size:** HyperCast vendors nothing and HyperTabular only `hypercast`, so the crates are small. HyperTabular's corpus is 3 MB against CRAN's 5 MB guideline: ship a small subset and skip the cases whose files are missing.
+- [ ] **Panics:** both cores are proven panic-free, which is worth saying in `cran-comments.md`. The R glue code still catches unwinds at the boundary.
+- [ ] **Carry over every reviewer comment HyperUuid gets** to both packages before either is submitted.
+
 ## Sources
 
 - [CRAN: Using Rust in CRAN packages (mirror)](https://brieger.esalq.usp.br/CRAN/web/packages/using_rust.html)

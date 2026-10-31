@@ -16,13 +16,12 @@ all: $(SHLIB) rust_clean
 $(SHLIB): $(STATLIB)
 
 $(STATLIB):
-	if [ -f rust/vendor.tar.xz ]; then \
-	  tar xf rust/vendor.tar.xz -C rust && mkdir -p $(CARGO_HOME_DIR) && \
-	  cp rust/vendor-config.toml $(CARGO_HOME_DIR)/config.toml && OFFLINE=--offline; \
-	else OFFLINE=; fi; \
+	[ -f rust/vendor.tar.xz ] || { echo "hyperuuid: src/rust/vendor.tar.xz is missing; run tools/vendor.sh from r/ (README, Local loop). The Rust build is offline from that tarball only, so the core linked is this checkout's and never a fetched one." >&2; exit 1; }; \
+	tar xf rust/vendor.tar.xz -C rust && mkdir -p $(CARGO_HOME_DIR) && \
+	cp rust/vendor-config.toml $(CARGO_HOME_DIR)/config.toml; \
 	export CARGO_HOME=$(CARGO_HOME_DIR); export PATH="$(PATH):$(HOME)/.cargo/bin"; \
 	rustc --version; \
-	cargo build -j 2 --lib --release --target $(TARGET) $$OFFLINE --manifest-path rust/Cargo.toml --target-dir $(TARGET_DIR)
+	cargo build -j 2 --lib --release --target $(TARGET) --offline --manifest-path rust/Cargo.toml --target-dir $(TARGET_DIR)
 
 rust_clean: $(SHLIB)
 	rm -rf $(STATLIB) $(CARGO_HOME_DIR) rust/vendor $(TARGET_DIR)

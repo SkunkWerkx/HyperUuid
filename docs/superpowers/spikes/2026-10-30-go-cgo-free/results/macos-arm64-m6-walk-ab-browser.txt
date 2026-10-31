@@ -1,0 +1,92 @@
+walk: base
+goos: js
+goarch: wasm
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000 	   32995	     36128 ns/op
+BenchmarkW2gV7Batch1000 	   33344	     36005 ns/op
+BenchmarkW2gV7Batch1000 	   33219	     36027 ns/op
+BenchmarkW2gV7Batch1000 	   33295	     35964 ns/op
+BenchmarkW2gV7Batch1000 	   33348	     36000 ns/op
+BenchmarkW2gV7Batch1000 	   33384	     35987 ns/op
+PASS
+ok  	spike/w2gaes	7.253s
+goos: js
+goarch: wasm
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000 	  202182	      5795 ns/op
+BenchmarkW2gV7Batch1000 	  208810	      5782 ns/op
+BenchmarkW2gV7Batch1000 	  207060	      5783 ns/op
+BenchmarkW2gV7Batch1000 	  208404	      5763 ns/op
+BenchmarkW2gV7Batch1000 	  209305	      5791 ns/op
+BenchmarkW2gV7Batch1000 	  207814	      5808 ns/op
+PASS
+ok  	spike/w2gfloor	7.260s
+walk: tree
+goos: js
+goarch: wasm
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000 	   28688	     41793 ns/op
+BenchmarkW2gV7Batch1000 	   28834	     41679 ns/op
+BenchmarkW2gV7Batch1000 	   28802	     41631 ns/op
+BenchmarkW2gV7Batch1000 	   28860	     41618 ns/op
+BenchmarkW2gV7Batch1000 	   28812	     41974 ns/op
+BenchmarkW2gV7Batch1000 	   28893	     41548 ns/op
+PASS
+ok  	spike/w2gaes	7.278s
+goos: js
+goarch: wasm
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000 	  111426	     10629 ns/op
+BenchmarkW2gV7Batch1000 	  113432	     10584 ns/op
+BenchmarkW2gV7Batch1000 	  113496	     10574 ns/op
+BenchmarkW2gV7Batch1000 	  113607	     10580 ns/op
+BenchmarkW2gV7Batch1000 	  113058	     10631 ns/op
+BenchmarkW2gV7Batch1000 	  113064	     10623 ns/op
+PASS
+ok  	spike/w2gfloor	7.254s
+walk: base
+goos: js
+goarch: wasm
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000 	   32965	     36107 ns/op
+BenchmarkW2gV7Batch1000 	   33542	     36832 ns/op
+BenchmarkW2gV7Batch1000 	   33531	     35822 ns/op
+BenchmarkW2gV7Batch1000 	   33544	     35873 ns/op
+BenchmarkW2gV7Batch1000 	   33285	     35848 ns/op
+BenchmarkW2gV7Batch1000 	   33439	     35793 ns/op
+PASS
+ok  	spike/w2gaes	7.287s
+goos: js
+goarch: wasm
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000 	  204243	      5735 ns/op
+BenchmarkW2gV7Batch1000 	  209410	      5732 ns/op
+BenchmarkW2gV7Batch1000 	  209378	      5748 ns/op
+BenchmarkW2gV7Batch1000 	  209548	      5736 ns/op
+BenchmarkW2gV7Batch1000 	  208250	      5822 ns/op
+BenchmarkW2gV7Batch1000 	  209260	      5753 ns/op
+PASS
+ok  	spike/w2gfloor	7.259s
+walk: tree
+goos: js
+goarch: wasm
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000 	   28832	     41428 ns/op
+BenchmarkW2gV7Batch1000 	   29148	     41208 ns/op
+BenchmarkW2gV7Batch1000 	   29174	     41225 ns/op
+BenchmarkW2gV7Batch1000 	   28971	     41387 ns/op
+BenchmarkW2gV7Batch1000 	   29040	     41348 ns/op
+BenchmarkW2gV7Batch1000 	   28968	     41394 ns/op
+PASS
+ok  	spike/w2gaes	7.263s
+goos: js
+goarch: wasm
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000 	  107744	     10780 ns/op
+BenchmarkW2gV7Batch1000 	  113062	     10635 ns/op
+BenchmarkW2gV7Batch1000 	  112596	     10679 ns/op
+BenchmarkW2gV7Batch1000 	  112545	     10751 ns/op
+BenchmarkW2gV7Batch1000 	  111584	     10698 ns/op
+BenchmarkW2gV7Batch1000 	  113185	     10617 ns/op
+PASS
+ok  	spike/w2gfloor	7.235s

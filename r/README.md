@@ -26,8 +26,8 @@ R CMD INSTALL hyperuuid_<version>.tar.gz
 ```
 
 The tarball is what `R CMD build r` makes from a checkout after `tools/vendor.sh` (see
-[Local loop](#local-loop)). It carries every Rust dependency in `src/rust/vendor.tar.xz` and
-builds offline. `configure` prints the `cargo` and `rustc` versions it found, and stops with
+[Local loop](#local-loop)). It carries every Rust crate it builds in `src/rust/vendor.tar.xz`,
+the `hyperuuid` core among them, and builds offline. `configure` prints the `cargo` and `rustc` versions it found, and stops with
 a pointer to rustup when either is missing or `rustc` is older than 1.89.
 
 ## Usage
@@ -176,20 +176,27 @@ From `r/`, with Rust, GNU tar (`brew install gnu-tar` on macOS) and the R packag
 jsonlite and devtools:
 
 ```sh
-tools/vendor.sh            # stage the core and the corpus, vendor the crates, write inst/AUTHORS
-tools/vendor.sh --verify   # the staged corpus, core and lock are present
+tools/vendor.sh            # derive the lock, vendor the crates and the core, stage the corpus, write inst/AUTHORS
+tools/vendor.sh --verify   # the vendor tarball (with the core), the lock and the corpus are present
 Rscript -e 'devtools::test()'
 cd .. && R CMD build r
 _R_CHECK_CRAN_INCOMING_=false R CMD check --as-cran hyperuuid_<version>.tar.gz
 ```
 
-`tools/vendor.sh --stage` copies the core and the corpus files and derives the lock only,
-without vendoring. The core under `src/rust/core/`, the wrapper crate's
-`src/rust/Cargo.lock` (the core's `rust/Cargo.lock` pruned to the wrapper's packages, so the
-crates vendored are the versions the core is tested with), the vendor tarball and the corpus
-copy under `tests/testthat/corpus/` are generated and gitignored; the tarball `R CMD build`
-makes carries them all. Rerun `tools/vendor.sh` after any change in `rust/` or `corpus/`. A missing corpus file is a test failure, never a skip; the
-replay skips only when jsonlite (a Suggests) is absent, as on CRAN's no-Suggests check.
+`tools/vendor.sh --stage` does everything but `inst/AUTHORS`, the one step that needs
+jsonlite. The wrapper crate in `src/rust/` depends on the `hyperuuid` crate by exact version,
+as any crates.io consumer does, so the graph CRAN builds is the published one; `vendor.sh`
+resolves that version from the checkout's `rust/` (a command-line `[patch]`, never a committed
+file, and it refuses a pin that differs from `rust/Cargo.toml`), vendors the dependencies, adds
+the core as `cargo package` writes it, and rewrites the lock offline so it names the crates.io
+source. The wrapper's `src/rust/Cargo.lock` (the core's `rust/Cargo.lock` pruned to the
+wrapper's packages, so the crates vendored are the versions the core is tested with), the
+vendor tarball and the corpus copy under `tests/testthat/corpus/` are generated and
+gitignored; the tarball `R CMD build` makes carries them all. Rerun `tools/vendor.sh` after
+any change in `rust/` or `corpus/`: the Rust build is offline from the vendor tarball only,
+and stops without it rather than fetch the published core. A missing corpus file is a test
+failure, never a skip; the replay skips only when jsonlite (a Suggests) is absent, as on
+CRAN's no-Suggests check.
 
 Lint against an installed copy: lintr's object-usage linter loads the package it lints, and
 without one every exported name is a false positive.
