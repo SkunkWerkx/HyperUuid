@@ -150,9 +150,9 @@ final class HyperUuidTest extends TestCase
 
     public function testV7CurrentTimestampIsEmbedded(): void
     {
-        $before = (int) round(microtime(true) * 1000);
+        $before = self::nowMillis();
         $id = HyperUuid::newV7();
-        $after = (int) round(microtime(true) * 1000);
+        $after = self::nowMillis();
 
         $embedded = self::embeddedMillis($id);
         self::assertGreaterThanOrEqual($before, $embedded);
@@ -296,9 +296,10 @@ final class HyperUuidTest extends TestCase
         return ((int) $dt->format('U')) * 1000 + intdiv((int) $dt->format('u'), 1000);
     }
 
+    /** The wall clock in whole milliseconds, truncated as the extension truncates it (`as_millis`); rounding would read one ahead of an id made in the same millisecond's second half. */
     private static function nowMillis(): int
     {
-        return (int) round(microtime(true) * 1000);
+        return (int) floor(microtime(true) * 1000);
     }
 
     /**
@@ -417,9 +418,9 @@ final class HyperUuidTest extends TestCase
 
     public function testBatchBytesDefaultsToNow(): void
     {
-        $before = (int) (microtime(true) * 1000);
+        $before = self::nowMillis();
         $bytes = HyperUuid::newV7BatchBytes(1);
-        $after = (int) (microtime(true) * 1000);
+        $after = self::nowMillis();
         $ts = (new Uuid(substr($bytes, 0, 16)))->timestamp();
         $ms = (int) ((float) $ts->format('U.u') * 1000);
         self::assertGreaterThanOrEqual($before - 1000, $ms);
