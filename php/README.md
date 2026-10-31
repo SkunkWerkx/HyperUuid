@@ -268,6 +268,11 @@ messages are the same in this extension, except:
   `TimestampOutOfRangeException` (1.0: `TypeError`).
 - `isRfc($version)` with a `$version` outside 0-15 is never matched; 1.0 could truncate a large
   value into that range.
+- A v7 timestamp stops at 9999-12-31T23:59:59.999Z (253402300799999 ms); 1.0 minted every value
+  of the 48-bit field, to 10889. The `TimestampOutOfRangeException` message names the range,
+  `unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)`; 1.0 said
+  `unix_millis must fit within the RFC 9562 48-bit field`. The tests compare the extension
+  against 1.0's recordings through exactly these two differences (`tests/Support/V1Differences.php`).
 
 Arguments are taken as 1.0 took them. A caller without `declare(strict_types=1)` gets PHP's
 weak-mode coercion of each declared type, with its deprecations (`newV7("1700000000000")`,
@@ -329,7 +334,10 @@ forward. A single call consumes one of a millisecond's 2^20 steps and a batch of
   advance without running more than 1000 ms ahead of the supplied timestamp or past its last
   millisecond`, before anything is reserved. It is a state error, not an argument error, and
   a call whose timestamp is past the stream's millisecond succeeds. The random source failing
-  is `RandomSourceException`; a timestamp past 48 bits is `TimestampOutOfRangeException`.
+  is `RandomSourceException`; a timestamp before 1970 or after 9999-12-31T23:59:59.999Z
+  (253,402,300,799,999 ms, the generation cap) is `TimestampOutOfRangeException`. The 48-bit
+  field itself reaches 10889: `timestamp()` and `unixMillis()` read a version 7 another
+  generator dated past the cap as they read a version 6, no timestamp.
 
 ## Why not `ramsey/uuid`?
 

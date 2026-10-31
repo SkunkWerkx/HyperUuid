@@ -5,7 +5,8 @@
 //! every export just takes plain pointers into the caller's own stack- or heap-allocated
 //! buffers — no allocator exports, no protocol beyond "here's a 16-byte buffer, fill it in".
 //!
-//! Return codes: `0` success, `1` random source failure, `2` timestamp out of range, `3` a
+//! Return codes: `0` success, `1` random source failure, `2` timestamp out of range (version 7
+//! is minted up to 253402300799999, 9999-12-31T23:59:59.999Z), `3` a
 //! batch too large to address (`count * 16` overflows `usize`, which only a 32-bit target can
 //! reach, and where no buffer that size can exist), `4` a version 7 batch larger than the
 //! 26-bit counter space, `5` a SQL-order conversion handed a value of the wrong version, `6` a
@@ -154,9 +155,11 @@ pub extern "C" fn uuid_new_v5(
 }
 
 /// The version-agnostic timestamp read in one call: for an RFC 9562 version 7 UUID at
-/// `uuid_ptr` (16 bytes, held in `layout`'s byte order), writes its Unix-epoch milliseconds to
+/// `uuid_ptr` (16 bytes, held in `layout`'s byte order) dated at most 253402300799999
+/// (9999-12-31T23:59:59.999Z, the generation cap), writes its Unix-epoch milliseconds to
 /// `millis_out` and returns the version, 7. For anything else — another version, another
-/// variant, an unknown layout code — returns 0 and leaves `millis_out` untouched.
+/// variant, an unknown layout code, a version 7 dated past the cap — returns 0 and leaves
+/// `millis_out` untouched. `uuid_v7_unix_millis` reads the field as it is.
 #[unsafe(no_mangle)]
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_get_timestamp(
@@ -176,8 +179,8 @@ pub extern "C" fn uuid_get_timestamp(
 
 /// Writes a time-sortable UUID version 7 (RFC 9562 §6.2) to `out_ptr` (16 bytes), embedding
 /// `unix_millis` (milliseconds since the Unix epoch, supplied by the caller).
-/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
-/// 6 if the version 7 stream cannot advance (its counter is exhausted).
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range
+/// (past 253402300799999, the last millisecond of 9999), 6 if the version 7 stream cannot advance (its counter is exhausted).
 #[unsafe(no_mangle)]
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub extern "C" fn uuid_new_v7(unix_millis: u64, out_ptr: *mut u8) -> i32 {
@@ -223,8 +226,8 @@ pub extern "C" fn uuid_v7_unix_millis_in(uuid_ptr: *const u8, layout_code: u32) 
 /// sharing one `unix_millis` timestamp capture and one contiguous reservation of the version 7
 /// stream. A `count` of 0 is a no-op success. Items past the end of the stream's millisecond
 /// are stamped the next one, so the batch is always in order.
-/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range,
-/// 3 if `count * 16` bytes cannot be addressed (32-bit targets only), 4 if `count` exceeds
+/// Returns 0 on success, 1 if the random source failed, 2 if `unix_millis` is out of range
+/// (past 253402300799999, the last millisecond of 9999), 3 if `count * 16` bytes cannot be addressed (32-bit targets only), 4 if `count` exceeds
 /// 2^26, 6 if the stream cannot advance. On 1 and 6 the front of the buffer may hold entropy.
 #[unsafe(no_mangle)]
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]

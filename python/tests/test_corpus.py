@@ -119,18 +119,18 @@ def test_timestamp_corpus(vector):
     assert hyperuuid.version(id_, layout) == version
 
     if millis is not None and millis > _MAX_DATETIME_MILLIS:
-        # A spec-valid v7 timestamp past year 9999 has no datetime: the datetime doors raise
-        # OverflowError for it (documented on v7_timestamp) while the millisecond doors read it.
+        # datetime's ceiling is the generation cap, so a v7 another generator dated past it has
+        # no timestamp at the version-agnostic door (as a version 6 has none), while the
+        # per-version millisecond reader reads the field and v7_timestamp, which builds a
+        # datetime, raises OverflowError for it as documented.
         assert version == 7
         assert hyperuuid.v7_unix_millis(id_, layout) == millis
-        with pytest.raises(OverflowError):
-            hyperuuid.get_timestamp(id_, layout)
+        assert hyperuuid.get_timestamp(id_, layout) is None
         with pytest.raises(OverflowError):
             hyperuuid.v7_timestamp(id_, layout)
         if rfc:
             assert hyperuuid.v7_unix_millis(id_) == millis
-            with pytest.raises(OverflowError):
-                hyperuuid.get_timestamp(id_)
+            assert hyperuuid.get_timestamp(id_) is None
             with pytest.raises(OverflowError):
                 hyperuuid.v7_timestamp(id_)
         return

@@ -84,22 +84,28 @@ RSpec.describe "conformance corpus" do
         layout = CORPUS_LAYOUTS.fetch(row["layout"])
         code = HyperUuid::Uuid::LAYOUTS.fetch(layout)
         millis = row["unix_millis"]
-        expected = millis && Time.at(millis / 1000, millis % 1000, :millisecond).utc
+        # The version-agnostic door answers only for a timestamp the core would mint: a version 7
+        # dated past the generation cap, 253402300799999 ms, has none there, as a version 6 has
+        # none. The version 7 millisecond reads below read the 48-bit field as it is.
+        minted = !millis.nil? && millis <= 253_402_300_799_999
+        expected = minted ? Time.at(millis / 1000, millis % 1000, :millisecond).utc : nil
 
         expect(id.version(layout: layout)).to eq(row["version"])
         expect(id.timestamp(layout: layout, raise_on_mismatch: false)).to eq(expected)
         # The one strict read #timestamp is, straight from the backend.
-        expect(HyperUuid::Runtime.get_timestamp(id.bytes, code)).to eq(millis)
+        expect(HyperUuid::Runtime.get_timestamp(id.bytes, code)).to eq(minted ? millis : nil)
         if layout == :rfc9562
           expect(id.timestamp(raise_on_mismatch: false)).to eq(expected)
           expect(id.version).to eq(row["version"])
         end
 
-        if millis.nil?
-          expect { id.timestamp(layout: layout) }.to raise_error(ArgumentError)
-        else
+        if minted
           expect(id.timestamp(layout: layout)).to eq(expected)
           expect((id.timestamp(layout: layout).to_r * 1000).to_i).to eq(millis)
+        else
+          expect { id.timestamp(layout: layout) }.to raise_error(ArgumentError)
+        end
+        unless millis.nil?
           # The version 7 millisecond reads, which trust the caller's version and check nothing.
           expect(row["version"]).to eq(7)
           expect(HyperUuid::Runtime.v7_unix_millis_in(id.bytes, code)).to eq(millis)

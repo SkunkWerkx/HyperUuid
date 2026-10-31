@@ -41,7 +41,8 @@ uuid_v4_raw <- function(n = 1) {
 #'
 #' `time` is converted to whole Unix milliseconds as `floor(seconds * 1000)`; a `Date` is
 #' midnight UTC. `time` is an argument, so a missing or non-finite element, a time before
-#' 1970 or past the 48-bit field, a length other than 1 or `n`, and `n` over
+#' 1970 or after 9999-12-31T23:59:59.999Z (the generation cap), a length other than 1 or `n`,
+#' and `n` over
 #' [uuid_v7_max_batch] with a scalar `time` are errors.
 #'
 #' @param n How many ids to generate: a single non-negative whole number.

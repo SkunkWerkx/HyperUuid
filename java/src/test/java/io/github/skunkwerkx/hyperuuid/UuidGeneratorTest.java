@@ -148,11 +148,36 @@ class UuidGeneratorTest {
     }
 
     @Test
-    void v7TimestampRoundTripsZeroAndTheRfc48BitMax() {
+    void v7TimestampRoundTripsZeroAndTheCap() {
         assertEquals(Instant.ofEpochMilli(0), UuidGenerator.v7Timestamp(UuidGenerator.newV7(0)));
 
-        long maxMs = 0x0000_FFFF_FFFF_FFFFL;
+        long maxMs = 253_402_300_799_999L;
         assertEquals(Instant.ofEpochMilli(maxMs), UuidGenerator.v7Timestamp(UuidGenerator.newV7(maxMs)));
+    }
+
+    // The cap is the last instant .NET's DateTime and Python's datetime can name. One
+    // millisecond more is the out-of-range IllegalArgumentException; a version 7 another
+    // generator dated past the cap has no timestamp at getTimestamp, as a version 6 has none,
+    // while v7UnixMillis trusts the caller and reads the 48-bit field as it is.
+    @Test
+    void v7TimestampsStopAtTheLastMillisecondOf9999InBothDirections() {
+        Instant last = Instant.parse("9999-12-31T23:59:59.999Z");
+        assertEquals(253_402_300_799_999L, last.toEpochMilli());
+        assertEquals(Optional.of(last), UuidGenerator.getTimestamp(UuidGenerator.newV7(last)));
+        assertEquals(Optional.of(last), UuidGenerator.getTimestamp(UuidGenerator.newV7(253_402_300_799_999L)));
+        for (Instant past :
+                new Instant[] {Instant.ofEpochMilli(253_402_300_800_000L), Instant.parse("+10000-01-01T00:00:00Z")}) {
+            IllegalArgumentException thrown =
+                    assertThrows(IllegalArgumentException.class, () -> UuidGenerator.newV7(past), past.toString());
+            assertEquals(
+                    "unixMillis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)",
+                    thrown.getMessage());
+        }
+
+        UUID past = UUID.fromString("ffffffff-ffff-7000-8000-010203040506");
+        assertTrue(UuidGenerator.isRfc(past, 7));
+        assertEquals(Optional.empty(), UuidGenerator.getTimestamp(past));
+        assertEquals(0x0000_FFFF_FFFF_FFFFL, UuidGenerator.v7UnixMillis(past));
     }
 
     @Test
@@ -290,10 +315,10 @@ class UuidGeneratorTest {
     }
 
     // The layout holds all 122 of a v7's free bits, so every timestamp newV7 takes converts,
-    // up to the 48-bit field's last millisecond, and comes back exactly.
+    // up to the generation cap, and comes back exactly.
     @Test
     void v7ToSqlOrderTakesEveryTimestamp() {
-        for (long ms : new long[] {0L, RFC_TEST_VECTOR_MS, 1L << 47, 0x0000_FFFF_FFFF_FFFFL}) {
+        for (long ms : new long[] {0L, RFC_TEST_VECTOR_MS, 1L << 47, 253_402_300_799_999L}) {
             UUID id = UuidGenerator.newV7(ms);
             UUID sql = UuidGenerator.v7ToSqlOrder(id);
             assertEquals(7, UuidGenerator.version(sql, UuidLayout.SQL_SERVER), "ms " + ms);

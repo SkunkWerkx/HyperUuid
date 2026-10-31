@@ -165,13 +165,17 @@ final class CorpusTests: XCTestCase {
         for vector in try corpus("timestamp.json", as: TimestampVector.self) {
             let layout = Self.layout(vector.layout)
             let id = UUID(rfcBytes: Self.hex(vector.uuid))
-            let expected = vector.unix_millis.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+            // The version-agnostic door answers only for a timestamp the core would mint: a
+            // version 7 dated past the generation cap, 253402300799999 ms, has none there, as a
+            // version 6 has none. The per-version reads below read the 48-bit field as it is.
+            let field = vector.unix_millis.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+            let expected = vector.unix_millis.flatMap { $0 <= 253_402_300_799_999 ? field : nil }
             XCTAssertEqual(try UuidGenerator.version(id, layout: layout), vector.version, "\(vector)")
             XCTAssertEqual(try UuidGenerator.getTimestamp(id, layout: layout), expected, "\(vector)")
             if layout == .rfc9562 {
                 XCTAssertEqual(try UuidGenerator.getTimestamp(id), expected, "\(vector)")
             }
-            guard let millis = vector.unix_millis, let date = expected else { continue }
+            guard let millis = vector.unix_millis, let date = field else { continue }
 
             // A Date holds every 48-bit v7 timestamp, up to 2^48 - 1 ms in year 10889.
             if millis == (1 << 48) - 1 {

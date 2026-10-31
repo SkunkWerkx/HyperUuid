@@ -224,18 +224,34 @@ public sealed class UuidGeneratorTests
 	{
 		UuidGenerator.V7Timestamp(UuidGenerator.NewV7(0)).ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(0));
 
-		// Largest ms value DateTimeOffset (year <= 9999) can represent, not the RFC's own
-		// 48-bit max (valid to year 10889) — see test below for that boundary.
+		// Inside DateTimeOffset's last year; the generation cap is its last millisecond (the
+		// test below pins that boundary).
 		var largeMs = new DateTimeOffset(9999, 1, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 		UuidGenerator.V7Timestamp(UuidGenerator.NewV7(largeMs)).ToUnixTimeMilliseconds().ShouldBe(largeMs);
 	}
 
 	[Fact]
-	public void V7Timestamp_ThrowsPastDateTimeOffsetYearRange()
+	public void V7Timestamps_StopAtTheLastMillisecondOf9999InBothDirections()
 	{
-		// A legitimate RFC 9562 v7 UUID can embed a timestamp DateTimeOffset can't hold.
-		var id = UuidGenerator.NewV7(0x0000_FFFF_FFFF_FFFFL);
-		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.V7Timestamp(id));
+		// The cap is DateTimeOffset.MaxValue's millisecond, so the whole accepted range has a
+		// DateTimeOffset. One millisecond more is the out-of-range exception; a version 7
+		// another generator dated past the cap has no timestamp at GetTimestamp, as a version 6
+		// has none, while V7UnixMillis trusts the caller and reads the 48-bit field as it is, and
+		// V7Timestamp, which builds a DateTimeOffset, throws for it as documented.
+		DateTimeOffset.MaxValue.ToUnixTimeMilliseconds().ShouldBe(253_402_300_799_999L);
+		var last = DateTimeOffset.FromUnixTimeMilliseconds(253_402_300_799_999L);
+		UuidGenerator.GetTimestamp(UuidGenerator.NewV7(DateTimeOffset.MaxValue)).ShouldBe(last);
+		UuidGenerator.GetTimestamp(UuidGenerator.NewV7(253_402_300_799_999L)).ShouldBe(last);
+		var thrown = Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7(253_402_300_800_000L));
+		thrown.Message.ShouldContain("at most 253402300799999 (9999-12-31T23:59:59.999Z)");
+		UuidGenerator.TryNewV7(253_402_300_800_000L, out _).ShouldBeFalse();
+
+		var past = Guid.Parse("ffffffff-ffff-7000-8000-010203040506");
+		UuidGenerator.IsRfc(past, 7).ShouldBeTrue();
+		UuidGenerator.GetTimestamp(past).ShouldBeNull();
+		past.Timestamp.ShouldBeNull();
+		UuidGenerator.V7UnixMillis(past).ShouldBe(0x0000_FFFF_FFFF_FFFFL);
+		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.V7Timestamp(past));
 	}
 
 	[Fact]
@@ -421,8 +437,9 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void V7ToSqlOrder_ConvertsEveryTimestamp()
 	{
-		// The layout holds all 122 of a v7's free bits, so there is no timestamp it refuses.
-		foreach (var ms in new[] { 0L, (1L << 47) - 1, 1L << 47, (1L << 48) - 1 })
+		// The layout holds all 122 of a v7's free bits, so every timestamp NewV7 takes converts,
+		// the generation cap included.
+		foreach (var ms in new[] { 0L, (1L << 47) - 1, 1L << 47, 253_402_300_799_999L })
 		{
 			var id = UuidGenerator.NewV7(ms);
 			var sql = UuidGenerator.V7ToSqlOrder(id);
@@ -466,9 +483,9 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void TryNewV7_ReturnsFalseWhereTheThrowingOverloadThrows()
 	{
-		// 2^48 ms doesn't fit v7's 48-bit unix_ts_ms field — the native layer reports rc 2,
-		// which NewV7 turns into an exception and TryNewV7 reports as a plain false.
-		const long outOfRange = 1L << 48;
+		// One past the generation cap — the native layer reports rc 2, which NewV7 turns into
+		// an exception and TryNewV7 reports as a plain false.
+		const long outOfRange = 253_402_300_800_000L;
 		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.NewV7(outOfRange));
 		UuidGenerator.TryNewV7(outOfRange, out var id).ShouldBeFalse();
 		id.ShouldBe(Guid.Empty);
@@ -553,7 +570,7 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void TryFillV7_ReturnsFalseWhereFillV7Throws()
 	{
-		const long outOfRange = 1L << 48;
+		const long outOfRange = 253_402_300_800_000L;
 		var buf = new Guid[8];
 		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV7(buf, outOfRange));
 		UuidGenerator.TryFillV7(buf, outOfRange).ShouldBeFalse();

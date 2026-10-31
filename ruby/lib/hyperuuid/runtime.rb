@@ -18,7 +18,7 @@ module HyperUuid
     # One copy of the out-of-range message for the Fiddle backend and for the doors' own
     # range check in hyperuuid.rb; the Magnus extension (rust/src/ruby_ext.rs) carries the
     # same text, and spec/native_backend_spec.rb pins that the two agree.
-    V7_TIMESTAMP_OUT_OF_RANGE = "unix_millis must fit within the RFC 9562 48-bit field"
+    V7_TIMESTAMP_OUT_OF_RANGE = "unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)"
 
     # The two batch-size refusals, shared the same way: a version 7 batch past the 26-bit
     # counter space (the core's return code 4, which the doors in hyperuuid.rb refuse before

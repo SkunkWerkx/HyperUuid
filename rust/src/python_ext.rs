@@ -214,7 +214,7 @@ fn new_v7(py: Python<'_>, unix_millis: Option<u64>) -> PyResult<Py<PyAny>> {
     match v7::new_v7(millis_or_now(unix_millis)) {
         Ok(id) => make_uuid(py, *id.as_bytes()),
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-            "unix_millis must be non-negative and fit within 48 bits",
+            "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)",
         )),
         Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
             Err(PyValueError::new_err(e.to_string()))
@@ -266,7 +266,7 @@ fn new_v7_batch(py: Python<'_>, count: u32, unix_millis: Option<u64>) -> PyResul
     match v7::new_v7_batch(millis_or_now(unix_millis), count, &mut raw) {
         Ok(()) => Ok(batch_list(py, &raw)?.into_any().unbind()),
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-            "unix_millis must be non-negative and fit within 48 bits",
+            "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)",
         )),
         Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
             Err(PyValueError::new_err(e.to_string()))
@@ -533,7 +533,7 @@ fn fill_v7_bytes(buffer: &Bound<'_, PyByteArray>, unix_millis: Option<u64>) -> P
     match filled {
         Ok(()) => Ok(()),
         Err(v7::NewV7Error::TimestampOutOfRange) => Err(PyValueError::new_err(
-            "unix_millis must be non-negative and fit within 48 bits",
+            "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)",
         )),
         Err(e @ (v7::NewV7Error::BufferTooSmall | v7::NewV7Error::BatchTooLarge)) => {
             Err(PyValueError::new_err(e.to_string()))

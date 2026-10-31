@@ -251,8 +251,15 @@ HYPERUUID_CRATE_VERSION=<version> suite.wasm -test.v`; and `GOOS=js GOARCH=wasm`
 `GOOS=wasip1 GOARCH=wasm` `go test ./...` with `$(go env GOROOT)/lib/wasm` on PATH. The
 memory receipts: `HYPERUUID_RECEIPTS=1 go test -run TestReceipts -v .`. Swift has no core
 until one is built: `.github/scripts/local-core.sh` builds the checkout's own into the
-gitignored `swift/HyperUuidCore.artifactbundle/` (it finds `../HyperForge` on its own), then
-`swift test`. CI builds each leg's core before its suites.
+gitignored `swift/HyperUuidCore.artifactbundle/` (it finds `../HyperForge` on its own) and
+stages the same archive in `csharp/HyperUuid/staticlibs/<rid>/` for a local Native AOT publish,
+then `swift test`. It starts with `.github/scripts/local-clean.sh`, which removes every
+binding's staged build artifact (C#'s `runtimes/` and `staticlibs/`, the Swift bundle's
+variants, Java's `build/`, Python's in-tree extension, Ruby's staged bundles, R's vendor
+tarball, lockfile, corpus and objects, TypeScript's addon, WASI module and bundles) and names
+what rebuilds each, so nothing a suite loads predates the core being built; run it alone before
+any local build after a `rust/` change. Only this checkout has that problem: CI builds each
+leg's core into an empty tree before its suites.
 
 PHP is the extension built from `rust/`: `cargo php-ext` there, then `composer test` in `php/`
 (`composer bench` for the benchmarks), both loading `rust/target/php/release/` with `-d
@@ -308,11 +315,12 @@ the PDF manual; `--no-manual` skips it, as CI's check does, so only CRAN builds 
 
 C#'s test project multi-targets net10.0 and net11.0, so `dotnet test` needs both runtimes, and
 its `--project` is relative to where you run it: from `csharp/HyperUuid.Tests`, or with an
-absolute path (a repo-root `--project csharp/HyperUuid.Tests/...` doubles the path). Two local
-Apple link traps predate the multi-target and are not consumer-visible: a gitignored
-`runtimes/browser-wasm` archive left under `csharp/HyperUuid` is packed by the csproj's
-`runtimes/**` item, and the csproj copies `rust/target/release/libhyperuuid.dylib` when no
-library is staged, so stale ones link into the wrong build.
+absolute path (a repo-root `--project csharp/HyperUuid.Tests/...` doubles the path). The
+csproj packs whatever sits in the gitignored `runtimes/` and `staticlibs/` under
+`csharp/HyperUuid`, the targets link a `staticlibs/<rid>/` archive whenever one is present, and
+the csproj copies `rust/target/release/libhyperuuid.dylib` only when no library is staged, so a
+stale staging links into the wrong build and is not consumer-visible: `local-clean.sh` clears
+it, and `local-core.sh` restages the host's archive.
 
 ## Working with the owner
 

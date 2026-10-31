@@ -211,8 +211,8 @@ public final class UuidGenerator {
      *
      * @param unixMillis the Unix-epoch millisecond timestamp to embed
      * @return a new version 7 UUID timestamped at {@code unixMillis}
-     * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
-     *     within 48 bits
+     * @throws IllegalArgumentException if {@code unixMillis} is negative or is past
+     *     253402300799999 (9999-12-31T23:59:59.999Z, the generation cap)
      * @throws IllegalStateException if the stream is exhausted (message beginning
      *     {@code "version 7 counter exhausted"}) or the random source fails
      */
@@ -220,7 +220,8 @@ public final class UuidGenerator {
         NativeCore.Scratch scratch = NativeCore.scratch();
         int rc = NativeCore.newV7(scratch, unixMillis);
         if (rc == 2) {
-            throw new IllegalArgumentException("unixMillis must be non-negative and fit within 48 bits");
+            throw new IllegalArgumentException(
+                    "unixMillis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)");
         }
         if (rc == 6) {
             throw new IllegalStateException(V7_COUNTER_EXHAUSTED);
@@ -237,8 +238,8 @@ public final class UuidGenerator {
      *
      * @param instant the timestamp to embed
      * @return a new version 7 UUID timestamped at {@code instant}
-     * @throws IllegalArgumentException if {@code instant} is negative or doesn't fit within 48
-     *     bits
+     * @throws IllegalArgumentException if {@code instant} is negative or is past
+     *     253402300799999 (9999-12-31T23:59:59.999Z, the generation cap)
      */
     public static UUID newV7(Instant instant) {
         Objects.requireNonNull(instant, "instant");
@@ -261,10 +262,10 @@ public final class UuidGenerator {
     }
 
     /**
-     * Recovers the UTC timestamp embedded in a version 7 UUID as an {@link Instant}. Cannot
-     * overflow: the 48-bit field tops out in the year 10889, far inside what an
-     * {@code Instant} holds — unlike the corresponding Python/C# bindings, whose date types
-     * stop at the year 9999.
+     * Recovers the UTC timestamp embedded in a version 7 UUID as an {@link Instant}. Trusts the
+     * caller's version and reads the 48-bit field as it is: a value another generator dated
+     * past 9999-12-31T23:59:59.999Z (the generation cap; the field reaches 10889) comes back
+     * as that {@code Instant}, where {@link #getTimestamp(UUID)} answers empty for it.
      *
      * @param uuid a version 7 UUID
      * @return the embedded UTC timestamp
@@ -280,8 +281,10 @@ public final class UuidGenerator {
      * caller doesn't need to already know (or separately check) whether {@code uuid} is a
      * version 7 before asking. The variant is checked as well as the version: a 7 nibble under
      * the NCS, Microsoft or future variant is not an RFC version and has no timestamp. Only
-     * version 7 timestamps are read: a version 1 or 6 from another generator comes back
-     * empty. One call into the core, with no bit-layout logic here.
+     * version 7 timestamps are read, and only those the core would mint: a version 1 or 6 from
+     * another generator comes back empty, and so does a version 7 dated past
+     * 9999-12-31T23:59:59.999Z (253402300799999 ms, the generation cap). One call into the
+     * core, with no bit-layout logic here.
      *
      * @param uuid any RFC 9562-ordered UUID
      * @return the embedded UTC timestamp, or empty if {@code uuid} isn't an RFC 9562 version 7
@@ -631,8 +634,8 @@ public final class UuidGenerator {
      * @param count how many UUIDs to create
      * @param unixMillis the shared Unix-epoch millisecond timestamp to embed in each
      * @return {@code count} new version 7 UUIDs
-     * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
-     *     within 48 bits, or {@code count} is negative or greater than {@link #MAX_V7_BATCH}
+     * @throws IllegalArgumentException if {@code unixMillis} is negative or is past
+     *     253402300799999 (9999-12-31T23:59:59.999Z, the generation cap), or {@code count} is negative or greater than {@link #MAX_V7_BATCH}
      * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
      *     the random source fails
      */
@@ -647,7 +650,10 @@ public final class UuidGenerator {
         int rc = NativeCore.newV7Batch(unixMillis, count, out);
         if (rc != 0) {
             throw batchFailure(
-                    rc, "uuid_new_v7_batch", count, "unixMillis must be non-negative and fit within 48 bits");
+                    rc,
+                    "uuid_new_v7_batch",
+                    count,
+                    "unixMillis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)");
         }
         UUID[] result = new UUID[count];
         NativeCore.readUuids(out, result);
@@ -682,7 +688,11 @@ public final class UuidGenerator {
     private static void fillBytesNative(byte[] out, int count, long unixMillis, String fn) {
         int rc = NativeCore.newV7Batch(unixMillis, count, out);
         if (rc != 0) {
-            throw batchFailure(rc, fn, count, "unixMillis must be non-negative and fit within 48 bits");
+            throw batchFailure(
+                    rc,
+                    fn,
+                    count,
+                    "unixMillis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)");
         }
     }
 
@@ -775,8 +785,8 @@ public final class UuidGenerator {
      *
      * @param destination the array to fill; its length determines how many UUIDs are generated
      * @param unixMillis the shared timestamp, in milliseconds since the Unix epoch
-     * @throws IllegalArgumentException if {@code unixMillis} is negative or doesn't fit
-     *     within 48 bits, or {@code destination} is longer than {@link #MAX_V7_BATCH}
+     * @throws IllegalArgumentException if {@code unixMillis} is negative or is past
+     *     253402300799999 (9999-12-31T23:59:59.999Z, the generation cap), or {@code destination} is longer than {@link #MAX_V7_BATCH}
      * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
      *     the random source fails
      */
@@ -821,7 +831,7 @@ public final class UuidGenerator {
      *
      * @throws IllegalArgumentException if {@code destination.length} is not a multiple of
      *     16 or holds more than {@link #MAX_V7_BATCH} UUIDs, or {@code unixMillis} is
-     *     negative or doesn't fit within 48 bits
+     *     negative or is past 253402300799999 (9999-12-31T23:59:59.999Z, the generation cap)
      * @throws IllegalStateException if the stream is exhausted (see {@link #newV7(long)}) or
      *     the random source fails
      */

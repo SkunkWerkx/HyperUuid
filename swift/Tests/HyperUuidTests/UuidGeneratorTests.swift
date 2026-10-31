@@ -193,13 +193,42 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertEqual(timestamp.timeIntervalSince1970, Double(rfcTestVectorMs) / 1000, accuracy: 0.0001)
     }
 
-    func testV7TimestampRoundTripsZeroAndTheRfc48BitMax() throws {
+    func testV7TimestampRoundTripsZeroAndTheCap() throws {
         let zero = try UuidGenerator.newV7(unixMillis: 0)
         XCTAssertEqual(try UuidGenerator.v7UnixMillis(zero), 0)
 
-        let maxMs: UInt64 = 0x0000_FFFF_FFFF_FFFF
+        let maxMs: UInt64 = 253_402_300_799_999
         let id = try UuidGenerator.newV7(unixMillis: maxMs)
         XCTAssertEqual(try UuidGenerator.v7UnixMillis(id), maxMs)
+    }
+
+    // The cap is the last instant .NET's DateTime and Python's datetime can name. One
+    // millisecond more is timestampOutOfRange; a version 7 another generator dated past the cap
+    // has no timestamp at getTimestamp, as a version 6 has none, while v7UnixMillis trusts the
+    // caller and reads the 48-bit field as it is.
+    func testV7TimestampsStopAtTheLastMillisecondOf9999InBothDirections() throws {
+        // 253402300799.999 is not exact in a Double; the floor to the millisecond lands on the
+        // cap, which is what the assertion on the embedded value checks.
+        let last = Date(timeIntervalSince1970: 253_402_300_799.999)
+        XCTAssertEqual(try UuidGenerator.v7UnixMillis(try UuidGenerator.newV7(last)), 253_402_300_799_999)
+        XCTAssertEqual(
+            try UuidGenerator.getTimestamp(try UuidGenerator.newV7(unixMillis: 253_402_300_799_999)),
+            Date(timeIntervalSince1970: 253_402_300_799.999))
+        XCTAssertThrowsError(try UuidGenerator.newV7(unixMillis: 253_402_300_800_000)) { error in
+            guard case .timestampOutOfRange? = error as? UuidGenerator.Error else {
+                return XCTFail("one past the cap: \(error)")
+            }
+        }
+        XCTAssertThrowsError(try UuidGenerator.newV7(Date(timeIntervalSince1970: 253_402_300_800))) { error in
+            guard case .timestampOutOfRange? = error as? UuidGenerator.Error else {
+                return XCTFail("a Date one past the cap: \(error)")
+            }
+        }
+
+        let past = UUID(uuidString: "ffffffff-ffff-7000-8000-010203040506")!
+        XCTAssertTrue(try UuidGenerator.isRfc(past, version: 7))
+        XCTAssertNil(try UuidGenerator.getTimestamp(past))
+        XCTAssertEqual(try UuidGenerator.v7UnixMillis(past), 0x0000_FFFF_FFFF_FFFF)
     }
 
     func testNewV7FromDateMatchesNewV7FromTheEquivalentMillis() throws {
@@ -390,10 +419,10 @@ final class UuidGeneratorTests: XCTestCase {
         XCTAssertEqual(six, original, "a refused in-place conversion leaves the bytes alone")
     }
 
-    // The layout holds all 122 of a v7's free bits, so every timestamp converts, the 48-bit
-    // maximum included, and comes back exact.
+    // The layout holds all 122 of a v7's free bits, so every timestamp newV7 takes converts,
+    // the generation cap included, and comes back exact.
     func testEveryV7TimestampConvertsToSqlOrder() throws {
-        for millis: UInt64 in [0, (1 << 47) - 1, 1 << 47, (1 << 48) - 1] {
+        for millis: UInt64 in [0, (1 << 47) - 1, 1 << 47, 253_402_300_799_999] {
             let id = try UuidGenerator.newV7(unixMillis: millis)
             let sql = try UuidGenerator.v7ToSqlOrder(id)
             XCTAssertEqual(try UuidGenerator.v7FromSqlOrder(sql), id, "\(millis)")
@@ -407,7 +436,8 @@ final class UuidGeneratorTests: XCTestCase {
             "hyperuuid: the value is not a UUID of the version this conversion takes")
         XCTAssertEqual(
             UuidGenerator.Error.timestampOutOfRange.description,
-            "hyperuuid: unix millisecond timestamp must be non-negative and fit within 48 bits")
+            "hyperuuid: unix millisecond timestamp must be non-negative and at most 253402300799999 "
+                + "(9999-12-31T23:59:59.999Z)")
     }
 
     // MARK: - Destination-buffer fills

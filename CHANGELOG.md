@@ -110,6 +110,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **v7 timestamps stop at 9999-12-31T23:59:59.999Z, in both directions.** A version 7 is
+  minted with a timestamp up to 253,402,300,799,999 ms, the last instant .NET's `DateTime` and
+  Python's `datetime` can name, so every binding's time type states the whole accepted range;
+  one millisecond more is the out-of-range error every binding already had for a negative or
+  48-bit overflowing value. The version-agnostic timestamp door (`GetTimestamp` and its
+  spellings) answers for a version 7 dated past that cap as it answers for a version 6: no
+  timestamp. C# and Python used to throw from that door for such a value, since their time types
+  stop at 9999; every binding now agrees without an exception. The 48-bit field itself reaches
+  10889, so the per-version millisecond reader (`V7UnixMillis` and its spellings) still reads a
+  UUID another generator dated past 9999 as the field says. Go's `NewV7AtTime` also guards the
+  `time.Time` itself: `time.Time.UnixMilli` wraps silently past the year 292 million, and a date
+  in year 584,556,019 used to come back as a valid id stamped 1970-01-01T00:00:00.384Z. Every
+  out-of-range message now names the cap; for PHP, whose exceptions are otherwise 1.0's, the
+  new wording and the cap are listed under "Differences from 1.0" in `php/README.md`. *(all)*
 - **Go — one backend: the core translated to Go source, no cgo, no binary in git.** The Rust
   core built for `wasm32-wasip1` is translated to one Go file by
   [wasm2go](https://github.com/ncruces/wasm2go) and committed as `go/internal/core/core.go`;

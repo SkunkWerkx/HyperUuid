@@ -21,8 +21,8 @@ final class ExceptionsTest extends TestCase
     {
         try {
             $line = __LINE__ + 1;
-            HyperUuid::newV7(1 << 48);
-            self::fail('newV7 accepted a timestamp past 48 bits');
+            HyperUuid::newV7(253_402_300_800_000);
+            self::fail('newV7 accepted a timestamp one past the cap');
         } catch (TimestampOutOfRangeException $e) {
             self::assertSame(__FILE__, $e->getFile());
             self::assertSame($line, $e->getLine());

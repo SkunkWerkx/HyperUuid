@@ -194,9 +194,13 @@ class CorpusTest {
             String message = vector.toString();
             assertEquals(version, UuidGenerator.version(id, layout), message);
 
-            // Instant reaches far past v7's 2^48 - 1 ms (the year 10889), so unlike the C#
-            // and Python bindings no row needs a documented exception here.
-            Optional<Instant> expected = Optional.ofNullable(millis).map(Instant::ofEpochMilli);
+            // The version-agnostic doors answer only for a timestamp the core would mint: a
+            // version 7 dated past the generation cap, 253402300799999 ms, has none there, as a
+            // version 6 has none. The per-version reads below read the 48-bit field as it is
+            // (an Instant reaches far past its 2^48 - 1 ms, the year 10889).
+            Optional<Instant> expected = Optional.ofNullable(millis)
+                    .filter(ms -> ms <= 253_402_300_799_999L)
+                    .map(Instant::ofEpochMilli);
             assertEquals(expected, UuidGenerator.getTimestamp(id, layout), message);
             if (layout == UuidLayout.RFC_9562) {
                 assertEquals(expected, UuidGenerator.getTimestamp(id), message);
@@ -207,11 +211,12 @@ class CorpusTest {
             if (version != 7) {
                 throw new IllegalStateException("a timestamp on a version " + version + ": " + vector);
             }
+            Instant field = Instant.ofEpochMilli(millis);
             assertEquals(millis, UuidGenerator.v7UnixMillis(id, layout), message);
-            assertEquals(expected.orElseThrow(), UuidGenerator.v7Timestamp(id, layout), message);
+            assertEquals(field, UuidGenerator.v7Timestamp(id, layout), message);
             if (layout == UuidLayout.RFC_9562) {
                 assertEquals(millis, UuidGenerator.v7UnixMillis(id), message);
-                assertEquals(expected.orElseThrow(), UuidGenerator.v7Timestamp(id), message);
+                assertEquals(field, UuidGenerator.v7Timestamp(id), message);
             }
         }
     }

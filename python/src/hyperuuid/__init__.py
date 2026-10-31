@@ -124,7 +124,9 @@ _U64_MAX = (1 << 64) - 1
 _U32_MAX = (1 << 32) - 1
 # The core's own words for a timestamp its field cannot hold. A value that does not even fit
 # the u64 the core takes is the same caller bug, so it raises the same error from here.
-_V7_OUT_OF_RANGE = "unix_millis must be non-negative and fit within 48 bits"
+_V7_OUT_OF_RANGE = (
+    "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)"
+)
 
 
 def _unix_millis_from(value: int | datetime.datetime | None, out_of_range: str) -> int | None:
@@ -203,14 +205,15 @@ def new_v7(unix_millis: int | datetime.datetime | None = None) -> _uuid.UUID:
     """Create a time-sortable UUID version 7 (RFC 9562 §6.2).
 
     Defaults to the current time; pass an explicit ``datetime.datetime`` or Unix-epoch
-    millisecond timestamp (non-negative, fitting in 48 bits) to embed a specific time instead.
+    millisecond timestamp (non-negative, at most 253402300799999: 9999-12-31T23:59:59.999Z, the
+    last instant ``datetime`` names) to embed a specific time instead.
 
     Every call reserves the next step of one process-wide stream, re-seeded at random each
     millisecond: see :func:`new_v7_batch` for the ordering and the embedded timestamp.
 
     :raises TypeError: if ``unix_millis`` is not an int, a ``datetime.datetime`` or ``None``.
-    :raises ValueError: if ``unix_millis`` is negative or does not fit the 48-bit
-        ``unix_ts_ms`` field.
+    :raises ValueError: if ``unix_millis`` is negative or is past
+        9999-12-31T23:59:59.999Z (253402300799999 ms, the generation cap).
     :raises RuntimeError: ``version 7 counter exhausted``, when the stream cannot advance
         without running more than 1000 ms ahead of ``unix_millis`` or past its last
         millisecond (2**44 - 2). It reserves nothing, and a call whose timestamp is past the
@@ -235,9 +238,10 @@ def v7_timestamp(uuid_value: _uuid.UUID, layout: Layout = Layout.RFC9562) -> dat
     responsible for checking first if that matters (:func:`is_rfc`, or :func:`get_timestamp`,
     which checks for you).
 
-    :raises OverflowError: for a (spec-valid) embedded timestamp past year 9999 — the RFC's
-        48-bit millisecond field holds values up to the year 10889, but ``datetime.datetime``
-        cannot represent a year beyond 9999. :func:`v7_unix_millis` reads those.
+    :raises OverflowError: for a (spec-valid) embedded timestamp past year 9999 — never minted
+        here (9999-12-31T23:59:59.999Z is the generation cap), but the RFC's 48-bit field holds
+        values up to the year 10889 and ``datetime.datetime`` cannot represent them.
+        :func:`v7_unix_millis` reads those; :func:`get_timestamp` answers ``None`` for them.
     :raises TypeError: if ``layout`` is not an integer.
     :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
@@ -280,7 +284,8 @@ def get_timestamp(
     the value is read in place; which layout ``uuid_value`` is in is the caller's to know
     (see :func:`version`).
 
-    :raises OverflowError: for a version 7 timestamp past year 9999, as :func:`v7_timestamp`.
+    A version 7 another generator dated past 9999-12-31T23:59:59.999Z, the generation cap, is
+    ``None`` too, as a version 6 is: :func:`v7_unix_millis` reads its field.
     :raises TypeError: if ``layout`` is not an integer.
     :raises ValueError: if ``layout`` is not a :class:`Layout`.
     """
@@ -398,8 +403,8 @@ def new_v7_batch(
     :raises TypeError: if ``count`` is not an int, or ``unix_millis`` is not an int, a
         ``datetime.datetime`` or ``None``.
     :raises ValueError: if ``count`` is outside 0 to :data:`MAX_V7_BATCH` (checked before
-        anything is allocated), or ``unix_millis`` is negative or does not fit the 48-bit
-        ``unix_ts_ms`` field.
+        anything is allocated), or ``unix_millis`` is negative or is past
+        9999-12-31T23:59:59.999Z (253402300799999 ms, the generation cap).
     :raises RuntimeError: ``version 7 counter exhausted`` (see above), or the random source
         failing. The batch is not returned and the stream is left as it was.
     :raises MemoryError: if a batch of ``count`` UUIDs cannot be allocated.
@@ -485,8 +490,8 @@ def fill_v7(buffer: bytearray, unix_millis: int | datetime.datetime | None = Non
     :raises TypeError: if ``buffer`` is not a ``bytearray``, or ``unix_millis`` is not an int,
         a ``datetime.datetime`` or ``None``.
     :raises ValueError: if ``len(buffer)`` is not a multiple of 16 or holds more than
-        :data:`MAX_V7_BATCH` UUIDs, or ``unix_millis`` is negative or does not fit the 48-bit
-        ``unix_ts_ms`` field.
+        :data:`MAX_V7_BATCH` UUIDs, or ``unix_millis`` is negative or is past
+        9999-12-31T23:59:59.999Z (253402300799999 ms, the generation cap).
     :raises RuntimeError: ``version 7 counter exhausted`` (see :func:`new_v7_batch`), or the
         random source failing.
     """

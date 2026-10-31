@@ -57,9 +57,32 @@ test_that("bad arguments error with pinned messages", {
   expect_error(uuid_v4(-1), "n must be a single non-negative whole number", fixed = TRUE)
   expect_error(
     uuid_v7(time = -1),
-    "unix_millis must be non-negative and fit within 48 bits",
+    "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)",
     fixed = TRUE
   )
+})
+
+test_that("v7 timestamps stop at the last millisecond of 9999 in both directions", {
+  # The cap is the last instant .NET's DateTime and Python's datetime can name. One millisecond
+  # more errors; a version 7 another generator dated past the cap has no timestamp at
+  # uuid_timestamp, as a version 6 has none, while uuid_v7_unix_millis trusts the caller and
+  # reads the 48-bit field as it is.
+  last <- as.POSIXct("9999-12-31 23:59:59.999", tz = "UTC")
+  expect_equal(uuid_v7_unix_millis(uuid_v7(time = last)), 253402300799999, tolerance = 0)
+  expect_equal(
+    uuid_v7_unix_millis(uuid_v7(time = 253402300799.999)), 253402300799999,
+    tolerance = 0
+  )
+  expect_equal(as.numeric(uuid_timestamp(uuid_v7(time = last))), as.numeric(last), tolerance = 1e-3)
+  expect_error(
+    uuid_v7(time = 253402300800),
+    "unix_millis must be non-negative and at most 253402300799999 (9999-12-31T23:59:59.999Z)",
+    fixed = TRUE
+  )
+  past <- "ffffffff-ffff-7000-8000-010203040506"
+  expect_true(uuid_is_rfc(past, 7))
+  expect_true(is.na(uuid_timestamp(past)))
+  expect_equal(uuid_v7_unix_millis(past), 281474976710655, tolerance = 0)
 })
 
 test_that("uuid_v7_raw matches the string form's shape", {

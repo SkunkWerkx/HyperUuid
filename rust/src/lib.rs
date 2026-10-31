@@ -168,22 +168,26 @@ pub use uuid::{Layout, ParseUuidError, Uuid, Variant};
 /// version before asking. "RFC 9562" is part of the check: a value whose variant isn't
 /// [`Variant::Rfc9562`] has no version, so a 7 in its version nibble carries no timestamp
 /// either ([`Uuid::is_rfc`]). Version 7 is the only version this crate generates with a
-/// timestamp, so it is the only one it reads one from. Delegates straight to
-/// [`v7::unix_millis`], with no bit-layout logic duplicated here.
+/// timestamp, so it is the only one it reads one from, and only a timestamp it would mint: a
+/// version 7 dated past [`v7::MAX_UNIX_MILLIS`] (9999-12-31T23:59:59.999Z, the generation cap)
+/// has no timestamp here either, as a version 6 has none. The field reader behind this,
+/// [`v7::unix_millis`], reads the 48 bits as they are, for a caller who knows what it holds.
 #[cfg_attr(feature = "no-panic", no_panic::no_panic)]
 pub fn get_timestamp(uuid: &Uuid) -> Option<Timestamp> {
     get_timestamp_in(uuid, Layout::Rfc9562)
 }
 
 /// The version and Unix-epoch milliseconds [`get_timestamp_in`] answers with: `(7, millis)`
-/// for an RFC 9562 version 7 UUID held in `layout`'s byte order, `None` for anything else. One read for both, so the C ABI can hand back the pair in one call.
+/// for an RFC 9562 version 7 UUID held in `layout`'s byte order whose timestamp is at most
+/// [`v7::MAX_UNIX_MILLIS`], `None` for anything else. One read for both, so the C ABI can hand
+/// back the pair in one call.
 #[inline]
 pub(crate) fn timestamp_in(uuid: &Uuid, layout: Layout) -> Option<(u8, u64)> {
-    if uuid.is_rfc_in(7, layout) {
-        Some((7, v7::unix_millis_in(uuid, layout)))
-    } else {
-        None
+    if !uuid.is_rfc_in(7, layout) {
+        return None;
     }
+    let millis = v7::unix_millis_in(uuid, layout);
+    (millis <= v7::MAX_UNIX_MILLIS).then_some((7, millis))
 }
 
 /// [`get_timestamp`] for a UUID held in `layout`'s byte order: in [`Layout::SqlServer`], the

@@ -198,9 +198,12 @@ func TestCorpusTimestamp(t *testing.T) {
 			t.Errorf("%s: VersionIn = %d, %v", where, got, err)
 		}
 
-		// time.Time holds every timestamp a version 7 can carry, 2^48-1 ms (year 10889)
-		// included, so no row is out of reach here. A version 6 has none.
-		millisValue, timeBased := v["unix_millis"].(float64)
+		// The version-agnostic doors answer only for a timestamp the core would mint: a
+		// version 7 dated past the cap, 253402300799999 ms, has none there, as a version 6 has
+		// none. The per-version field readers below read the 48 bits as they are (time.Time
+		// holds every value they can carry, 2^48-1 ms in year 10889 included).
+		millisValue, hasField := v["unix_millis"].(float64)
+		timeBased := hasField && millisValue <= 253_402_300_799_999
 		if !timeBased {
 			if _, err := GetTimestampIn(id, layout); !errors.Is(err, ErrNotTimeBased) {
 				t.Errorf("%s: GetTimestampIn err = %v, want ErrNotTimeBased", where, err)
@@ -210,17 +213,21 @@ func TestCorpusTimestamp(t *testing.T) {
 					t.Errorf("%s: GetTimestamp err = %v, want ErrNotTimeBased", where, err)
 				}
 			}
-			continue
+			if !hasField {
+				continue
+			}
 		}
 		millis := uint64(millisValue)
 		want := time.UnixMilli(int64(millis)).UTC()
 
-		if got, err := GetTimestampIn(id, layout); err != nil || !got.Equal(want) {
-			t.Errorf("%s: GetTimestampIn = %v, %v", where, got, err)
-		}
-		if layout == LayoutRfc9562 {
-			if got, err := GetTimestamp(id); err != nil || !got.Equal(want) {
-				t.Errorf("%s: GetTimestamp = %v, %v", where, got, err)
+		if timeBased {
+			if got, err := GetTimestampIn(id, layout); err != nil || !got.Equal(want) {
+				t.Errorf("%s: GetTimestampIn = %v, %v", where, got, err)
+			}
+			if layout == LayoutRfc9562 {
+				if got, err := GetTimestamp(id); err != nil || !got.Equal(want) {
+					t.Errorf("%s: GetTimestamp = %v, %v", where, got, err)
+				}
 			}
 		}
 

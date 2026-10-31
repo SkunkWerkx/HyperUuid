@@ -128,7 +128,8 @@ module HyperUuid
     # variant as well as the version: a 7 in the version nibble under any variant but
     # +:rfc9562+ is not a version 7 UUID, so it has no timestamp (#rfc? is the same check on
     # its own). Every other version has none either, a version 6 or 1 from another generator
-    # included.
+    # included, and nor has a version 7 dated past 9999-12-31T23:59:59.999Z, the generation
+    # cap: the 48-bit field reaches 10889, and only Runtime.v7_unix_millis reads it that far.
     #
     # Raises by default for anything that isn't an RFC 9562 version 7 UUID; pass
     # `raise_on_mismatch: false` to get `nil` back instead — for a caller that doesn't already

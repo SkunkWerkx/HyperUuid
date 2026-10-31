@@ -82,8 +82,10 @@ SEXP C_native_version(void) { return ScalarInteger((int)hyperuuid_version()); }
 
 /* ---- generation ---- */
 
-#define MAX_BATCH 67108864u            /* 2^26, the v7 counter space */
-#define MILLIS_LIMIT 281474976710656.0 /* 2^48 */
+#define MAX_BATCH 67108864u /* 2^26, the v7 counter space */
+/* One past the generation cap, 9999-12-31T23:59:59.999Z: the 48-bit field reaches 10889, but a
+ * version 7 is minted only up to the last millisecond every binding's time type can name. */
+#define MILLIS_LIMIT 253402300800000.0
 
 /* The 16 x n raw matrix every generator fills, then (optionally) turned into strings. */
 static SEXP alloc_ids(int n) { return allocMatrix(RAWSXP, 16, n); }
@@ -128,7 +130,8 @@ SEXP C_new_v4(SEXP n, SEXP as_raw) {
 
 static uint64_t millis_arg(double d) {
   if (!(d >= 0.0 && d < MILLIS_LIMIT)) {
-    Rf_error("unix_millis must be non-negative and fit within 48 bits");
+    Rf_error("unix_millis must be non-negative and at most 253402300799999 "
+             "(9999-12-31T23:59:59.999Z)");
   }
   return (uint64_t)d;
 }
@@ -157,7 +160,8 @@ SEXP C_new_v7(SEXP millis, SEXP n, SEXP as_raw) {
       if (rc == 1)
         Rf_error("uuid_new_v7_batch: random source failure");
       if (rc == 2)
-        Rf_error("unix_millis must be non-negative and fit within 48 bits");
+        Rf_error("unix_millis must be non-negative and at most 253402300799999 "
+                 "(9999-12-31T23:59:59.999Z)");
       if (rc == 4)
         Rf_error("batch count exceeds the 26-bit counter space (67108864 per call)");
       if (rc == 6)
@@ -172,7 +176,8 @@ SEXP C_new_v7(SEXP millis, SEXP n, SEXP as_raw) {
         if (rc == 1)
           Rf_error("uuid_new_v7: random source failure");
         if (rc == 2)
-          Rf_error("unix_millis must be non-negative and fit within 48 bits");
+          Rf_error("unix_millis must be non-negative and at most 253402300799999 "
+                   "(9999-12-31T23:59:59.999Z)");
         if (rc == 6)
           Rf_error("version 7 counter exhausted: the stream cannot advance without running more "
                    "than 1000 ms ahead of the supplied timestamp or past its last millisecond");

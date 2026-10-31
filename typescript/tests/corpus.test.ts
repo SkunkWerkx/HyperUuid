@@ -107,18 +107,19 @@ test('timestamp.json', () => {
     const L = layouts[v.layout]
     const rfc = v.layout === 'rfc9562'
     assert.equal(version(v.uuid, L), v.version, ctx)
-    if (v.unix_millis === null) {
-      assert.equal(getTimestamp(v.uuid, L), null, ctx)
-      if (rfc) assert.equal(getTimestamp(v.uuid), null, ctx)
-      continue
-    }
+    // The version-agnostic door answers only for a timestamp the core would mint: a v7 dated
+    // past the generation cap, 253402300799999 ms, has none there, as a v6 has none. The
+    // per-version reads below read the 48-bit field as it is.
+    const minted = v.unix_millis !== null && v.unix_millis <= 253_402_300_799_999
+    assert.equal(getTimestamp(v.uuid, L)?.getTime() ?? null, minted ? v.unix_millis : null, ctx)
+    if (rfc)
+      assert.equal(getTimestamp(v.uuid)?.getTime() ?? null, minted ? v.unix_millis : null, ctx)
+    if (v.unix_millis === null) continue
     assert.equal(v.version, 7, ctx)
     assert.equal(v7UnixMillis(v.uuid, L), v.unix_millis, ctx)
-    assert.equal(getTimestamp(v.uuid, L)?.getTime(), v.unix_millis, ctx)
     assert.equal(v7Timestamp(v.uuid, L).getTime(), v.unix_millis, ctx)
     if (rfc) {
       assert.equal(v7UnixMillis(v.uuid), v.unix_millis, ctx)
-      assert.equal(getTimestamp(v.uuid)?.getTime(), v.unix_millis, ctx)
       assert.equal(v7Timestamp(v.uuid).getTime(), v.unix_millis, ctx)
     }
   }

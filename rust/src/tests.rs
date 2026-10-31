@@ -151,6 +151,42 @@ fn v7_max_timestamp_succeeds() {
 }
 
 #[test]
+fn v7_max_timestamp_is_the_last_millisecond_of_9999() {
+    // 9999-12-31T23:59:59.999Z: the last instant .NET's DateTime and Python's datetime can
+    // name, and a generation cap that every binding's time type can represent. The 48-bit
+    // field reaches 10889, and reading one dated past 9999 still works (corpus/timestamp.json).
+    assert_eq!(v7::MAX_UNIX_MILLIS, 253_402_300_799_999);
+    let id = v7::new_v7(253_402_300_799_999).unwrap();
+    assert_eq!(v7::unix_millis(&id), 253_402_300_799_999);
+    let err = v7::new_v7(253_402_300_800_000).unwrap_err();
+    assert_eq!(err, v7::NewV7Error::TimestampOutOfRange);
+    let foreign = Uuid::from_bytes(hex16("ffffffffffff70008000010203040506"));
+    assert_eq!(v7::unix_millis(&foreign), 0x0000_FFFF_FFFF_FFFF);
+}
+
+#[test]
+fn get_timestamp_is_none_past_the_cap() {
+    // The version-agnostic door answers for a timestamp the crate would mint, and treats a v7
+    // dated past 9999 as it treats a non-v7: no timestamp. The per-version field reader stays a
+    // field reader (the test above).
+    let at_cap = v7::new_v7(253_402_300_799_999).unwrap();
+    assert_eq!(
+        crate::get_timestamp(&at_cap).map(|t| t.to_unix_millis()),
+        Some(253_402_300_799_999)
+    );
+    let past = Uuid::from_bytes(hex16("ffffffffffff70008000010203040506"));
+    assert!(past.is_rfc(7));
+    assert_eq!(crate::get_timestamp(&past), None);
+    let sql = v7::to_sql_order(&past).unwrap();
+    assert_eq!(crate::get_timestamp_in(&sql, Layout::SqlServer), None);
+    assert_eq!(
+        crate::get_timestamp_in(&v7::to_sql_order(&at_cap).unwrap(), Layout::SqlServer)
+            .map(|t| t.to_unix_millis()),
+        Some(253_402_300_799_999)
+    );
+}
+
+#[test]
 fn v7_overflow_timestamp_errors() {
     let err = v7::new_v7(v7::MAX_UNIX_MILLIS + 1).unwrap_err();
     assert_eq!(err, v7::NewV7Error::TimestampOutOfRange);

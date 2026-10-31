@@ -41,7 +41,13 @@ int main() {
   auto batch = hu::new_v7_batch(4, millis);
   CHECK(batch && batch->size() == 4 && (*batch)[0] < (*batch)[1]);
   CHECK(hu::new_v7_batch(hu::max_v7_batch + 1).error() == hu::errc::batch_too_large);
-  CHECK(hu::new_v7(std::uint64_t{1} << 48).error() == hu::errc::timestamp_out_of_range);
+  // The generation cap, 9999-12-31T23:59:59.999Z, and the version-agnostic door's view past it.
+  CHECK(hu::new_v7(std::uint64_t{253402300799999}) &&
+        hu::v7_unix_millis(*hu::new_v7(std::uint64_t{253402300799999})) == 253402300799999);
+  CHECK(hu::new_v7(std::uint64_t{253402300800000}).error() == hu::errc::timestamp_out_of_range);
+  auto past = hu::uuid::parse("ffffffff-ffff-7000-8000-010203040506");
+  CHECK(past && hu::is_rfc(*past, 7) && !hu::get_timestamp(*past) &&
+        hu::v7_unix_millis(*past) == 0xFFFFFFFFFFFFull);
   std::error_code code = hu::errc::counter_exhausted;
   CHECK(code.category().name() == std::string_view("hyperuuid"));
   // Checked by the header, not the core: a name the 32-bit C length cannot carry.

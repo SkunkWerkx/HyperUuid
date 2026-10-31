@@ -46,8 +46,9 @@ Returns Foundation's `UUID`. `Namespaces.dns`/`url`/`oid`/`x500` are RFC 9562
 Section 6.6's well-known namespaces; `WellKnownUuids.nilUUID`/`maxUUID` are the
 §5.9/§5.10 special values. `UuidGenerator.v7Timestamp(_:)` recovers the embedded UTC
 `Date` from a version 7 UUID; `newV7(_:)` accepts a `Date` directly in place of
-`newV7(unixMillis:)`'s raw millisecond count (a date before 1970, or one that isn't a finite
-instant, throws `timestampOutOfRange` like any other timestamp the field can't hold), and
+`newV7(unixMillis:)`'s raw millisecond count (a date before 1970 or after
+9999-12-31T23:59:59.999Z, the generation cap, or one that isn't a finite instant, throws
+`timestampOutOfRange`), and
 `getTimestamp(_:)` is the checked counterpart to `v7Timestamp` — it checks the variant as
 well as the version, in one native call, and returns `nil` for anything that isn't an RFC
 9562 version 7 UUID (a 7 nibble under another variant has no timestamp, and neither does a
@@ -108,8 +109,10 @@ and pass it at every call site that can see a SQL-ordered value. With the defaul
 `version` and `isRfc` read RFC order, so `isRfc(sqlOrdered, version: 7)` reads the wrong
 bytes; there is deliberately no layout-agnostic check. `UuidLayout`'s raw values are the core's layout codes; the core
 reserves 0 for "no layout", which a Swift enum cannot hold, so there is no invalid layout to
-pass and no error for one. Every 48-bit v7 timestamp has a `Date`, up to 2⁴⁸ − 1 ms in year
-10889.
+pass and no error for one. A version 7 is minted up to 9999-12-31T23:59:59.999Z
+(253,402,300,799,999 ms, the generation cap); `getTimestamp` reads one another generator dated
+past that as it reads a version 6, `nil`, while `v7UnixMillis` and `v7Timestamp` read the 48-bit
+field as it is, up to 2⁴⁸ − 1 ms in year 10889 (every such value has a `Date`).
 
 ### SQL Server order
 
@@ -273,7 +276,8 @@ and `android_device_test.sh`, which run the same way against a local emulator). 
 1 GiB batch tests skip there.
 
 In a checkout of this repository the core is build output, never committed:
-`.github/scripts/local-core.sh` builds the host's archive from the checkout's `rust/` into
+`.github/scripts/local-core.sh` clears every binding's staged build artifact
+(`.github/scripts/local-clean.sh`), builds the host's archive from the checkout's `rust/` into
 `swift/HyperUuidCore.artifactbundle/` (gitignored but for its `include/`), and then `swift test`
 from `swift/` links it. CI writes each leg's archives there the same way. Without one the
 package still resolves, and a build stops at `import HyperUuidCore`. The root `Package.swift`

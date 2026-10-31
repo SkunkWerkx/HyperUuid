@@ -113,18 +113,18 @@ try {
     const L = layouts[v.layout]
     const rfc = v.layout === 'rfc9562'
     equal(version(v.uuid, L), v.version, ctx)
-    if (v.unix_millis === null) {
-      equal(getTimestamp(v.uuid, L), null, ctx)
-      if (rfc) equal(getTimestamp(v.uuid), null, ctx)
-      continue
-    }
+    // getTimestamp answers only for a timestamp the core would mint: a version 7 dated past
+    // 253402300799999 ms (9999-12-31T23:59:59.999Z) has none, as a version 6 has none, while
+    // v7UnixMillis and v7Timestamp read the 48-bit field as it is.
+    const minted = v.unix_millis !== null && v.unix_millis <= 253_402_300_799_999
+    equal(getTimestamp(v.uuid, L)?.getTime() ?? null, minted ? v.unix_millis : null, ctx)
+    if (rfc) equal(getTimestamp(v.uuid)?.getTime() ?? null, minted ? v.unix_millis : null, ctx)
+    if (v.unix_millis === null) continue
     equal(v.version, 7, ctx)
     equal(v7UnixMillis(v.uuid, L), v.unix_millis, ctx)
-    equal(getTimestamp(v.uuid, L)?.getTime(), v.unix_millis, ctx)
     equal(v7Timestamp(v.uuid, L).getTime(), v.unix_millis, ctx)
     if (rfc) {
       equal(v7UnixMillis(v.uuid), v.unix_millis, ctx)
-      equal(getTimestamp(v.uuid)?.getTime(), v.unix_millis, ctx)
       equal(v7Timestamp(v.uuid).getTime(), v.unix_millis, ctx)
     }
   }

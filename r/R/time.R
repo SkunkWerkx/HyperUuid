@@ -1,6 +1,6 @@
 # Converts `time` (POSIXct, POSIXlt, Date, or numeric seconds since the Unix epoch) to
 # whole Unix milliseconds, a double of length 1 or n. NA and non-finite elements error here;
-# the [0, 2^48) range check lives in C.
+# the range check, 0 to 253402300799999 (9999-12-31T23:59:59.999Z), lives in C.
 unix_millis <- function(time, n) {
   if (inherits(time, "POSIXlt")) {
     time <- as.POSIXct(time)

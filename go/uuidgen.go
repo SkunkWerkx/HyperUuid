@@ -105,9 +105,10 @@ func NewV7() (uuid.UUID, error) {
 //
 // A call that would take the stream more than 1000 ms ahead of unixMillis, or past 2^44 − 2,
 // returns ErrCounterExhausted and reserves nothing; a call whose timestamp is past the
-// stream's millisecond succeeds. A unixMillis that doesn't fit 48 bits returns
-// ErrTimestampOutOfRange. On a target without 64-bit atomics none of this applies: the core
-// keeps one never-reset 26-bit counter.
+// stream's millisecond succeeds. A unixMillis past 253402300799999 (9999-12-31T23:59:59.999Z,
+// the last millisecond every binding's time type can name; the 48-bit field itself reaches
+// 10889) returns ErrTimestampOutOfRange. On a target without 64-bit atomics none of this
+// applies: the core keeps one never-reset 26-bit counter.
 func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 	out, rc := newV7(unixMillis)
 	switch rc {
@@ -123,11 +124,23 @@ func NewV7At(unixMillis uint64) (uuid.UUID, error) {
 }
 
 // NewV7AtTime creates a time-sortable UUID version 7 (RFC 9562 §6.2) from a time.Time — pulls
-// the Unix-epoch milliseconds off t and mints it through NewV7At, with its ordering contract
-// and its ErrCounterExhausted.
+// the Unix-epoch milliseconds off t, floored to the millisecond, and mints it through NewV7At,
+// with its ordering contract and its ErrCounterExhausted. A t before 1970 or after
+// 9999-12-31T23:59:59.999Z is ErrTimestampOutOfRange, checked on t itself: t.UnixMilli wraps
+// silently past the year 292 million, and a wrapped value must never look like a timestamp.
 func NewV7AtTime(t time.Time) (uuid.UUID, error) {
+	if t.Before(v7Epoch) || !t.Before(v7PastCap) {
+		return uuid.UUID{}, fmt.Errorf("NewV7AtTime: %v is before 1970 or after 9999-12-31T23:59:59.999Z: %w", t.UTC(), ErrTimestampOutOfRange)
+	}
 	return NewV7At(uint64(t.UnixMilli()))
 }
+
+// The time.Time bounds of NewV7AtTime: the Unix epoch and the first millisecond past the
+// generation cap, 253402300799999 ms (NewV7At).
+var (
+	v7Epoch   = time.UnixMilli(0)
+	v7PastCap = time.UnixMilli(253_402_300_800_000)
+)
 
 // GetTimestamp recovers the UTC timestamp embedded in id as a time.Time, or ErrNotTimeBased if
 // id isn't an RFC 9562 version 7 UUID. Unlike V7Timestamp, this checks the variant and version

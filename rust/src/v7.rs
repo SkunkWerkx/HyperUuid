@@ -7,9 +7,12 @@ use crate::{Layout, SqlOrderError, Timestamp, Uuid, sql};
 #[cfg(target_has_atomic = "64")]
 use core::sync::atomic::AtomicU64;
 
-/// Largest Unix-epoch millisecond timestamp that fits the 48-bit `unix_ts_ms` field
-/// (valid until the year 10889).
-pub const MAX_UNIX_MILLIS: u64 = 0x0000_FFFF_FFFF_FFFF;
+/// Largest Unix-epoch millisecond timestamp a version 7 UUID is minted with:
+/// 9999-12-31T23:59:59.999Z, the last instant .NET's `DateTime` and Python's `datetime` can
+/// name, so every binding's time type can state the whole accepted range. The 48-bit
+/// `unix_ts_ms` field itself reaches 10889-08-02, and [`unix_millis`] reads a UUID dated past
+/// 9999 as the field says: the cap is on generation, not on inspection.
+pub const MAX_UNIX_MILLIS: u64 = 253_402_300_799_999;
 
 /// 26-bit counter mask (67,108,864 values) spanning `rand_a` and the top of `rand_b`.
 const COUNTER_MASK: u32 = 0x03FF_FFFF;
@@ -48,7 +51,10 @@ impl core::fmt::Display for NewV7Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::TimestampOutOfRange => {
-                write!(f, "unix millisecond timestamp must fit within 48 bits")
+                write!(
+                    f,
+                    "unix millisecond timestamp must be at most 253402300799999 (9999-12-31T23:59:59.999Z)"
+                )
             }
             Self::Random(e) => write!(f, "random source failed: {e}"),
             Self::BufferTooSmall => write!(f, "output buffer is shorter than count * 16 bytes"),

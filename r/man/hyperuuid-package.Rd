@@ -6,7 +6,7 @@
 \alias{hyperuuid-package}
 \title{hyperuuid: RFC 9562 UUIDs: Versions 4, 5 and 7 and a 'SQL Server' Ordering}
 \description{
-Generates RFC 9562 version 4 (random), version 5 (name-based) and version 7 (time-ordered) UUIDs, inspects their version, variant and timestamp, and converts version 7 values to and from a version 8 layout that sorts by creation time in 'SQL Server' indexes. The work is done by a compiled 'Rust' core shared with the project's bindings for other languages. Every function is vectorised: character, integer, logical and POSIXct results propagate NA element-wise, while the raw conversions and every argument are strict and error.
+Generates version 4 (random), version 5 (name-based) and version 7 (time-ordered) UUIDs as specified in RFC 9562 (Davis, Peabody and Leach 2024) \doi{10.17487/RFC9562}, inspects their version, variant and timestamp, and converts version 7 values to and from a version 8 layout that sorts by creation time in 'SQL Server' indexes. The work is done by a compiled 'Rust' core shared with the project's bindings for other languages. Every function is vectorised: character, integer, logical and POSIXct results propagate NA element-wise, while the raw conversions and every argument are strict and error.
 }
 \seealso{
 Useful links:

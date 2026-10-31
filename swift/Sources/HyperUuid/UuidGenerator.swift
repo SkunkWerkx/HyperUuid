@@ -40,7 +40,8 @@ public enum UuidGenerator {
             case .randomSourceFailure(let code):
                 return "hyperuuid: native call failed with code \(code) (random source failure)"
             case .timestampOutOfRange:
-                return "hyperuuid: unix millisecond timestamp must be non-negative and fit within 48 bits"
+                return "hyperuuid: unix millisecond timestamp must be non-negative and at most 253402300799999 "
+                    + "(9999-12-31T23:59:59.999Z)"
             case .wrongVersion:
                 return "hyperuuid: the value is not a UUID of the version this conversion takes"
             case .bufferNotWholeUUIDs(let count):
@@ -195,8 +196,9 @@ public enum UuidGenerator {
     /// Unix-epoch milliseconds off a `Date`, for the doors that take one. `UInt64(_:)` traps
     /// on a negative, NaN or infinite `Double`, and none of those is a caller bug worth a
     /// crash: a pre-1970 date is ``Error/timestampOutOfRange`` like any other timestamp the
-    /// field can't hold. A date too far in the future to trap on is passed through for the
-    /// native core to refuse with the same error.
+    /// field can't hold. A date after 9999-12-31T23:59:59.999Z (the generation cap) or too far
+    /// in the future to trap on is passed through for the native core to refuse with the same
+    /// error.
     private static func unixMillis(of date: Date) throws -> UInt64 {
         let millis = date.timeIntervalSince1970 * 1000
         // NaN fails both comparisons; 2⁶⁴ is the first value `UInt64(_:)` can't take.
@@ -287,8 +289,10 @@ public enum UuidGenerator {
     /// as the version, in one native call, so a caller doesn't need to already know (or
     /// separately check) what `uuid` is before asking — a 7 nibble under another variant has no
     /// RFC version and so no timestamp. A version 6 or version 1 from another generator is
-    /// `nil` too: this library reads only version 7 timestamps. No bit-layout logic here.
-    /// Every 48-bit v7 timestamp has a `Date`, up to 2^48 − 1 ms (year 10889).
+    /// `nil` too: this library reads only version 7 timestamps, and only those the core would
+    /// mint: a version 7 dated past 9999-12-31T23:59:59.999Z (the generation cap) is `nil` as
+    /// well, where `v7UnixMillis` and `v7Timestamp` read the 48-bit field as it is, up to 2^48 − 1
+    /// ms (year 10889). No bit-layout logic here.
     public static func getTimestamp(_ uuid: UUID) throws -> Date? {
         try getTimestamp(uuid, layout: .rfc9562)
     }
