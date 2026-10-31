@@ -140,8 +140,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **PHP — breaking: the package is a native extension, installed with PIE.**
   <!-- owner's words -->
   `pie install skunkwerkx/hyperuuid` downloads a prebuilt Zend extension, `hyperuuid`, built
-  from the core with ext-php-rs, from the GitHub Release: 21 zips, PHP 8.3, 8.4 and 8.5 (NTS
-  only) on seven platforms (Linux x64 and arm64 on glibc and on musl, macOS x64 and arm64,
+  from the core with ext-php-rs, from the GitHub Release: 18 zips, PHP 8.3, 8.4 and 8.5 (NTS
+  only) on six platforms (Linux x64 and arm64 on glibc and on musl, macOS arm64,
   Windows x64), each attested and named in the release attestation. `composer require` no
   longer installs it, and no FFI package is kept. `ext-ffi`, `ffi.enable` and preloading,
   `HYPERUUID_NATIVE_LIBRARY` and `HyperUuid::isAvailable()` are gone;

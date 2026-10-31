@@ -105,9 +105,10 @@ re-running the harness, and don't drop a loss.
   `WINDOWS_COMPILERS`, the `vsNN` each minor's Windows build uses, and `WINDOWS_TOOLSETS`, the
   MSVC toolset each `vsNN` links with: PHP refuses a DLL linked newer than its core), the
   `minors` default in `hyper-pie-acceptance.yml` (`test_forge_producers.py` holds those
-  equal), and the platform and minor table in `php/README.md`. A new minor is 7 more zips on the release; the count
-  (21 today) is in `php/README.md`, `docs/platforms.md`, `.github/RELEASING.md` and the
-  CHANGELOG.
+  equal), and the platform and minor table in `php/README.md`. A new minor is 6 more zips on the
+  release; the count (18 today) is in `php/README.md`, `.github/RELEASING.md` and the CHANGELOG.
+  No Intel macOS zip and no leg that compiles a PHP: a leg takes the PHP its platform packages,
+  or there is no leg (the Forge's `CLAUDE.md` has the rule; never build a language runtime).
 - The Python sdist: built in the Forge's `hyper-build-wheels.yml` when `.github/hyper.json`
   says `sdist: true`; one more pypi inventory file, `hyperuuid-<version>.tar.gz`, beside the 17
   wheels. Its Rust floor is `rust-version`, proven at exactly that toolchain by the build job.

@@ -12,7 +12,7 @@ HyperUuid now ships nine bindings over one Rust core, with TypeScript and R land
 | Java | JNI (21–24), FFM (25+) | Maven Central | JDK 21 | 2.8-5.1x faster than `UUID.randomUUID()` |
 | Python | PyO3 extension | PyPI, wheels and an sdist | 3.11 | 3.4-4.2x faster than stdlib |
 | Ruby | Magnus, Fiddle fallback | RubyGems | 3.3 (on Fiddle) | 2.1-5.5x faster than `SecureRandom.uuid` |
-| PHP | ext-php-rs extension | PIE: Packagist, 21 zips on the GitHub Release | 8.3 | 1.2-1.4x faster than a naive inline v4 (1.0's FFI package; the extension not yet measured) |
+| PHP | ext-php-rs extension | PIE: Packagist, 18 zips on the GitHub Release | 8.3 | 1.2-1.4x faster than a naive inline v4 (1.0's FFI package; the extension not yet measured) |
 | Swift | static library | git tag; core zips on the GitHub Release | 6.2 | 11-16x faster than `Foundation.UUID()` |
 | Go | the core as Go source (wasm2go) | git tag, no binaries | 1.26 | 4.5-5.4x faster than `google/uuid`; batch 1.5x slower than the cgo binding it replaced |
 | TypeScript (new) | napi-rs addon | npm: root package + 8 platform packages | Node 22, Bun | v4 4.1-6.4x slower than `crypto.randomUUID()`; v7 2.3x faster than `uuid` `v7()` on Node, 1.2x slower on Bun |

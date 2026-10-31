@@ -268,11 +268,16 @@ the XPS yet. Both are debts, named here so they are not forgotten.
 
 **Packaging.** Native libraries were committed to git in August because Packagist has no
 packing step; the Composer archive carried every binding until export-ignore took it from 3.5
-to 2.6 MB (0.5.0). Now: 21 zips on the release (8.3, 8.4, 8.5; NTS; seven platforms), the
+to 2.6 MB (0.5.0). Now: 18 zips on the release (8.3, 8.4, 8.5; NTS; six platforms), the
 Windows build on stable with `RUSTC_BOOTSTRAP=1` for `abi_vectorcall` because dropping Windows
 would have been a regression, no source fallback, no win-arm64 (PHP ships none), no ZTS. The
 first PIE install from Packagist is proven only at the rehearsal or 1.1.0, and a red
-acceptance after publish means a patch release.
+acceptance after publish means a patch release. There was a seventh platform for a week:
+Intel macOS, whose leg compiled an x86_64 PHP from php.net's source under Rosetta on every
+uncached run because Homebrew bottles none, and which stalled 15 minutes at link on 2026-10-31
+(run 41188206120) before the owner cancelled it and the leg. The rule that came out of it is
+the shortest in this document: never build a language runtime. A leg takes the runtime its
+platform packages, or there is no leg.
 
 **The same ABI discussion, owed twice over.** PHP's extension ABI changes with every minor, so
 each minor is its own build and seven more zips, and the choice of 8.3, 8.4 and 8.5 is a list

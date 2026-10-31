@@ -30,7 +30,7 @@ unchanged since the run that packaged it: hold Forge merges until a release is o
    ```
 
    This is the recovery path, so every release exercises it. After all six publishers
-   succeed it creates `go/vX.Y.Z` and the GitHub Release, with the 21 PHP extension zips
+   succeed it creates `go/vX.Y.Z` and the GitHub Release, with the 18 PHP extension zips
    attached (PIE installs from there; Packagist sees the tag at once, so `pie install` fails
    until this step has run). Its last job, `pie-acceptance`, then has PIE install
    `skunkwerkx/hyperuuid:vX.Y.Z` on every platform and PHP minor and checks it from a fresh
