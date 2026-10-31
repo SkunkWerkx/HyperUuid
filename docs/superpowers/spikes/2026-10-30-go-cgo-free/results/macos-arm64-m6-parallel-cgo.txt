@@ -1,0 +1,20 @@
+# spike/cgostatic.test
+ld: warning: ignoring duplicate libraries: '/Users/buvy/Developer/SkunkWerkx/HyperUuid/rust/target/aarch64-apple-darwin/staticlib/libhyperuuid.a'
+goos: darwin
+goarch: arm64
+pkg: spike/cgostatic
+cpu: Apple M6
+BenchmarkParallelCgoNewV7-12    	 5786731	       206.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5821408	       211.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5571114	       207.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5680123	       206.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5831922	       204.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5819426	       208.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	 2606994	       458.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	 2593032	       458.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	 2625816	       459.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	 2606204	       460.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	 2599858	       458.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	 2623080	       460.3 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/cgostatic	18.506s

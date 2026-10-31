@@ -1,0 +1,92 @@
+walk: base
+goos: linux
+goarch: arm64
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000-12    	  397466	      2987 ns/op
+BenchmarkW2gV7Batch1000-12    	  401886	      2983 ns/op
+BenchmarkW2gV7Batch1000-12    	  400350	      2981 ns/op
+BenchmarkW2gV7Batch1000-12    	  401515	      2985 ns/op
+BenchmarkW2gV7Batch1000-12    	  401850	      2989 ns/op
+BenchmarkW2gV7Batch1000-12    	  401733	      2988 ns/op
+PASS
+ok  	spike/w2gaes	7.183s
+goos: linux
+goarch: arm64
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000-12    	  505840	      2352 ns/op
+BenchmarkW2gV7Batch1000-12    	  503779	      2351 ns/op
+BenchmarkW2gV7Batch1000-12    	  510387	      2351 ns/op
+BenchmarkW2gV7Batch1000-12    	  509796	      2351 ns/op
+BenchmarkW2gV7Batch1000-12    	  511174	      2347 ns/op
+BenchmarkW2gV7Batch1000-12    	  511070	      2368 ns/op
+PASS
+ok  	spike/w2gfloor	7.186s
+walk: tree
+goos: linux
+goarch: arm64
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000-12    	  552399	      2151 ns/op
+BenchmarkW2gV7Batch1000-12    	  556320	      2154 ns/op
+BenchmarkW2gV7Batch1000-12    	  554080	      2157 ns/op
+BenchmarkW2gV7Batch1000-12    	  554438	      2200 ns/op
+BenchmarkW2gV7Batch1000-12    	  557769	      2156 ns/op
+BenchmarkW2gV7Batch1000-12    	  555909	      2147 ns/op
+PASS
+ok  	spike/w2gaes	7.202s
+goos: linux
+goarch: arm64
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000-12    	  784213	      1536 ns/op
+BenchmarkW2gV7Batch1000-12    	  791676	      1513 ns/op
+BenchmarkW2gV7Batch1000-12    	  794083	      1512 ns/op
+BenchmarkW2gV7Batch1000-12    	  792435	      1512 ns/op
+BenchmarkW2gV7Batch1000-12    	  790746	      1513 ns/op
+BenchmarkW2gV7Batch1000-12    	  792939	      1512 ns/op
+PASS
+ok  	spike/w2gfloor	7.200s
+walk: base
+goos: linux
+goarch: arm64
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000-12    	  395546	      3051 ns/op
+BenchmarkW2gV7Batch1000-12    	  399492	      3117 ns/op
+BenchmarkW2gV7Batch1000-12    	  380654	      3006 ns/op
+BenchmarkW2gV7Batch1000-12    	  402393	      2985 ns/op
+BenchmarkW2gV7Batch1000-12    	  401380	      2993 ns/op
+BenchmarkW2gV7Batch1000-12    	  371221	      3019 ns/op
+PASS
+ok  	spike/w2gaes	7.123s
+goos: linux
+goarch: arm64
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000-12    	  507160	      2458 ns/op
+BenchmarkW2gV7Batch1000-12    	  511614	      2345 ns/op
+BenchmarkW2gV7Batch1000-12    	  508011	      2346 ns/op
+BenchmarkW2gV7Batch1000-12    	  511994	      2344 ns/op
+BenchmarkW2gV7Batch1000-12    	  511862	      2344 ns/op
+BenchmarkW2gV7Batch1000-12    	  511424	      2345 ns/op
+PASS
+ok  	spike/w2gfloor	7.241s
+walk: tree
+goos: linux
+goarch: arm64
+pkg: spike/w2gaes
+BenchmarkW2gV7Batch1000-12    	  551852	      2151 ns/op
+BenchmarkW2gV7Batch1000-12    	  553975	      2151 ns/op
+BenchmarkW2gV7Batch1000-12    	  553479	      2153 ns/op
+BenchmarkW2gV7Batch1000-12    	  558045	      2152 ns/op
+BenchmarkW2gV7Batch1000-12    	  554744	      2152 ns/op
+BenchmarkW2gV7Batch1000-12    	  559405	      2152 ns/op
+PASS
+ok  	spike/w2gaes	7.173s
+goos: linux
+goarch: arm64
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000-12    	  784498	      1519 ns/op
+BenchmarkW2gV7Batch1000-12    	  792656	      1529 ns/op
+BenchmarkW2gV7Batch1000-12    	  783327	      1517 ns/op
+BenchmarkW2gV7Batch1000-12    	  793075	      1516 ns/op
+BenchmarkW2gV7Batch1000-12    	  791092	      1519 ns/op
+BenchmarkW2gV7Batch1000-12    	  792715	      1517 ns/op
+PASS
+ok  	spike/w2gfloor	7.203s

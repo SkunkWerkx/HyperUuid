@@ -1,0 +1,100 @@
+walk: base
+goos: darwin
+goarch: arm64
+pkg: spike/w2gaes
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  346201	      2978 ns/op
+BenchmarkW2gV7Batch1000-12    	  407748	      2949 ns/op
+BenchmarkW2gV7Batch1000-12    	  408556	      2939 ns/op
+BenchmarkW2gV7Batch1000-12    	  407473	      3021 ns/op
+BenchmarkW2gV7Batch1000-12    	  402846	      3038 ns/op
+BenchmarkW2gV7Batch1000-12    	  399267	      2973 ns/op
+PASS
+ok  	spike/w2gaes	7.158s
+goos: darwin
+goarch: arm64
+pkg: spike/w2gfloor
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  504891	      2376 ns/op
+BenchmarkW2gV7Batch1000-12    	  507049	      2379 ns/op
+BenchmarkW2gV7Batch1000-12    	  506383	      2367 ns/op
+BenchmarkW2gV7Batch1000-12    	  504811	      2391 ns/op
+BenchmarkW2gV7Batch1000-12    	  478498	      2512 ns/op
+BenchmarkW2gV7Batch1000-12    	  491737	      2387 ns/op
+PASS
+ok  	spike/w2gfloor	7.283s
+walk: tree
+goos: darwin
+goarch: arm64
+pkg: spike/w2gaes
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  576924	      2078 ns/op
+BenchmarkW2gV7Batch1000-12    	  574563	      2081 ns/op
+BenchmarkW2gV7Batch1000-12    	  575487	      2081 ns/op
+BenchmarkW2gV7Batch1000-12    	  576934	      2078 ns/op
+BenchmarkW2gV7Batch1000-12    	  574872	      2077 ns/op
+BenchmarkW2gV7Batch1000-12    	  575772	      2076 ns/op
+PASS
+ok  	spike/w2gaes	7.267s
+goos: darwin
+goarch: arm64
+pkg: spike/w2gfloor
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  785847	      1561 ns/op
+BenchmarkW2gV7Batch1000-12    	  791023	      1516 ns/op
+BenchmarkW2gV7Batch1000-12    	  792067	      1510 ns/op
+BenchmarkW2gV7Batch1000-12    	  793652	      1508 ns/op
+BenchmarkW2gV7Batch1000-12    	  795289	      1510 ns/op
+BenchmarkW2gV7Batch1000-12    	  801114	      1570 ns/op
+PASS
+ok  	spike/w2gfloor	7.389s
+walk: base
+goos: darwin
+goarch: arm64
+pkg: spike/w2gaes
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  409033	      2929 ns/op
+BenchmarkW2gV7Batch1000-12    	  412587	      2911 ns/op
+BenchmarkW2gV7Batch1000-12    	  412741	      2910 ns/op
+BenchmarkW2gV7Batch1000-12    	  412562	      2909 ns/op
+BenchmarkW2gV7Batch1000-12    	  412924	      2910 ns/op
+BenchmarkW2gV7Batch1000-12    	  412898	      2908 ns/op
+PASS
+ok  	spike/w2gaes	7.301s
+goos: darwin
+goarch: arm64
+pkg: spike/w2gfloor
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  438207	      2350 ns/op
+BenchmarkW2gV7Batch1000-12    	  513201	      2342 ns/op
+BenchmarkW2gV7Batch1000-12    	  512623	      2341 ns/op
+BenchmarkW2gV7Batch1000-12    	  512334	      2342 ns/op
+BenchmarkW2gV7Batch1000-12    	  512625	      2348 ns/op
+BenchmarkW2gV7Batch1000-12    	  512841	      2355 ns/op
+PASS
+ok  	spike/w2gfloor	7.125s
+walk: tree
+goos: darwin
+goarch: arm64
+pkg: spike/w2gaes
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  581056	      2062 ns/op
+BenchmarkW2gV7Batch1000-12    	  585337	      2052 ns/op
+BenchmarkW2gV7Batch1000-12    	  585387	      2057 ns/op
+BenchmarkW2gV7Batch1000-12    	  583648	      2056 ns/op
+BenchmarkW2gV7Batch1000-12    	  583900	      2054 ns/op
+BenchmarkW2gV7Batch1000-12    	  579110	      2051 ns/op
+PASS
+ok  	spike/w2gaes	7.287s
+goos: darwin
+goarch: arm64
+pkg: spike/w2gfloor
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  797484	      1503 ns/op
+BenchmarkW2gV7Batch1000-12    	  801516	      1499 ns/op
+BenchmarkW2gV7Batch1000-12    	  784408	      1497 ns/op
+BenchmarkW2gV7Batch1000-12    	  803756	      1494 ns/op
+BenchmarkW2gV7Batch1000-12    	  800908	      1495 ns/op
+BenchmarkW2gV7Batch1000-12    	  802983	      1509 ns/op
+PASS
+ok  	spike/w2gfloor	7.265s

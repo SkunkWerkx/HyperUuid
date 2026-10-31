@@ -1,0 +1,11 @@
+goos: linux
+goarch: arm64
+pkg: spike/w2gfloor
+BenchmarkW2gV7Batch1000-12    	  783975	      1516 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  792266	      1513 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  792608	      1515 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  792256	      1515 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  792144	      1518 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  792339	      1517 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/w2gfloor	7.197s

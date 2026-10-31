@@ -56,3 +56,11 @@ func BenchmarkParallelCgoNewV7(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkParallelCgoNewV4(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			NewV4()
+		}
+	})
+}

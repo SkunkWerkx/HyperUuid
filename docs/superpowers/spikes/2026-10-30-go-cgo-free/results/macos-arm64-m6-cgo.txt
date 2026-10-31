@@ -1,0 +1,48 @@
+goos: darwin
+goarch: arm64
+pkg: spike/cgostatic
+cpu: Apple M6
+BenchmarkCgoVersion-12          	82349005	        12.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	96001281	        12.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	97204362	        12.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	95434386	        12.48 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	97091635	        12.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	97434888	        12.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	 6514105	       184.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	 6514836	       183.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	 6508969	       183.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	 6509629	       183.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	 6524366	       183.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	 6522817	       183.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4Ptr-12         	 6389376	       187.7 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	 6384806	       187.8 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	 6394411	       187.9 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	 6386004	       187.9 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	 6388765	       187.9 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	 6348102	       188.5 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV7-12            	16868284	        71.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	16490028	        71.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	16794040	        72.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	16746240	        71.60 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	16729624	        71.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	16954440	        73.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	87697930	        13.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	87743882	        13.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	87418159	        13.81 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	87282248	        13.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	86773905	        13.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	87977344	        13.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  657410	      1830 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  658351	      1838 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  656215	      1832 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  662804	      1837 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  655462	      1838 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  655204	      1833 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5874772	       206.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5878867	       205.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5725356	       206.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5270506	       210.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5781556	       207.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 5761136	       211.3 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/cgostatic	51.655s

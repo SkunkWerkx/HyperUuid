@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: spike/w2gfloor
+cpu: Apple M6
+BenchmarkW2gV7Batch1000-12    	  781317	      1525 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  803998	      1492 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  803997	      1492 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  803412	      1492 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  804286	      1492 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12    	  804343	      1492 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/w2gfloor	7.293s

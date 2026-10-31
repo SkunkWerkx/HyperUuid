@@ -1,0 +1,23 @@
+goos: js
+goarch: wasm
+pkg: spike/w2gaes
+BenchmarkW2gNewV4         	 5810918	       203.6 ns/op
+BenchmarkW2gNewV4         	 5992941	       200.2 ns/op
+BenchmarkW2gNewV4         	 5994106	       200.4 ns/op
+BenchmarkW2gNewV7         	 3918324	       306.1 ns/op
+BenchmarkW2gNewV7         	 3956276	       303.6 ns/op
+BenchmarkW2gNewV7         	 3960006	       303.2 ns/op
+BenchmarkW2gV7Millis      	78538636	        15.11 ns/op
+BenchmarkW2gV7Millis      	86021800	        13.91 ns/op
+BenchmarkW2gV7Millis      	86368911	        13.86 ns/op
+BenchmarkW2gV7Batch1000   	   29406	     40653 ns/op
+BenchmarkW2gV7Batch1000   	   29577	     40634 ns/op
+BenchmarkW2gV7Batch1000   	   29466	     40701 ns/op
+BenchmarkParallelW2gNewV7 	 3875904	       305.6 ns/op
+BenchmarkParallelW2gNewV7 	 3932383	       305.4 ns/op
+BenchmarkParallelW2gNewV7 	 3926618	       306.2 ns/op
+BenchmarkParallelW2gNewV4 	 5614827	       206.3 ns/op
+BenchmarkParallelW2gNewV4 	 5818998	       205.9 ns/op
+BenchmarkParallelW2gNewV4 	 5810148	       206.1 ns/op
+PASS
+ok  	spike/w2gaes	23.154s

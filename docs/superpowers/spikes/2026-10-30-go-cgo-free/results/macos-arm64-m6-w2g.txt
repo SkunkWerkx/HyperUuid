@@ -1,0 +1,42 @@
+goos: darwin
+goarch: arm64
+pkg: spike/w2g
+cpu: Apple M6
+BenchmarkW2gVersion-12          	380028398	         3.126 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	386062758	         3.119 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	386082166	         3.169 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	377203596	         3.136 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	385713699	         3.114 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gVersion-12          	384866102	         3.118 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	 7272502	       164.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	 7282398	       164.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	 7327123	       163.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	 7335946	       163.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	 7318932	       163.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV4-12            	 7328854	       164.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22916488	        52.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	23264286	        52.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22659234	        52.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22874570	        52.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22317812	        52.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gNewV7-12            	22537380	        51.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	322403589	         3.723 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	322340730	         3.723 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	322182643	         3.724 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	322182428	         3.735 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	311787549	         3.767 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Millis-12         	321989896	         3.727 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  458730	      2625 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  456408	      2633 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  453982	      2626 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  457074	      2663 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  459654	      2658 ns/op	       0 B/op	       0 allocs/op
+BenchmarkW2gV7Batch1000-12      	  448519	      2722 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7912293	       151.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8114058	       151.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7929968	       151.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7962163	       150.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 8071273	       149.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelW2gNewV7-12    	 7913065	       151.5 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/w2g	44.199s

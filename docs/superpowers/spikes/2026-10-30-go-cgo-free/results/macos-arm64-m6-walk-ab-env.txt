@@ -1,0 +1,5 @@
+go version go1.27.3 darwin/arm64
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+Darwin Mac.lan 27.2.0 Darwin Kernel Version 27.2.0: Wed Oct 14 23:45:26 PDT 2026; root:xnu-13432.41.4~25/RELEASE_ARM64_T8152 arm64
+base: bb390d5 (bb390d5)
+tree: b04d6e2

@@ -1,0 +1,53 @@
+goos: linux
+goarch: arm64
+pkg: spike/cgostatic
+BenchmarkCgoVersion-12          	68042959	        17.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	60475106	        21.51 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	68260840	        20.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	51959049	        22.82 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	68898862	        21.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoVersion-12          	69121437	        17.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	30175710	        42.43 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	26484609	        42.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	30108106	        39.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	30037671	        42.65 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	33291025	        35.68 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4-12            	33644151	        35.72 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV4Ptr-12         	35597260	        33.04 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	36477906	        32.46 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	37080382	        32.44 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	37005817	        32.48 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	36359550	        32.59 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV4Ptr-12         	36869426	        32.46 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCgoNewV7-12            	30395649	        39.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30430624	        39.42 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30406465	        39.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30175899	        39.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30507471	        39.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoNewV7-12            	30317034	        39.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	90745816	        13.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	90811056	        13.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	90800748	        13.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	89190039	        13.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	90595383	        13.34 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Millis-12         	90392354	        13.39 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  348711	      3509 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  349286	      3478 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  347889	      3449 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  348222	      3456 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  349412	      3463 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCgoV7Batch1000-12      	  345698	      3464 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 6629342	       182.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 6530547	       181.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 6563546	       186.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 6377682	       186.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 6443061	       188.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV7-12    	 6552682	       185.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	229847263	         4.968 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	245273857	         5.090 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	249593197	         4.487 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	230211667	         4.640 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	235837216	         4.795 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelCgoNewV4-12    	247279155	         4.954 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	spike/cgostatic	62.239s

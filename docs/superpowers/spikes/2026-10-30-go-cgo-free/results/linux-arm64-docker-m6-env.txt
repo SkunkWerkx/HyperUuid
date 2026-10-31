@@ -1,0 +1,2 @@
+go version go1.27.3 linux/arm64
+Linux dcd6ae91997b 7.0.14-linuxkit #1 SMP PREEMPT Fri Oct 16 11:55:50 UTC 2026 aarch64 GNU/Linux
