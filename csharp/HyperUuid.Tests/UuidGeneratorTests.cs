@@ -570,7 +570,7 @@ public sealed class UuidGeneratorTests
 	[Fact]
 	public void TryFillV7_ReturnsFalseWhereFillV7Throws()
 	{
-		const long outOfRange = 1L << 48;
+		const long outOfRange = 253_402_300_800_000L;
 		var buf = new Guid[8];
 		Should.Throw<ArgumentOutOfRangeException>(() => UuidGenerator.FillV7(buf, outOfRange));
 		UuidGenerator.TryFillV7(buf, outOfRange).ShouldBeFalse();

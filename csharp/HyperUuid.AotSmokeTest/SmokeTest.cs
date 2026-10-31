@@ -139,7 +139,7 @@ internal static class SmokeTest
 			}
 		}
 		Span<Guid> filled = stackalloc Guid[4];
-		if (!UuidGenerator.TryFillV7(filled, FixedMs) || UuidGenerator.TryFillV7(filled, 1L << 48))
+		if (!UuidGenerator.TryFillV7(filled, FixedMs) || UuidGenerator.TryFillV7(filled, 253_402_300_800_000L))
 		{
 			Console.WriteLine("FAIL: TryFillV7 misreported a valid or an out-of-range timestamp");
 			return 1;
@@ -186,10 +186,10 @@ internal static class SmokeTest
 			Console.WriteLine("FAIL: a SQL-order conversion did not refuse a value outside its domain");
 			return 1;
 		}
-		var late = UuidGenerator.NewV7((1L << 48) - 1);
+		var late = UuidGenerator.NewV7(253_402_300_799_999L);
 		if (UuidGenerator.V7FromSqlOrder(UuidGenerator.V7ToSqlOrder(late)) != late)
 		{
-			Console.WriteLine("FAIL: the last v7 millisecond did not round-trip through SQL order");
+			Console.WriteLine("FAIL: the last minted v7 millisecond did not round-trip through SQL order");
 			return 1;
 		}
 		try

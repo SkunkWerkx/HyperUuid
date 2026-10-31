@@ -116,7 +116,8 @@ pub(crate) fn v7_error(e: v7::NewV7Error, op: &str) -> PhpException {
         v7::NewV7Error::TimestampOutOfRange => {
             return exception(
                 Thrown::TimestampOutOfRange,
-                "unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)".into(),
+                "unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)"
+                    .into(),
             );
         }
         v7::NewV7Error::CounterExhausted => {

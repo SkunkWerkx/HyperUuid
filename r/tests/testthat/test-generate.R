@@ -69,7 +69,10 @@ test_that("v7 timestamps stop at the last millisecond of 9999 in both directions
   # reads the 48-bit field as it is.
   last <- as.POSIXct("9999-12-31 23:59:59.999", tz = "UTC")
   expect_equal(uuid_v7_unix_millis(uuid_v7(time = last)), 253402300799999, tolerance = 0)
-  expect_equal(uuid_v7_unix_millis(uuid_v7(time = 253402300799.999)), 253402300799999, tolerance = 0)
+  expect_equal(
+    uuid_v7_unix_millis(uuid_v7(time = 253402300799.999)), 253402300799999,
+    tolerance = 0
+  )
   expect_equal(as.numeric(uuid_timestamp(uuid_v7(time = last))), as.numeric(last), tolerance = 1e-3)
   expect_error(
     uuid_v7(time = 253402300800),

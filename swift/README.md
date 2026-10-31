@@ -276,7 +276,8 @@ and `android_device_test.sh`, which run the same way against a local emulator). 
 1 GiB batch tests skip there.
 
 In a checkout of this repository the core is build output, never committed:
-`.github/scripts/local-core.sh` builds the host's archive from the checkout's `rust/` into
+`.github/scripts/local-core.sh` clears every binding's staged build artifact
+(`.github/scripts/local-clean.sh`), builds the host's archive from the checkout's `rust/` into
 `swift/HyperUuidCore.artifactbundle/` (gitignored but for its `include/`), and then `swift test`
 from `swift/` links it. CI writes each leg's archives there the same way. Without one the
 package still resolves, and a build stops at `import HyperUuidCore`. The root `Package.swift`

@@ -43,7 +43,8 @@ fn exception_class(ruby: &Ruby, pick: fn(&Cached) -> Opaque<ExceptionClass>) -> 
     }
 }
 
-const V7_TIMESTAMP_OUT_OF_RANGE: &str = "unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)";
+const V7_TIMESTAMP_OUT_OF_RANGE: &str =
+    "unix_millis must be between 0 and 253402300799999 (9999-12-31T23:59:59.999Z)";
 const V7_BATCH_TOO_LARGE: &str =
     "a single version 7 batch takes at most 67108864 UUIDs (the 26-bit counter space)";
 const BATCH_TOO_LARGE_TO_ADDRESS: &str = "the batch is too large to address on this platform";

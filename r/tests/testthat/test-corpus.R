@@ -109,7 +109,9 @@ test_that("timestamp.json", {
     if (rfc) expect_equal(uuid_v7_unix_millis(id), ms, tolerance = 0, info = id)
     if (minted) {
       expect_equal(round(as.numeric(uuid_timestamp(id, lay)) * 1000), ms, tolerance = 0, info = id)
-      if (rfc) expect_equal(round(as.numeric(uuid_timestamp(id)) * 1000), ms, tolerance = 0, info = id)
+      if (rfc) {
+        expect_equal(round(as.numeric(uuid_timestamp(id)) * 1000), ms, tolerance = 0, info = id)
+      }
     }
   }
 })

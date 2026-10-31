@@ -51,7 +51,10 @@ impl core::fmt::Display for NewV7Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::TimestampOutOfRange => {
-                write!(f, "unix millisecond timestamp must be at most 253402300799999 (9999-12-31T23:59:59.999Z)")
+                write!(
+                    f,
+                    "unix millisecond timestamp must be at most 253402300799999 (9999-12-31T23:59:59.999Z)"
+                )
             }
             Self::Random(e) => write!(f, "random source failed: {e}"),
             Self::BufferTooSmall => write!(f, "output buffer is shorter than count * 16 bytes"),
