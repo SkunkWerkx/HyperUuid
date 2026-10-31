@@ -85,7 +85,14 @@ func TestNilAndMaxAreClassifiedAsTheRfcSays(t *testing.T) {
 func TestAVersionOutsideTheNibbleNeverMatches(t *testing.T) {
 	id := must(NewV7At(inspectMs))
 	// 7+256 would read as 7 if it were narrowed to a byte, 7+1<<32 if narrowed to a uint32.
-	for _, version := range []int{7 + 256, 7 + 1<<32, -1, 16} {
+	// The second exists only on a 64-bit int, and through a variable: a constant conversion
+	// that overflows int is a compile error on 386 and arm even in a dead branch.
+	versions := []int{7 + 256, -1, 16}
+	if strconv.IntSize == 64 {
+		var big int64 = 1 << 32
+		versions = append(versions, 7+int(big))
+	}
+	for _, version := range versions {
 		if IsRfc(id, version) {
 			t.Errorf("IsRfc(%d) = true", version)
 		}
@@ -299,6 +306,12 @@ func TestAV7BatchPastTheCounterSpaceIsRefusedOnEveryDoor(t *testing.T) {
 func TestAV7BatchOfExactlyTheCounterSpaceIsStrictlyIncreasing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("allocates 1 GiB; skipped under -short")
+	}
+	if runtime.GOARCH == "wasm" || strconv.IntSize == 32 {
+		// The batch is 1 GiB in the result and 1 GiB in the core's scratch, more while the
+		// scratch grows; a 32-bit address space cannot hold it, and the host's allocation
+		// failure is fatal, not an error (go/README.md, "Memory").
+		t.Skip("a maximum batch needs more than a 32-bit address space")
 	}
 	ids, err := NewV7BatchAt(MaxV7Batch, inspectMs)
 	if err != nil {

@@ -1,10 +1,10 @@
 // Package hyperuuid provides RFC 9562 UUID generation (v4 random, v5 deterministic, v7
-// time-sortable, with a version 8 SQL Server order for v7) by calling the Rust core, linked into the binary as a static library through
-// cgo (backend_static.go). It builds on Linux, macOS and Windows, on amd64 and arm64, with a
-// C compiler present, and under TinyGo for WebAssembly, browser included (backend_tinygo.go);
-// anything else is a compile error that says so (unsupported.go).
+// time-sortable, with a version 8 SQL Server order for v7) by calling the Rust core, which is
+// compiled into the binary as Go: the core built for wasm32-wasip1 and translated to one Go
+// source file by wasm2go (internal/core, core.go). It builds on every GOOS and GOARCH Go
+// has, with no C compiler and no cgo, and under TinyGo and Go's own WebAssembly targets.
 //
-// The core is linked, not loaded, so nothing here can fail to load: Available is always
+// The core is compiled in, not loaded, so nothing here can fail to load: Available is always
 // true, and the errors these functions return are the core's own — a failed random source,
 // a timestamp out of range — or a caller's mistake, such as a negative count.
 package hyperuuid
@@ -46,15 +46,14 @@ func NewV4() (uuid.UUID, error) {
 
 // NewV5 creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and raw name
 // bytes. The same (namespace, name) pair always produces the same UUID; an empty or nil name
-// is valid and hashes the namespace alone.
+// is valid and hashes the namespace alone. A name longer than MaxV5Name bytes returns
+// ErrNameTooLong before anything is allocated.
 func NewV5(namespace uuid.UUID, name []byte) (uuid.UUID, error) {
-	if uint64(len(name)) > math.MaxUint32 {
-		return uuid.UUID{}, fmt.Errorf("hyperuuid: name of %d bytes exceeds the native length limit", len(name))
+	if err := checkV5Name(len(name)); err != nil {
+		return uuid.UUID{}, err
 	}
-	// uuid_new_v5 is pure hashing — no entropy, no clock — and has no failure code: it
-	// returns 0 unconditionally, so there is nothing to map onto an error here.
-	out, _ := newV5(namespace, name)
-	return out, nil
+	// uuid_new_v5 is pure hashing — no entropy, no clock.
+	return newV5(namespace, name)
 }
 
 // NewV5String creates a deterministic UUID version 5 (RFC 9562 §5.5) from a namespace and a
@@ -322,7 +321,8 @@ func FillV7(dst []uuid.UUID) error {
 // one contiguous block of the stream, in strictly increasing order (see NewV7BatchAt and
 // NewV7At). A dst longer than MaxV7Batch returns ErrBatchTooLarge with nothing written. A batch
 // the stream cannot hold within 1000 ms of unixMillis returns ErrCounterExhausted and reserves
-// nothing, but dst may then hold entropy from the draw: treat it as clobbered.
+// nothing; dst is untouched (the draw lands in the guest's scratch, which is copied out only
+// on success).
 func FillV7At(dst []uuid.UUID, unixMillis uint64) error {
 	if len(dst) > MaxV7Batch {
 		return errV7BatchTooLarge(len(dst))

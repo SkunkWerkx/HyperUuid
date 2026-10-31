@@ -13,12 +13,6 @@ csharp/HyperUuid/runtimes/
 # The same for the static libraries a Native AOT publish links in: staged by the forge's
 # static-libs/build-static-libs.sh at test and pack time, never committed.
 csharp/HyperUuid/staticlibs/
-# go/staticlib's archives ARE committed — a Go module is whatever is in the tree — but only
-# by stage-native-binaries.yml, which adds them with `git add -f` after verifying each one's
-# build provenance. Ignored here so that a developer's own build of them (the forge's
-# static-libs/build-static-libs.sh, which `go test` needs to link) can never
-# ride into a commit by accident.
-go/staticlib/*/*.a
 
 # Gradle / Java
 **/.gradle/
@@ -86,11 +80,11 @@ php/.phpunit.result.cache
 typescript/*.node
 typescript/npm/
 
-# R. vendor.sh stages the core and the corpus, derives the wrapper crate's lock from
-# rust/Cargo.lock and vendors the crates into these at release time, in CI and for the
-# local loop; R CMD INSTALL leaves the objects and the library. All generated, never
-# committed. r/.gitignore and typescript/.gitignore repeat their entries for their own trees.
-r/src/rust/core/
+# R. vendor.sh derives the wrapper crate's lock from rust/Cargo.lock, vendors the crates
+# (the core among them, from this checkout) and stages the corpus into these at release
+# time, in CI and for the local loop; R CMD INSTALL leaves the objects and the library. All
+# generated, never committed. r/.gitignore and typescript/.gitignore repeat their entries
+# for their own trees.
 r/src/rust/vendor/
 r/src/rust/vendor.tar.xz
 r/src/rust/Cargo.lock

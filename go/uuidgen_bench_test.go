@@ -1,6 +1,7 @@
 package hyperuuid
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -85,6 +86,26 @@ func BenchmarkNewV7BatchAt1000(b *testing.B) {
 // and 7) — these measure HyperUuid's V7Timestamp head-to-head against it on the
 // same pre-generated UUID, generation excluded from the timed loop.
 
+// The platform's own calls, for the scoreboard: google/uuid's v4 and its v7 (which keeps a
+// monotonic sequence of its own), both reading the operating system's random source through
+// crypto/rand on every call.
+
+func BenchmarkGoogleUuidNewRandom(b *testing.B) {
+	for b.Loop() {
+		if _, err := uuid.NewRandom(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGoogleUuidNewV7(b *testing.B) {
+	for b.Loop() {
+		if _, err := uuid.NewV7(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkV7TimestampExtraction(b *testing.B) {
 	id, err := NewV7At(rfcTestVectorMs)
 	if err != nil {
@@ -129,4 +150,69 @@ func BenchmarkFillV7BytesAt1000(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// ---- Contention ---------------------------------------------------------------------------
+//
+// The stateless calls run on the primary instance when its lock is free and on a pooled
+// instance otherwise (core_pool.go); v7 calls always take the primary's lock. These measure
+// both under GOMAXPROCS goroutines, with allocations reported, so the README's contention
+// numbers are the shipped binding's and the pool's cost shows up as allocations and GCs.
+
+func BenchmarkParallelNewV4(b *testing.B) {
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := NewV4(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkParallelNewV7(b *testing.B) {
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		clock := newBenchClock() // one per goroutine: the clock is not shared
+		for pb.Next() {
+			if _, err := NewV7At(clock.next()); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+// BenchmarkParallelMixed is v4, v5 of a 32-byte name, v7 and Version, round-robin on every
+// goroutine, with the heap in use and the collections the run cost reported beside the time.
+func BenchmarkParallelMixed(b *testing.B) {
+	b.ReportAllocs()
+	name := []byte("0123456789abcdef0123456789abcdef")
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	b.RunParallel(func(pb *testing.PB) {
+		clock := newBenchClock()
+		var last uuid.UUID
+		for i := 0; pb.Next(); i++ {
+			var err error
+			switch i & 3 {
+			case 0:
+				last, err = NewV4()
+			case 1:
+				last, err = NewV5(NamespaceDNS, name)
+			case 2:
+				last, err = NewV7At(clock.next())
+			default:
+				if Version(last) < 0 {
+					b.Fatal("version")
+				}
+			}
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	b.ReportMetric(float64(after.HeapInuse), "heap-inuse-B")
+	b.ReportMetric(float64(after.NumGC-before.NumGC), "gcs")
 }

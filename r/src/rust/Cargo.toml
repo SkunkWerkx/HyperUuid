@@ -7,8 +7,13 @@ publish = false
 [lib]
 crate-type = ["staticlib"]
 
+# The core from crates.io at exactly this package's version, the way any Rust consumer of it
+# depends on it, and nothing else. prepare-release bumps the pin with DESCRIPTION, and
+# tools/vendor.sh refuses a pin that differs from rust/Cargo.toml: it resolves this version
+# from the checkout's rust/ and vendors that source beside the other crates into
+# src/rust/vendor.tar.xz, so the package builds offline from the published graph.
 [dependencies]
-hyperuuid = { path = "core", default-features = false, features = ["staticlib"] }
+hyperuuid = { version = "=1.0.0", default-features = false, features = ["staticlib"] }
 
 [profile.release]
 lto = true
@@ -16,4 +21,3 @@ codegen-units = 1
 panic = "abort"
 
 [workspace]
-exclude = ["core"]

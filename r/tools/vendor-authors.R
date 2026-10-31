@@ -1,11 +1,17 @@
 # Writes inst/AUTHORS: one line per vendored crate (the dependency closure of the rcore
-# wrapper, without rcore itself and the hyperuuid core), from cargo metadata. Run from the
-# package root by tools/vendor.sh after cargo vendor.
+# wrapper, without rcore itself and the hyperuuid core, which is this project's own), from
+# cargo metadata. Run from the package root by tools/vendor.sh, which leaves src/rust/vendor
+# in place for it: the metadata is read offline against that directory, since the lock names
+# the crates.io source for the core at a version that is not published while a release packs
+# this package.
 # The metadata is a single JSON line of about 60 KB, and it goes through a file: on Windows
 # `system2(stdout = TRUE)` splits captured lines at 8095 bytes, and the break lands inside a
 # string.
 metadata <- tempfile(fileext = ".json")
-status <- system2("cargo", c("metadata", "--format-version", "1", "--locked",
+vendored <- c("--offline",
+              "--config", shQuote('source.crates-io.replace-with="vendored-sources"'),
+              "--config", shQuote('source.vendored-sources.directory="src/rust/vendor"'))
+status <- system2("cargo", c("metadata", "--format-version", "1", "--locked", vendored,
                              "--manifest-path", "src/rust/Cargo.toml"), stdout = metadata)
 if (status != 0L) stop("vendor-authors.R: cargo metadata exited with status ", status)
 meta <- jsonlite::fromJSON(metadata, simplifyVector = FALSE)

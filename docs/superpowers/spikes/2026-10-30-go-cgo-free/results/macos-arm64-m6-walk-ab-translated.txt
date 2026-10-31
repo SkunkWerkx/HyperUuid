@@ -3,98 +3,98 @@ goos: darwin
 goarch: arm64
 pkg: spike/w2gaes
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  346201	      2978 ns/op
-BenchmarkW2gV7Batch1000-12    	  407748	      2949 ns/op
-BenchmarkW2gV7Batch1000-12    	  408556	      2939 ns/op
-BenchmarkW2gV7Batch1000-12    	  407473	      3021 ns/op
-BenchmarkW2gV7Batch1000-12    	  402846	      3038 ns/op
-BenchmarkW2gV7Batch1000-12    	  399267	      2973 ns/op
+BenchmarkW2gV7Batch1000-12    	  392583	      2926 ns/op
+BenchmarkW2gV7Batch1000-12    	  412827	      2925 ns/op
+BenchmarkW2gV7Batch1000-12    	  407667	      2930 ns/op
+BenchmarkW2gV7Batch1000-12    	  407712	      2918 ns/op
+BenchmarkW2gV7Batch1000-12    	  414250	      2926 ns/op
+BenchmarkW2gV7Batch1000-12    	  409423	      2923 ns/op
 PASS
-ok  	spike/w2gaes	7.158s
+ok  	spike/w2gaes	7.227s
 goos: darwin
 goarch: arm64
 pkg: spike/w2gfloor
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  504891	      2376 ns/op
-BenchmarkW2gV7Batch1000-12    	  507049	      2379 ns/op
-BenchmarkW2gV7Batch1000-12    	  506383	      2367 ns/op
-BenchmarkW2gV7Batch1000-12    	  504811	      2391 ns/op
-BenchmarkW2gV7Batch1000-12    	  478498	      2512 ns/op
-BenchmarkW2gV7Batch1000-12    	  491737	      2387 ns/op
+BenchmarkW2gV7Batch1000-12    	  502720	      2382 ns/op
+BenchmarkW2gV7Batch1000-12    	  512882	      2370 ns/op
+BenchmarkW2gV7Batch1000-12    	  512024	      2353 ns/op
+BenchmarkW2gV7Batch1000-12    	  510300	      2358 ns/op
+BenchmarkW2gV7Batch1000-12    	  495998	      2369 ns/op
+BenchmarkW2gV7Batch1000-12    	  503620	      2353 ns/op
 PASS
-ok  	spike/w2gfloor	7.283s
+ok  	spike/w2gfloor	7.348s
 walk: tree
 goos: darwin
 goarch: arm64
 pkg: spike/w2gaes
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  576924	      2078 ns/op
-BenchmarkW2gV7Batch1000-12    	  574563	      2081 ns/op
-BenchmarkW2gV7Batch1000-12    	  575487	      2081 ns/op
-BenchmarkW2gV7Batch1000-12    	  576934	      2078 ns/op
-BenchmarkW2gV7Batch1000-12    	  574872	      2077 ns/op
-BenchmarkW2gV7Batch1000-12    	  575772	      2076 ns/op
+BenchmarkW2gV7Batch1000-12    	  497670	      2065 ns/op
+BenchmarkW2gV7Batch1000-12    	  586491	      2058 ns/op
+BenchmarkW2gV7Batch1000-12    	  586029	      2059 ns/op
+BenchmarkW2gV7Batch1000-12    	  572461	      2062 ns/op
+BenchmarkW2gV7Batch1000-12    	  584181	      2059 ns/op
+BenchmarkW2gV7Batch1000-12    	  585232	      2057 ns/op
 PASS
-ok  	spike/w2gaes	7.267s
+ok  	spike/w2gaes	7.120s
 goos: darwin
 goarch: arm64
 pkg: spike/w2gfloor
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  785847	      1561 ns/op
-BenchmarkW2gV7Batch1000-12    	  791023	      1516 ns/op
-BenchmarkW2gV7Batch1000-12    	  792067	      1510 ns/op
-BenchmarkW2gV7Batch1000-12    	  793652	      1508 ns/op
-BenchmarkW2gV7Batch1000-12    	  795289	      1510 ns/op
-BenchmarkW2gV7Batch1000-12    	  801114	      1570 ns/op
+BenchmarkW2gV7Batch1000-12    	  688946	      1502 ns/op
+BenchmarkW2gV7Batch1000-12    	  803838	      1498 ns/op
+BenchmarkW2gV7Batch1000-12    	  804282	      1500 ns/op
+BenchmarkW2gV7Batch1000-12    	  793344	      1499 ns/op
+BenchmarkW2gV7Batch1000-12    	  801854	      1498 ns/op
+BenchmarkW2gV7Batch1000-12    	  804008	      1497 ns/op
 PASS
-ok  	spike/w2gfloor	7.389s
+ok  	spike/w2gfloor	7.142s
 walk: base
 goos: darwin
 goarch: arm64
 pkg: spike/w2gaes
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  409033	      2929 ns/op
-BenchmarkW2gV7Batch1000-12    	  412587	      2911 ns/op
-BenchmarkW2gV7Batch1000-12    	  412741	      2910 ns/op
-BenchmarkW2gV7Batch1000-12    	  412562	      2909 ns/op
-BenchmarkW2gV7Batch1000-12    	  412924	      2910 ns/op
-BenchmarkW2gV7Batch1000-12    	  412898	      2908 ns/op
+BenchmarkW2gV7Batch1000-12    	  358027	      2932 ns/op
+BenchmarkW2gV7Batch1000-12    	  412231	      2924 ns/op
+BenchmarkW2gV7Batch1000-12    	  409093	      2922 ns/op
+BenchmarkW2gV7Batch1000-12    	  407589	      2923 ns/op
+BenchmarkW2gV7Batch1000-12    	  409833	      2922 ns/op
+BenchmarkW2gV7Batch1000-12    	  412587	      2945 ns/op
 PASS
-ok  	spike/w2gaes	7.301s
+ok  	spike/w2gaes	7.145s
 goos: darwin
 goarch: arm64
 pkg: spike/w2gfloor
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  438207	      2350 ns/op
-BenchmarkW2gV7Batch1000-12    	  513201	      2342 ns/op
-BenchmarkW2gV7Batch1000-12    	  512623	      2341 ns/op
-BenchmarkW2gV7Batch1000-12    	  512334	      2342 ns/op
-BenchmarkW2gV7Batch1000-12    	  512625	      2348 ns/op
-BenchmarkW2gV7Batch1000-12    	  512841	      2355 ns/op
+BenchmarkW2gV7Batch1000-12    	  437109	      2360 ns/op
+BenchmarkW2gV7Batch1000-12    	  507883	      2348 ns/op
+BenchmarkW2gV7Batch1000-12    	  512577	      2352 ns/op
+BenchmarkW2gV7Batch1000-12    	  511492	      2358 ns/op
+BenchmarkW2gV7Batch1000-12    	  512659	      2351 ns/op
+BenchmarkW2gV7Batch1000-12    	  509917	      2348 ns/op
 PASS
-ok  	spike/w2gfloor	7.125s
+ok  	spike/w2gfloor	7.121s
 walk: tree
 goos: darwin
 goarch: arm64
 pkg: spike/w2gaes
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  581056	      2062 ns/op
-BenchmarkW2gV7Batch1000-12    	  585337	      2052 ns/op
-BenchmarkW2gV7Batch1000-12    	  585387	      2057 ns/op
-BenchmarkW2gV7Batch1000-12    	  583648	      2056 ns/op
-BenchmarkW2gV7Batch1000-12    	  583900	      2054 ns/op
-BenchmarkW2gV7Batch1000-12    	  579110	      2051 ns/op
+BenchmarkW2gV7Batch1000-12    	  581750	      2061 ns/op
+BenchmarkW2gV7Batch1000-12    	  585234	      2051 ns/op
+BenchmarkW2gV7Batch1000-12    	  585901	      2051 ns/op
+BenchmarkW2gV7Batch1000-12    	  585764	      2051 ns/op
+BenchmarkW2gV7Batch1000-12    	  585364	      2088 ns/op
+BenchmarkW2gV7Batch1000-12    	  584980	      2051 ns/op
 PASS
-ok  	spike/w2gaes	7.287s
+ok  	spike/w2gaes	7.312s
 goos: darwin
 goarch: arm64
 pkg: spike/w2gfloor
 cpu: Apple M6
-BenchmarkW2gV7Batch1000-12    	  797484	      1503 ns/op
-BenchmarkW2gV7Batch1000-12    	  801516	      1499 ns/op
-BenchmarkW2gV7Batch1000-12    	  784408	      1497 ns/op
-BenchmarkW2gV7Batch1000-12    	  803756	      1494 ns/op
-BenchmarkW2gV7Batch1000-12    	  800908	      1495 ns/op
-BenchmarkW2gV7Batch1000-12    	  802983	      1509 ns/op
+BenchmarkW2gV7Batch1000-12    	  792667	      1507 ns/op
+BenchmarkW2gV7Batch1000-12    	  803869	      1499 ns/op
+BenchmarkW2gV7Batch1000-12    	  804363	      1503 ns/op
+BenchmarkW2gV7Batch1000-12    	  800742	      1494 ns/op
+BenchmarkW2gV7Batch1000-12    	  804006	      1501 ns/op
+BenchmarkW2gV7Batch1000-12    	  801301	      1496 ns/op
 PASS
-ok  	spike/w2gfloor	7.265s
+ok  	spike/w2gfloor	7.339s

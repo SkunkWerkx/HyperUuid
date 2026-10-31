@@ -18,9 +18,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// corpus decodes corpus/<name>, walking up from the test directory to find it.
+// corpus decodes corpus/<name>: from the directory HYPERUUID_CORPUS names when it is set (a
+// WASI runtime sees only what is mounted, and the wasm job mounts the checkout and points
+// here), else by walking up from the test directory to find it.
 func corpus(t *testing.T, name string) []map[string]any {
 	t.Helper()
+	if dir := os.Getenv("HYPERUUID_CORPUS"); dir != "" {
+		return decodeCorpus(t, name, filepath.Join(dir, name))
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -35,14 +40,7 @@ func corpus(t *testing.T, name string) []map[string]any {
 			text, readErr = os.ReadFile(filepath.Join(dir, "testdata", "corpus", name))
 		}
 		if readErr == nil {
-			var vectors []map[string]any
-			if err := json.Unmarshal(text, &vectors); err != nil {
-				t.Fatalf("corpus/%s: %v", name, err)
-			}
-			if len(vectors) == 0 {
-				t.Fatalf("corpus/%s is empty", name)
-			}
-			return vectors
+			return parseCorpus(t, name, text)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -50,6 +48,29 @@ func corpus(t *testing.T, name string) []map[string]any {
 		}
 		dir = parent
 	}
+}
+
+// decodeCorpus reads and parses one corpus file at path, failing with "not found" when it
+// is missing.
+func decodeCorpus(t *testing.T, name, path string) []map[string]any {
+	t.Helper()
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("corpus/%s not found at %s: %v", name, path, err)
+	}
+	return parseCorpus(t, name, text)
+}
+
+func parseCorpus(t *testing.T, name string, text []byte) []map[string]any {
+	t.Helper()
+	var vectors []map[string]any
+	if err := json.Unmarshal(text, &vectors); err != nil {
+		t.Fatalf("corpus/%s: %v", name, err)
+	}
+	if len(vectors) == 0 {
+		t.Fatalf("corpus/%s is empty", name)
+	}
+	return vectors
 }
 
 func hexField(t *testing.T, v map[string]any, key string) []byte {

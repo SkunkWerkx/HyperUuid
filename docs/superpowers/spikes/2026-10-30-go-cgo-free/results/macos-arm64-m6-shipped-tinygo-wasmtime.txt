@@ -1,0 +1,44 @@
+# TinyGo 0.44.0 -target=wasip1 under wasmtime 50.0.0 (ebe5e8df1 2026-10-20), 2026-10-31T09:01Z, -count 3
+BenchmarkNewV4                     	 7707920	       154.1 ns/op
+BenchmarkNewV4                     	 7773883	       153.7 ns/op
+BenchmarkNewV4                     	 7806654	       153.9 ns/op
+BenchmarkNewV5String               	 4636086	       258.6 ns/op
+BenchmarkNewV5String               	 4643782	       258.3 ns/op
+BenchmarkNewV5String               	 4646335	       258.3 ns/op
+BenchmarkNewV7At                   	 7473700	       160.8 ns/op
+BenchmarkNewV7At                   	 7459995	       160.6 ns/op
+BenchmarkNewV7At                   	 7446015	       160.6 ns/op
+BenchmarkV7IndividualX1000         	    7508	    158919 ns/op
+BenchmarkV7IndividualX1000         	    7592	    158200 ns/op
+BenchmarkV7IndividualX1000         	    7600	    158389 ns/op
+BenchmarkNewV7BatchAt1000          	   67916	     17652 ns/op
+BenchmarkNewV7BatchAt1000          	   68035	     17638 ns/op
+BenchmarkNewV7BatchAt1000          	   68005	     17682 ns/op
+BenchmarkGoogleUuidNewRandom       	19990338	        59.80 ns/op
+BenchmarkGoogleUuidNewRandom       	19939848	        59.71 ns/op
+BenchmarkGoogleUuidNewRandom       	20044431	        59.71 ns/op
+BenchmarkGoogleUuidNewV7           	 7876392	       152.0 ns/op
+BenchmarkGoogleUuidNewV7           	 7894060	       152.1 ns/op
+BenchmarkGoogleUuidNewV7           	 7889908	       152.4 ns/op
+BenchmarkV7TimestampExtraction     	12430852	        96.64 ns/op
+BenchmarkV7TimestampExtraction     	12396052	        96.64 ns/op
+BenchmarkV7TimestampExtraction     	12424417	        96.60 ns/op
+BenchmarkGoogleUuidV7TimeExtraction	493447429	         2.423 ns/op
+BenchmarkGoogleUuidV7TimeExtraction	497830288	         2.420 ns/op
+BenchmarkGoogleUuidV7TimeExtraction	493398735	         2.425 ns/op
+BenchmarkFillV7At1000              	   86415	     13908 ns/op
+BenchmarkFillV7At1000              	   86556	     13945 ns/op
+BenchmarkFillV7At1000              	   86281	     13886 ns/op
+BenchmarkFillV7BytesAt1000         	   86124	     13992 ns/op
+BenchmarkFillV7BytesAt1000         	   86476	     13914 ns/op
+BenchmarkFillV7BytesAt1000         	   86304	     13896 ns/op
+BenchmarkParallelNewV4             	1000000000	         0.0000080 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7             	1000000000	         0.0000080 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed             	1000000000	         0.0000220 ns/op	         0 gcs	    438544 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed             	1000000000	         0.0000210 ns/op	         0 gcs	    438640 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed             	1000000000	         0.0000220 ns/op	         0 gcs	    438656 heap-inuse-B	       0 B/op	       0 allocs/op
+PASS

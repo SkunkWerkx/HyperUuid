@@ -14,7 +14,7 @@
 //! to the caller in the UUIDs or overwritten by their version and variant bits.
 //!
 //! **Small requests (every single-item generator, and smaller batches), Linux:** a pool of
-//! buffered ChaCha20 generators, [`pool`] below, which has the details. A single UUID needs 6
+//! buffered ChaCha20 generators, [`pool`] below, which has the details. A single UUID needs 11
 //! to 16 bytes, too few to pay for keying a cipher per call, so the pool keys one per kilobyte
 //! of keystream and hands it out a few bytes at a time. No key outlives a second of wall-clock
 //! time, which is what keeps a process restored from a snapshot from replaying its bytes.

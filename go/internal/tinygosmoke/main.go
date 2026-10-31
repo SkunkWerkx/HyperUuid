@@ -1,15 +1,15 @@
 // Command tinygosmoke is the check CI runs in headless Chrome: this module compiled by TinyGo
-// for the browser (`tinygo build -target=wasm`), with the core linked in from
-// staticlib/wasm, loaded by index.html beside it through TinyGo's own wasm_exec.js. It
-// prints one PASS or FAIL line per check and DONE at the end; the forge's
-// hyper-build-wasm.yml fails the run on any FAIL or a missing DONE, which is also what a
-// trap part-way through looks like.
+// for the browser (`tinygo build -target=wasm`), loaded by index.html beside it through
+// TinyGo's own wasm_exec.js. Nothing is linked: the core is the Go translation in
+// internal/core, and its one import, WASI's random_get, is served by the binding's OS source
+// from crypto/rand, which wasm_exec.js backs with crypto.getRandomValues. It prints one PASS
+// or FAIL line per check and DONE at the end; the forge's hyper-build-wasm.yml fails the run
+// on any FAIL or a missing DONE, which is also what a trap part-way through looks like.
 //
 // The expected core version comes from rust/Cargo.toml at build time
-// (`-ldflags "-X main.wantVersion=..."`), so the page proves the archive that was linked is
-// the one this commit's core builds, not a stale one. Stock Go builds this too, natively
-// under cgo, so `go vet ./...` covers it like any other package; it is internal, so it is
-// nothing a consumer can import.
+// (`-ldflags "-X main.wantVersion=..."`), so the page proves the translated core is the one
+// this commit's rust/ builds, not a stale one. Stock Go builds this too, so `go vet ./...`
+// covers it like any other package; it is internal, so it is nothing a consumer can import.
 package main
 
 import (

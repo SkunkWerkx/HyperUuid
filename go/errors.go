@@ -15,9 +15,8 @@ var ErrTimestampOutOfRange = errors.New("hyperuuid: unix millisecond timestamp o
 // their batch and Fill forms — when the process-wide stream cannot advance without running
 // more than 1000 ms ahead of the supplied timestamp, or past the last millisecond the stream
 // holds (2^44 − 2), and the call is not out of stream (return code 6). It is a state error,
-// not an argument error: the failed call reserved nothing and a call whose timestamp is past
-// the stream's millisecond succeeds. A failed batch or fill may have written entropy into the
-// front of dst, so treat dst as clobbered, not untouched.
+// not an argument error: the failed call reserved nothing, wrote nothing into dst, and a call
+// whose timestamp is past the stream's millisecond succeeds.
 var ErrCounterExhausted = errors.New("hyperuuid: version 7 counter exhausted: the stream cannot advance without running more than 1000 ms ahead of the supplied timestamp or past its last millisecond")
 
 // ErrNotTimeBased is returned by GetTimestamp and GetTimestampIn when the given UUID isn't an
@@ -57,3 +56,7 @@ var ErrBatchUnaddressable = errors.New("hyperuuid: batch is too large to address
 // order, anything but an RFC 9562 version 7; from SQL order, anything but a SQL-ordered value
 // converted from a version 7, so an RFC-ordered value is refused too.
 var ErrWrongVersion = errors.New("hyperuuid: the value is not a UUID of the version this conversion takes")
+
+// ErrNameTooLong is returned by NewV5 and NewV5String for a name longer than MaxV5Name
+// bytes, the core's addressable limit.
+var ErrNameTooLong = errors.New("hyperuuid: a version 5 name is at most MaxV5Name bytes, the core's addressable limit")

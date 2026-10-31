@@ -9,8 +9,9 @@ version 8 SQL Server order for v7. A Node-API addon built with [napi-rs](https:/
 Rust core every other HyperUuid binding calls, linked straight into the `.node` file, with
 types for TypeScript and the same API under Node and Bun.
 
-It is not the fastest way to mint a single id in JavaScript: `crypto.randomUUID()` and the
-`uuid` package beat it per call on this machine ([Benchmarks](#benchmarks)). What it gives
+It is not the fastest way to mint a single v4 in JavaScript: `crypto.randomUUID()` beats it
+per call on this machine, and the `uuid` package's `v7()` beats its v7 on Bun, where on Node
+it is 2.3x faster ([Benchmarks](#benchmarks)). What it gives
 you is the same engine, bit for bit, as the C#, Go, Java, PHP, Python, Ruby and Swift
 bindings, the SQL Server order, and batch and buffer generation that pay for randomness once.
 
@@ -308,9 +309,9 @@ that spread. Averages per call:
 | `v7UnixMillis(id)` | 115 ns | 156 ns | |
 
 `newV4()` loses on both runtimes and `newV7()` on Bun. A call into the addon that touches no
-randomness (`v7UnixMillis`) is 115 ns on Node; the rest is the random source. On Apple
-platforms the core asks `CCRandomGenerateBytes` for every id (the user-space ChaCha20 path in
-`rust/src/entropy.rs` is Linux and Android only), and Apple's generator costs more from 12
+randomness (`v7UnixMillis`) is 115 ns on Node; most of the rest is the random source. On Apple
+platforms the core asks `CCRandomGenerateBytes` for every id (the user-space ChaCha20 pool in
+`rust/src/entropy.rs` is Linux only), and Apple's generator costs more from 12
 bytes up: a v4 draws 16, a v7 11. `crypto.randomUUID()` draws from a buffer of random bytes it
 refills in bulk, so it pays that cost once per many ids. A batch does the same: one fetch for
 the whole batch, about 44 ns an id as strings on Node and 3.6 ns as bytes. If you mint ids one

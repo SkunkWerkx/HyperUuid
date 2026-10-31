@@ -1,0 +1,51 @@
+# golang:1.27 in Docker Desktop on the Apple M6 (linux/arm64, virtualized), 2026-10-31T09:02Z, -count 3
+go version go1.27.3 linux/arm64
+go: downloading golang.org/x/sys v0.49.0
+go: downloading github.com/google/uuid v1.6.0
+goos: linux
+goarch: arm64
+pkg: github.com/SkunkWerkx/HyperUuid/go
+BenchmarkNewV4-12                         	21690584	        54.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	21921194	        55.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	21683725	        55.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	10401824	       111.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	10783474	       109.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	11058543	       108.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	21866817	        54.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	21332858	        55.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	22033374	        54.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   21836	     55063 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   21942	     54636 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   21757	     55246 ns/op	      10 B/op	       0 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  378099	      3360 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  355262	      3324 ns/op	   16391 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  361888	      3311 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	19540897	        57.81 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	20458976	        57.91 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	20569635	        57.77 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	12101551	        98.56 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	12153565	        98.99 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	12242066	        98.45 ns/op	      16 B/op	       1 allocs/op
+BenchmarkV7TimestampExtraction-12         	178184301	         6.740 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	178690754	         6.731 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	176990671	         6.777 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	868706997	         1.379 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	870547207	         1.380 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	874123747	         1.379 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  558199	      2159 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  555538	      2195 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  555231	      2154 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  553880	      2156 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  554751	      2157 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  556413	      2158 ns/op	       5 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	115280799	        10.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	120943341	        10.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	128562669	         9.411 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8379205	       150.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 7944646	       151.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 7981197	       153.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10850346	       110.5 ns/op	         0 gcs	   3579904 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10862402	       111.1 ns/op	         0 gcs	   3588096 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10840981	       112.1 ns/op	         0 gcs	   3620864 heap-inuse-B	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/SkunkWerkx/HyperUuid/go	54.241s

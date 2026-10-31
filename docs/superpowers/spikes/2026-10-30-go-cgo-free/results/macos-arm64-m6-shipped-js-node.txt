@@ -1,0 +1,48 @@
+# GOOS=js GOARCH=wasm, node v24.22.1, 2026-10-31T09:00Z, -count 3
+goos: js
+goarch: wasm
+pkg: github.com/SkunkWerkx/HyperUuid/go
+BenchmarkNewV4                      	 2208397	       540.6 ns/op
+BenchmarkNewV4                      	 2242560	       533.5 ns/op
+BenchmarkNewV4                      	 2230616	       536.7 ns/op
+BenchmarkNewV5String                	 4126966	       287.7 ns/op
+BenchmarkNewV5String                	 4241424	       282.4 ns/op
+BenchmarkNewV5String                	 4265853	       282.2 ns/op
+BenchmarkNewV7At                    	 2126857	       561.9 ns/op
+BenchmarkNewV7At                    	 2154211	       553.6 ns/op
+BenchmarkNewV7At                    	 2146057	       559.3 ns/op
+BenchmarkV7IndividualX1000          	    2132	    558625 ns/op
+BenchmarkV7IndividualX1000          	    2158	    557559 ns/op
+BenchmarkV7IndividualX1000          	    2144	    556078 ns/op
+BenchmarkNewV7BatchAt1000           	   89162	     13021 ns/op
+BenchmarkNewV7BatchAt1000           	   92654	     12946 ns/op
+BenchmarkNewV7BatchAt1000           	   93148	     12908 ns/op
+BenchmarkGoogleUuidNewRandom        	 2468182	       490.6 ns/op
+BenchmarkGoogleUuidNewRandom        	 2451810	       489.9 ns/op
+BenchmarkGoogleUuidNewRandom        	 2425270	       490.8 ns/op
+BenchmarkGoogleUuidNewV7            	 1987808	       605.0 ns/op
+BenchmarkGoogleUuidNewV7            	 1954663	       607.5 ns/op
+BenchmarkGoogleUuidNewV7            	 2007855	       597.4 ns/op
+BenchmarkV7TimestampExtraction      	31629340	        37.33 ns/op
+BenchmarkV7TimestampExtraction      	33992762	        35.20 ns/op
+BenchmarkV7TimestampExtraction      	34018418	        35.22 ns/op
+BenchmarkGoogleUuidV7TimeExtraction 	233626693	         5.132 ns/op
+BenchmarkGoogleUuidV7TimeExtraction 	301955706	         4.040 ns/op
+BenchmarkGoogleUuidV7TimeExtraction 	301206174	         3.967 ns/op
+BenchmarkFillV7At1000               	  107630	     11163 ns/op
+BenchmarkFillV7At1000               	  107552	     11190 ns/op
+BenchmarkFillV7At1000               	  107828	     11146 ns/op
+BenchmarkFillV7BytesAt1000          	  107864	     11141 ns/op
+BenchmarkFillV7BytesAt1000          	  108267	     11514 ns/op
+BenchmarkFillV7BytesAt1000          	  104017	     11562 ns/op
+BenchmarkParallelNewV4              	 2119959	       580.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4              	 2199660	       540.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4              	 2199880	       538.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7              	 2122152	       558.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7              	 2142882	       554.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7              	 2148634	       559.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed              	 3306966	       365.6 ns/op	         0 gcs	    630784 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed              	 3268939	       366.1 ns/op	         0 gcs	    630784 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed              	 3294648	       366.7 ns/op	         0 gcs	    630784 heap-inuse-B	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/SkunkWerkx/HyperUuid/go	54.927s

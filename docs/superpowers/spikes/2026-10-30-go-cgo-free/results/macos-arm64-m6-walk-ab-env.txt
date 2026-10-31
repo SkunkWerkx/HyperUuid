@@ -2,4 +2,7 @@ go version go1.27.3 darwin/arm64
 rustc 1.99.1 (58cf8f9c3 2026-10-13)
 Darwin Mac.lan 27.2.0 Darwin Kernel Version 27.2.0: Wed Oct 14 23:45:26 PDT 2026; root:xnu-13432.41.4~25/RELEASE_ARM64_T8152 arm64
 base: bb390d5 (bb390d5)
-tree: b04d6e2
+tree: e510ae7 + uncommitted rust/
+wasmtime 50.0.0 (ebe5e8df1 2026-10-20)
+node v24.22.1
+browser: GOOS=js GOARCH=wasm under node v24.22.1

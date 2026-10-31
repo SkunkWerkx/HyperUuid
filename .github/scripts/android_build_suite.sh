@@ -6,20 +6,23 @@
 #   android_build_suite.sh go    <x86_64|aarch64> <stage-dir> [go build tags]
 #   android_build_suite.sh swift <x86_64|aarch64> <stage-dir>
 #
-# Needs ANDROID_NDK_HOME. Go links go/staticlib/android_{amd64,arm64} (or, with the
-# hyperuuid_local tag, what local-core.sh built), through the NDK's clang as cgo's CC, into
-# one static test binary. Swift needs a toolchain of 6.3 or later on PATH, the first with a
+# Needs ANDROID_NDK_HOME. Go links nothing of the core's: it is the Go translation in
+# go/internal/core. The test binary is still linked through the NDK's clang, because Go
+# itself requires external linking on android/amd64 (`go build` refuses CGO_ENABLED=0
+# there: "requires external (cgo) linking"), and the emulator CI runs is x86_64; android/arm64
+# links internally and a consumer's `go build` for it needs no NDK, but one path serves both
+# here. Swift needs a toolchain of 6.3 or later on PATH, the first with a
 # Swift SDK for Android; the SDK matching that toolchain's version is installed from
 # swift.org if it is not already, checked against the checksum swift.org publishes for it,
 # and pointed at the NDK. Its runtime is shared libraries, so they are staged beside the
 # test bundle along with the NDK's libc++_shared.so. Swift's Android floor is API 28, Go's
-# and the archives' 21.
+# 21.
 #
 # ci.yml's test-android job runs both, and so does a local emulator run:
 #
-#   ANDROID=1 .github/scripts/local-core.sh
-#   .github/scripts/android_build_suite.sh go x86_64 /tmp/go hyperuuid_local
+#   .github/scripts/android_build_suite.sh go x86_64 /tmp/go
 #   .github/scripts/android_device_test.sh /tmp/go ./hyperuuid.test -test.v -test.short
+#   ANDROID=1 .github/scripts/local-core.sh
 #   .github/scripts/android_build_suite.sh swift x86_64 /tmp/swift
 #   .github/scripts/android_device_test.sh /tmp/swift ./HyperUuidPackageTests.xctest
 set -euo pipefail
