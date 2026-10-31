@@ -219,8 +219,10 @@ jobs:
   # backend, clippy also runs the Android configuration, whose entropy path (entropy.rs:
   # ChaCha20 for batches, no pool) nothing else compiles, and `extra_features: uuid1` with the
   # `no_panic_command` override put the `uuid` interop feature through clippy, the MSRV check
-  # and the no-panic link, and `big_endian` runs the core's suite, corpus included, on s390x
-  # under QEMU, and `lint_java_jni` runs the JNI crate's std tests and its no_std build.
+  # and the no-panic link, which links a second time with `--cfg hyperuuid_words_walk` for the
+  # WebAssembly batch walk (rust/src/v7.rs, `fill_batch`), and `big_endian` runs the core's
+  # suite, corpus included, on s390x under QEMU, and `lint_java_jni` runs the JNI crate's std
+  # tests and its no_std build.
   # None of it waits on build-native.
   check-core:
     uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master
@@ -229,7 +231,7 @@ jobs:
     with:
       no_std_rustflags: --cfg getrandom_backend="custom"
       extra_features: uuid1
-      no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1
+      no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1 && RUSTFLAGS="--cfg hyperuuid_words_walk" cargo build --release --example no_panic --features no-panic,uuid1
       big_endian: s390x-unknown-linux-gnu
       clippy_targets: aarch64-linux-android
       lint_node: true

@@ -12,8 +12,8 @@ import (
 	"spike/w2g20/core"
 )
 
-// SPIKE: random_get served from a ChaCha8 stream keyed from crypto/rand, rekeyed after 1 MiB
-// or one second (the core's own pool rule). Calls are already serialized by Core.mu.
+// SPIKE: random_get served from a ChaCha20 stream (x/crypto) keyed from crypto/rand, rekeyed
+// after 1 MiB or one second (the core's own pool rule). Calls are already serialized by Core.mu.
 type wasi struct {
 	m       *core.Module
 	g       *chacha20.Cipher

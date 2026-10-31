@@ -118,6 +118,11 @@ harness = false
 name = "no_panic"
 required-features = ["no-panic"]
 
+# `hyperuuid_words_walk` builds the WebAssembly batch walk on the host, so the no-panic proof
+# (examples/no_panic.rs) can link it: v7.rs, `fill_batch`, has why.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(hyperuuid_words_walk)"] }
+
 # Size, not speed. Measured on win-x64 (Ruby 3.4, already carrying `-C strip=symbols`): the
 # Magnus extension goes 1,102,336 -> 1,040,384 bytes, -5.6%, with .text 842,336 -> 792,704
 # and all 14 exports intact. Every leg's artifact shrinks, not just that one, so it reaches

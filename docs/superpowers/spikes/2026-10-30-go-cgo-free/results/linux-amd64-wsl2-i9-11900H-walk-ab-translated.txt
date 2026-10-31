@@ -1,0 +1,100 @@
+walk: base
+goos: linux
+goarch: amd64
+pkg: spike/w2gaes
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  152264	      7874 ns/op
+BenchmarkW2gV7Batch1000-12    	  159738	      7366 ns/op
+BenchmarkW2gV7Batch1000-12    	  167432	      7679 ns/op
+BenchmarkW2gV7Batch1000-12    	  162464	      7924 ns/op
+BenchmarkW2gV7Batch1000-12    	  152306	      7624 ns/op
+BenchmarkW2gV7Batch1000-12    	  164420	      7512 ns/op
+PASS
+ok  	spike/w2gaes	7.361s
+goos: linux
+goarch: amd64
+pkg: spike/w2gfloor
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  183073	      6657 ns/op
+BenchmarkW2gV7Batch1000-12    	  177656	      6699 ns/op
+BenchmarkW2gV7Batch1000-12    	  180126	      6660 ns/op
+BenchmarkW2gV7Batch1000-12    	  182506	      7345 ns/op
+BenchmarkW2gV7Batch1000-12    	  189614	      6757 ns/op
+BenchmarkW2gV7Batch1000-12    	  191745	      6671 ns/op
+PASS
+ok  	spike/w2gfloor	7.526s
+walk: tree
+goos: linux
+goarch: amd64
+pkg: spike/w2gaes
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  226184	      5494 ns/op
+BenchmarkW2gV7Batch1000-12    	  245842	      5274 ns/op
+BenchmarkW2gV7Batch1000-12    	  243732	      5406 ns/op
+BenchmarkW2gV7Batch1000-12    	  246025	      5414 ns/op
+BenchmarkW2gV7Batch1000-12    	  247650	      5257 ns/op
+BenchmarkW2gV7Batch1000-12    	  235742	      5403 ns/op
+PASS
+ok  	spike/w2gaes	7.782s
+goos: linux
+goarch: amd64
+pkg: spike/w2gfloor
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  288913	      4344 ns/op
+BenchmarkW2gV7Batch1000-12    	  290576	      5125 ns/op
+BenchmarkW2gV7Batch1000-12    	  273576	      4758 ns/op
+BenchmarkW2gV7Batch1000-12    	  267706	      4553 ns/op
+BenchmarkW2gV7Batch1000-12    	  251883	      4578 ns/op
+BenchmarkW2gV7Batch1000-12    	  273591	      4586 ns/op
+PASS
+ok  	spike/w2gfloor	7.690s
+walk: base
+goos: linux
+goarch: amd64
+pkg: spike/w2gaes
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  159244	      7699 ns/op
+BenchmarkW2gV7Batch1000-12    	  174991	      7420 ns/op
+BenchmarkW2gV7Batch1000-12    	  162626	      7709 ns/op
+BenchmarkW2gV7Batch1000-12    	  172794	      7463 ns/op
+BenchmarkW2gV7Batch1000-12    	  145471	      7727 ns/op
+BenchmarkW2gV7Batch1000-12    	  164464	      7491 ns/op
+PASS
+ok  	spike/w2gaes	7.441s
+goos: linux
+goarch: amd64
+pkg: spike/w2gfloor
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  187296	      6853 ns/op
+BenchmarkW2gV7Batch1000-12    	  179335	      6765 ns/op
+BenchmarkW2gV7Batch1000-12    	  183364	      6597 ns/op
+BenchmarkW2gV7Batch1000-12    	  194403	      6754 ns/op
+BenchmarkW2gV7Batch1000-12    	  174198	      6924 ns/op
+BenchmarkW2gV7Batch1000-12    	  195724	      6621 ns/op
+PASS
+ok  	spike/w2gfloor	7.537s
+walk: tree
+goos: linux
+goarch: amd64
+pkg: spike/w2gaes
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  230574	      5435 ns/op
+BenchmarkW2gV7Batch1000-12    	  221151	      5445 ns/op
+BenchmarkW2gV7Batch1000-12    	  242589	      5351 ns/op
+BenchmarkW2gV7Batch1000-12    	  243813	      5369 ns/op
+BenchmarkW2gV7Batch1000-12    	  237502	      5254 ns/op
+BenchmarkW2gV7Batch1000-12    	  245628	      5311 ns/op
+PASS
+ok  	spike/w2gaes	7.634s
+goos: linux
+goarch: amd64
+pkg: spike/w2gfloor
+cpu: 11th Gen Intel(R) Core(TM) i9-11900H @ 2.50GHz
+BenchmarkW2gV7Batch1000-12    	  270218	      4415 ns/op
+BenchmarkW2gV7Batch1000-12    	  290920	      4293 ns/op
+BenchmarkW2gV7Batch1000-12    	  303354	      4290 ns/op
+BenchmarkW2gV7Batch1000-12    	  290016	      4516 ns/op
+BenchmarkW2gV7Batch1000-12    	  287324	      4400 ns/op
+BenchmarkW2gV7Batch1000-12    	  297477	      4492 ns/op
+PASS
+ok  	spike/w2gfloor	7.670s

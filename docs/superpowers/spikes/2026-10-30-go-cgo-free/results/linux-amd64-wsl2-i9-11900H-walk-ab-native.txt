@@ -1,0 +1,4 @@
+base round 1 batch_1000/v7_batch     time:   [5.1814 µs 5.2332 µs 5.2869 µs]
+tree round 1 batch_1000/v7_batch     time:   [5.0474 µs 5.0736 µs 5.0966 µs]
+base round 2 batch_1000/v7_batch     time:   [5.1294 µs 5.1664 µs 5.1982 µs]
+tree round 2 batch_1000/v7_batch     time:   [5.1106 µs 5.1418 µs 5.1747 µs]
