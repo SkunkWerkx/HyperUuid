@@ -57,11 +57,17 @@ cp -r "$repo/corpus" "$stage/corpus"
 # Each test executable is linked with 16 KB pages, as NDK r28 and later do by default and an
 # older NDK on the machine would not: the emulator CI runs it on uses 16 KB pages, where a
 # 4 KB-aligned executable does not load, and that would fail the run for a reason that is
-# not the core's.
+# not the core's. The Go binary also takes --apply-dynamic-relocs: after external linking Go
+# reads the FIPS section addresses back out of the executable (go:fipsinfo) to hash them, GNU
+# ld writes dynamic-relocation addends into the data, and lld does not unless asked, so Go
+# hashes four empty ranges and GODEBUG=fips140=on panics at start with "fips140: verification
+# mismatch" before any test runs (seen in the emulator; reproduced on linux/amd64 with
+# -fuse-ld=lld, Go 1.26). android/arm64 links internally and is not affected.
 case "$binding" in
   go)
     CC="$prebuilt/bin/$arch-linux-android21-clang" GOOS=android GOARCH="$goarch" CGO_ENABLED=1 \
-      go -C "$repo/go" test -c ${tags:+-tags "$tags"} -ldflags=-extldflags=-Wl,-z,max-page-size=16384 \
+      go -C "$repo/go" test -c ${tags:+-tags "$tags"} \
+      -ldflags=-extldflags=-Wl,-z,max-page-size=16384,--apply-dynamic-relocs \
       -o "$stage/hyperuuid.test" .
     ;;
   swift)

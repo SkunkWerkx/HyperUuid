@@ -468,7 +468,15 @@ nothing of the core's is linked either way, and page alignment is the linker's b
 `android/amd64` and runs it in an x86_64 emulator whose image uses 16 KB pages
 (`.github/scripts/android_build_suite.sh` and `android_device_test.sh`, which run the same
 way against a local emulator), with `-short` so the one 1 GiB batch test is left to the other
-platforms; `android/arm64` is built in the cross-compile sweep.
+platforms; `android/arm64` is built in the cross-compile sweep. One more flag there is the
+linker's: an `android/amd64` binary run with `GODEBUG=fips140=on` panics at start with
+`fips140: verification mismatch` unless it was linked with
+`-ldflags=-extldflags=-Wl,--apply-dynamic-relocs`. Go's linker reads the FIPS section addresses
+back out of the linked file; GNU ld writes dynamic-relocation addends into the data, and the
+NDK's lld does not unless asked, so Go hashes four empty ranges and the check fails against the
+real ones at start (reproduced on `linux/amd64` with `-fuse-ld=lld`, Go 1.26). The CI build
+passes the flag, and so must any Go program lld links that is to run in FIPS mode; the module
+itself is not involved.
 
 ### WebAssembly
 

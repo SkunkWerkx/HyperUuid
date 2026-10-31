@@ -352,6 +352,11 @@ class CiTests(unittest.TestCase):
         self.assertIn('.github/scripts/android_build_suite.sh go "$arch" "stage/go-$arch"', android)
         self.assertNotIn('CC=', android)
         self.assertNotIn('static-libs artifact lands them in go', android)
+        # The NDK's lld leaves dynamic-relocation addends out of the data unless asked, and Go's
+        # linker reads the FIPS section addresses back from the file after external linking:
+        # without the flag, GODEBUG=fips140=on panics at start with "verification mismatch".
+        script = (ROOT / '.github/scripts/android_build_suite.sh').read_text()
+        self.assertIn('-ldflags=-extldflags=-Wl,-z,max-page-size=16384,--apply-dynamic-relocs', script)
 
     def test_java_jni_legs_are_on(self):
         # The Forge's java_jni input defaults false; the jar's floor is JDK 21 beside the primary 25.

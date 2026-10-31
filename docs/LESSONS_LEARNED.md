@@ -13,9 +13,27 @@ i9-11900H, running Fedora 44 under WSL2 (linux-x64) and Windows 11 natively. The
 M6 (Mac18,5) under macOS 27. Numbers from the two are never compared with each other. An
 earlier arm64 WSL2 box produced the first tables, and it is the subject of the first lesson.
 
-## The three lessons that kept repeating
+## The four lessons that kept repeating
 
-**1. The bill was the entropy source, not the crossing.** Every binding was first explained in
+**1. Make the Rust ABI `no_std`, panic-free and allocation-free before anything else.** The
+one decision that never had to be revisited. The crate was `#![no_std]` with no `alloc` from
+0.1.1 (2026-08-31; the last allocation went when the batch functions started drawing entropy
+through the caller's own buffer), every generation, parsing and conversion function and every C
+export carried `#[no_panic]` from 0.5.0, proven at link time by a release binary CI builds
+(`examples/no_panic.rs`), and the shared library every binding loads has been `no_std` since
+the same release, 19,048 bytes with LTO instead of 426,856 with std's unwinder and backtraces
+in it. Everything in this document stands on those three properties. Every buffer is the
+binding's, which is what lets R, Go and C# hand the core vectors they allocated and sized, and
+what CRAN is told in `r/cran-comments.md`. A panic cannot reach a C caller, so no binding
+carries an unwinder for the core's sake, and the one that did swap unwinders (Magnus, 0.2.0)
+was tested on hardware rather than argued. And a core with no runtime underneath it is a core
+that builds for `wasm32-wasip1` and translates to Go source, links into a Blazor archive built
+with `-Zbuild-std`, runs under TinyGo, and compiles as a bare-metal rlib, none of which was
+planned in August. The rule for the next engine: these three come first, compiler-enforced
+and link-proven, before the first binding is written, because every binding after that
+inherits them for free and none can add them later.
+
+**2. The bill was the entropy source, not the crossing.** Every binding was first explained in
 terms of its FFI door: `ctypes` costs a microsecond, `runtime.cgocall` costs 40 ns, Fiddle is
 "structural". Every one of those explanations was either wrong or beside the point. The cost
 that decided single-call speed on every platform was where the random bytes came from and how
@@ -27,7 +45,7 @@ entropy doors, a 19x range. The Go CHANGELOG entry for 0.3.0 said it in Septembe
 not the crossing, is what those doors cost". We wrote it down and then re-learned it in
 October, twice.
 
-**2. One machine's ratio is one machine's ratio.** The first published tables came from an arm64
+**3. One machine's ratio is one machine's ratio.** The first published tables came from an arm64
 WSL2 box whose wall-clock read cost about a microsecond and whose JDK random source ran six
 times slower than the XPS's. Both sat on the far side of the comparisons that produced the
 largest numbers. The 0.4.0 re-measure on x86-64 shrank the Rust-vs-`uuid`-crate headline from
@@ -35,7 +53,7 @@ largest numbers. The 0.4.0 re-measure on x86-64 shrank the Rust-vs-`uuid`-crate 
 6–7.5x (CHANGELOG 0.4.0). Since then every table names its machine and date, tables from
 different machines are never merged, and a table that predates a core change says so.
 
-**3. Pick the door for reach, then measure it; never assert it.** The two bindings whose
+**4. Pick the door for reach, then measure it; never assert it.** The two bindings whose
 mechanism was chosen without a benchmark (TypeScript's napi-rs addon, "decided from the start
 rather than by measurement", and PHP's extension, taken "for reach, not for the crossing")
 are also the two with the least settled numbers. The bindings whose door was chosen by a
@@ -59,7 +77,7 @@ the first tables were representative.
 LTO never applied while the manifest listed `["cdylib", "rlib"]`. Fixing that and building
 `no_std` took the linux-x64 library from 426,856 bytes to 19,048 (346,544 with LTO alone), at
 the same speed (CHANGELOG 0.5.0); stripped, 16,168 bytes (0.6.0). The 0.4.0 re-measure is
-lesson 2 above.
+lesson 3 above.
 
 **The entropy work, with its receipts** (`rust/src/entropy.rs` header):
 
@@ -212,6 +230,18 @@ that pinning `fiddle` in `Gemfile.lock` would stop a build (it does not); 0.8.0 
 segfault under compacting GC. A wasmtime backend came and went (0.3.0 to 0.6.0); the ruby.wasm
 gem stayed. Nine gems a release.
 
+**The ABI discussion Python had, and Ruby still owes.** Python's grid was argued out in the
+open: the `cp314t` wheel went because it was bound to one interpreter version, `abi3` and
+`abi3t` carry across minors, and the sdist is proven at the floor. Ruby got the mechanics
+without the argument. MRI has no stable extension ABI, so a Magnus build binds to one Ruby
+minor, every platform gem is fat across the minors in `ruby/Rakefile`, and Fiddle takes
+everything else. What is not written down anywhere is the rule: which minors the fat gem
+carries and why those, what adding a minor costs (one more shared object in every platform
+gem and one more CI leg), when a minor leaves (its end of life is in `CLAUDE.md`; the decision
+to track that date and nothing else is not), and whether a Fiddle-only interpreter is a
+supported one or a fallback with a printed loss. Each of those was decided when it came up.
+The same discussion, with the same receipts, is owed here.
+
 ## PHP
 
 **Believed.** That the benchmark harness measured the binding. Also that the FFI package was
@@ -243,6 +273,16 @@ Windows build on stable with `RUSTC_BOOTSTRAP=1` for `abi_vectorcall` because dr
 would have been a regression, no source fallback, no win-arm64 (PHP ships none), no ZTS. The
 first PIE install from Packagist is proven only at the rehearsal or 1.1.0, and a red
 acceptance after publish means a patch release.
+
+**The same ABI discussion, owed twice over.** PHP's extension ABI changes with every minor, so
+each minor is its own build and seven more zips, and the choice of 8.3, 8.4 and 8.5 is a list
+in the Forge with an end-of-life date beside it, not an argued rule. Unanswered in writing:
+when a new minor joins (at its release, or its first release candidate, so that PIE users can
+test ahead), whether ZTS is ever built (today a threaded SAPI gets nothing), what a user on an
+unlisted minor gets (nothing: there is no source fallback and no FFI package), and what a
+Windows user gets if `abi_vectorcall` never stabilizes. Python wrote its answers into the
+CHANGELOG and the README as it made them; Ruby and PHP should get the same treatment before
+the next minor of either forces the decisions ad hoc again.
 
 ## Swift
 
@@ -282,7 +322,7 @@ Nothing in the binding changed between the two rows. The core's entropy door did
 1000 costs 44.2 / 27.3 µs as strings and 3.62 / 2.93 µs as bytes, and `v7UnixMillis`, a call
 that touches no randomness, 115 / 156 ns.
 
-**Should have known.** Lesson 1 again, and it was already in the CHANGELOG. The TypeScript
+**Should have known.** Lesson 2 again, and it was already in the CHANGELOG. The TypeScript
 README's explanation ("the rest is the random source") does not close arithmetically against
 the core's own probe numbers, and now says "most of the rest".
 
@@ -351,7 +391,7 @@ ns in WSL2 and 26 on Windows, from the `version` rows), and the 1.0.0 README's "
 was roughly the whole cgo `version` call there, not the crossing. The author of this document
 repeated the 40 ns explanation in the new Go README this week, on the M6, where it is wrong
 by a factor of four, and found it only by reading the spike's own result files back. That is
-lesson 1 for the third time.
+lesson 2 for the third time.
 
 **Where it shipped** (M6, Go 1.27.3, `-count 6` medians, 2026-10-31; the raw output is
 committed as `results/macos-arm64-m6-shipped-host.txt`):
@@ -390,6 +430,18 @@ separate repo behind a vanity import path, was superseded on 2026-10-30 by not h
 package on every GOOS and GOARCH Go has. The cost accepted for that: the batch, Linux
 contention, and a primary instance that holds 1 GiB for the life of the process after a
 `MaxV7Batch`.
+
+**What a control found.** The FIPS selection test (a child process under `GODEBUG=fips140=on`
+must report the OS source) was written to prove the stream is never chosen there. On its first
+run in the Android emulator it failed before our code ran: `fips140: verification mismatch`
+from Go's own integrity check. The cause is in the linker, not the module: for external linking
+Go reads the FIPS section addresses back out of the linked executable, GNU ld writes
+dynamic-relocation addends into the data, and the NDK's lld does not unless given
+`--apply-dynamic-relocs`, so Go hashed four empty ranges. Reproduced on `linux/amd64` in Docker
+with `-fuse-ld=lld` (Go 1.26), fixed with that flag, control kept. A test that exists only to
+pin a negative found a toolchain bug on the one platform that both links externally and
+links with lld; the lesson is the one about running every control on every platform, not
+just the platform it was written on.
 
 ## C and C++
 
@@ -448,9 +500,12 @@ beside the spike's; the others have the harness and the command.
 - Go: the x64 columns and the parallel v4 there, awaiting the XPS; the Alpine run, iOS,
   Android and the cross-compile sweep are proven by CI, not locally.
 - TypeScript: its own glibc floor, stated and enforced.
+- Ruby and PHP: the ABI decision written down as Python's is (which interpreter minors the
+  native extension carries and why, what a new one costs, when one leaves, and what everyone
+  else gets).
 - R: why a single v7 costs three times a single v4.
 - The core's entropy note gives a whole `new_v7` at 60 ns and its 11-byte draw at 67.5 ns in a
   separate C probe; one of the two measurements is the wrong shape for the comparison.
-- The obvious next experiment, given lesson 1: a buffered stream on Apple platforms inside the
+- The obvious next experiment, given lesson 2: a buffered stream on Apple platforms inside the
   core itself, which is what Go did outside it, and which would move the TypeScript and R Apple
   rows. Not started, and not promised here.
