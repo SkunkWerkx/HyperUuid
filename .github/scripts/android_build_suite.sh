@@ -84,11 +84,10 @@ sdk = next((p for p in release.get("platforms", []) if p.get("platform") == "and
 print(release.get("tag", "-"), sdk["checksum"] if sdk else "-")' "$version")
     [ "$checksum" != - ] || { echo "error: swift.org lists no Android SDK for Swift $version" >&2; exit 1; }
     sdk="${tag}_android"
-    if ! swift sdk list | grep -qx "$sdk"; then
-      swift sdk install \
-        "https://download.swift.org/${tag,,}/android-sdk/$tag/$sdk.artifactbundle.tar.gz" \
-        --checksum "$checksum"
-    fi
+    # Judged by the bundle on disk, not the install's exit status: swift_sdk_install.sh has why.
+    "$(dirname "${BASH_SOURCE[0]}")/swift_sdk_install.sh" "$sdk" \
+      "https://download.swift.org/${tag,,}/android-sdk/$tag/$sdk.artifactbundle.tar.gz" \
+      "$checksum" "$arch-unknown-linux-android28"
     bundle="$(swift sdk configure --show-configuration "$sdk" "$arch-unknown-linux-android28" \
       | sed -n 's|^sdkRootPath: \(.*\)/swift-android/ndk-sysroot$|\1|p')"
     [ -d "$bundle/swift-android" ] || { echo "error: cannot locate the $sdk bundle" >&2; exit 1; }
