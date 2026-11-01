@@ -1249,7 +1249,7 @@ jobs:
             pr) skip=(--skip osx-x64) ;;
             *) echo "::error::mode must be release or pr, not $MODE"; exit 1 ;;
           esac
-          python3 ".hyperforge/.github/scripts/npm_package.py" pack --package typescript --artifacts artifacts/node --out npm-packages "${skip[@]}"
+          python3 ".hyperforge/.github/scripts/npm_package.py" pack --package typescript --artifacts artifacts/node --out npm-packages ${skip[@]+"${skip[@]}"}
           ls -l npm-packages
 
       - name: The consumer-test harness

@@ -370,7 +370,10 @@ class CiTests(unittest.TestCase):
         self.assertIn("MODE: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}", pack)
         self.assertIn('release) skip=() ;;', pack)
         self.assertIn('pr) skip=(--skip osx-x64) ;;', pack)
-        self.assertIn('"${skip[@]}"', pack)
+        # macOS's /bin/bash is 3.2, where `set -u` rejects an empty array expanded as
+        # "${skip[@]}": release mode (the empty case) died on xcode-27 in the 1.1.0 preparation.
+        self.assertIn('${skip[@]+"${skip[@]}"}', pack)
+        self.assertNotIn(' "${skip[@]}"', pack)
         self.assertNotIn('SKIP_NATIVES', job, 'the harness no longer takes a list of absent natives')
         bun = next(step for step in re.split(r'\n      - ', job)[1:] if 'test:bun' in step)
         self.assertIn('continue-on-error: true', bun, "Bun's forced-WASI result is recorded, never a failure")
