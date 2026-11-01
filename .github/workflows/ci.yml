@@ -1218,6 +1218,11 @@ jobs:
           NAPI_RS_FORCE_WASI=error npm test
           npm run typecheck
 
+      # Bun's runner prints each failure as a `::error` workflow command when it sees GitHub
+      # Actions, and Bun 1.4.4 cannot load the WASI module, so this tolerated step posted ten
+      # error annotations per leg on the 1.1.0 preparation. Workflow commands are off for its
+      # output and resumed before the exit status is returned, so the next step still records
+      # the result and the Actions tab counts no errors from a step that cannot fail the job.
       - name: The same on Bun, recorded
         id: bun
         shell: bash
@@ -1225,7 +1230,12 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          NAPI_RS_FORCE_WASI=error npm run test:bun
+          token="$(node -e 'console.log(require("node:crypto").randomBytes(16).toString("hex"))')"
+          echo "::stop-commands::$token"
+          status=0
+          NAPI_RS_FORCE_WASI=error npm run test:bun || status=$?
+          echo "::$token::"
+          exit "$status"
 
       - name: Record Bun's result
         shell: bash

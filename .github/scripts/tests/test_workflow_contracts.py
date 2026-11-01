@@ -377,6 +377,13 @@ class CiTests(unittest.TestCase):
         self.assertNotIn('SKIP_NATIVES', job, 'the harness no longer takes a list of absent natives')
         bun = next(step for step in re.split(r'\n      - ', job)[1:] if 'test:bun' in step)
         self.assertIn('continue-on-error: true', bun, "Bun's forced-WASI result is recorded, never a failure")
+        # Bun's runner prints each failure as a `::error` workflow command on GitHub Actions, and
+        # Bun 1.4.4 cannot load the WASI module: without this the tolerated step posted ten error
+        # annotations per leg on the 1.1.0 preparation. Commands are off for its output, resumed
+        # before the exit status is returned, so the step after still records the result.
+        self.assertIn('echo "::stop-commands::$token"', bun)
+        self.assertIn('NAPI_RS_FORCE_WASI=error npm run test:bun || status=$?', bun)
+        self.assertIn('echo "::$token::"\n          exit "$status"', bun)
         self.assertEqual(job.count('continue-on-error: true'), 1, 'nothing but Bun is tolerated')
         for step in re.split(r'\n      - ', job)[1:]:
             if 'run:' in step:
