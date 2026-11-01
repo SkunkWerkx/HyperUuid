@@ -13,21 +13,27 @@ name: CI — build native, build wasm, test every binding
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
 # Magnus extension) get uploaded here for later reuse, as do the 17 PyPI wheels, which
-# are built, installed and called into on every run (build-wheels below). The .nupkg and
-# the gems are still packed in release.yml, at tag time, from this run's libraries.
+# are built, installed and called into on every run (build-wheels below). On a release's run
+# the tail below packs every registry input from those libraries too: the release train.
 #
 # None of it is version-agnostic: each native library reports the crate version it was
 # built at (`hyperuuid_version()`), and a wheel carries it in its file name. So the run a
-# release reuses has to be one that ran against the version-bump commit, which is why
-# prepare-release.yml dispatches this workflow after it pushes the bump — see release.yml's
-# find-ci-run for the gate.
+# release publishes from has to be one that ran against the version-bump commit, which is
+# why prepare-release.yml dispatches this workflow after it pushes the bump — see
+# release.yml's tag-guard for the gate.
+#
+# The release tail, after the board and only on prepare-release.yml's dispatch at master:
+# `forge` resolves the one Forge commit this run uses, the eight pack jobs pack from this
+# run's artifacts, `release-prepare` builds, attests and preserves the inventory (A, this
+# run, the Forge), `codeql` dispatches codeql.yml on this commit and requires a clean
+# dashboard, and `stage-release` commits B, the release commit, on master. The tag push at B
+# then runs release.yml, which verifies and signs what this run preserved and publishes it.
 #
 # No push trigger, deliberately (not because master is branch-protected — checked via
 # `gh api repos/.../branches/master/protection`, it isn't, despite this having been assumed
-# here before): a stray run rebuilding/retesting on every trivial direct push (stage-native-
-# binaries.yml's own binary-refresh commits included) would just be wasted compute for a
-# result nobody's waiting on. The version bump is the one push that does need a run, and
-# prepare-release.yml asks for it explicitly.
+# here before): a stray run rebuilding/retesting on every trivial direct push (stage-release's
+# own B included) would just be wasted compute for a result nobody's waiting on. The version
+# bump is the one push that does need a run, and prepare-release.yml asks for it explicitly.
 
 on:
   pull_request:
@@ -38,9 +44,9 @@ on:
     - cron: "0 6 * * 1"
 
 # Least privilege for the whole board: every job below reads the repository and nothing more.
-# The HyperForge jobs that attest need id-token and attestations on top of that (SLSA
-# provenance for what they build), and request-staging needs actions to start stage-native-binaries.yml;
-# each declares those itself — a job-level `permissions:` replaces this block rather than
+# The HyperForge jobs that attest, the pack jobs and release-prepare need id-token and
+# attestations on top of that (SLSA provenance for what they build), codeql needs actions to
+# start codeql.yml, and stage-release needs contents to push B; each declares those itself — a job-level `permissions:` replaces this block rather than
 # adding to it, so the writes never reach another job. This is also what
 # quietens CodeQL's actions/missing-workflow-permissions, which otherwise fires once per job.
 permissions:
@@ -1271,14 +1277,18 @@ jobs:
           negative-unpublished plain omit-optional absent-native forced-wasi
           negative-deleted-package negative-deleted-wasm bundlers
 
-  # A release's run is dispatched by prepare-release.yml with a GITHUB_TOKEN, and GitHub raises
-  # no workflow_run for a run that token started, so stage-native-binaries.yml would never hear
-  # that it finished. workflow_dispatch is one of the two events the token may raise: once every
-  # job above is green, this asks staging for this exact run. Staging waits for the run to
-  # complete and holds it to the same checks as ever; a run a human dispatched also raises
-  # workflow_run, and whichever staging request comes second finds A staged and skips. Pull
-  # requests and the weekly schedule never stage, and only this job may start a workflow.
-  request-staging:
+  # The release tail. A release's run is dispatched by prepare-release.yml at master once the
+  # bump is pushed as A; pull requests and the weekly schedule never reach it. Everything below
+  # needs every board job above, through `forge`, so nothing is packed from a red board.
+  #
+  # The Forge is called at master. GitHub resolves that to one commit when the run is queued
+  # and records it in the run's referenced_workflows; every .hyperforge checkout below and the
+  # inventory's forge_sha use that commit, so the actions and scripts match the reusable
+  # workflows. The tag run later requires this commit to be an ancestor of its own Forge.
+  # The output is `revision`, not `sha`: CodeQL reads a checkout ref whose step, job or output
+  # name contains head, sha, commit, branch or ref as a pull request head, and in a read-only
+  # job it reports the checkout as a cache-poisoning step (actions/cache-poisoning/poisonable-step).
+  forge:
     needs: [changes, core, build-static, build-android, core-checks, lint-csharp, lint-java,
             lint-python, lint-ruby, lint-php, lint-swift, lint-typescript, lint-r, lint-go,
             lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
@@ -1287,14 +1297,285 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-26.04
     permissions:
-      actions: write
+      contents: read
+    outputs:
+      revision: ${{ steps.forge.outputs.revision }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Ask stage-native-binaries.yml to stage this run
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the Forge commit this run uses
+        id: forge
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh workflow run stage-native-binaries.yml --repo "$GITHUB_REPOSITORY" --ref master
-          -f head_sha="$GITHUB_SHA" -f ci_run_id="$GITHUB_RUN_ID"
+        run: |
+          set -euo pipefail
+          shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --jq '[.referenced_workflows[] | select(.path | startswith("SkunkWerkx/.github/")) | .sha] | unique | .[]')
+          [[ "$shas" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected one Forge commit in this run, got: ${shas:-none}"; exit 1; }
+          echo "revision=$shas" >> "$GITHUB_OUTPUT"
+
+      - name: Read the version this run was built at
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::rust/Cargo.toml has no stable X.Y.Z version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # The eight pack jobs, each packing this run's attested artifacts at this commit and
+  # attesting what it packs. The three reusable workflows carry the Forge's identity; the
+  # composites keep this repository's, which RubyGems.org, npmjs.com and the inventory's
+  # signer_repo for the gems, the npm tarballs, the CRAN tarball and the C archives require.
+  nuget-org-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    with:
+      crate: hyperuuid
+      csproj_path: csharp/HyperUuid/HyperUuid.csproj
+      runtimes_dir: csharp/HyperUuid/runtimes
+      android: true
+      source_run_id: ${{ github.run_id }}
+
+  crate-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@master
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  maven-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@master
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    with:
+      crate: hyperuuid
+      java_resources_dir: java/src/main/resources/native
+      java_jni: true
+      source_run_id: ${{ github.run_id }}
+    secrets:
+      MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+      MAVEN_SIGNING_KEY_PASSWORD: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
+
+  ruby-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-gems
+        with:
+          run_id: ${{ github.run_id }}
+          source_sha: ${{ github.sha }}
+          token: ${{ github.token }}
+
+  npm-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-npm
+        with:
+          run_id: ${{ github.run_id }}
+          source_sha: ${{ github.sha }}
+          token: ${{ github.token }}
+
+  # The CRAN source tarball: preserved and inventoried with everything else, uploaded by no job.
+  r-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-r
+        with:
+          source_sha: ${{ github.sha }}
+
+  # The C archives, one per platform, for the GitHub Release: this run's attested libraries
+  # with the header and c/'s package files.
+  c-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/pack-c
+        with:
+          run_id: ${{ github.run_id }}
+          source_sha: ${{ github.sha }}
+          token: ${{ github.token }}
+
+  pypi-pack:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/verify-wheels
+        with:
+          run_id: ${{ github.run_id }}
+          source_sha: ${{ github.sha }}
+          token: ${{ github.token }}
+
+  # One inventory of every registry input, every GitHub Release file and every shipped native,
+  # each verified against its build provenance at this commit: inventory.json names A, this
+  # run and the Forge above, and is attested here; release-packages is preserved for 90 days
+  # in this run. The release attestation over every file is the tag's (release.yml).
+  release-prepare:
+    needs: [changes, forge, nuget-org-pack, crate-pack, maven-pack, ruby-pack, npm-pack, r-pack, c-pack, pypi-pack]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/release-prepare
+        with:
+          version: ${{ needs.forge.outputs.version }}
+          source_sha: ${{ github.sha }}
+          ci_run_id: ${{ github.run_id }}
+          forge_sha: ${{ needs.forge.outputs.revision }}
+          token: ${{ github.token }}
+          npm_packages: true
+          cran_packages: true
+
+  # CodeQL on this commit, before B exists: codeql.yml is dispatched at master with this run's
+  # id (its Swift leg unpacks this run's attested Swift zips, since no checkout carries a core),
+  # held to have scanned this commit (master must still be A), watched to completion, and the
+  # code scanning dashboard must then hold no open alert on master. The only job here that may
+  # start a workflow; it checks nothing out.
+  codeql:
+    needs: [changes, forge]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: write
+      security-events: read
+    steps:
+      - name: Scan this commit and require a clean code scanning dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=$(gh api --method POST -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/codeql.yml/dispatches" \
+            -f ref=master -f "inputs[ci_run_id]=${{ github.run_id }}" --jq '.workflow_run_id')
+          [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || { echo "::error::codeql.yml dispatch returned no run id"; exit 1; }
+          scanned=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq .head_sha)
+          [ "$scanned" = "$GITHUB_SHA" ] || { echo "::error::codeql.yml scanned $scanned, not this commit: master moved beyond A; prepare again"; exit 1; }
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 60
+          open=$(gh api --paginate "repos/$GITHUB_REPOSITORY/code-scanning/alerts?state=open&ref=refs/heads/master&per_page=100" --jq '.[].number' | wc -l | tr -d ' ')
+          [ "$open" = 0 ] || { echo "::error::$open open code scanning alerts on master; fix them and prepare again"; exit 1; }
+
+  # B, the release commit: this run's attested Swift zips' checksums and the version written
+  # into the root Package.swift and committed on master, which must still be A, with the
+  # Release-Source-SHA, Release-CI-Run-ID and Release-Forge-SHA trailers release.yml's
+  # tag-guard reads back. The only job here that may write the repository. The tag is pushed
+  # at B by hand (RELEASING.md).
+  stage-release:
+    needs: [changes, forge, release-prepare, codeql]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      attestations: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: ${{ needs.forge.outputs.revision }}
+          path: .hyperforge
+          persist-credentials: false
+      - uses: ./.hyperforge/.github/actions/stage-release
+        with:
+          source_sha: ${{ github.sha }}
+          ci_run_id: ${{ github.run_id }}
+          forge_sha: ${{ needs.forge.outputs.revision }}
+          token: ${{ github.token }}
 
   # The one status to read. Master is not branch-protected and a skipped job satisfies a
   # required check, so this job, which always runs, is red when any job above failed or was
@@ -1305,7 +1586,9 @@ jobs:
             lint-python, lint-ruby, lint-php, lint-swift, lint-typescript, lint-r, lint-go,
             lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
             test-typescript, test-r, test-go, pack-c, build-wasm, build-wheels,
-            test-nuget-package, test-npm-package, test-apple-mobile, test-android]
+            test-nuget-package, test-npm-package, test-apple-mobile, test-android,
+            forge, nuget-org-pack, crate-pack, maven-pack, ruby-pack, npm-pack, r-pack, c-pack,
+            pypi-pack, release-prepare, codeql, stage-release]
     if: always()
     runs-on: ubuntu-26.04
     permissions:

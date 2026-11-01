@@ -14,9 +14,12 @@ name: CodeQL
 # The cost of the switch is that this file now owns what default setup owned: a language added
 # to the repository is unscanned until it is added to the matrix.
 
-# Weekly and on demand, not on pull requests or pushes: the scan is a release gate, run on the
-# staging commit before tagging (.github/RELEASING.md), and the weekly run keeps the dashboard
-# current between releases. Swift alone is why: under CodeQL's tracer a Swift build of this
+# Weekly and on demand, not on pull requests or pushes: the scan is a release gate, run on A by
+# the preparation run's `codeql` job (ci.yml's tail), which dispatches it with its run id and
+# requires a clean dashboard before B is staged (.github/RELEASING.md), and the weekly run keeps
+# the dashboard current between releases. No checkout carries a Swift core, so the Swift leg
+# builds against the zips a release-mode ci.yml run attested: the run the dispatch names, or
+# the newest green one on master for the weekly scan. Swift alone is why: under CodeQL's tracer a Swift build of this
 # library costs 7-8½ minutes however it is invoked (`swift build --target` took 7m37s, `swiftc`
 # on the library's sources directly 8m27s; untraced, either takes seconds), a fixed cost of the
 # extractor rather than of the code, and not one worth paying on every pull request.
@@ -25,6 +28,12 @@ on:
     # Weekly, off the hour and off CI's Monday board.
     - cron: "27 4 * * 2"
   workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: "The release-mode ci.yml run whose attested Swift core the Swift leg builds against; empty takes the newest green one on master"
+        required: false
+        type: string
+        default: ""
 
 # A run for a ref waits for the one before it rather than cancelling it: a run to completion is
 # what keeps the code scanning dashboard current.
@@ -47,6 +56,8 @@ jobs:
       actions: read
       contents: read
       packages: read
+      # The Swift leg verifies the core's build provenance before unpacking it.
+      attestations: read
     strategy:
       fail-fast: false
       matrix:
@@ -99,8 +110,63 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
 
+      # The core left git on 2026-10-30: the root Package.swift links a local core when one is
+      # in swift/ and otherwise downloads the release's zips, which the finalizer has not
+      # published at preparation time. So the Swift leg does what the Swift suites do: it takes
+      # the run's swift-release-assets, verifies each zip's build provenance (signed by the Forge
+      # at that run's commit) and unpacks them into swift/ (swift_release.py unpack).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.build-mode == 'manual'
+        with:
+          repository: SkunkWerkx/.github
+          ref: master
+          path: .hyperforge
+          persist-credentials: false
+
+      - name: Resolve the release-mode run whose core to build against
+        id: run
+        if: matrix.build-mode == 'manual'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CI_RUN_ID" ]; then
+            [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid ci_run_id"; exit 1; }
+            found=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" --jq '"\(.id) \(.head_sha)"')
+          else
+            found=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --status success \
+              --limit 20 --json databaseId,event,headSha \
+              --jq 'map(select(.event == "workflow_dispatch" or .event == "schedule"))[0] // empty | "\(.databaseId) \(.headSha)"')
+          fi
+          [ -n "$found" ] || { echo "::error::No green release-mode ci.yml run on master to take a core from"; exit 1; }
+          echo "id=${found%% *}" >> "$GITHUB_OUTPUT"
+          echo "sha=${found##* }" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: matrix.build-mode == 'manual'
+        with:
+          name: swift-release-assets
+          path: ${{ runner.temp }}/swift-release-assets
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - name: Stage that run's attested Swift core
+        if: matrix.build-mode == 'manual'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.run.outputs.sha }}
+          FORGE_SCRIPTS: .hyperforge/.github/scripts
+        run: |
+          set -euo pipefail
+          for zip in "$RUNNER_TEMP"/swift-release-assets/*.zip; do
+            gh attestation verify "$zip" --repo "$GITHUB_REPOSITORY" --signer-repo SkunkWerkx/.github \
+              --source-digest "$SOURCE_SHA"
+          done
+          python3 "$FORGE_SCRIPTS/swift_release.py" unpack --assets "$RUNNER_TEMP/swift-release-assets"
+
       # From the root Package.swift, the one consumers resolve; its HyperUuid target is the
-      # same sources as swift/Package.swift's.
+      # same sources as swift/Package.swift's, now linking the unpacked core.
       - name: Build the Swift library
         if: matrix.build-mode == 'manual'
         run: swift build --target HyperUuid

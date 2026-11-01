@@ -5,7 +5,7 @@
 # with --omit=optional (the spec's scenario 2 inside the image); s390x installs plainly, since
 # the point is that no native package fits there. floor adds engine-strict, so an engines
 # mismatch anywhere in the packed graph fails the install. The copy of smoke.cjs makes
-# require('hyperuuid') resolve from the install, not from /ct.
+# require('@skunkwerkx/hyperuuid') resolve from the install, not from /ct.
 set -eu
 cd /work
 cp /ct/smoke.cjs ./smoke.cjs
@@ -15,7 +15,7 @@ case "$SCENARIO" in s390x) omit="" ;; *) omit="--omit=optional" ;; esac
 node --version
 npm --version
 # shellcheck disable=SC2086 # $omit is empty or one flag
-npm install $omit "hyperuuid@$VERSION" --cache /work/cache --no-audit --no-fund
+npm install $omit "@skunkwerkx/hyperuuid@$VERSION" --cache /work/cache --no-audit --no-fund
 # No pipe into tee: under sh it would hide Node's exit status and let the grep pass over a
 # failed assertion. s390x is a big-endian host, where the fallback's runtime misreads its own
 # reference counts (host-endian typed arrays over little-endian wasm memory; the consumer

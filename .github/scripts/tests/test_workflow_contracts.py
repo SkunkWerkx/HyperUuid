@@ -16,14 +16,12 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / '.github/workflows'
 FORGE = ROOT.parent / 'HyperForge'
 PUBLISHERS = ('nuget-org-publish', 'rubygems-publish', 'pypi-publish', 'npm-publish', 'pack-crates', 'maven-publish')
-PACKERS = ('nuget-org-pack', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack', 'c-pack', 'crate-pack', 'maven-pack')
-ACTION_JOBS = {'find-ci-run': 'release-guard', 'ruby-pack': 'pack-gems', 'pypi-pack': 'verify-wheels',
-               'npm-pack': 'pack-npm', 'r-pack': 'pack-r', 'c-pack': 'pack-c',
-               'publication-gate': 'release-gate', 'nuget-org-publish': 'publish-nuget',
+# release.yml packs nothing: the eight pack jobs are ci.yml's tail (TAIL below).
+PACKERS = ()
+ACTION_JOBS = {'find-ci-run': 'tag-guard', 'publication-gate': 'tag-gate', 'nuget-org-publish': 'publish-nuget',
                'rubygems-publish': 'publish-rubygems', 'pypi-publish': 'publish-pypi',
                'npm-publish': 'publish-npm', 'finalize-release': 'finalize-release'}
 FORGE_WORKFLOW = re.compile(r'SkunkWerkx/\.github/\.github/workflows/([\w-]+\.yml)@(\S+)')
-PUBLISH_GATE = "publish: ${{ github.event_name == 'workflow_dispatch' }}"
 
 
 def jobs(path):
@@ -49,18 +47,39 @@ class ReleaseFlowTests(unittest.TestCase):
         self.text = (WORKFLOWS / 'release.yml').read_text()
         self.jobs = jobs(WORKFLOWS / 'release.yml')
 
-    def test_tag_push_prepares_and_only_a_dispatch_publishes(self):
+    def test_the_tag_push_publishes_and_a_dispatch_retries(self):
+        # The release train's act two: the tag push verifies what ci.yml preserved, attests it
+        # from the tag and publishes; a dispatch at the tag replays with the receipts.
         self.assertIn('    tags: ["v*"]', self.text)
-        self.assertIn('prepared_run_id:', self.text)
+        self.assertEqual(re.findall(r'^      ([a-z_]+):\n        description', self.text, re.M),
+                         ['publication_run_id', 'maven_deployment_id'])
+        self.assertNotIn('prepared_run_id', self.text.split('\njobs:')[0])   # no dispatch input
+        self.assertNotIn('prepared_run_id', self.jobs['find-ci-run'])              # no guard override
+        self.assertNotIn('ci_run_id:', self.text.split('\njobs:')[0])
         self.assertIn('cancel-in-progress: false', self.text)
+        self.assertEqual([n for n in self.jobs if n.endswith('-pack')], [])
         for publisher in PUBLISHERS:
             with self.subTest(publisher=publisher):
-                if publisher == 'pypi-publish':
-                    # Gated by its own upload and wait steps (test_pypi_upload_is_a_step_of_this_workflow).
-                    self.assertNotIn(PUBLISH_GATE, self.jobs[publisher])
-                else:
-                    self.assertIn(PUBLISH_GATE, self.jobs[publisher])
-        self.assertIn("github.event_name == 'workflow_dispatch'", header(self.jobs['finalize-release']))
+                job = self.jobs[publisher]
+                self.assertNotIn("event_name == 'workflow_dispatch'", job)
+                if publisher != 'pypi-publish':
+                    self.assertIn('publish: true', job)
+                self.assertIn('publication_run_id: ${{ inputs.publication_run_id }}', job)
+        gate = self.jobs['publication-gate']
+        self.assertIn("attest: ${{ github.event_name == 'push' }}", gate)
+        self.assertIn('packing_forge_sha: ${{ needs.find-ci-run.outputs.packing_forge_sha }}', gate)
+        self.assertNotIn("event_name == 'workflow_dispatch'", header(self.jobs['finalize-release']))
+        self.assertNotIn("event_name == 'workflow_dispatch'", header(self.jobs['pie-acceptance']))
+
+    def test_pack_crates_and_maven_take_the_gate_s_verified_packages_at_a(self):
+        # The preserved crate and bundle were attested in ci.yml at A; both reusable publishers
+        # verify at inputs.source_sha and take the gate's re-uploaded copies from this run.
+        for name in ('pack-crates', 'maven-publish'):
+            with self.subTest(job=name):
+                job = self.jobs[name]
+                self.assertIn('prepared_run_id: ${{ github.run_id }}', job)
+                self.assertIn('publish: true', job)
+                self.assertIn('source_sha: ${{ needs.find-ci-run.outputs.source_sha }}', job)
 
     def test_pypi_upload_is_a_step_of_this_workflow(self):
         # Nested in the Forge's composite action, pypa/gh-action-pypi-publish looks for its image
@@ -74,10 +93,9 @@ class ReleaseFlowTests(unittest.TestCase):
         self.assertEqual(steps, sorted(steps))
         self.assertIn('      - id: pypi\n        uses: ./.hyperforge/.github/actions/publish-pypi', job)
         self.assertEqual(job.count('uses: pypa/gh-action-pypi-publish@'), 1)
-        self.assertRegex(job, r"if: steps\.pypi\.outputs\.pending == 'true' && github\.event_name == 'workflow_dispatch'\n"
+        self.assertRegex(job, r"if: steps\.pypi\.outputs\.pending == 'true'\n"
                               r" +uses: pypa/gh-action-pypi-publish@[0-9a-f]{40} # v[0-9.]+\n +with:\n +packages-dir: pending-pypi\n")
         self.assertRegex(job, r"Verify every public wheel and sdist matches the prepared bytes\n"
-                              r" +if: github\.event_name == 'workflow_dispatch'\n"
                               r' +run: python3 "\$FORGE_SCRIPTS/release_inventory\.py" registry-confirm --registry pypi\n')
         self.assertNotIn('pypa/', '\n'.join(j for name, j in self.jobs.items() if name != 'pypi-publish'))
 
@@ -88,17 +106,11 @@ class ReleaseFlowTests(unittest.TestCase):
                 self.assertIn('needs: [find-ci-run, publication-gate]', head)
                 self.assertIn('!cancelled()', head)
                 self.assertIn("needs.publication-gate.result == 'success'", head)
-        for packer in PACKERS:
-            with self.subTest(packer=packer):
-                self.assertIn("if: inputs.prepared_run_id == ''", header(self.jobs[packer]))
-        # The gate waits for every packer, and on a tag run for each one's success; a publish
-        # dispatch skips the packers and takes the preserved packages instead.
+        # The gate waits for the guard alone: nothing is packed here, on either event.
         gate = header(self.jobs['publication-gate'])
-        gate_needs = set(re.split(r'[\s,]+', re.search(r'^    needs: \[([^]]*)\]', gate, re.M)[1].strip()))
-        self.assertEqual(gate_needs, {'find-ci-run', *PACKERS})
-        self.assertIn("(inputs.prepared_run_id != '' ||", gate)
-        for packer in PACKERS:
-            self.assertIn(f"needs.{packer}.result == 'success'", gate)
+        self.assertEqual(CiTests.needs(self.jobs['publication-gate']), {'find-ci-run'})
+        self.assertIn("needs.find-ci-run.result == 'success'", gate)
+        self.assertNotIn('prepared_run_id', gate)
         self.assertEqual({k: v for k, v in re.findall(r'^          (npm_packages|cran_packages): (.*)$',
                                                         self.jobs['publication-gate'], re.M)},
                          {'npm_packages': 'true', 'cran_packages': 'true'})
@@ -117,7 +129,6 @@ class ReleaseFlowTests(unittest.TestCase):
         head = header(job)
         self.assertEqual(set(re.split(r'[\s,]+', re.search(r'^    needs: \[([^]]*)\]', head, re.M)[1].strip())),
                          {'find-ci-run', 'finalize-release'})
-        self.assertIn("github.event_name == 'workflow_dispatch'", head)
         self.assertIn("needs.finalize-release.result == 'success'", head)
         self.assertIn('    uses: SkunkWerkx/.github/.github/workflows/hyper-pie-acceptance.yml@master\n', job)
         self.assertIn('      package: skunkwerkx/hyperuuid\n', job)
@@ -129,7 +140,7 @@ class ReleaseFlowTests(unittest.TestCase):
     def test_forge_commit_is_resolved_once_and_checked_out_before_every_action(self):
         find = self.jobs['find-ci-run']
         order = [find.index('name: Resolve the Forge commit this run uses'),
-                 find.index('path: .hyperforge'), find.index('uses: ./.hyperforge/.github/actions/release-guard')]
+                 find.index('path: .hyperforge'), find.index('uses: ./.hyperforge/.github/actions/tag-guard')]
         self.assertEqual(order, sorted(order))
         self.assertIn('referenced_workflows', find)
         # The job's forge_sha output and the guard's input, the .hyperforge checkout, the one write.
@@ -145,8 +156,8 @@ class ReleaseFlowTests(unittest.TestCase):
                 self.assertIn('persist-credentials: false', body)
                 if job != 'find-ci-run':
                     self.assertIn('ref: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
-                if job not in ('find-ci-run', 'ruby-pack', 'pypi-pack', 'npm-pack', 'r-pack', 'c-pack'):
-                    # The actions that write the inventory or publish record the Forge commit.
+                if job != 'find-ci-run':
+                    # The actions that verify the inventory or publish record the Forge commit.
                     self.assertIn('forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}', body)
 
     def test_read_only_checkouts_are_not_named_like_a_pull_request_head(self):
@@ -178,8 +189,8 @@ class ReleaseFlowTests(unittest.TestCase):
             self.assertIn(f'{secret}: ${{{{ secrets.{secret} }}}}', self.jobs['maven-publish'])
 
     def test_maven_jobs_pack_the_jni_libraries(self):
-        for name in ('maven-pack', 'maven-publish'):
-            self.assertIn('      java_jni: true\n', self.jobs[name], name)
+        self.assertIn('      java_jni: true\n', self.jobs['maven-publish'])
+        self.assertIn('      java_jni: true\n', jobs(WORKFLOWS / 'ci.yml')['maven-pack'])
 
 
 class PreparationFlowTests(unittest.TestCase):
@@ -191,42 +202,39 @@ class PreparationFlowTests(unittest.TestCase):
         self.assertIn('group: release-source-${{ github.repository }}', text)
         self.assertIn('actions: write', job)
 
-    def test_stage_natives_keeps_its_triggers_and_gate(self):
-        text = (WORKFLOWS / 'stage-native-binaries.yml').read_text()
-        job = jobs(WORKFLOWS / 'stage-native-binaries.yml')['stage-native-binaries']
-        ci_name = re.search(r'^name: (.+)$', (WORKFLOWS / 'ci.yml').read_text(), re.M)[1]
-        self.assertIn(f'workflows: ["{ci_name}"]', text)
-        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-stage-natives.yml@master', job)
-        for clause in ("github.event.workflow_run.conclusion == 'success'",
-                       "github.event.workflow_run.event == 'workflow_dispatch'"):
-            self.assertIn(clause, header(job))
-        self.assertIn('source_sha: ${{ github.event_name == \'workflow_run\' && github.event.workflow_run.head_sha || inputs.head_sha }}', job)
-        self.assertIn('event_run_id: ${{ github.event.workflow_run.id || inputs.ci_run_id }}', job)
+    def test_codeql_swift_leg_stages_the_preparation_runs_core(self):
+        # No checkout carries a Swift core since it left git (2026-10-30), so the Swift leg builds
+        # against the zips a release-mode ci.yml run attested: the one the preparation run names,
+        # or the newest green one on master for the weekly scan.
+        text = (WORKFLOWS / 'codeql.yml').read_text()
         self.assertRegex(text, r'\n      ci_run_id:\n(?:        .*\n)*        required: false\n')
-        self.assertIn('group: release-source-${{ github.repository }}', text)
+        self.assertIn('attestations: read', text)
+        job = jobs(WORKFLOWS / 'codeql.yml')['analyze']
+        names = re.findall(r'^      - name: (.*)$', job, re.M)
+        wanted = ['Resolve the release-mode run whose core to build against', "Stage that run's attested Swift core",
+                  'Build the Swift library']
+        self.assertEqual([n for n in names if n in wanted], wanted)
+        for needle in ("if: matrix.build-mode == 'manual'", 'name: swift-release-assets', 'run-id: ${{ steps.run.outputs.id }}',
+                       '--signer-repo SkunkWerkx/.github', '--source-digest', 'swift_release.py" unpack --assets'):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, job)
+        resolve = job.split('      - name: Resolve the release-mode run whose core to build against\n')[1].split('\n\n')[0]
+        self.assertIn('inputs.ci_run_id', resolve)
+        for needle in ('--workflow ci.yml', '--branch master', '--status success', '"workflow_dispatch" or .event == "schedule"'):
+            self.assertIn(needle, resolve)
+        self.assertIn('repository: SkunkWerkx/.github', job)
+        self.assertEqual(job.count("if: matrix.build-mode == 'manual'"), 5, 'the Forge checkout, resolve, download, stage and build')
 
-    def test_release_mode_ci_on_master_requests_staging_of_its_own_run(self):
-        # prepare-release dispatches ci.yml with a GITHUB_TOKEN, and GitHub raises no
-        # workflow_run for that run, so the run itself has to ask for staging.
-        ci = jobs(WORKFLOWS / 'ci.yml')
-        request = ci['request-staging']
-        needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
-        self.assertEqual(set(re.split(r'[\s,]+', needs.strip())), set(ci) - {'request-staging', 'pr-board'},
-                         'staging is requested only once every other job is green; the board reads it, it does not wait for it')
-        self.assertIn("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'\n", header(request))
-        self.assertNotRegex(header(request), r'always\(\)|failure\(\)|cancelled\(\)')
-        self.assertEqual(re.findall(r'^      ([a-z-]+): (\w+)$', header(request), re.M), [('actions', 'write')])
-        command = ' '.join(request.split('        run: >-\n')[1].split('\n\n')[0].split())
-        self.assertEqual(command, 'gh workflow run stage-native-binaries.yml --repo "$GITHUB_REPOSITORY" --ref master '
-                                  '-f head_sha="$GITHUB_SHA" -f ci_run_id="$GITHUB_RUN_ID"')
-
-    def test_only_request_staging_may_start_a_workflow(self):
+    def test_only_codeql_may_start_a_workflow(self):
+        # Least privilege across the board: the attesting callers and the pack jobs hold the two
+        # attestation scopes, codeql alone may start a workflow (codeql.yml, on this run), and
+        # stage-release alone may write the repository (B).
         text = (WORKFLOWS / 'ci.yml').read_text()
         self.assertIn('\npermissions:\n  contents: read\n', text)
         for name, job in jobs(WORKFLOWS / 'ci.yml').items():
             with self.subTest(job=name):
                 grants = set(re.findall(r'^      ([a-z-]+): write$', header(job), re.M))
-                allowed = {'actions'} if name == 'request-staging' else {'id-token', 'attestations'}
+                allowed = {'codeql': {'actions'}, 'stage-release': {'contents'}}.get(name, {'id-token', 'attestations'})
                 self.assertLessEqual(grants, allowed)
 
 
@@ -238,8 +246,14 @@ MODE = "${{ github.event_name == 'pull_request' && 'pr' || 'release' }}"
 # ForgeInterfaceTests.test_attesting_set_is_current holds this to the checkout.
 ATTESTING = {'hyper-core.yml', 'hyper-build-static.yml', 'hyper-build-android.yml', 'hyper-build-wasm.yml',
              'hyper-build-wheels.yml', 'hyper-build-php-extension.yml', 'hyper-test-java.yml',
-             'hyper-test-typescript.yml', 'hyper-test-ruby.yml'}
-NO_MODE = {'hyper-core-checks.yml'}
+             'hyper-test-typescript.yml', 'hyper-test-ruby.yml',
+             'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
+NO_MODE = {'hyper-core-checks.yml', 'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
+# The release tail of ci.yml, in dependency order (pr_board.py's TAIL): the Forge resolver, the
+# eight pack jobs, the inventory, CodeQL and B; gated on prepare-release.yml's master dispatch.
+TAIL = ['forge', 'nuget-org-pack', 'crate-pack', 'maven-pack', 'ruby-pack', 'npm-pack', 'r-pack', 'c-pack', 'pypi-pack',
+        'release-prepare', 'codeql', 'stage-release']
+TAIL_GATE = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'"
 
 
 class CiTests(unittest.TestCase):
@@ -332,9 +346,7 @@ class CiTests(unittest.TestCase):
         self.assertNotIn('dotnet-version', job)
         for needle in ('HYPERUUID003', 'NU1202', '.nobuild', 'readelf -d'):
             self.assertIn(needle, job)
-        request = self.jobs['request-staging']
-        needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
-        self.assertIn('test-nuget-package', re.split(r'[\s,]+', needs.strip()))
+        self.assertIn('test-nuget-package', self.needs(self.jobs['forge']))
 
     def test_npm_package_job_proves_the_fallback_in_consumers(self):
         job = self.jobs['test-npm-package']
@@ -374,9 +386,7 @@ class CiTests(unittest.TestCase):
         self.assertNotIn('floor', others)
         wasm = self.jobs['build-wasm']
         self.assertIn('      node_wasi: ${{ ' + self.g('core', 'ci', 'typescript') + ' }}\n', wasm)
-        request = self.jobs['request-staging']
-        needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
-        self.assertIn('test-npm-package', re.split(r'[\s,]+', needs.strip()))
+        self.assertIn('test-npm-package', self.needs(self.jobs['forge']))
 
     def test_gate_admits_blazor_webassembly_on_net10_and_net11(self):
         # The build-std archive links on both toolchains, so HYPERUUID003 no longer names Blazor.
@@ -406,14 +416,13 @@ class CiTests(unittest.TestCase):
         # the wasm workflow runs its whole suite under TinyGo and stock Go beside the browser build.
         ci = (WORKFLOWS / 'ci.yml').read_text()
         self.assertNotIn('go/staticlib', ci)
-        self.assertNotIn('go/staticlib', (WORKFLOWS / 'stage-native-binaries.yml').read_text())
         go = self.jobs['test-go']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-go.yml@master', go)
         self.assertEqual(self.needs(go), {'changes', 'lint-go'})
         self.assertIn('      linters: fast\n', self.jobs['lint-go'])
         self.assertIn('      linters: full\n', self.jobs['lint-go-full'])
         self.assertEqual({name for name, job in self.jobs.items() if 'lint-go-full' in self.needs(job)},
-                         {'request-staging', 'pr-board'}, 'the full Go lint gates nothing but the two aggregates')
+                         {'forge', 'pr-board'}, 'the full Go lint gates nothing but the two aggregates')
         wasm = self.jobs['build-wasm']
         go_gate = self.g('core', 'ci', 'go')
         self.assertIn('      go_wasm_suite: ${{ ' + go_gate + ' }}\n', wasm)
@@ -525,14 +534,14 @@ class CiTests(unittest.TestCase):
 
     def test_attesting_callers_hold_the_write_scopes(self):
         # A reusable workflow cannot escalate past its caller: the ones that attest get the two
-        # scopes, and no other job does (least privilege; test_only_request_staging_may_start_a_workflow).
+        # scopes, and no other job does (least privilege; test_only_codeql_may_start_a_workflow).
         for name, job in self.jobs.items():
             with self.subTest(job=name):
                 grants = set(re.findall(r'^      ([a-z-]+): write$', header(job), re.M))
                 workflow = FORGE_WORKFLOW.search(job)
                 if workflow and workflow[1] in ATTESTING:
                     self.assertEqual(grants, {'id-token', 'attestations'})
-                elif name != 'request-staging':
+                elif name not in TAIL:
                     self.assertEqual(grants, set())
 
     def test_every_forge_call_passes_mode_when_declared(self):
@@ -582,12 +591,68 @@ class CiTests(unittest.TestCase):
             with self.subTest(job=name):
                 self.assertNotIn("event_name == 'pull_request'", self.gate(job) or '')
 
-    def test_request_staging_needs_every_job_but_pr_board(self):
-        self.assertEqual(self.needs(self.jobs['request-staging']), set(self.jobs) - {'request-staging', 'pr-board'})
+    def test_the_tail_replaces_request_staging(self):
+        self.assertNotIn('request-staging', self.jobs)
+        self.assertFalse((WORKFLOWS / 'stage-native-binaries.yml').exists())
+        board = set(self.jobs) - set(TAIL) - {'pr-board'}
+        self.assertEqual(self.needs(self.jobs['forge']), board)
+        for name in TAIL:
+            with self.subTest(job=name):
+                self.assertEqual(self.gate(self.jobs[name]), TAIL_GATE)
+                self.assertIn('changes', self.needs(self.jobs[name]))
+        for packer in TAIL[1:9]:
+            self.assertEqual(self.needs(self.jobs[packer]), {'changes', 'forge'})
+        self.assertEqual(self.needs(self.jobs['release-prepare']), {'changes', 'forge', *TAIL[1:9]})
+        self.assertEqual(self.needs(self.jobs['codeql']), {'changes', 'forge'})
+        self.assertEqual(self.needs(self.jobs['stage-release']), {'changes', 'forge', 'release-prepare', 'codeql'})
+        self.assertEqual(list(self.jobs)[-len(TAIL) - 1:], TAIL + ['pr-board'])
 
-    def test_pr_board_needs_every_job_but_request_staging_and_always_runs(self):
+    def test_pack_jobs_pack_this_run_at_this_commit(self):
+        for name in ('ruby-pack', 'npm-pack', 'c-pack', 'pypi-pack'):
+            job = self.jobs[name]
+            self.assertIn('run_id: ${{ github.run_id }}', job)
+            self.assertIn('source_sha: ${{ github.sha }}', job)
+        self.assertIn('source_sha: ${{ github.sha }}', self.jobs['r-pack'])
+        for name in ('nuget-org-pack', 'maven-pack'):
+            self.assertIn('source_run_id: ${{ github.run_id }}', self.jobs[name])
+        for name in [*TAIL[4:9], 'release-prepare', 'stage-release']:   # the jobs that run Forge code; codeql only dispatches
+            with self.subTest(job=name):
+                self.assertIn('ref: ${{ needs.forge.outputs.revision }}', self.jobs[name])
+                self.assertIn('persist-credentials: false', self.jobs[name])
+        self.assertNotIn('actions/checkout', self.jobs['codeql'])
+        prepare = self.jobs['release-prepare']
+        for line in ('version: ${{ needs.forge.outputs.version }}', 'source_sha: ${{ github.sha }}', 'ci_run_id: ${{ github.run_id }}',
+                     'forge_sha: ${{ needs.forge.outputs.revision }}', 'npm_packages: true', 'cran_packages: true'):
+            self.assertIn(line, prepare)
+
+    def test_the_tail_holds_its_write_scopes_and_nothing_more(self):
+        def grants(name):
+            return set(re.findall(r'^      ([a-z-]+): write$', header(self.jobs[name]), re.M))
+        for name in TAIL[1:10]:
+            # verify-wheels attests nothing (the wheels were attested where they were built):
+            # pypi-pack reads attestations and writes none.
+            self.assertEqual(grants(name), {'id-token'} if name == 'pypi-pack' else {'id-token', 'attestations'}, name)
+        self.assertIn('      attestations: read\n', header(self.jobs['pypi-pack']))
+        self.assertEqual(grants('forge'), set())
+        self.assertEqual(grants('codeql'), {'actions'})
+        self.assertEqual(grants('stage-release'), {'contents'})
+
+    def test_codeql_is_dispatched_on_this_run_and_must_leave_no_open_alert(self):
+        step = self.jobs['codeql']
+        for needle in ('actions/workflows/codeql.yml/dispatches', 'ref=master', 'inputs[ci_run_id]=${{ github.run_id }}',
+                       'X-GitHub-Api-Version: 2026-03-10', '.workflow_run_id', 'gh run watch', '--exit-status',
+                       'code-scanning/alerts?state=open&ref=refs/heads/master', 'security-events: read',
+                       # The dispatched run must have scanned this commit: master must still be A.
+                       '--jq .head_sha', '"$scanned" = "$GITHUB_SHA"',
+                       # The alert count is jq and wc alone; no calculator the image may lack.
+                       "--jq '.[].number' | wc -l"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, step)
+        self.assertNotIn('| bc', step)
+
+    def test_pr_board_needs_every_job_but_itself(self):
         board = self.jobs['pr-board']
-        self.assertEqual(self.needs(board), set(self.jobs) - {'request-staging', 'pr-board'})
+        self.assertEqual(self.needs(board), set(self.jobs) - {'pr-board'})
         self.assertEqual(self.gate(board), 'always()')
         self.assertIn('    permissions:\n      contents: read\n', header(board))
         self.assertIn('persist-credentials: false', board)
@@ -615,7 +680,7 @@ class CiTests(unittest.TestCase):
     def test_pr_board_wiring(self):
         board = self.jobs['pr-board']
         self.assertEqual(self.gate(board), 'always()')
-        self.assertEqual(self.needs(board), set(self.jobs) - {'request-staging', 'pr-board'})
+        self.assertEqual(self.needs(board), set(self.jobs) - {'pr-board'})
         self.assertIn('persist-credentials: false', board)
         step = next(step for step in re.split(r'\n      - ', board)[1:] if 'pr_board.py' in step)
         self.assertIn('NEEDS: ${{ toJSON(needs) }}', step)
@@ -682,7 +747,8 @@ class ForgeInterfaceTests(unittest.TestCase):
         called = set()
         for path in sorted(WORKFLOWS.glob('*.yml')):
             called |= {workflow for workflow, _ in FORGE_WORKFLOW.findall(path.read_text())}
-        composites = ('musl-native', 'ruby-magnus', 'ruby-magnus-musl', 'static-libs')
+        composites = ('musl-native', 'ruby-magnus', 'ruby-magnus-musl', 'static-libs',
+                      'prepare-crate-package', 'prepare-maven-package')
         attesting = set()
         for workflow in called:
             body = (FORGE / '.github/workflows' / workflow).read_text().split('\njobs:')[1]

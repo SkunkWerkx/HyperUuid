@@ -61,9 +61,10 @@ vector check; `FLOOR_IMAGE=node:22.12.0-alpine run.sh <dir> floor` fails the ins
   self-contained bundle: the loader's `require` calls for the platform packages and the WASI
   package cannot be resolved into one file (webpack fails the build on them; esbuild bundles
   and the bundle then cannot load the module in a directory with no `node_modules`). The
-  configuration that passes, for both, is `hyperuuid` **external**: esbuild
-  `--external:hyperuuid`, webpack `externals: { hyperuuid: 'commonjs hyperuuid' }`, with
-  `hyperuuid` installed beside the bundle (`npm install --omit=dev` of the deployment's
+  configuration that passes, for both, is `@skunkwerkx/hyperuuid` **external**: esbuild
+  `--external:@skunkwerkx/hyperuuid`, webpack
+  `externals: { '@skunkwerkx/hyperuuid': 'commonjs @skunkwerkx/hyperuuid' }`, with
+  the package installed beside the bundle (`npm install --omit=dev` of the deployment's
   `package.json`). That is the configuration to document for bundled deployments.
 - **npm bug 4828 is fixed in npm 11.20.0 and alive in Node 22's npm.** The scenario reproduces
   npm/cli#4828 live: install for darwin-arm64, delete the lockfile, install again beside
@@ -93,7 +94,7 @@ vector check; `FLOOR_IMAGE=node:22.12.0-alpine run.sh <dir> floor` fails the ins
   checks print within a minute of the container's start. Nothing beyond the smoke's five checks
   is claimed for big-endian hosts.
 - **Bun.** Under `NAPI_RS_FORCE_WASI=error`, Bun 1.4.4 cannot initialise the WASI module (its
-  `node:wasi` has no reactor `initialize`), so `require('hyperuuid')` succeeds with
+  `node:wasi` has no reactor `initialize`), so `require('@skunkwerkx/hyperuuid')` succeeds with
   `isAvailable() === false`. The native addon on Bun passes the whole suite. Recorded, not a
   failure of the run.
 - **Publishing to Verdaccio.** npm refuses to publish with no credentials at all, whatever the

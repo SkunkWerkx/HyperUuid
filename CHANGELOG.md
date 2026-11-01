@@ -7,7 +7,7 @@ all of them. Each entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — 2026-10-31
+## [1.1.0] — 2026-11-01
 
 ### Security
 
@@ -56,7 +56,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   consumer beside the C one on every desktop archive and the Apple mobile ones. *(C++)*
 - **Core on big-endian.** CI runs the core's test suite, conformance corpus included, on
   s390x under QEMU. *(repository only)*
-- **A TypeScript binding for Node and Bun, on npm as `hyperuuid`.** A Node-API addon built
+- **A TypeScript binding for Node and Bun, on npm as `@skunkwerkx/hyperuuid`.** A Node-API addon built
   with napi-rs, the core linked into the `.node` file, published as eight platform packages
   (`@skunkwerkx/hyperuuid-<platform>`, one per RID) that the root package picks through
   `optionalDependencies`, so nothing compiles at install. Node 22.13 or newer and Bun, CommonJS
@@ -182,7 +182,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name the caller's file and line, and `isRfc()` never matches a version outside 0–15.
   `php/README.md` lists them under "Differences from 1.0". Stubs for IDEs
   and PHPStan are in the repository, in `php/stubs/`. No PHP binary is left in git: `php/src/`
-  is gone, and `stage-native-binaries.yml` no longer stages one. After every publish,
+  is gone, and nothing stages one. After every publish,
   `release.yml` has PIE install the release on every platform and minor. *(PHP)*
 - **The v7 counter is re-seeded on every new millisecond.** The stream used to be one 26-bit
   counter, seeded once per process and never reset, so two ids revealed how many were minted
@@ -225,11 +225,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cannot build it, since PyO3 0.30 refuses free-threaded CPython below 3.14. Free-threading
   starts at 3.15. *(Python)*
 - **The release flow, after its first run.** `release.yml` uploads the wheels as a step of
-  its own `pypi-publish` job again, so their PEP 740 publish attestations name it; staging
-  starts by itself once the release-mode CI on the preparation commit is green (that run's
-  last job, `request-staging`, dispatches it, since GitHub raises no `workflow_run` for a
-  run a `GITHUB_TOKEN` started), and a second request for a commit already staged is skipped
-  with a notice; the Forge commit's step output is `revision`, which clears CodeQL's
+  its own `pypi-publish` job again, so their PEP 740 publish attestations name it; the Forge
+  commit's step output is `revision`, which clears CodeQL's
   `actions/cache-poisoning/poisonable-step`; and `pypi-recovery.yml` is gone. *(repository only)*
 - **Rust, R — minimum Rust is now 1.89** (was 1.85), the floor of current `uuid` 1.x. Source
   installs of the R package and builds from this repository need `rustc` 1.89. *(Rust, R)*
@@ -303,6 +300,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `windows-2025-vs2026`, `windows-11-vs2026-arm`, `ubuntu-26.04` and its arm64 twin), and the
   Go, Swift, Python, Ruby, Java and .NET toolchains the images carry at the pinned versions are
   used as installed. *(repository only)*
+- **One dispatch prepares and attests, one tag publishes.** *(repository only)* `prepare-release.yml`
+  bumps, dates the CHANGELOG heading, runs the full board, packs every registry input, attests each
+  package and the inventory, preserves them for 90 days and commits the staging commit; pushing
+  `vX.Y.Z` at it verifies the preserved bytes, signs the release attestation from the tag and
+  publishes to the six registries. A retry is the same workflow dispatched at the tag, so the PyPI
+  and npm publisher is `release.yml` from 1.1.0 on and never changes again (1.0.0's wheels went up
+  from a one-off workflow after the tag run's upload failed, which PyPI shows as a change of
+  provenance). `stage-native-binaries.yml` is gone; CodeQL runs on the preparation commit inside
+  that run and must leave no open alert before the staging commit exists.
 
 ### Fixed
 

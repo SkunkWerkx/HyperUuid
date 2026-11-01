@@ -1,42 +1,41 @@
-name: Release — prepare, verify, preserve, publish, finalize
+name: Release — verify, attest, publish, finalize
 
-# The release is two deliberate acts at the same root tag (B, the staging commit).
+# The release is two acts, and this workflow is the second.
 #
-#   1. Pushing the tag runs this workflow with no inputs: it verifies B against its
-#      preparation run, packs every registry input, attests each package and the release
-#      as a whole (inventory.json plus the release attestation over every shipped file),
-#      preserves the complete release-packages artifact, plans every registry upload and
-#      proves every Trusted Publisher exchange it can without uploading. Nothing is pushed,
-#      no Go tag, no GitHub Release.
-#   2. `gh workflow run release.yml --ref vX.Y.Z -f prepared_run_id=<that run>` publishes
-#      from the preserved bytes through the recovery path, so every release exercises it.
+#   1. prepare-release.yml, dispatched with the bare version, bumps and pushes A and runs the
+#      release-mode ci.yml on it. That run's tail packs every registry input from its own
+#      artifacts, builds and attests the inventory, preserves release-packages for 90 days,
+#      scans A with CodeQL and commits B, the release commit, on master with the trailers the
+#      guard below reads (Release-Source-SHA, Release-CI-Run-ID, Release-Forge-SHA).
+#   2. Pushing the tag vX.Y.Z at B runs this workflow: the guard holds the tag to B and B to
+#      its run, the gate downloads what that run preserved, re-verifies every file and the
+#      inventory against their build provenance at A, holds B's Package.swift to the preserved
+#      Swift zips, requires the Forge that packed to be an ancestor of the Forge this run
+#      uses, and attests every shipped file from the tag (inventory.json as the predicate).
+#      The six publishers then upload, each verifying its own files just before, and the
+#      finalizer writes go/vX.Y.Z and the GitHub Release. Nothing is packed here.
 #
-# Recovery is the same dispatch, plus publication_run_id when registry receipts exist. It
-# never rebuilds the native matrix and never re-attests; it verifies the preserved bytes
-# against the attestations the tag run made. The job bodies live in the Forge: the composite
-# actions (SkunkWerkx/.github/.github/actions/*) run from the one Forge commit this run
-# resolved, checked out as .hyperforge; the six reusable workflows (the NuGet, crate and
-# Maven packing, the crate and Maven publishing, the PIE acceptance) are called at master,
-# which GitHub resolves when the run is queued.
+# `gh workflow run release.yml --ref vX.Y.Z -f publication_run_id=<the tag run>` replays the
+# same jobs at the tag with the registry receipts: the gate verifies the tag run's release
+# attestation instead of making one, and every publisher reports nothing to do or finishes
+# what the tag run did not. Every release runs that replay once, as its recovery proof. It
+# never rebuilds, never re-packs and never re-attests.
 #
-# The publish dispatch ends with pie-acceptance: PIE installs the PHP extension from the
-# GitHub Release the finalizer wrote, on every platform and PHP minor. It runs after
-# publication, so a failure there is fixed with a patch release, never in place.
+# The job bodies live in the Forge: the composite actions (SkunkWerkx/.github/.github/actions/*)
+# run from the one Forge commit this run resolved, checked out as .hyperforge; the three
+# reusable workflows (the crate and Maven publishing, the PIE acceptance) are called at
+# master, which GitHub resolves when the run is queued.
+#
+# The run ends with pie-acceptance: PIE installs the PHP extension from the GitHub Release
+# the finalizer wrote, on every platform and PHP minor. It runs after publication, so a
+# failure there is fixed with a patch release, never in place.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      ci_run_id:
-        description: "Optional assertion of B's Release-CI-Run-ID; never an override"
-        required: false
-        type: string
-      prepared_run_id:
-        description: "Exact prior release.yml run at this tag/B holding release-packages"
-        required: false
-        type: string
       publication_run_id:
-        description: "Prior publication attempt with NuGet/Central/crate receipts"
+        description: "The tag run (or a later replay) holding the registry receipts"
         required: false
         type: string
       maven_deployment_id:
@@ -58,6 +57,7 @@ jobs:
       run_id: ${{ steps.guard.outputs.run_id }}
       source_sha: ${{ steps.guard.outputs.source_sha }}
       version: ${{ steps.guard.outputs.version }}
+      packing_forge_sha: ${{ steps.guard.outputs.packing_forge_sha }}
       forge_sha: ${{ steps.forge.outputs.revision }}
     permissions:
       contents: read
@@ -69,10 +69,9 @@ jobs:
           fetch-depth: 2
 
       # The Forge is called at master. GitHub resolves that to one commit when the run is queued
-      # and records it in the run's referenced_workflows; every .hyperforge checkout and the
-      # inventory's forge_sha use that commit, so the actions and scripts match the reusable
-      # workflows. A recovery run verifies the preserved inventory against it, so recovery needs
-      # the Forge's master unchanged since the packaging run.
+      # and records it in the run's referenced_workflows; every .hyperforge checkout uses that
+      # commit, so the actions and scripts match the reusable workflows. The gate requires the
+      # Forge that packed (the inventory's forge_sha, B's trailer) to be an ancestor of it.
       # The output is `revision`, not `sha`: CodeQL reads a checkout ref whose step, job or output
       # name contains head, sha, commit, branch or ref as a pull request head, and in this
       # read-only job (the write-permission jobs fall outside that query) it reports the release
@@ -95,192 +94,22 @@ jobs:
           path: .hyperforge
           persist-credentials: false
 
+      # No overrides: B's trailers say what was prepared, and the guard holds the tag to them.
       - id: guard
-        uses: ./.hyperforge/.github/actions/release-guard
+        uses: ./.hyperforge/.github/actions/tag-guard
         with:
-          ci_run_id: ${{ inputs.ci_run_id }}
-          prepared_run_id: ${{ inputs.prepared_run_id }}
           forge_sha: ${{ steps.forge.outputs.revision }}
           token: ${{ github.token }}
 
-  nuget-org-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: write
-    with:
-      crate: hyperuuid
-      csproj_path: csharp/HyperUuid/HyperUuid.csproj
-      runtimes_dir: csharp/HyperUuid/runtimes
-      android: true
-      source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
-
-  crate-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@master
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-
-  maven-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@master
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: write
-    with:
-      crate: hyperuuid
-      java_resources_dir: java/src/main/resources/native
-      java_jni: true
-      source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
-    secrets:
-      MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
-      MAVEN_SIGNING_KEY_PASSWORD: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
-
-  # The gems and the wheels are handled by composite actions, not reusable workflows, because
-  # the gems are attested here and RubyGems.org verifies this repository's identity: a
-  # composite action keeps the caller's OIDC identity, a reusable workflow carries the Forge's.
-  ruby-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: SkunkWerkx/.github
-          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
-          path: .hyperforge
-          persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/pack-gems
-        with:
-          run_id: ${{ needs.find-ci-run.outputs.run_id }}
-          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
-          token: ${{ github.token }}
-
-  # The npm tarballs and the R source tarball are attested here for the same reason: npmjs.com
-  # registers this repository's OIDC identity, and the inventory records both groups as signed
-  # by this repository at B. The CRAN tarball is preserved and never uploaded by any job.
-  npm-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: SkunkWerkx/.github
-          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
-          path: .hyperforge
-          persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/pack-npm
-        with:
-          run_id: ${{ needs.find-ci-run.outputs.run_id }}
-          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
-          token: ${{ github.token }}
-
-  r-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: SkunkWerkx/.github
-          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
-          path: .hyperforge
-          persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/pack-r
-        with:
-          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
-
-  # The C archives, one per platform, for the GitHub Release: the CI run's attested libraries
-  # with the header and c/'s package files, attested here because the inventory records the c/
-  # group as signed by this repository at B, like the gems.
-  c-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: SkunkWerkx/.github
-          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
-          path: .hyperforge
-          persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/pack-c
-        with:
-          run_id: ${{ needs.find-ci-run.outputs.run_id }}
-          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
-          token: ${{ github.token }}
-
-  pypi-pack:
-    needs: find-ci-run
-    if: inputs.prepared_run_id == ''
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: SkunkWerkx/.github
-          ref: ${{ needs.find-ci-run.outputs.forge_sha }}
-          path: .hyperforge
-          persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/verify-wheels
-        with:
-          run_id: ${{ needs.find-ci-run.outputs.run_id }}
-          source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
-          token: ${{ github.token }}
-
-  # One inventory of every registry input and every native committed at B, attested twice:
-  # build provenance for inventory.json, and the release attestation whose subjects are every
-  # shipped file and whose predicate is the inventory. Preserved for 90 days as
-  # release-packages; a recovery run verifies the preserved bytes and never re-attests.
+  # The preserved release-packages of the ci.yml run at A, re-verified file by file against
+  # their build provenance and the inventory's own attestation, then attested as one release:
+  # every shipped file a subject, inventory.json the predicate, signed by this file at the tag.
+  # A replay verifies the tag run's attestation instead. Preserved again in this run, with the
+  # verified crate and Maven inputs the two reusable publishers below take.
   publication-gate:
-    needs: [find-ci-run, nuget-org-pack, ruby-pack, pypi-pack, npm-pack, r-pack, c-pack, crate-pack, maven-pack]
+    needs: find-ci-run
     if: >-
-      always() && !cancelled() && needs.find-ci-run.result == 'success' &&
-      (inputs.prepared_run_id != '' ||
-       (needs.nuget-org-pack.result == 'success' && needs.ruby-pack.result == 'success' &&
-        needs.pypi-pack.result == 'success' && needs.npm-pack.result == 'success' &&
-        needs.r-pack.result == 'success' && needs.c-pack.result == 'success' &&
-        needs.crate-pack.result == 'success' &&
-        needs.maven-pack.result == 'success'))
+      !cancelled() && needs.find-ci-run.result == 'success'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -295,20 +124,22 @@ jobs:
           ref: ${{ needs.find-ci-run.outputs.forge_sha }}
           path: .hyperforge
           persist-credentials: false
-      - uses: ./.hyperforge/.github/actions/release-gate
+      - uses: ./.hyperforge/.github/actions/tag-gate
         with:
           version: ${{ needs.find-ci-run.outputs.version }}
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
-          prepared_run_id: ${{ inputs.prepared_run_id }}
+          packing_forge_sha: ${{ needs.find-ci-run.outputs.packing_forge_sha }}
+          attest: ${{ github.event_name == 'push' }}
           token: ${{ github.token }}
           npm_packages: true
           cran_packages: true
 
-  # Every publisher below runs on the tag push with publish off: it plans the upload from the
-  # preserved inventory and, where the registry allows it, completes the Trusted Publisher
-  # exchange without uploading. Only a workflow_dispatch publishes.
+  # Every publisher below uploads on the tag push and on a replay alike: each plans from the
+  # preserved inventory and what the registry already serves, verifies its own files' build
+  # provenance just before uploading, and uploads only what is missing. publication_run_id
+  # names the run holding the receipts on a replay.
   nuget-org-publish:
     needs: [find-ci-run, publication-gate]
     if: >-
@@ -334,8 +165,8 @@ jobs:
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
-          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
-          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          publication_run_id: ${{ inputs.publication_run_id }}
+          publish: true
           trusted_publisher_user: ${{ vars.NUGET_TRUSTED_PUBLISHER_USER }}
           token: ${{ github.token }}
 
@@ -364,10 +195,12 @@ jobs:
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
-          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
-          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          publication_run_id: ${{ inputs.publication_run_id }}
+          publish: true
           token: ${{ github.token }}
 
+  # npm's Trusted Publishing exchange happens inside `npm publish`, in the Forge's composite,
+  # which keeps this workflow's OIDC identity: npmjs.com is registered against this file.
   npm-publish:
     needs: [find-ci-run, publication-gate]
     if: >-
@@ -393,8 +226,8 @@ jobs:
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
-          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
-          publish: ${{ github.event_name == 'workflow_dispatch' }}
+          publication_run_id: ${{ inputs.publication_run_id }}
+          publish: true
           token: ${{ github.token }}
 
   pypi-publish:
@@ -423,27 +256,26 @@ jobs:
           source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
           ci_run_id: ${{ needs.find-ci-run.outputs.run_id }}
           forge_sha: ${{ needs.find-ci-run.outputs.forge_sha }}
-          publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+          publication_run_id: ${{ inputs.publication_run_id }}
           token: ${{ github.token }}
       # A step of this workflow, never of the Forge's action: pypa/gh-action-pypi-publish runs
       # its own container image, which it finds through github.action_repository, and nested in
       # a composite action that is empty (actions/runner#2473), so it looked for
-      # ghcr.io/<this repo>:<tag> and both v1.0.0 uploads failed before sending anything. The
-      # action cannot make the OIDC exchange without uploading, so only a publish dispatch runs
-      # it, and its PEP 740 publish attestations name this file, as every release's must.
+      # ghcr.io/<this repo>:<tag> and both v1.0.0 uploads failed before sending anything. Its
+      # PEP 740 publish attestations name this file, as every release's must.
       - name: Publish only missing preserved wheels and sdist (Trusted Publishing)
-        if: steps.pypi.outputs.pending == 'true' && github.event_name == 'workflow_dispatch'
+        if: steps.pypi.outputs.pending == 'true'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: pending-pypi
       - name: Verify every public wheel and sdist matches the prepared bytes
-        if: github.event_name == 'workflow_dispatch'
         run: python3 "$FORGE_SCRIPTS/release_inventory.py" registry-confirm --registry pypi
 
   # crates.io Trusted Publishing is registered against this file, release.yml: crates.io
   # matches the OIDC token's workflow_ref claim, which names the top-level workflow, not the
   # Forge's hyper-publish-crate.yml that this job calls. The Forge's package_preparation.py
   # finds this job in run history by its name ("pack-crates / publish"): don't rename it.
+  # The crate was packed and attested in ci.yml at A, so the publisher verifies it there.
   pack-crates:
     needs: [find-ci-run, publication-gate]
     if: >-
@@ -458,8 +290,9 @@ jobs:
     with:
       prepared_run_id: ${{ github.run_id }}
       prepared_artifact_name: verified-crate-package
-      publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
-      publish: ${{ github.event_name == 'workflow_dispatch' }}
+      source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+      publication_run_id: ${{ inputs.publication_run_id }}
+      publish: true
 
   maven-publish:
     needs: [find-ci-run, publication-gate]
@@ -479,9 +312,10 @@ jobs:
       source_run_id: ${{ needs.find-ci-run.outputs.run_id }}
       prepared_run_id: ${{ github.run_id }}
       prepared_artifact_name: verified-maven-central-package
-      publication_run_id: ${{ inputs.publication_run_id || inputs.prepared_run_id }}
+      source_sha: ${{ needs.find-ci-run.outputs.source_sha }}
+      publication_run_id: ${{ inputs.publication_run_id }}
       deployment_id: ${{ inputs.maven_deployment_id }}
-      publish: ${{ github.event_name == 'workflow_dispatch' }}
+      publish: true
     secrets:
       MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
@@ -489,11 +323,12 @@ jobs:
       MAVEN_SIGNING_KEY_PASSWORD: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
 
   # The go/vX.Y.Z tag and the GitHub Release (notes from the CHANGELOG's section plus the
-  # verification commands), only once every registry has the bytes, and only on a dispatch.
+  # verification commands), only once every registry has the bytes; on a replay, what the
+  # tag run did not finish.
   finalize-release:
     needs: [find-ci-run, publication-gate, nuget-org-publish, rubygems-publish, pypi-publish, npm-publish, pack-crates, maven-publish]
     if: >-
-      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      !cancelled() &&
       needs.find-ci-run.result == 'success' && needs.publication-gate.result == 'success' &&
       needs.nuget-org-publish.result == 'success' && needs.rubygems-publish.result == 'success' &&
       needs.pypi-publish.result == 'success' && needs.npm-publish.result == 'success' &&
@@ -526,7 +361,7 @@ jobs:
   pie-acceptance:
     needs: [find-ci-run, finalize-release]
     if: >-
-      !cancelled() && github.event_name == 'workflow_dispatch' &&
+      !cancelled() &&
       needs.find-ci-run.result == 'success' && needs.finalize-release.result == 'success'
     uses: SkunkWerkx/.github/.github/workflows/hyper-pie-acceptance.yml@master
     permissions:

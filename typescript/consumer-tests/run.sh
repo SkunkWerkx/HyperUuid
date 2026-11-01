@@ -38,7 +38,7 @@
 #                           then be stale
 #   bundlers                esbuild and webpack bundle bundled.cjs; the bundle runs from a
 #                           directory outside the repository under NAPI_RS_FORCE_WASI=error,
-#                           plain first, then with hyperuuid external and installed beside it
+#                           plain first, then with @skunkwerkx/hyperuuid external and installed beside it
 #   all                     every scenario above, in that order
 #
 # Containers reach the registry over --network host at 127.0.0.1 on Linux; on Docker Desktop
@@ -130,7 +130,7 @@ for f in "$tarballs"/skunkwerkx-"$crate"-*-"$version".tgz; do
   case "$f" in *"-$wasi-$version.tgz") wasi_tarball="$f" ;; *) natives+=("$f") ;; esac
 done
 shopt -u nullglob
-root_tarball="$tarballs/$crate-$version.tgz"
+root_tarball="$tarballs/skunkwerkx-$crate-$version.tgz"
 [ -f "$root_tarball" ] || { echo "no root tarball $root_tarball"; exit 1; }
 [ -n "$wasi_tarball" ] || { echo "no WASI tarball in $tarballs"; exit 1; }
 for f in "${natives[@]}"; do publish "$f"; done
@@ -182,7 +182,7 @@ platform_packages() { # the installed native platform packages, if any
 
 scenario_negative_unpublished() {
   local dir; dir="$(consumer negative-unpublished)"
-  if (cd "$dir" && npm install --cache "$dir/cache" "$crate@$version" > install.log 2>&1); then
+  if (cd "$dir" && npm install --cache "$dir/cache" "$scope@$version" > install.log 2>&1); then
     cat "$dir/install.log"; die "negative-unpublished: npm install succeeded without the WASI package"
   fi
   grep -q "$scope-$wasi" "$dir/install.log" || { cat "$dir/install.log"; die "negative-unpublished: the error does not name $scope-$wasi"; }
@@ -192,7 +192,7 @@ scenario_negative_unpublished() {
 
 scenario_plain() {
   local dir; dir="$(consumer plain)"
-  install_in "$dir" "$crate@$version"
+  install_in "$dir" "$scope@$version"
   [ -f "$dir/node_modules/$scope-$wasi/package.json" ] || die "plain: the WASI package is not installed"
   smoke "$dir" || die "plain: smoke failed"
   expect_target "$dir" native plain
@@ -202,7 +202,7 @@ scenario_plain() {
 
 scenario_omit_optional() {
   local dir; dir="$(consumer "consumer two")"
-  install_in "$dir" --omit=optional "$crate@$version"
+  install_in "$dir" --omit=optional "$scope@$version"
   [ -z "$(platform_packages "$dir")" ] || die "omit-optional: a platform package was installed"
   smoke "$dir" || die "omit-optional: smoke failed"
   expect_target "$dir" "$wasi" omit-optional
@@ -212,7 +212,7 @@ scenario_omit_optional() {
 
 scenario_absent_native() {
   local dir; dir="$(consumer absent-native)"
-  install_in "$dir" "$crate@$version"
+  install_in "$dir" "$scope@$version"
   local removed; removed="$(platform_packages "$dir")"
   [ -n "$removed" ] || die "absent-native: no platform package to delete"
   for p in $removed; do rm -rf "$dir/node_modules/@skunkwerkx/$p"; done
@@ -225,7 +225,7 @@ scenario_absent_native() {
 
 scenario_forced_wasi() {
   local dir; dir="$(consumer forced-wasi)"
-  install_in "$dir" "$crate@$version"
+  install_in "$dir" "$scope@$version"
   smoke "$dir" NAPI_RS_FORCE_WASI=error || die "forced-wasi: smoke failed"
   expect_target "$dir" "$wasi" forced-wasi
   expect_stderr_experimental_only "$dir" forced-wasi
@@ -244,7 +244,7 @@ scenario_forced_wasi() {
 
 scenario_negative_deleted_package() {
   local dir; dir="$(consumer negative-deleted-package)"
-  install_in "$dir" --omit=optional "$crate@$version"
+  install_in "$dir" --omit=optional "$scope@$version"
   rm -rf "$dir/node_modules/$scope-$wasi"
   smoke "$dir" || die "negative-deleted-package: smoke exited non-zero"
   grep -q 'available=false target=none' "$dir/out.txt" || die "negative-deleted-package: expected available=false"
@@ -256,7 +256,7 @@ scenario_negative_deleted_package() {
 
 scenario_negative_deleted_wasm() {
   local dir; dir="$(consumer negative-deleted-wasm)"
-  install_in "$dir" --omit=optional "$crate@$version"
+  install_in "$dir" --omit=optional "$scope@$version"
   rm "$dir/node_modules/$scope-$wasi/$crate.$wasi.wasm"
   smoke "$dir" || die "negative-deleted-wasm: smoke exited non-zero"
   grep -q 'available=false target=none' "$dir/out.txt" || die "negative-deleted-wasm: expected available=false"
@@ -274,7 +274,7 @@ scenario_mac_lockfile() {
   [ -e "$lnpm" ] || lnpm="$prefix/npm"
   [ "$("$lnpm" --version)" = "$LOCKFILE_NPM" ] || die "mac-lockfile: the pinned npm is $("$lnpm" --version), not $LOCKFILE_NPM"
   local dir; dir="$(consumer mac-lockfile)"
-  (cd "$dir" && "$lnpm" install --cache "$dir/cache" --os=darwin --cpu=arm64 "$crate@$version" > install1.log 2>&1) || { cat "$dir/install1.log"; die "mac-lockfile: first install"; }
+  (cd "$dir" && "$lnpm" install --cache "$dir/cache" --os=darwin --cpu=arm64 "$scope@$version" > install1.log 2>&1) || { cat "$dir/install1.log"; die "mac-lockfile: first install"; }
   local natives_first; natives_first="$(grep -c "node_modules/$scope-" "$dir/package-lock.json" || true)"
   rm "$dir/package-lock.json"
   (cd "$dir" && "$lnpm" install --cache "$dir/cache" --os=darwin --cpu=arm64 > install2.log 2>&1) || { cat "$dir/install2.log"; die "mac-lockfile: second install"; }
@@ -339,7 +339,7 @@ run_bundle() { # run_bundle <bundle> <label> [external]: deploys the bundle to a
   local deploy; deploy="$(mktemp -d)"
   cp "$bundle" "$deploy/bundle.cjs"
   if [ "$form" = external ]; then
-    printf '{"name":"consumer","private":true,"dependencies":{"%s":"%s"}}\n' "$crate" "$version" > "$deploy/package.json"
+    printf '{"name":"consumer","private":true,"dependencies":{"%s":"%s"}}\n' "$scope" "$version" > "$deploy/package.json"
     printf 'registry=%s\naudit=false\nfund=false\nupdate-notifier=false\n' "$registry" > "$deploy/.npmrc"
     (cd "$deploy" && npm install --omit=dev --cache "$deploy/cache" > install.log 2>&1) || { cat "$deploy/install.log"; return 1; }
   fi
@@ -352,7 +352,7 @@ run_bundle() { # run_bundle <bundle> <label> [external]: deploys the bundle to a
 
 scenario_bundlers() {
   local dir; dir="$(consumer bundlers)"
-  install_in "$dir" "$crate@$version"
+  install_in "$dir" "$scope@$version"
   cp "$here/bundled.cjs" "$dir/bundled.cjs"
   # esbuild
   local passed=""
