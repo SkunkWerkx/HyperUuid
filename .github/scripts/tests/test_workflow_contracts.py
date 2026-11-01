@@ -211,12 +211,12 @@ class PreparationFlowTests(unittest.TestCase):
         ci = jobs(WORKFLOWS / 'ci.yml')
         request = ci['request-staging']
         needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
-        self.assertEqual(set(re.split(r'[\s,]+', needs.strip())), set(ci) - {'request-staging'},
-                         'staging is requested only once every other job is green')
+        self.assertEqual(set(re.split(r'[\s,]+', needs.strip())), set(ci) - {'request-staging', 'pr-board'},
+                         'staging is requested only once every other job is green; the board reads it, it does not wait for it')
         self.assertIn("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'\n", header(request))
         self.assertNotRegex(header(request), r'always\(\)|failure\(\)|cancelled\(\)')
         self.assertEqual(re.findall(r'^      ([a-z-]+): (\w+)$', header(request), re.M), [('actions', 'write')])
-        command = ' '.join(request.split('        run: >-\n')[1].split())
+        command = ' '.join(request.split('        run: >-\n')[1].split('\n\n')[0].split())
         self.assertEqual(command, 'gh workflow run stage-native-binaries.yml --repo "$GITHUB_REPOSITORY" --ref master '
                                   '-f head_sha="$GITHUB_SHA" -f ci_run_id="$GITHUB_RUN_ID"')
 
@@ -230,24 +230,55 @@ class PreparationFlowTests(unittest.TestCase):
                 self.assertLessEqual(grants, allowed)
 
 
+BINDINGS = ['csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
+LABELS = {'ubuntu-26.04', 'ubuntu-26.04-arm', 'xcode-27', 'windows-2025-vs2026', 'windows-11-vs2026-arm'}
+ALLOWED_EXCEPTIONS = set()
+MODE = "${{ github.event_name == 'pull_request' && 'pr' || 'release' }}"
+# The Forge workflows with an attestation step (or a composite that attests) in their jobs;
+# ForgeInterfaceTests.test_attesting_set_is_current holds this to the checkout.
+ATTESTING = {'hyper-core.yml', 'hyper-build-static.yml', 'hyper-build-android.yml', 'hyper-build-wasm.yml',
+             'hyper-build-wheels.yml', 'hyper-build-php-extension.yml', 'hyper-test-java.yml',
+             'hyper-test-typescript.yml', 'hyper-test-ruby.yml'}
+NO_MODE = {'hyper-core-checks.yml'}
+
+
 class CiTests(unittest.TestCase):
     def setUp(self):
         self.jobs = jobs(WORKFLOWS / 'ci.yml')
 
-    def test_native_suites_preserved_and_mobile_dependencies_narrow(self):
-        build = self.jobs['build-native']
-        # The Forge has none of these inputs: the static, Android and swift-static work is
-        # its own workflows', called below, and the PHP extension builds inline.
-        for gone in ('static_libs_artifact', 'swift_static_tests', 'android_shared_artifact',
-                     'php_extension_schedule', 'apple_mobile', 'android:'):
-            self.assertNotIn(gone, build)
-        self.assertIn('needs: build-static', self.jobs['test-apple-mobile'])
-        self.assertIn('needs: [build-static, build-android]', self.jobs['test-android'])
-        self.assertIn('needs: build-static', self.jobs['test-swift-static'])
+    @staticmethod
+    def needs(job):
+        match = re.search(r'^    needs: \[([^]]*)\]', header(job), re.M)
+        if match:
+            return set(re.split(r'[\s,]+', match[1].strip()))
+        match = re.search(r'^    needs: (\S+)$', header(job), re.M)
+        return {match[1]} if match else set()
+
+    @staticmethod
+    def gate(job):
+        match = re.search(r'^    if: (.*)$', header(job), re.M)
+        return match[1].strip() if match else None
+
+    @staticmethod
+    def g(*keys):
+        return ' || '.join(f"needs.changes.outputs.{key} == 'true'" for key in keys)
+
+    def test_mobile_dependencies(self):
+        # Release board only, both of them; the C smoke's simulator run joins test-apple-mobile,
+        # which is why it waits for the packed archives.
+        apple, android = self.jobs['test-apple-mobile'], self.jobs['test-android']
+        self.assertEqual(self.needs(apple), {'changes', 'build-static', 'pack-c'})
+        self.assertEqual(self.needs(android), {'changes', 'build-static', 'build-android'})
+        for job in (apple, android):
+            self.assertIn("    if: github.event_name != 'pull_request'\n", header(job))
+        self.assertNotIn('test-swift-static', self.jobs, "Swift's static suite is its Linux test legs' now")
+        self.assertNotIn('build-native', self.jobs)
+        self.assertNotIn('check-core', self.jobs)
+        self.assertNotIn('test-c', self.jobs)
 
     def test_php_floor_is_explicit_and_matches_both_composer_files(self):
         # The Forge's php_floor_version default (8.2) serves the siblings; this repo says its own.
-        m = re.search(r'^      php_floor_version: "(\d+\.\d+)"$', self.jobs['build-native'], re.M)
+        m = re.search(r'^      php_floor_version: "(\d+\.\d+)"$', self.jobs['test-php'], re.M)
         self.assertIsNotNone(m)
         floor = m.group(1)
         self.assertEqual(floor, '8.3')
@@ -293,9 +324,9 @@ class CiTests(unittest.TestCase):
 
     def test_nuget_package_job_proves_the_packed_layout(self):
         job = self.jobs['test-nuget-package']
-        self.assertIn('    needs: [build-static, build-native]\n', header(job))
+        self.assertEqual(self.needs(job), {'changes', 'core', 'build-static'})
         self.assertIn('    runs-on: ubuntu-26.04\n', header(job))
-        self.assertNotRegex(header(job), r'^    if:', 'it runs on pull requests, like test-android')
+        self.assertEqual(self.gate(job), self.g('csharp', 'core', 'ci'))
         self.assertIn('setup-dotnet', job)
         self.assertIn('global-json-file: global.json', job)
         self.assertNotIn('dotnet-version', job)
@@ -307,11 +338,12 @@ class CiTests(unittest.TestCase):
 
     def test_npm_package_job_proves_the_fallback_in_consumers(self):
         job = self.jobs['test-npm-package']
-        self.assertIn('    needs: [build-native, build-wasm]\n', header(job))
+        self.assertEqual(self.needs(job), {'changes', 'core', 'build-wasm', 'test-typescript'},
+                         'node-<rid> comes from the TypeScript legs, node-wasm32-wasip1 from build-wasm')
         self.assertIn('    runs-on: ${{ matrix.os }}\n', header(job))
-        self.assertIn('        os: [ubuntu-26.04, macos-26, windows-2025]\n', header(job))
+        self.assertIn('        os: [ubuntu-26.04, xcode-27, windows-2025-vs2026]\n', header(job))
         self.assertIn('      fail-fast: false\n', header(job))
-        self.assertNotRegex(header(job), r'^    if:', 'it runs on pull requests, like test-nuget-package')
+        self.assertEqual(self.gate(job), self.g('typescript', 'core', 'ci'))
         for needle in ('npm_package.py" pack', 'NAPI_RS_FORCE_WASI=error npm test', 'npm run typecheck',
                        'node-wasm32-wasip1', 'run.sh', 'setup-qemu-action', 'path: .hyperforge',
                        'repository: SkunkWerkx/.github', 'ref: master', 'persist-credentials: false',
@@ -319,7 +351,7 @@ class CiTests(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, job)
         self.assertNotIn('--allow-missing-natives', job)
-        # PR mode has no osx-x64 build (hyper-build-native skips it), so the pack leaves that
+        # PR mode has no osx-x64 build (hyper-core.yml skips it), so the pack leaves that
         # platform package out by name, as test-c does; release mode skips nothing. The consumer
         # harness needs no list of absent natives: its lockfile scenario names darwin-arm64 only.
         pack = next(step for step in re.split(r'\n      - ', job)[1:] if 'npm_package.py" pack' in step)
@@ -341,7 +373,7 @@ class CiTests(unittest.TestCase):
         self.assertNotIn('mac-lockfile', others)
         self.assertNotIn('floor', others)
         wasm = self.jobs['build-wasm']
-        self.assertIn('      node_wasi: true\n', wasm)
+        self.assertIn('      node_wasi: ${{ ' + self.g('core', 'ci', 'typescript') + ' }}\n', wasm)
         request = self.jobs['request-staging']
         needs = re.search(r'^    needs: \[([^]]*)\]', request, re.M)[1]
         self.assertIn('test-npm-package', re.split(r'[\s,]+', needs.strip()))
@@ -360,21 +392,32 @@ class CiTests(unittest.TestCase):
         self.assertNotIn('grep -qF "error HYPERUUID003"', step)
         self.assertIn('if grep -qF "HYPERUUID003"', step)
 
-    def test_typescript_and_r_legs_are_on(self):
-        # The Forge's node and r inputs default false until the siblings carry the bindings.
-        self.assertEqual(re.findall(r'^      (node|r): (.*)$', self.jobs['build-native'], re.M),
-                         [('node', 'true'), ('r', 'true')])
+    def test_typescript_and_r_callers(self):
+        # The Forge's lint_node and lint_r default false until the siblings carry the bindings;
+        # the test workflows' toggles default true.
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-typescript.yml@master', self.jobs['test-typescript'])
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-r.yml@master', self.jobs['test-r'])
+        self.assertIn('      lint_node: true\n', self.jobs['lint-typescript'])
+        self.assertIn('      lint_r: true\n', self.jobs['lint-r'])
 
-    def test_go_runs_from_the_translated_core_on_every_leg(self):
+    def test_go_caller_and_wasm_legs(self):
         # Go's core is Go source (go/internal/core, translated from the wasm32-wasip1 build):
-        # no archive is staged for it anywhere, and the wasm workflow runs its whole suite
-        # under TinyGo and stock Go beside the browser build.
+        # no archive is staged for it anywhere, its suites wait for nothing but its lint, and
+        # the wasm workflow runs its whole suite under TinyGo and stock Go beside the browser build.
         ci = (WORKFLOWS / 'ci.yml').read_text()
         self.assertNotIn('go/staticlib', ci)
         self.assertNotIn('go/staticlib', (WORKFLOWS / 'stage-native-binaries.yml').read_text())
+        go = self.jobs['test-go']
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-go.yml@master', go)
+        self.assertEqual(self.needs(go), {'changes', 'lint-go'})
+        self.assertIn('      linters: fast\n', self.jobs['lint-go'])
+        self.assertIn('      linters: full\n', self.jobs['lint-go-full'])
+        self.assertEqual({name for name, job in self.jobs.items() if 'lint-go-full' in self.needs(job)},
+                         {'request-staging', 'pr-board'}, 'the full Go lint gates nothing but the two aggregates')
         wasm = self.jobs['build-wasm']
-        self.assertIn('      go_wasm_suite: true\n', wasm)
-        self.assertIn('      go_tinygo_smoke: go/internal/tinygosmoke\n', wasm)
+        go_gate = self.g('core', 'ci', 'go')
+        self.assertIn('      go_wasm_suite: ${{ ' + go_gate + ' }}\n', wasm)
+        self.assertIn("      go_tinygo_smoke: ${{ (" + go_gate + ") && 'go/internal/tinygosmoke' || '' }}\n", wasm)
         # iOS: Go itself requires external linking on ios/arm64, so the simulator run keeps
         # Go's own clang wrapper; the device build is built and must exist, and nothing is
         # inspected for a core symbol, since there is no linked core.
@@ -399,18 +442,20 @@ class CiTests(unittest.TestCase):
         script = (ROOT / '.github/scripts/android_build_suite.sh').read_text()
         self.assertIn('-ldflags=-extldflags=-Wl,-z,max-page-size=16384,--apply-dynamic-relocs', script)
 
-    def test_java_jni_legs_are_on(self):
+    def test_java_caller(self):
         # The Forge's java_jni input defaults false; the jar's floor is JDK 21 beside the primary 25.
-        build = self.jobs['build-native']
-        self.assertIn('      java_jni: true\n', build)
-        self.assertIn('      jdk_floor_version: "21"\n', build)
+        java = self.jobs['test-java']
+        self.assertIn('      java_jni: true\n', java)
+        self.assertIn('      jdk_floor_version: "21"\n', java)
+        self.assertIn('      lint_java_jni: true\n', self.jobs['lint-java'])
 
-    def test_static_checks_run_in_the_forge_with_this_repositorys_eight_inputs(self):
-        core = self.jobs['check-core']
-        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master', core)
+    def test_core_checks_is_the_forge_matrix_with_the_core_inputs(self):
+        core = self.jobs['core-checks']
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-core-checks.yml@master', core)
+        self.assertEqual(self.needs(core), {'changes'})
+        self.assertEqual(self.gate(core), self.g('core', 'ci'))
         self.assertEqual(with_block(core), {'no_std_rustflags', 'extra_features', 'no_panic_command',
-                                             'clippy_targets', 'lint_node', 'lint_r', 'big_endian',
-                                             'lint_java_jni'})
+                                             'clippy_targets', 'big_endian'})
         self.assertIn('big_endian: s390x-unknown-linux-gnu', core)
         self.assertIn('no_std_rustflags: --cfg getrandom_backend="custom"', core)
         self.assertIn('extra_features: uuid1', core)
@@ -419,11 +464,193 @@ class CiTests(unittest.TestCase):
         self.assertIn(' && RUSTFLAGS="--cfg hyperuuid_words_walk" cargo build --release --example no_panic'
                       ' --features no-panic,uuid1\n', core)
         self.assertIn('clippy_targets: aarch64-linux-android', core)
-        self.assertIn('lint_node: true', core)
-        self.assertIn('lint_r: true', core)
-        self.assertIn('lint_java_jni: true', core)
-        inline = [name for name in self.jobs if re.match(r'(check|lint|format)-', name) and name != 'check-core']
-        self.assertEqual(inline, [], 'static checks live in hyper-check-core.yml, once')
+        inline = [name for name in self.jobs if re.match(r'(check|lint|format)-', name) and not re.match(r'lint-[a-z]+(-full)?$', name)]
+        self.assertEqual(inline, [], 'static checks live in hyper-core-checks.yml and the lint callers, once each')
+        for name in self.jobs:
+            if name.startswith('lint-'):
+                self.assertIn('    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-', self.jobs[name], name)
+
+    # The board's shape: every gate reads `changes`, every suite waits for its lint and the core,
+    # the two consumer tests and the two mobile jobs keep their inputs, and pr-board reads it all.
+
+    def test_changes_and_pr_board_are_the_only_unconditional_jobs(self):
+        for name, job in self.jobs.items():
+            with self.subTest(job=name):
+                if name in ('changes',):
+                    self.assertIsNone(self.gate(job))
+                elif name == 'pr-board':
+                    self.assertEqual(self.gate(job), 'always()')
+                else:
+                    self.assertIsNotNone(self.gate(job), 'every other job is gated')
+
+    def test_every_job_that_reads_changes_needs_it(self):
+        for name, job in self.jobs.items():
+            if name == 'changes':
+                continue
+            with self.subTest(job=name):
+                self.assertIn('changes', self.needs(job))
+
+    def test_core_is_one_forge_core_call_gated_on_docs_only(self):
+        core = self.jobs['core']
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-core.yml@master', core)
+        self.assertEqual(self.needs(core), {'changes'})
+        self.assertEqual(self.gate(core), "needs.changes.outputs.docs_only != 'true'")
+        self.assertEqual(with_block(core), {'mode', 'crate', 'project'})
+        self.assertEqual(set(re.findall(r'^      ([a-z-]+): write$', header(core), re.M)), {'id-token', 'attestations'})
+        self.assertEqual([name for name, job in self.jobs.items() if 'workflows/hyper-core.yml@master' in job], ['core'])
+
+    def test_every_lint_caller_needs_only_changes(self):
+        for binding in BINDINGS:
+            with self.subTest(binding=binding):
+                lint = self.jobs[f'lint-{binding}']
+                self.assertEqual(self.needs(lint), {'changes'})
+                self.assertEqual(self.gate(lint), self.g(binding, 'core', 'ci'))
+                self.assertIn(f'uses: SkunkWerkx/.github/.github/workflows/hyper-lint-{binding}.yml@master', lint)
+                self.assertFalse(re.findall(r'^      [a-z-]+: write$', header(lint), re.M), 'a lint attests nothing')
+        full = self.jobs['lint-go-full']
+        self.assertEqual(self.needs(full), {'changes'})
+        self.assertEqual(self.gate(full), self.g('go', 'core', 'ci'))
+
+    def test_every_test_caller_needs_its_lint_and_core(self):
+        extra = {'csharp': {'build-static'}, 'swift': {'build-static'}}
+        workflow = {binding: f'hyper-test-{binding}.yml' for binding in BINDINGS}
+        workflow['php'] = 'hyper-build-php-extension.yml'
+        for binding in BINDINGS:
+            with self.subTest(binding=binding):
+                test = self.jobs[f'test-{binding}']
+                core = set() if binding == 'go' else {'core'}
+                self.assertEqual(self.needs(test), {'changes', f'lint-{binding}'} | core | extra.get(binding, set()))
+                self.assertEqual(self.gate(test), self.g(binding, 'core', 'ci'))
+                self.assertIn(f'uses: SkunkWerkx/.github/.github/workflows/{workflow[binding]}@master', test)
+
+    def test_attesting_callers_hold_the_write_scopes(self):
+        # A reusable workflow cannot escalate past its caller: the ones that attest get the two
+        # scopes, and no other job does (least privilege; test_only_request_staging_may_start_a_workflow).
+        for name, job in self.jobs.items():
+            with self.subTest(job=name):
+                grants = set(re.findall(r'^      ([a-z-]+): write$', header(job), re.M))
+                workflow = FORGE_WORKFLOW.search(job)
+                if workflow and workflow[1] in ATTESTING:
+                    self.assertEqual(grants, {'id-token', 'attestations'})
+                elif name != 'request-staging':
+                    self.assertEqual(grants, set())
+
+    def test_every_forge_call_passes_mode_when_declared(self):
+        for name, job in self.jobs.items():
+            workflow = FORGE_WORKFLOW.search(job)
+            if not workflow or workflow[1] in NO_MODE:
+                continue
+            with self.subTest(job=name):
+                self.assertIn('      mode: ' + MODE + '\n', job)
+                self.assertNotIn("mode: release", job)
+
+    def test_pack_c_runs_the_pack_alone_in_this_runs_mode(self):
+        pack = self.jobs['pack-c']
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master', pack)
+        self.assertEqual(self.needs(pack), {'changes', 'core', 'build-static', 'build-android'})
+        self.assertEqual(self.gate(pack), self.g('core', 'ci'))
+        self.assertEqual(re.findall(r'^      (smokes|lint): (\w+)$', pack, re.M), [('smokes', 'false'), ('lint', 'false')])
+        self.assertIn('      mode: ' + MODE + '\n', pack)
+
+    def test_build_static_runs_for_the_bindings_that_link_it(self):
+        static = self.jobs['build-static']
+        self.assertEqual(self.needs(static), {'changes'})
+        self.assertEqual(self.gate(static), self.g('core', 'ci', 'csharp', 'swift'))
+        android = self.jobs['build-android']
+        self.assertEqual(self.needs(android), {'changes'})
+        self.assertEqual(self.gate(android), self.g('core', 'ci'))
+
+    def test_php_pr_legs_are_two_paths(self):
+        php = self.jobs['test-php']
+        self.assertIn('      pr_legs: two-paths\n', php)
+        self.assertIn('      php_floor_version: "8.3"\n', php)
+
+    def test_build_wasm_inputs_are_gated(self):
+        wasm = self.jobs['build-wasm']
+        self.assertEqual(self.needs(wasm), {'changes'})
+        self.assertEqual(self.gate(wasm), self.g('core', 'ci', 'csharp', 'typescript', 'go'))
+        self.assertIn('      archive: ${{ ' + self.g('core', 'ci', 'csharp') + ' }}\n', wasm, 'the archive itself, not only its check')
+        self.assertIn("      blazor_check: ${{ (" + self.g('core', 'ci', 'csharp') + ") && 'csharp/HyperUuid.WasmSmokeTest/check.sh' || '' }}\n", wasm)
+        self.assertIn("      rust_browser_test: ${{ (" + self.g('core', 'ci') + ") && 'rust/browser-test' || '' }}\n", wasm)
+        self.assertIn('      ruby_wasm_smoke: ruby/wasm-smoke\n', wasm)
+        wheels = self.jobs['build-wheels']
+        self.assertEqual(self.needs(wheels), {'changes'})
+        self.assertEqual(self.gate(wheels), self.g('python', 'core', 'ci'))
+
+    def test_no_job_excludes_release_mode(self):
+        for name, job in self.jobs.items():
+            with self.subTest(job=name):
+                self.assertNotIn("event_name == 'pull_request'", self.gate(job) or '')
+
+    def test_request_staging_needs_every_job_but_pr_board(self):
+        self.assertEqual(self.needs(self.jobs['request-staging']), set(self.jobs) - {'request-staging', 'pr-board'})
+
+    def test_pr_board_needs_every_job_but_request_staging_and_always_runs(self):
+        board = self.jobs['pr-board']
+        self.assertEqual(self.needs(board), set(self.jobs) - {'request-staging', 'pr-board'})
+        self.assertEqual(self.gate(board), 'always()')
+        self.assertIn('    permissions:\n      contents: read\n', header(board))
+        self.assertIn('persist-credentials: false', board)
+        self.assertEqual(list(self.jobs)[-1], 'pr-board')
+
+    def test_changes_job_wiring(self):
+        job = self.jobs['changes']
+        self.assertEqual(self.needs(job), set())
+        self.assertIn('    runs-on: ubuntu-26.04\n', header(job))
+        self.assertIn('    permissions:\n      contents: read\n      pull-requests: read\n', header(job))
+        self.assertIn('persist-credentials: false', job)
+        outputs = re.findall(r'^      ([a-z_]+): \$\{\{ steps\.classify\.outputs\.([a-z_]+) \}\}$', header(job), re.M)
+        self.assertEqual([a for a, _ in outputs], ['core', 'ci', 'docs_only', 'csharp', 'java', 'python', 'ruby', 'php',
+                                                   'swift', 'typescript', 'r', 'go'])
+        self.assertTrue(all(a == b for a, b in outputs))
+        step = next(step for step in re.split(r'\n      - ', job)[1:] if 'id: classify' in step)
+        for needle in ('set -euo pipefail', '--paginate', 'tee -a "$GITHUB_OUTPUT"', 'python3 .github/scripts/pr_changes.py',
+                       'GH_TOKEN: ${{ github.token }}', 'PR: ${{ github.event.pull_request.number }}'):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, step)
+        self.assertIn('--all', step.split('else')[1])
+        self.assertNotIn('--all', step.split('else')[0])
+        self.assertNotIn('GH_TOKEN', header(job), "the token is the step's, not the job's")
+
+    def test_pr_board_wiring(self):
+        board = self.jobs['pr-board']
+        self.assertEqual(self.gate(board), 'always()')
+        self.assertEqual(self.needs(board), set(self.jobs) - {'request-staging', 'pr-board'})
+        self.assertIn('persist-credentials: false', board)
+        step = next(step for step in re.split(r'\n      - ', board)[1:] if 'pr_board.py' in step)
+        self.assertIn('NEEDS: ${{ toJSON(needs) }}', step)
+        self.assertIn('CHANGES: ${{ toJSON(needs.changes.outputs) }}', step)
+        self.assertIn('run: python3 .github/scripts/pr_board.py', step)
+
+    def test_one_simulator_boot_on_the_full_board(self):
+        # The C archives' Apple mobile smoke runs in test-apple-mobile's simulator, not a second
+        # one of its own: one boot on the whole board, after the packed archives are in.
+        text = (WORKFLOWS / 'ci.yml').read_text()
+        self.assertEqual(text.count('xcrun simctl boot '), 1)
+        apple = self.jobs['test-apple-mobile']
+        self.assertIn('pack-c', self.needs(apple))
+        steps = re.split(r'\n      - ', apple)[1:]
+        names = [step.splitlines()[0] for step in steps]
+        download = next(i for i, step in enumerate(steps) if 'name: c-packages-ci' in step)
+        boot = next(i for i, n in enumerate(names) if n == 'name: Boot an iPhone simulator')
+        smoke = next(i for i, n in enumerate(names) if n == 'name: C — the four Apple mobile archives, built against and run')
+        self.assertLess(download, smoke)
+        self.assertLess(boot, smoke)
+        self.assertIn('c/smoke/apple-mobile.sh unpacked "$VERSION"', steps[smoke])
+        self.assertIn('${{ !cancelled() }}', steps[smoke])
+        self.assertNotIn('smoke-apple-mobile', text)
+
+    def test_runner_labels_are_explicit(self):
+        text = (WORKFLOWS / 'ci.yml').read_text()
+        for name, job in self.jobs.items():
+            for value in re.findall(r'^    runs-on: (.*)$', job, re.M):
+                with self.subTest(job=name, runs_on=value):
+                    if value == '${{ matrix.os }}':
+                        values = re.search(r'^        os: \[(.*)\]$', job, re.M)[1].split(', ')
+                    else:
+                        values = [value]
+                    self.assertLessEqual(set(values) - ALLOWED_EXCEPTIONS, LABELS, values)
+        self.assertNotRegex(text, r'runs-on: .*latest')
 
 
 class PinningTests(unittest.TestCase):
@@ -450,6 +677,19 @@ class ForgeInterfaceTests(unittest.TestCase):
         match = re.search(r'^(?:    |)inputs:\n((?:(?:      |  )\S.*\n|\s*\n|.*\n)*?)(?=^(?:  |)[a-z]|^\S)', text, re.M)
         indent = '      ' if '\n    inputs:' in text else '  '
         return set(re.findall(rf'^{indent}([\w-]+):\s*$', text, re.M)) if match else set()
+
+    def test_attesting_set_is_current(self):
+        called = set()
+        for path in sorted(WORKFLOWS.glob('*.yml')):
+            called |= {workflow for workflow, _ in FORGE_WORKFLOW.findall(path.read_text())}
+        composites = ('musl-native', 'ruby-magnus', 'ruby-magnus-musl', 'static-libs')
+        attesting = set()
+        for workflow in called:
+            body = (FORGE / '.github/workflows' / workflow).read_text().split('\njobs:')[1]
+            if re.search(r'^ +- name: Attest|uses: actions/attest', body, re.M) or any(f'actions/{c}\n' in body for c in composites):
+                attesting.add(workflow)
+        ci_called = {w for w, _ in FORGE_WORKFLOW.findall((WORKFLOWS / 'ci.yml').read_text())}
+        self.assertEqual(attesting & ci_called, ATTESTING & ci_called)
 
     def test_calls_match_declared_inputs(self):
         for path in sorted(WORKFLOWS.glob('*.yml')):

@@ -27,7 +27,7 @@ updates:
       # pass, so Dependabot's bump to it would break them. Refresh these pins by hand.
       - dependency-name: dtolnay/rust-toolchain
 
-  # The core and its wasm-bindgen browser test. The Forge's check-msrv (hyper-check-core.yml)
+  # The core and its wasm-bindgen browser test. The Forge's MSRV check (hyper-core-checks.yml)
   # holds the lockfiles to rust-version. Also the TypeScript binding's napi-rs crate and the Java binding's JNI crate.
   # Not the R package's wrapper crate (r/src/rust): its only dependency is the core itself,
   # pinned `=` the release version (a version file prepare-release bumps, not a dependency to

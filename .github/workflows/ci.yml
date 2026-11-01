@@ -1,13 +1,14 @@
 name: CI — build native, build wasm, test every binding
 
-# The build/test matrix lives in HyperForge (SkunkWerkx/.github) as the canonical Hyper*
-# pipeline — 5 real-hardware legs plus the two musl RIDs in Alpine containers (and osx-x64
-# cross-built on the Apple silicon runner, the core's own suite run under Rosetta), the Rust core
-# built fresh per leg, every binding's suite run against it. Ruby's suite runs on the
-# Magnus extension once per Ruby ABI on seven RIDs — the musl ones in each Ruby's Alpine
-# image; osx-x64 is cross-built, with no Magnus extension and no binding suite — and once
-# more forced onto the Fiddle fallback; Python
-# has no fallback — PyO3 only, staged and tested per leg.
+# The board: the Rust core first, on the seven hosts (hyper-core.yml, one caller job whose
+# matrix builds, tests, export-checks and C-smokes each leg and uploads native-<rid>), then
+# one job per host × binding, each binding's own Forge workflow called only when `changes`
+# says the pull request touched it (or the core, or .github/), so a one-binding change pays
+# one toolchain setup per host and nothing for the eight other bindings. Each binding's lint
+# runs once, on ubuntu-26.04-arm, ahead of its suites: a red lint starts no suite anywhere.
+# On workflow_dispatch and schedule nothing is gated — `changes` emits every output true and
+# docs_only false — so the release-mode board is the whole board, and pr-board, the one
+# status to read, is red when any needed job failed or was skipped while its gate said run.
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
@@ -37,8 +38,8 @@ on:
     - cron: "0 6 * * 1"
 
 # Least privilege for the whole board: every job below reads the repository and nothing more.
-# The five HyperForge build jobs need id-token and attestations on top of that (SLSA provenance
-# for what they build), and request-staging needs actions to start stage-native-binaries.yml;
+# The HyperForge jobs that attest need id-token and attestations on top of that (SLSA
+# provenance for what they build), and request-staging needs actions to start stage-native-binaries.yml;
 # each declares those itself — a job-level `permissions:` replaces this block rather than
 # adding to it, so the writes never reach another job. This is also what
 # quietens CodeQL's actions/missing-workflow-permissions, which otherwise fires once per job.
@@ -51,7 +52,80 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # What the pull request touched, one boolean per class (.github/scripts/pr_changes.py has
+  # the rules: `ci` is .github/**, `core` is rust/, include/, c/ and corpus/, `docs_only` is
+  # Markdown and dotfiles alone, and an unclassified path is everything). Every gate below
+  # reads these. The file list comes from the API, paginated, so a rename classifies both
+  # sides and no checkout depth is involved; under pipefail an API failure is a red job, never
+  # a docs-only board. Off a pull request every output is true: the whole board runs.
+  changes:
+    runs-on: ubuntu-26.04
+    # pull-requests read is what the files endpoint documents for a fine-grained token (a public
+    # repository's files are readable without it, but the scope is read-only either way and
+    # a fork's pull request gets the same read token, so nothing is widened).
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      core: ${{ steps.classify.outputs.core }}
+      ci: ${{ steps.classify.outputs.ci }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      csharp: ${{ steps.classify.outputs.csharp }}
+      java: ${{ steps.classify.outputs.java }}
+      python: ${{ steps.classify.outputs.python }}
+      ruby: ${{ steps.classify.outputs.ruby }}
+      php: ${{ steps.classify.outputs.php }}
+      swift: ${{ steps.classify.outputs.swift }}
+      typescript: ${{ steps.classify.outputs.typescript }}
+      r: ${{ steps.classify.outputs.r }}
+      go: ${{ steps.classify.outputs.go }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Classify the pull request's files
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = pull_request ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate \
+              --jq '.[] | [.filename, (.previous_filename // "")] | @tsv' \
+              | python3 .github/scripts/pr_changes.py | tee -a "$GITHUB_OUTPUT"
+          else
+            python3 .github/scripts/pr_changes.py --all | tee -a "$GITHUB_OUTPUT"
+          fi
+
+  # The core on the seven hosts: cargo cdylib, the crate's suite and corpus, the glibc floor,
+  # the cdylib's exports held to rust/src/ffi.rs and loaded by .github/scripts/cdylib_smoke.py,
+  # this leg's static archive, the C archive assembled from both and c/smoke/ built against
+  # it, and native-<rid> uploaded (attested off pull requests). It never skips on a code
+  # change: a binding change can touch nothing here and still needs a core to test against.
+  core:
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-core.yml@master
+    # A reusable workflow can never escalate beyond what the calling job was granted, so the
+    # two scopes attest-build-provenance needs have to be handed down from here — id-token to
+    # mint the OIDC token it signs with, attestations to record the result. contents stays
+    # read: nothing in the called workflow writes to the repo.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+
+  # The cross-target bundle (Apple, Android, the archives the NuGet targets link), one
+  # producer of static-libs: C#'s and Swift's suites and the NuGet consumer test download it.
   build-static:
+    needs: [changes]
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.csharp == 'true' || needs.changes.outputs.swift == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-static.yml@master
     permissions:
       contents: read
@@ -65,6 +139,8 @@ jobs:
       android: true
 
   build-android:
+    needs: [changes]
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-android.yml@master
     permissions:
       contents: read
@@ -74,41 +150,169 @@ jobs:
       crate: hyperuuid
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
 
-  test-swift-static:
-    needs: build-static
-    uses: SkunkWerkx/.github/.github/workflows/hyper-test-swift-static.yml@master
+  # Every static check on the core, in one Forge job on three hosts (hyper-core-checks.yml):
+  # rustfmt and clippy, the C ABI held to rust/src/ffi.rs by .github/scripts/check_exports.py,
+  # the release checks, the conformance corpus re-derived by corpus/oracle.py,
+  # cargo-semver-checks against the last crates.io release, the MSRV, the no_std and no-panic
+  # proofs, the crate's whole suite on wasm32-wasip1 under a pinned wasmtime, actionlint over
+  # this directory with the workflow-contract, ABI-probe and text-file tests in
+  # .github/scripts/tests, and clang-format and shellcheck over c/smoke/ and the C++ header.
+  # The inputs are what is HyperUuid about it: off std there is no OS for `getrandom` to read,
+  # so the no_std builds name the custom backend, clippy also runs the Android configuration,
+  # whose entropy path (entropy.rs: ChaCha20 for batches, no pool) nothing else compiles, and
+  # `extra_features: uuid1` with the `no_panic_command` override put the `uuid` interop feature
+  # through clippy, the MSRV check and the no-panic link, which links a second time with
+  # `--cfg hyperuuid_words_walk` for the WebAssembly batch walk (rust/src/v7.rs, `fill_batch`),
+  # and `big_endian` runs the core's suite, corpus included, on s390x under QEMU. The bindings'
+  # own lints are the lint-<binding> jobs below. None of it waits on the core legs.
+  core-checks:
+    needs: [changes]
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-core-checks.yml@master
     permissions:
       contents: read
     with:
-      project: HyperUuid
+      no_std_rustflags: --cfg getrandom_backend="custom"
+      extra_features: uuid1
+      no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1 && RUSTFLAGS="--cfg hyperuuid_words_walk" cargo build --release --example no_panic --features no-panic,uuid1
+      big_endian: s390x-unknown-linux-gnu
+      clippy_targets: aarch64-linux-android
 
-  # The C archives the release attaches, packed from this run's libraries the way the tag
-  # run packs them, and each one built against through CMake and pkg-config on a runner that
-  # executes it (c/smoke/run.sh).
-  test-c:
-    needs: [build-native, build-static, build-android]
-    uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master
+  # Each binding's formatter and linter, once, on ubuntu-26.04-arm, ahead of its suites. The
+  # Forge's lint_node, lint_r and lint_java_jni default false until the siblings carry those
+  # bindings; everything else defaults on. Go's fast gate is gofmt, go vet, revive and the
+  # committed-core regeneration check; lint-go-full adds the cross-compile sweep and the race
+  # run beside the suites, gating nothing.
+  lint-csharp:
+    needs: [changes]
+    if: needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-csharp.yml@master
     permissions:
       contents: read
     with:
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
-
-  build-native:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-build-native.yml@master
-    # A reusable workflow can never escalate beyond what the calling job was granted, so the
-    # two scopes attest-build-provenance needs have to be handed down from here — id-token to
-    # mint the OIDC token it signs with, attestations to record the result. contents stays
-    # read: nothing in the called workflow writes to the repo.
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    with:
-      # pr: every leg and suite, nothing only a release needs (see the forge's README).
-      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
-      project: HyperUuid
       crate: hyperuuid
-      pure_env: HYPERUUID_PURE
+      project: HyperUuid
+
+  lint-java:
+    needs: [changes]
+    if: needs.changes.outputs.java == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-java.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      lint_java_jni: true
+
+  lint-python:
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-python.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+
+  lint-ruby:
+    needs: [changes]
+    if: needs.changes.outputs.ruby == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-ruby.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+
+  lint-php:
+    needs: [changes]
+    if: needs.changes.outputs.php == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-php.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+
+  lint-swift:
+    needs: [changes]
+    if: needs.changes.outputs.swift == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-swift.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+
+  lint-typescript:
+    needs: [changes]
+    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-typescript.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      lint_node: true
+
+  lint-r:
+    needs: [changes]
+    if: needs.changes.outputs.r == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-r.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      lint_r: true
+
+  lint-go:
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-go.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      linters: fast
+
+  lint-go-full:
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-go.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      linters: full
+
+  # Each binding's suite on the hosts it ships on, after its lint and the core legs (Go waits
+  # for its lint alone: its core is committed Go source). The inputs are the ones the native
+  # workflow took for the binding; the jobs whose Forge workflow attests what it uploads
+  # (jni-<rid>, node-<rid>, ruby-native-<rid>-<abi>, php-ext-<rid>-<minor>) hand down the two
+  # scopes, as core does.
+  test-csharp:
+    needs: [changes, lint-csharp, core, build-static]
+    if: needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-csharp.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
       # Turns the package's Native AOT claim into a per-platform receipt: publish on all five
       # legs, fail on any ILxxxx/AOTxxxx trim diagnostic, then actually run the produced
       # binary and require exit 0. The log uploads as aot-report-{rid}. The smoke test
@@ -116,6 +320,57 @@ jobs:
       # span transforms — so this covers the AOT-sensitive parts, not just NewV4().
       csharp_aot_project: csharp/HyperUuid.AotSmokeTest/HyperUuid.AotSmokeTest.csproj
       csharp_aot_frameworks: "net10.0 net11.0"
+      # The suite and the AOT smoke test run on net10.0 and net11.0 on every desktop and musl
+      # leg: the forge installs the global.json SDK plus the 10.0 runtime and publishes once
+      # per framework. iOS, Mac Catalyst and Android stay .NET 11 (HYPERUUID003); Blazor
+      # WebAssembly takes both.
+      csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
+      csharp_extra_runtime: "10.0"
+      # The csproj's runtimes/**/native wildcard stages at pack time, so the binding takes the
+      # pipeline's explicit per-leg placement for in-repo testing.
+      csharp_runtimes_dir: csharp/HyperUuid/runtimes
+  test-java:
+    needs: [changes, lint-java, core]
+    if: needs.changes.outputs.java == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-java.yml@master
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      # A jar has no per-platform package selection like NuGet's RID folders, so the binding
+      # takes the pipeline's explicit per-leg placement for in-repo testing.
+      java_resources_dir: java/src/main/resources/native
+      # JDK 21 is the jar's floor (JNI on 21–24), shipped beside the primary 25; it reaches
+      # EOL at Temurin on 2029-12-31, then this input and `java_jni` go.
+      java_jni: true
+      jdk_floor_version: "21"
+  test-python:
+    needs: [changes, lint-python, core]
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-python.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+  test-ruby:
+    needs: [changes, lint-ruby, core]
+    if: needs.changes.outputs.ruby == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-ruby.yml@master
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+      pure_env: HYPERUUID_PURE
       # The forge's ruby_version default (4.0, the current release) is the primary ABI; this
       # adds a second Magnus build+suite against 3.4 so each platform gem can ship both. A
       # Magnus extension is bound to one Ruby minor — unlike PyO3's abi3 wheels, which is why
@@ -126,44 +381,90 @@ jobs:
       # then and 3.4 consumers fall back to the universal Fiddle gem, which is exactly what
       # it's there for.
       ruby_compat_version: "3.4"
-      # The floor composer.json declares; a pr-mode run builds and tests the PHP extension on
-      # it on linux-x64 beside the newest minor (release builds every minor in the Forge's
-      # php_versions). Explicit because the Forge's default (8.2) serves the siblings.
+  test-php:
+    needs: [changes, lint-php, core]
+    if: needs.changes.outputs.php == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-build-php-extension.yml@master
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      # The floor composer.json declares; explicit because the Forge's default (8.2) serves
+      # the siblings. A pull request builds and tests the extension on two legs, one per build
+      # path: linux-x64 on the newest minor from the image's own PHP, and win-x64 on this
+      # floor through setup-php (the floor's Windows build takes another toolset). Release
+      # mode ignores pr_legs and builds every minor on six RIDs.
       php_floor_version: "8.3"
-      # attest_native defaults to true in the forge — each native library gets SLSA
-      # provenance tying it to this run and commit. It matters here specifically because the
-      # Rust build is deterministic for one toolchain and build image but NOT bit-reproducible
-      # across images (with the same rustc and linker, a local build and a runner's differ in
-      # hash and size; csharp/README.md has the measurement), so rebuild-and-compare isn't a
-      # check a consumer can actually perform. The permissions block above is what makes it
-      # work; without those scopes the step fails rather than silently skipping.
-      # The suite and the AOT smoke test run on net10.0 and net11.0 on every desktop and musl
-      # leg: the forge installs the global.json SDK plus the 10.0 runtime and publishes once
-      # per framework. iOS, Mac Catalyst and Android stay .NET 11 (HYPERUUID003); Blazor
-      # WebAssembly takes both.
-      csharp_test_project: csharp/HyperUuid.Tests/HyperUuid.Tests.csproj
-      csharp_extra_runtime: "10.0"
-      # A jar has no per-platform package selection like NuGet's RID folders, and the
-      # csproj's runtimes/**/native wildcard stages at pack time — so both bindings take
-      # the pipeline's explicit per-leg placement for in-repo testing.
-      csharp_runtimes_dir: csharp/HyperUuid/runtimes
-      java_resources_dir: java/src/main/resources/native
-      # JDK 21 is the jar's floor (JNI on 21–24), shipped beside the primary 25; it reaches
-      # EOL at Temurin on 2029-12-31, then this input and `java_jni` go.
-      java_jni: true
-      jdk_floor_version: "21"
-      # The TypeScript addon (uploaded and attested as node-{rid} for release.yml's npm-pack)
-      # and R CMD check --as-cran. Both default false in the Forge until the siblings carry
-      # these bindings; the Node, Bun and R versions are the Forge's defaults.
-      node: true
-      r: true
+      pr_legs: two-paths
+  test-swift:
+    needs: [changes, lint-swift, core, build-static]
+    if: needs.changes.outputs.swift == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-swift.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+  test-typescript:
+    needs: [changes, lint-typescript, core]
+    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-typescript.yml@master
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+  test-r:
+    needs: [changes, lint-r, core]
+    if: needs.changes.outputs.r == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-r.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      project: HyperUuid
+  test-go:
+    needs: [changes, lint-go]
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-go.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      crate: hyperuuid
+      go_version_file: go/go.mod
+  # The C archives the release attaches, packed from this run's libraries the way the tag run
+  # packs them (c_package.py pack over every RID, the Android archives included, and the
+  # layout check), uploaded as c-packages-ci. The per-RID smokes ran on the core legs and the
+  # formatter in core-checks, so this is the pack alone; the Apple mobile smoke takes the
+  # packed archives in test-apple-mobile.
+  pack-c:
+    needs: [changes, core, build-static, build-android]
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master
+    permissions:
+      contents: read
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+      smokes: false
+      lint: false
 
   # C#/NuGet's WASM support is a shipped surface (Norse Architecture needs it), so it's
-  # built on every PR, not just at release time.
+  # built on every pull request that can reach it, not just at release time.
   build-wasm:
+    needs: [changes]
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.csharp == 'true' || needs.changes.outputs.typescript == 'true' || needs.changes.outputs.go == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
-    # Handed down for the same reason as build-native's: the ruby.wasm job attests the
-    # archives the companion gem ships.
+    # Handed down for the same reason as core's: the ruby.wasm job attests the archives the
+    # companion gem ships, and the WASI job its module.
     permissions:
       contents: read
       id-token: write
@@ -173,21 +474,22 @@ jobs:
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       crate: hyperuuid
       project: HyperUuid
-      # Every browser target runs in headless Chrome, not just built: the Blazor smoke app
-      # linking the archive above, the crate itself for wasm32-unknown-unknown, and the Go
+      # Every browser target runs in headless Chrome, not just built, each when the pull
+      # request can reach it: the archive and the Blazor smoke app linking it (C#, the core
+      # or the workflows), the crate itself for wasm32-unknown-unknown (the core), and the Go
       # binding's smoke package compiled by TinyGo, its core being Go source (translated by
       # wasm2go from the crate's wasm32-wasip1 build and committed). The Go suite itself runs
       # on WebAssembly too: under TinyGo on wasip1 (wasmtime, the corpus mounted, with a
       # negative control without the mount), and under stock Go on js/wasm (Node) and
-      # wasip1/wasm (wasmtime). And
-      # in release mode (weekly and release, not PRs) the Magnus extension, built for each
-      # Ruby minor the -wasm gem carries, linked into a ruby.wasm interpreter and run under
-      # Node and in headless Chrome; those archives are uploaded as ruby-wasm-{minor} for
-      # release.yml.
-      blazor_check: csharp/HyperUuid.WasmSmokeTest/check.sh
-      rust_browser_test: rust/browser-test
-      go_wasm_suite: true
-      go_tinygo_smoke: go/internal/tinygosmoke
+      # wasip1/wasm (wasmtime). And in release mode (weekly and release, not PRs) the Magnus
+      # extension, built for each Ruby minor the -wasm gem carries, linked into a ruby.wasm
+      # interpreter and run under Node and in headless Chrome; those archives are uploaded as
+      # ruby-wasm-{minor} for release.yml.
+      archive: ${{ needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.csharp == 'true' }}
+      blazor_check: ${{ (needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.csharp == 'true') && 'csharp/HyperUuid.WasmSmokeTest/check.sh' || '' }}
+      rust_browser_test: ${{ (needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') && 'rust/browser-test' || '' }}
+      go_wasm_suite: ${{ needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
+      go_tinygo_smoke: ${{ (needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true') && 'go/internal/tinygosmoke' || '' }}
       ruby_wasm_smoke: ruby/wasm-smoke
       # The TypeScript binding's WebAssembly fallback: the napi-rs module built for threadless
       # wasm32-wasip1, the whole suite run against it with the native addon refused, the WASI
@@ -195,7 +497,7 @@ jobs:
       # Chrome; the module and its loaders are attested and uploaded as node-wasm32-wasip1,
       # which pack-npm and test-npm-package below consume. First job in that workflow: the
       # newest code fails first.
-      node_wasi: true
+      node_wasi: ${{ needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.typescript == 'true' }}
 
   # The 17 PyPI wheels, on every run rather than only at the tag: built by maturin,
   # installed on their own platform and on each interpreter they serve, free-threaded ones
@@ -208,9 +510,11 @@ jobs:
   # distribution too: built, `pip install`ed at exactly `rust-version` on manylinux2014 and
   # Alpine (one minor lower must fail), attested and uploaded as `pypi-wheels-sdist`.
   build-wheels:
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
-    # Same two scopes build-native hands down, for the same reason: the forge attests each
-    # wheel and cannot escalate past what this job was granted.
+    # Same two scopes core hands down, for the same reason: the forge attests each wheel and
+    # cannot escalate past what this job was granted.
     permissions:
       contents: read
       id-token: write
@@ -219,37 +523,6 @@ jobs:
       # pr: the Pyodide wheel and its in-browser suite only; the native wheels are packaging.
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       crate: hyperuuid
-
-  # Every static check on the core and every binding's lint and formatter, once, in the Forge
-  # (hyper-check-core.yml): no_std and no-panic proofs, the C ABI held to rust/src/ffi.rs
-  # (.github/scripts/check_exports.py and the cdylib built on every RID, dlopen'd and called by
-  # .github/scripts/cdylib_smoke.py), the conformance corpus re-derived by corpus/oracle.py, the
-  # workflow-contract, ABI-probe and text-file tests in .github/scripts/tests (the last holds
-  # every tracked text file to UTF-8, no BOM and LF), rustfmt and clippy, the MSRV,
-  # cargo-semver-checks against the last crates.io release, and actionlint over this directory. The inputs below are what is HyperUuid
-  # about it: off std there is no OS for `getrandom` to read, so the no_std builds name the custom
-  # backend, clippy also runs the Android configuration, whose entropy path (entropy.rs:
-  # ChaCha20 for batches, no pool) nothing else compiles, and `extra_features: uuid1` with the
-  # `no_panic_command` override put the `uuid` interop feature through clippy, the MSRV check
-  # and the no-panic link, which links a second time with `--cfg hyperuuid_words_walk` for the
-  # WebAssembly batch walk (rust/src/v7.rs, `fill_batch`), and `big_endian` runs the core's
-  # suite, corpus included, on s390x under QEMU, and `lint_java_jni` runs the JNI crate's std
-  # tests and its no_std build.
-  # None of it waits on build-native.
-  check-core:
-    uses: SkunkWerkx/.github/.github/workflows/hyper-check-core.yml@master
-    permissions:
-      contents: read
-    with:
-      no_std_rustflags: --cfg getrandom_backend="custom"
-      extra_features: uuid1
-      no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1 && RUSTFLAGS="--cfg hyperuuid_words_walk" cargo build --release --example no_panic --features no-panic,uuid1
-      big_endian: s390x-unknown-linux-gnu
-      clippy_targets: aarch64-linux-android
-      lint_node: true
-      lint_r: true
-      lint_java_jni: true
-
 
   # iOS and Mac Catalyst, for the three bindings that reach them. Neither platform loads a
   # library: the core is linked into the app, from the static libraries build-static
@@ -271,6 +544,9 @@ jobs:
   #    device with signing off. No runner has a device, so that last one is proved as far as
   #    a link goes: the app's executable must define the core's symbols.
   #
+  #  * C takes the four archives pack-c packed (header, static library, CMake and pkg-config
+  #    files): c/smoke/apple-mobile.sh builds the smoke consumer against each and runs the
+  #    simulator and Catalyst ones, in the simulator booted below.
   #  * Go takes none: its core is Go source (go/internal/core), so the suite here proves the
   #    translated core on iOS, not a link. It runs in the simulator through Go's own
   #    wrapper, misc/ios/go_ios_exec.go, which is how the Go project tests its iOS port; the
@@ -286,8 +562,8 @@ jobs:
   # app also writes what it prints to a file in its container (SmokeLog.cs) and that file is
   # what is checked.
   test-apple-mobile:
-    needs: build-static
-    # Start when the static archives are ready; release mode only.
+    needs: [changes, build-static, pack-c]
+    # Start when the static archives and the packed C archives are ready; release board only.
     if: github.event_name != 'pull_request'
     # The .NET 11 RC2 ios and maccatalyst workloads (27.0.x) are built against Xcode 27.0 and
     # refuse any other version; macos-latest (macOS 26) tops out at Xcode 26.6. The xcode-27
@@ -338,6 +614,45 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      # The C archives' four Apple mobile smokes, moved here from the Forge's hyper-test-c.yml
+      # so the full board boots one simulator: the archives pack-c packed, unpacked and built
+      # against through CMake (c/smoke/apple-mobile.sh: the iOS and simulator slices, Mac
+      # Catalyst on both architectures, maccatalyst-x64 under Rosetta), in the simulator above.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: c-packages-ci
+          path: c-packages
+
+      - name: Unpack the four Apple mobile archives
+        if: ${{ !cancelled() }}
+        id: unpack
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
+          mkdir unpacked
+          for rid in ios-arm64 iossimulator-arm64 maccatalyst-arm64 maccatalyst-x64; do
+            archives=(c-packages/*-"$version-$rid".tar.gz)
+            [ "${#archives[@]}" = 1 ] && [ -f "${archives[0]}" ] \
+              || { echo "::error::expected one $rid archive at $version, found: ${archives[*]}"; exit 1; }
+            tar -xzf "${archives[0]}" -C unpacked
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rosetta
+        if: ${{ !cancelled() }}
+        run: |
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            softwareupdate --install-rosetta --agree-to-license
+          fi
+          arch -x86_64 /usr/bin/true
+
+      - name: C — the four Apple mobile archives, built against and run
+        if: ${{ !cancelled() }}
+        env:
+          VERSION: ${{ steps.unpack.outputs.version }}
+        run: c/smoke/apple-mobile.sh unpacked "$VERSION"
 
       - name: Swift — macOS, with the XCFramework declared
         run: |
@@ -406,7 +721,7 @@ jobs:
             || { echo "::error::the iOS device build of the Go suite produced no binary"; exit 1; }
           echo "the Go suite builds for an iOS device"
 
-      # The SDK global.json names, as build-native's legs take it.
+      # The SDK global.json names, as the Forge's C# legs take it.
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         if: ${{ !cancelled() }}
         with:
@@ -517,7 +832,9 @@ jobs:
   # which an emulator's memory is no place for (every other leg runs them). The aarch64
   # builds are linked, not run. Swift's SDK for Android needs Swift 6.3 or later.
   test-android:
-    needs: [build-static, build-android]
+    needs: [changes, build-static, build-android]
+    # Release board only: an emulator run is minutes a pull request's own suites already cover.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
@@ -683,7 +1000,8 @@ jobs:
   #    installs no wasm workload.
   # The runner image's SDK is not assumed to be the only one: the job logs which are there.
   test-nuget-package:
-    needs: [build-static, build-native]
+    needs: [changes, core, build-static]
+    if: needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
@@ -842,15 +1160,17 @@ jobs:
   # package fits; big-endian, so the smoke's checks pass and the documented exit hang is
   # asserted, not hidden) and two bundlers. Bun runs the forced-WASI suite too, and its result is
   # recorded in the step summary without failing the job: Bun's node:wasi cannot initialise
-  # the module today (the design spec's Bun decision); native Bun stays green in build-native.
+  # the module today (the design spec's Bun decision); native Bun stays green on the TypeScript legs.
   # The Forge is checked out at master here, as release.yml does, for the pack script; the
   # workflow calls above resolve the same way.
   test-npm-package:
-    needs: [build-native, build-wasm]
+    # node-<rid> comes from the TypeScript legs, node-wasm32-wasip1 from build-wasm.
+    needs: [changes, core, build-wasm, test-typescript]
+    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-26.04, macos-26, windows-2025]
+        os: [ubuntu-26.04, xcode-27, windows-2025-vs2026]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -909,8 +1229,8 @@ jobs:
         run: |
           echo "- Bun $(bun --version) forced-WASI suite on $OS: $BUN_OUTCOME (recorded, never a failure of this job)" >> "$GITHUB_STEP_SUMMARY"
 
-      # PR mode has no osx-x64 build (hyper-build-native skips it), so the pack leaves that
-      # platform package out by name, as test-c does; the root still pins all eight, and npm
+      # PR mode has no osx-x64 build (hyper-core.yml skips it), so the pack leaves that
+      # platform package out by name, as pack-c does; the root still pins all eight, and npm
       # tolerates an optional dependency whose packument is missing. A release skips nothing.
       - name: Pack the ten tarballs as the release does
         shell: bash
@@ -959,8 +1279,11 @@ jobs:
   # workflow_run, and whichever staging request comes second finds A staged and skips. Pull
   # requests and the weekly schedule never stage, and only this job may start a workflow.
   request-staging:
-    needs: [build-static, build-android, test-swift-static, build-native, build-wasm, build-wheels,
-            check-core, test-apple-mobile, test-android, test-nuget-package, test-npm-package, test-c]
+    needs: [changes, core, build-static, build-android, core-checks, lint-csharp, lint-java,
+            lint-python, lint-ruby, lint-php, lint-swift, lint-typescript, lint-r, lint-go,
+            lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
+            test-typescript, test-r, test-go, pack-c, build-wasm, build-wheels,
+            test-nuget-package, test-npm-package, test-apple-mobile, test-android]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-26.04
     permissions:
@@ -972,3 +1295,28 @@ jobs:
         run: >-
           gh workflow run stage-native-binaries.yml --repo "$GITHUB_REPOSITORY" --ref master
           -f head_sha="$GITHUB_SHA" -f ci_run_id="$GITHUB_RUN_ID"
+
+  # The one status to read. Master is not branch-protected and a skipped job satisfies a
+  # required check, so this job, which always runs, is red when any job above failed or was
+  # cancelled, or was skipped while `changes` said it should run (a too-narrow classifier
+  # would otherwise be invisible); .github/scripts/pr_board.py has the gates, one per job.
+  pr-board:
+    needs: [changes, core, build-static, build-android, core-checks, lint-csharp, lint-java,
+            lint-python, lint-ruby, lint-php, lint-swift, lint-typescript, lint-r, lint-go,
+            lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
+            test-typescript, test-r, test-go, pack-c, build-wasm, build-wheels,
+            test-nuget-package, test-npm-package, test-apple-mobile, test-android]
+    if: always()
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Every needed job green, or skipped with its gate off
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          CHANGES: ${{ toJSON(needs.changes.outputs) }}
+        run: python3 .github/scripts/pr_board.py
