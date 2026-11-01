@@ -38,7 +38,7 @@ core_version() {
 gnu_tar() {
   local tar=tar
   command -v gtar > /dev/null && tar=gtar
-  "$tar" --version 2> /dev/null | grep -q 'GNU tar' || {
+  "$tar" --version 2> /dev/null | grep 'GNU tar' > /dev/null || {
     echo "vendor.sh: GNU tar is required (on macOS: brew install gnu-tar)" >&2
     exit 1
   }
@@ -118,7 +118,7 @@ case "${1:-}" in
     done
     version="$(core_version)"
     tar -xJOf "$PKG/src/rust/vendor.tar.xz" "vendor/$CRATE/Cargo.toml" 2> /dev/null \
-      | grep -q "^version = \"$version\"\$" || {
+      | grep "^version = \"$version\"\$" > /dev/null || {
       echo "vendor.sh: src/rust/vendor.tar.xz does not carry $CRATE $version; run tools/vendor.sh" >&2
       exit 1
     }

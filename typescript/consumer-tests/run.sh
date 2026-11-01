@@ -168,7 +168,7 @@ smoke() {
 expect_target() { grep -q "target=$2" "$1/out.txt" || die "$3: expected target=$2"; }
 expect_stderr_empty() { [ ! -s "$1/err.txt" ] || die "$2: stderr is not empty"; }
 expect_stderr_experimental_only() {
-  if grep -v -E 'ExperimentalWarning: WASI|--trace-warnings' "$1/err.txt" | grep -q .; then
+  if grep -v -E 'ExperimentalWarning: WASI|--trace-warnings' "$1/err.txt" | grep . >/dev/null; then
     die "$2: stderr carries more than the WASI ExperimentalWarning"
   fi
 }
