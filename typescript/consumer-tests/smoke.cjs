@@ -1,4 +1,4 @@
-// What a consumer sees: require('hyperuuid'), ask whether anything loaded, and if so use it.
+// What a consumer sees: require('@skunkwerkx/hyperuuid'), ask whether anything loaded, and if so use it.
 // Prints one line, `available=<bool> target=<native|wasm32-wasip1|none> [version=<v>]`, which
 // run.sh and container/consumer.sh assert on. When nothing loaded, the first door must throw
 // ERR_HYPERUUID_UNAVAILABLE and its cause chain is printed one per line, so the negative
@@ -8,7 +8,7 @@
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
-const api = require('hyperuuid')
+const api = require('@skunkwerkx/hyperuuid')
 
 function fail(message) {
   process.stdout.write(`FAIL: ${message}\n`)
@@ -32,7 +32,9 @@ if (!api.isAvailable()) {
   process.exit(0)
 }
 
-const binding = require(path.join(path.dirname(require.resolve('hyperuuid')), 'binding.js'))
+const binding = require(
+  path.join(path.dirname(require.resolve('@skunkwerkx/hyperuuid')), 'binding.js'),
+)
 process.stdout.write(
   `available=true target=${binding.__napiBindingTarget} version=${api.nativeVersion()}\n`,
 )

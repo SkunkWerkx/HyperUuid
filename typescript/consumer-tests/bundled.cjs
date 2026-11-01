@@ -5,7 +5,7 @@
 'use strict'
 const fs = require('node:fs')
 const path = require('node:path')
-const api = require('hyperuuid')
+const api = require('@skunkwerkx/hyperuuid')
 
 function fail(message) {
   process.stdout.write(`FAIL: ${message}\n`)

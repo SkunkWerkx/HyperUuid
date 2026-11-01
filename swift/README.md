@@ -361,8 +361,9 @@ gh attestation verify HyperUuidCore.artifactbundle.zip \
 ```
 
 Each zip also carries build provenance from `hyper-build-static.yml` in `SkunkWerkx/.github`,
-at the preparation commit the tagged commit was staged from (`stage-native-binaries.yml`
-verifies that before it writes a checksum into `Package.swift`), so that check needs
+at the preparation commit the tagged commit was staged from (the preparation run's
+`stage-release` job verifies that before it writes a checksum into `Package.swift`, and the tag
+run again before it signs the release attestation), so that check needs
 `--signer-repo` beside `--repo`:
 
 ```sh

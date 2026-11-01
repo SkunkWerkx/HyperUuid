@@ -8,7 +8,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/SkunkWerkx/HyperUuid/go.svg)](https://pkg.go.dev/github.com/SkunkWerkx/HyperUuid/go)
 [![Swift Package](https://img.shields.io/github/v/tag/SkunkWerkx/HyperUuid?label=swift%20package&sort=semver)](https://github.com/SkunkWerkx/HyperUuid/tags)
 [![RubyGems](https://img.shields.io/gem/v/hyperuuid.svg)](https://rubygems.org/gems/hyperuuid)
-[![npm](https://img.shields.io/npm/v/hyperuuid.svg)](https://www.npmjs.com/package/hyperuuid)
+[![npm](https://img.shields.io/npm/v/@skunkwerkx/hyperuuid.svg)](https://www.npmjs.com/package/@skunkwerkx/hyperuuid)
 [![CRAN](https://img.shields.io/cran/v/hyperuuid.svg)](https://cran.r-project.org/package=hyperuuid)
 [![Packagist](https://img.shields.io/packagist/v/skunkwerkx/hyperuuid.svg)](https://packagist.org/packages/skunkwerkx/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -162,7 +162,7 @@ Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s
 | [Ruby](ruby/) | ✅ | ✅ | ✅ | ✅ | Fiddle, built | ✅ | ✅ | ✅ | [RubyGems](https://rubygems.org/gems/hyperuuid) |
 | [PHP](php/) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | `pie install` ([Packagist](https://packagist.org/packages/skunkwerkx/hyperuuid); zips on the GitHub Release) |
 | [Python](python/) | ✅ | ✅ | ✅ | ✅ | built | ✅ | ✅ | ✅ | [PyPI](https://pypi.org/project/hyperuuid/) |
-| [TypeScript](typescript/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [npm](https://www.npmjs.com/package/hyperuuid) |
+| [TypeScript](typescript/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [npm](https://www.npmjs.com/package/@skunkwerkx/hyperuuid) |
 | [R](r/) | source | source | source | source | source | source | source | experimental | [CRAN](https://cran.r-project.org/package=hyperuuid) |
 | [C, C++](c/) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | GitHub Release (one archive per RID) |
 

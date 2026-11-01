@@ -492,10 +492,12 @@ beside the spike's; the others have the harness and the command.
   a clean project in CI now, and the CDN's bytes are verified against the attested bytes
   (0.2.0), so "the registry stores an upload verbatim" is measured each release rather than
   assumed.
-- **Two acts at one tag.** The tag push packs, attests (build provenance plus one release
-  attestation naming every shipped file) and preserves without uploading; a dispatch publishes
-  from the preserved bytes. The publish dispatch is also the recovery path, so every release
-  exercises it.
+- **Two acts, and the tag is the publish.** The preparation run packs, attests (build
+  provenance for every package and the inventory) and preserves; the tag push verifies those
+  bytes, signs one release attestation naming every shipped file and publishes. A dispatch at
+  the tag replays with the receipts, and every release runs that once as its no-op recovery
+  proof. Until 1.1.0 the tag push only preserved and a dispatch published, which is how 1.0.0's
+  wheels came to be uploaded by a third workflow (below).
 - **The shared pipeline is called at its head, unpinned**, so a fix reaches every consumer at
   once, and Forge merges are held while a release is in flight. A CI run from before a version
   bump is not reusable after it (0.4.0).
@@ -555,6 +557,13 @@ in the spec, `docs/superpowers/specs/2026-10-31-pr-board-design.md`).
 - The pull-request board: the docs-only and one-binding controls, not yet run; `lint-r`
   beside its suites, or cut below the core legs' time; the sdist fall-through's PR-mode gate,
   a Forge decision; the Windows arm64 core leg's 4m17.
+- PyPI shows a change of provenance on 1.0.0 and will show one on 1.1.0: the `v1.0.0` tag run's
+  PyPI upload failed inside the Forge's composite (actions/runner#2473) and a one-off
+  `pypi-recovery.yml` uploaded the attested bytes, so the PEP 740 attestations name a workflow
+  the tag's own did not. The release train is the answer, not a fix: from 1.1.0 the tag push
+  publishes from `release.yml` and a retry is the same file dispatched at the tag, so the
+  publishing workflow's name never changes again. The two marks on PyPI stay; a tag's workflow
+  cannot be replaced. First proved at 1.1.0.
 - The obvious next experiment, given lesson 2: a buffered stream on Apple platforms inside the
   core itself, which is what Go did outside it, and which would move the TypeScript and R Apple
   rows. Not started, and not promised here.

@@ -1,7 +1,7 @@
 # hyperuuid
 
 [![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/hyperuuid.svg)](https://www.npmjs.com/package/hyperuuid)
+[![npm](https://img.shields.io/npm/v/@skunkwerkx/hyperuuid.svg)](https://www.npmjs.com/package/@skunkwerkx/hyperuuid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
 
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
@@ -19,7 +19,7 @@ that pay for randomness once.
 ## Install
 
 ```sh
-npm install hyperuuid
+npm install @skunkwerkx/hyperuuid
 ```
 
 The package itself is JavaScript and types; the core comes from one of nine companion
@@ -50,7 +50,7 @@ It runs on Node 22.13 or newer
 ## Usage
 
 ```js
-const hyperuuid = require('hyperuuid')
+const hyperuuid = require('@skunkwerkx/hyperuuid')
 
 const id1 = hyperuuid.newV4()
 const id2 = hyperuuid.newV5(hyperuuid.Namespaces.dns, 'example.com')
@@ -85,7 +85,7 @@ console.log('batch:', batch.length)
 ESM works the same way, named imports included:
 
 ```js
-import { newV7, v7Timestamp } from 'hyperuuid'
+import { newV7, v7Timestamp } from '@skunkwerkx/hyperuuid'
 
 const id = newV7(new Date('2022-02-22T19:22:22Z'))
 console.log(id.slice(0, 13), v7Timestamp(id).toISOString()) // 017f22e2-79b0 2022-02-22T19:22:22.000Z
@@ -141,7 +141,7 @@ A HyperUuid error is an `Error` with a `code` from the table, and the same messa
 binding raises where one exists:
 
 ```js
-const { newV7, version, isHyperUuidError } = require('hyperuuid')
+const { newV7, version, isHyperUuidError } = require('@skunkwerkx/hyperuuid')
 
 try {
   version('not a uuid')
@@ -177,7 +177,7 @@ names no UUID version (outside 0 to 15, or not a whole number) answers `false`.
 
 ### When no native addon fits
 
-`require('hyperuuid')` tries the platform package for the host first. When none fits (the
+`require('@skunkwerkx/hyperuuid')` tries the platform package for the host first. When none fits (the
 install ran with `--omit=optional`, or the platform is not one of the eight) it loads the
 WebAssembly fallback instead: the same core compiled to `wasm32-wasip1`, run in-process
 through Node's `node:wasi` by [`@napi-rs/wasm-runtime`](https://www.npmjs.com/package/@napi-rs/wasm-runtime),
@@ -246,7 +246,7 @@ still there as frozen literals, and every door throws `ERR_HYPERUUID_UNAVAILABLE
 loader error as its `cause`, whose own `cause` chain names every attempt, native and WebAssembly:
 
 ```js
-const hyperuuid = require('hyperuuid')
+const hyperuuid = require('@skunkwerkx/hyperuuid')
 
 console.log(hyperuuid.isAvailable())
 try {
@@ -272,7 +272,7 @@ custom layouts, with the timestamp and counter placed where SQL Server's compara
 first, and the conversion back is exact:
 
 ```js
-const { newV5, newV7, v7ToSqlOrder, v7FromSqlOrder, Namespaces } = require('hyperuuid')
+const { newV5, newV7, v7ToSqlOrder, v7FromSqlOrder, Namespaces } = require('@skunkwerkx/hyperuuid')
 
 const id = newV7(1645557742000)
 const stored = v7ToSqlOrder(id)
@@ -307,7 +307,7 @@ the whole contract.
 When bytes are the destination (a database parameter, a wire format), skip the strings:
 
 ```js
-const { fillV7, newV7BatchBytes } = require('hyperuuid')
+const { fillV7, newV7BatchBytes } = require('@skunkwerkx/hyperuuid')
 
 const buf = new Uint8Array(1000 * 16)
 fillV7(buf) // 1000 v7 ids, one timestamp capture, no allocation
@@ -326,7 +326,7 @@ empty one writes nothing. It writes the caller's memory in place; a `Uint8Array`
 
 ```js
 const { newV7, version, variant, isRfc, getTimestamp, v7ToSqlOrder, Layout, Variant, NIL, MAX } =
-  require('hyperuuid')
+  require('@skunkwerkx/hyperuuid')
 
 const id = newV7()
 console.log(version(id)) // 7

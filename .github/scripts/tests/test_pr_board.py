@@ -64,17 +64,36 @@ class GateTests(unittest.TestCase):
         self.assertTrue(gates['lint-go-full'] and gates['build-wasm'])
 
     def test_core_gates_everything_but_the_release_jobs(self):
-        gates = pr_board.gates(outputs(core=True), 'pull_request')
+        gates = pr_board.gates(outputs(core=True), 'pull_request', 'refs/pull/1/merge')
         off = {name for name, gate in gates.items() if not gate}
-        self.assertEqual(off, {'test-apple-mobile', 'test-android'})
+        self.assertEqual(off, {'test-apple-mobile', 'test-android', *pr_board.TAIL})
 
     def test_release_only_jobs_are_gated_off_on_pull_requests(self):
         everything = outputs(**{key: True for key in ['core', 'ci'] + BINDINGS})
-        self.assertFalse(pr_board.gates(everything, 'pull_request')['test-apple-mobile'])
-        self.assertFalse(pr_board.gates(everything, 'pull_request')['test-android'])
-        for event in ('workflow_dispatch', 'schedule'):
-            gates = pr_board.gates(everything, event)
-            self.assertTrue(all(gates.values()), event)
+        self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-apple-mobile'])
+        self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-android'])
+        gates = pr_board.gates(everything, 'workflow_dispatch', 'refs/heads/master')
+        self.assertTrue(all(gates.values()))
+        gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
+        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL))
+
+    def test_the_tail_is_gated_on_a_master_dispatch_only(self):
+        on = pr_board.gates(outputs(core=True), 'workflow_dispatch', 'refs/heads/master')
+        self.assertTrue(all(on[name] for name in pr_board.TAIL))
+        for event, ref in (('pull_request', 'refs/pull/1/merge'), ('schedule', 'refs/heads/master'),
+                           ('workflow_dispatch', 'refs/heads/topic')):
+            with self.subTest(event=event, ref=ref):
+                self.assertFalse(any(pr_board.gates(outputs(core=True), event, ref)[name] for name in pr_board.TAIL))
+
+    def test_the_tail_is_gated_off_on_a_schedule(self):
+        self.assertTrue(pr_board.verdict(results(**{name: 'skipped' for name in pr_board.TAIL}),
+                                         pr_board.gates(outputs(core=True), 'schedule', 'refs/heads/master'))[0])
+
+    def test_request_staging_is_gone(self):
+        self.assertNotIn('request-staging', pr_board.JOBS)
+        self.assertEqual(pr_board.JOBS[-len(pr_board.TAIL):], pr_board.TAIL)
+        self.assertEqual(pr_board.TAIL, ['forge', 'nuget-org-pack', 'crate-pack', 'maven-pack', 'ruby-pack', 'npm-pack',
+                                         'r-pack', 'c-pack', 'pypi-pack', 'release-prepare', 'codeql', 'stage-release'])
 
     def test_gates_mirror_ci_yml(self):
         # Every job in ci.yml's `jobs:` but the two aggregates has a gate here, and a job's `if:`
@@ -83,7 +102,8 @@ class GateTests(unittest.TestCase):
         body = text[text.index('\njobs:') + 6:]
         starts = list(re.finditer(r'^  ([a-z][a-z0-9-]*):\s*$', body, re.M))
         jobs = {m[1]: body[m.start(): starts[i + 1].start() if i + 1 < len(starts) else len(body)] for i, m in enumerate(starts)}
-        self.assertEqual(set(jobs) - {'pr-board', 'request-staging'}, set(pr_board.JOBS))
+        self.assertEqual(set(jobs) - {'pr-board'}, set(pr_board.JOBS))
+        tail_gate = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'"
         for name in pr_board.JOBS:
             with self.subTest(job=name):
                 head = jobs[name].split('    steps:')[0]
@@ -92,9 +112,13 @@ class GateTests(unittest.TestCase):
                 if name == 'changes':
                     self.assertIsNone(gate)
                     continue
+                if name in pr_board.TAIL:
+                    # The release tail: a master dispatch and nothing else, whatever changed.
+                    self.assertEqual(gate[1], tail_gate)
+                    continue
                 if name in ('core', 'test-apple-mobile', 'test-android'):
                     continue
-                on = {key for key in outputs() if pr_board.gates(outputs(**{key: True}), 'pull_request')[name]}
+                on = {key for key in outputs() if pr_board.gates(outputs(**{key: True}), 'pull_request', 'refs/pull/1/merge')[name]}
                 self.assertEqual(on, classes)
 
 
@@ -147,10 +171,10 @@ class VerdictTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
-    def run_main(self, needs, changes, event):
+    def run_main(self, needs, changes, event, ref='refs/pull/1/merge'):
         out = io.StringIO()
         env = {'NEEDS': json.dumps({name: {'result': status, 'outputs': {}} for name, status in needs.items()}),
-               'CHANGES': json.dumps(changes), 'GITHUB_EVENT_NAME': event}
+               'CHANGES': json.dumps(changes), 'GITHUB_EVENT_NAME': event, 'GITHUB_REF': ref}
         with patch('sys.stdout', out), patch.dict('os.environ', env, clear=False):
             code = pr_board.main()
         return code, out.getvalue()
@@ -160,6 +184,15 @@ class MainTests(unittest.TestCase):
         code, out = self.run_main(needs, outputs(core=True), 'pull_request')
         self.assertEqual(code, 0, out)
         self.assertIn('ok', out)
+
+    def test_a_skipped_tail_is_red_on_a_master_dispatch_and_green_on_a_pull_request(self):
+        needs = results(**{name: 'skipped' for name in ['test-apple-mobile', 'test-android', *pr_board.TAIL]})
+        code, out = self.run_main(needs, outputs(core=True), 'pull_request')
+        self.assertEqual(code, 0, out)
+        needs = results(**{'stage-release': 'skipped'})
+        code, out = self.run_main(needs, outputs(core=True), 'workflow_dispatch', 'refs/heads/master')
+        self.assertEqual(code, 1)
+        self.assertIn('stage-release skipped but gated on', out)
 
     def test_red_exit_1_and_says_why(self):
         needs = results(**{'test-go': 'failure', 'test-apple-mobile': 'skipped', 'test-android': 'skipped'})
@@ -174,10 +207,15 @@ class MainTests(unittest.TestCase):
         body = text[text.index('\njobs:') + 6:]
         starts = list(re.finditer(r'^  ([a-z][a-z0-9-]*):\s*$', body, re.M))
         jobs = {m[1]: body[m.start(): starts[i + 1].start() if i + 1 < len(starts) else len(body)] for i, m in enumerate(starts)}
+        tail_gate = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'"
         for name, job in jobs.items():
             if 'attestations: write' not in job:
                 continue
             with self.subTest(job=name):
+                if name in pr_board.TAIL:
+                    # The release tail attests unconditionally and runs on a master dispatch alone.
+                    self.assertIn(f'    if: {tail_gate}\n', job)
+                    continue
                 self.assertIn("      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}\n", job)
                 self.assertNotIn('mode: release', job)
                 self.assertNotIn('attest_native', job, 'the Forge default, release mode only, stands')

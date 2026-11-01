@@ -412,7 +412,9 @@ tooling checks on its own. Those name the uploading workflow, and PyPI marks a r
 workflow differs from the previous one's: 1.0.0's name `pypi-recovery.yml`, the one-off
 workflow that uploaded that release's wheels after `release.yml`'s own upload failed before
 sending anything (the same packed and attested bytes, after the same checks), and 1.1.0's name
-`release.yml` again, so PyPI marks both. Every file of either still verifies from its tag with
+`release.yml` again, so PyPI marks both. From 1.1.0 on the tag push itself uploads from
+`release.yml`, and a retry is the same file dispatched at the tag, so the name does not change
+again. Every file of either still verifies from its tag with
 the commands above. The root README's [Provenance](../README.md#provenance) section has
 the whole picture.
 

@@ -1,5 +1,5 @@
 {
-  "name": "hyperuuid",
+  "name": "@skunkwerkx/hyperuuid",
   "version": "1.0.0",
   "type": "commonjs",
   "main": "index.js",
@@ -19,6 +19,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/SkunkWerkx/HyperUuid.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "napi": {
     "binaryName": "hyperuuid",
