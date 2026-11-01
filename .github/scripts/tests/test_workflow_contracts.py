@@ -214,6 +214,10 @@ class PreparationFlowTests(unittest.TestCase):
         wanted = ['Resolve the release-mode run whose core to build against', "Stage that run's attested Swift core",
                   'Build the Swift library']
         self.assertEqual([n for n in names if n in wanted], wanted)
+        # The Swift leg runs where the core legs run: the xcode-27 image carries the Swift
+        # toolchain the build step needs; macos-latest tracks whichever Xcode GitHub promotes.
+        self.assertIn('          - language: swift\n            build-mode: manual\n            runner: xcode-27\n', text)
+        self.assertNotIn('macos-latest', text)
         for needle in ("if: matrix.build-mode == 'manual'", 'name: swift-release-assets', 'run-id: ${{ steps.run.outputs.id }}',
                        '--signer-repo SkunkWerkx/.github', '--source-digest', 'swift_release.py" unpack --assets'):
             with self.subTest(needle=needle):
