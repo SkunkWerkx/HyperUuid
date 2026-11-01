@@ -501,6 +501,15 @@ beside the spike's; the others have the harness and the command.
 - **The shared pipeline is called at its head, unpinned**, so a fix reaches every consumer at
   once, and Forge merges are held while a release is in flight. A CI run from before a version
   bump is not reusable after it (0.4.0).
+- **Master is frozen from the dispatch until B lands, and the train enforces it.** The first
+  1.1.0 preparation to clear the board died at its `codeql` job: a cosmetic workflow fix had
+  been pushed to master while the run was in flight, the scan it dispatched ran on that commit
+  instead of A, and the job refused ("master moved beyond A; prepare again"), so no release
+  commit was staged. The guard had been written days earlier against exactly that case and
+  this was its first real firing. The four failures before it on the same night (a companion
+  lockfile the bump did not regenerate, a Homebrew tap that now needs `brew trust`, bash 3.2
+  rejecting an empty array) were each a release-mode path no pull request had ever run,
+  which is the cost of a board that gates on what changed.
 - **Floors follow upstream support, and the lists that move together are written down.** Go
   1.26, Python 3.11, Ruby 3.3 (on Fiddle), PHP 8.3, Node 22, .NET 10, JDK 21, Swift 6.2, R
   4.2, each with the date it moves and every file that moves with it listed in `CLAUDE.md`.
