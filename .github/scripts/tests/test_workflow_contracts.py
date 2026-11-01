@@ -256,10 +256,11 @@ ATTESTING = {'hyper-core.yml', 'hyper-build-static.yml', 'hyper-build-android.ym
              'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
 NO_MODE = {'hyper-core-checks.yml', 'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
 # The release tail of ci.yml, in dependency order (pr_board.py's TAIL): the Forge resolver, the
-# eight pack jobs, the inventory, CodeQL and B; gated on prepare-release.yml's master dispatch.
+# eight pack jobs, the inventory, CodeQL and B; gated on prepare-release.yml's master dispatch
+# with purpose=release (the default), so a purpose=board dispatch runs the board alone.
 TAIL = ['forge', 'nuget-org-pack', 'crate-pack', 'maven-pack', 'ruby-pack', 'npm-pack', 'r-pack', 'c-pack', 'pypi-pack',
         'release-prepare', 'codeql', 'stage-release']
-TAIL_GATE = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'"
+TAIL_GATE = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'"
 
 
 class CiTests(unittest.TestCase):
@@ -282,6 +283,18 @@ class CiTests(unittest.TestCase):
     @staticmethod
     def g(*keys):
         return ' || '.join(f"needs.changes.outputs.{key} == 'true'" for key in keys)
+
+    def test_dispatch_declares_purpose(self):
+        text = (WORKFLOWS / 'ci.yml').read_text()
+        head = text.split('\njobs:')[0]
+        block = re.search(r'^  workflow_dispatch:\n((?:    .*\n|\s*\n)+)', head, re.M)[1]
+        self.assertRegex(block, r'(?m)^      purpose:\n(?:        .*\n)*?        type: choice\n')
+        self.assertRegex(block, r'(?m)^        default: release$')
+        options = re.search(r'(?m)^        options:\n((?:          - .*\n)+)', block)[1]
+        self.assertEqual(re.findall(r'- (\S+)', options), ['board', 'release'])
+        # run-name yields `CI purpose=<purpose>` on a dispatch and defers to GitHub's default otherwise.
+        self.assertIn("run-name: ${{ github.event_name == 'workflow_dispatch' && format('CI purpose={0}', inputs.purpose) || '' }}\n", head)
+        self.assertIn('          PURPOSE: ${{ inputs.purpose }}\n', self.jobs['pr-board'])
 
     def test_mobile_dependencies(self):
         # Release board only, both of them; the C smoke's simulator run joins test-apple-mobile,
