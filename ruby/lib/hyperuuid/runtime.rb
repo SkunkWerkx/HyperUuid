@@ -47,7 +47,14 @@ module HyperUuid
     @mutex = Mutex.new
     @functions = nil
 
-    class << self
+    # The thirteen doors, the Fiddle way. They live in a module Runtime extends rather than
+    # on its singleton class, so the Magnus extension's define_singleton_method puts its
+    # definition on the singleton class in front of them: an override through the ancestor
+    # chain, not a redefinition, and `ruby -w` has nothing to say about it (1.1.0 defined
+    # them on the singleton class and printed "method redefined" twice per door on every
+    # require under -w). Lookup is unchanged either way: the singleton class first, then
+    # this module, so with the extension loaded no call ever reaches these.
+    module FiddleBackend
       def new_v4
         out = scratch
         rc = functions[:new_v4].call(out)
@@ -142,11 +149,15 @@ module HyperUuid
 
       # The loaded core's version word, major << 16 | minor << 8 | patch, straight from the
       # library's zero-argument hyperuuid_version export. HyperUuid.native_version unpacks
-      # it; like every method here, each backend replaces this one in place.
+      # it; like every door here, the extension defines its own in front of this one.
       def packed_version
         functions[:packed_version].call
       end
+    end
 
+    extend FiddleBackend
+
+    class << self
       # The one failure every generating export shares, with the one message every backend
       # raises for it: the export's name, and that the system's random source failed.
       def random_source_failure(export)

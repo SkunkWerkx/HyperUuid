@@ -8,10 +8,15 @@ This is a new submission.
   cargo 1.99.1.
 * Debian forky/sid on x86-64 (the `rocker/r-devel` image), R Under development (unstable)
   (2026-10-25 r90763), with the distribution's rustc and cargo 1.97.1.
+* The release's CI (GitHub Actions, rustc and cargo 1.99.1), `R CMD check --no-manual
+  --as-cran` failing on any NOTE, on the source the submitted tarball was built from: Ubuntu
+  26.04 x86-64 with R 4.6.2 and R 4.5.3, Ubuntu 26.04 aarch64 with R 4.6.2, macOS 27 aarch64
+  with R 4.6.2, and Windows Server 2022 x86-64 with R 4.6.2 (ucrt) and rustup's
+  `x86_64-pc-windows-gnu` target. All five: `Status: OK`.
 
 ## R CMD check results
 
-`R CMD check --as-cran hyperuuid_1.0.0.tar.gz`, with `_R_CHECK_CRAN_INCOMING_REMOTE_=TRUE`.
+`R CMD check --as-cran hyperuuid_1.1.0.tar.gz`, with `_R_CHECK_CRAN_INCOMING_REMOTE_=TRUE`.
 
 macOS, R 4.6.2, with the PDF manual (TinyTeX), `checkbashisms`, `qpdf` and `pandoc` installed:
 
@@ -78,4 +83,4 @@ to the binding and to R:
 
 Rtools ships no Rust, so the Windows build uses rustup's `x86_64-pc-windows-gnu` target
 (`aarch64-pc-windows-gnullvm` on ARM64), chosen by `tools/rustarch.R` in
-`src/Makevars.win`. Not tested locally; to be confirmed on win-builder.
+`src/Makevars.win`. Checked on Windows Server 2022 x86-64 in the release's CI (above).

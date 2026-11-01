@@ -28,6 +28,17 @@ RSpec.describe "native backend" do
     expect(fiddle_eval("HyperUuid::BACKEND")).to eq("fiddle")
   end
 
+  it "loads under -w without a method-redefinition warning" do
+    # 1.1.0 printed 26 lines under `ruby -w`, "method redefined; discarding old new_v4" and
+    # "previous definition of new_v4 was here" for each of the thirteen Runtime doors: the
+    # Fiddle definitions sat on Runtime's singleton class, exactly where the extension then
+    # defined its own. Any consumer running with warnings on saw it on every require.
+    lib = File.expand_path("../lib", __dir__)
+    out, status = Open3.capture2e(RbConfig.ruby, "-w", "-I", lib, "-r", "hyperuuid",
+                                  "-e", "print HyperUuid::BACKEND")
+    expect([status.success?, out]).to eq([true, "native"])
+  end
+
   it "agrees with the Fiddle backend on deterministic v5 generation" do
     native = HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "example.com").to_s
     expect(fiddle_eval('HyperUuid.new_v5(HyperUuid::Namespaces::DNS, "example.com").to_s')).to eq(native)
