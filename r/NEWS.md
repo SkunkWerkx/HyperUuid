@@ -1,4 +1,4 @@
-# hyperuuid 1.0.0
+# hyperuuid 1.1.0
 
 ## Added
 

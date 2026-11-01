@@ -111,7 +111,7 @@ Most languages *do* already have one — `Guid.NewGuid()`, `java.util.UUID.rando
 3. **Batch throughput, and a byte-level door under it.** Need to backfill a million IDs? `NewV7Batch`/`new_v7_batch`/`NewV7BatchAt` (binding-dependent naming) shares one timestamp capture and one contiguous counter reservation across the whole batch instead of paying per-item overhead N times — 1.3-15x faster than the equivalent loop depending on binding ([numbers below](docs/benchmarks.md#batch-generation-vs-an-equivalent-loop) and in each binding's README). Underneath that, every binding also exposes a raw-bytes form that constructs no UUID objects at all, which beats its own batch by **41x** in Ruby, 36x in Python and 16x in PHP (measured before PHP's extension) and lands every language measured on linux-x64 on the same floor, 3.6-4.9 µs per 1000 UUIDs ([numbers below](docs/benchmarks.md#skipping-object-construction-entirely)). Most stdlib UUID facilities have no batch API at all, let alone both. (Measured before the per-millisecond re-seed, core change, 2026-10-27.)
 4. **It's not slower for the trouble — it's faster, mostly.** Generation beats the platform's own call outright in every language measured on linux-x64, and in Go on the Apple M6 by 4.5-5.4x. TypeScript, measured so far only on that Mac, loses its v4 there on both runtimes and its v7 on Bun, and R's time-based ids lose to the `uuid` package's v1 (see [the scoreboard](#the-scoreboard)).
 
-The honest trade-off: this is one more native dependency to ship (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll`, or a prebuilt extension for the Python/Ruby fast paths) versus a UUID call that's already sitting in your standard library. If you only need plain v4 randomness and don't care about cross-language consistency, the stdlib call is simpler and that's a completely reasonable choice.
+The honest trade-off: this is one more native dependency to ship (a platform-specific `libhyperuuid.so`/`.dylib`/`.dll`, or the prebuilt extension Python, Ruby, PHP and TypeScript install; Go alone carries the core as source) versus a UUID call that's already sitting in your standard library. If you only need plain v4 randomness and don't care about cross-language consistency, the stdlib call is simpler and that's a completely reasonable choice.
 
 ## The scoreboard
 
@@ -169,7 +169,7 @@ Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s
 The cells that are not a plain ✅, and why each is deliberate:
 
 - **osx-x64 (Intel macOS): built, and tested at the core, in TypeScript and in Java only.** There is no Intel macOS CI leg. The library is cross-compiled on the Apple silicon runner, attested, and shipped in every package that carries one, and the Rust core's own suite runs on it there under Rosetta 2, which is why that row keeps its ✅. TypeScript's and Java's are the two binding suites that run on Intel macOS, TypeScript's on an x64 Node under Rosetta 2 against an addon cross-built there, Java's on x64 Temurin 21 and 25 under Rosetta 2 (the JNI path and the FFM path), which is why their rows have a ✅; every other one still runs on Apple silicon against the same source. Ruby there installs the universal gem and runs on Fiddle, since no precompiled gem is built for it. The leg took 37 minutes against 8 on Apple silicon, for hardware Apple stopped selling in 2023 on runners GitHub retires by Fall 2027.
-- **PHP on osx-x64 and win-arm64: no zip.** Intel macOS: Homebrew bottles no PHP for it any more, and no leg compiles a PHP to build against (the one that did was retired on 2026-10-31). Windows on ARM: PHP has never shipped a native Windows ARM64 build, so it runs as an x64 process there regardless of host CPU and takes the win-x64 zip — already exercised for real by the win-x64 leg.
+- **PHP on osx-x64 and win-arm64: no zip.** Intel macOS: Homebrew bottles no PHP for it any more, and no leg compiles a PHP to build against. Windows on ARM: PHP has never shipped a native Windows ARM64 build, so it runs as an x64 process there regardless of host CPU and takes the win-x64 zip — already exercised for real by the win-x64 leg.
 - **TypeScript on Bun.** The suite runs on Node on every leg and in both musl containers, and on Bun everywhere but win-arm64, where Bun is not yet verified, and osx-x64, whose cross-build leg runs Node alone.
 - **C and C++: one archive per RID, plus Android, iOS, Mac Catalyst and WebAssembly.** CI packs every archive from the run's own libraries with the release's packer, then on each RID's runner builds a C consumer and a C++23 one against it through CMake, and the C one through pkg-config, shared and static (osx-x64 under Rosetta 2, musl in Alpine). The iOS, iOS simulator and Mac Catalyst archives are static only and built against on a Mac: linked for a device, run in the simulator, and run as Mac Catalyst on both architectures. The android-arm64, android-x64 and wasi-wasm32 archives are packed but not run: no runner executes them, and their libraries are the ones C# and Swift already test there.
 - **R: source.** R ships a source package: CRAN compiles it for each platform it serves and builds its own Windows and macOS binaries, and a source install needs Rust 1.89 or newer. CI runs `R CMD check --as-cran` on linux-x64, linux-arm64, osx-arm64 and win-x64, on the current R and, on linux-x64, the previous minor too; the musl and osx-x64 cells are source builds no job here checks. On win-arm64 the build picks `aarch64-pc-windows-gnullvm`; R on Windows ARM64 is experimental, and that build is untested.
@@ -243,7 +243,8 @@ r/          the R 4.2+ binding: .Call into a C shim over the core's static libra
 include/    hyperuuid.h, the C header, generated by cbindgen from rust/src/ffi.rs, and
             hyperuuid.hpp, the hand-written C++23 header over it
 c/          the C archives' CMake and pkg-config files, and C and C++ smoke consumers
-docs/       benchmarks, platforms and provenance in depth
+docs/       benchmarks, platforms and provenance in depth; the lessons learned, the roadmap, the CRAN
+            checklist, and the design notes and spike receipts under superpowers/
 ```
 
 ## Why "Hyper"
@@ -252,7 +253,7 @@ The SkunkWerkx Hyper* series — HyperUuid, [HyperCast](https://github.com/Skunk
 
 ## Contributing
 
-Pull requests and issues are welcome. `.github/workflows/ci.yml` builds and tests every binding on every platform — a PR should stay green there before merging.
+Pull requests and issues are welcome. `.github/workflows/ci.yml` builds the core on every host and runs each binding's suite when the pull request could have broken it (its own tree, the core or the workflows changed); `pr-board` is the one status to keep green before merging.
 
 ## License
 

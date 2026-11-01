@@ -77,7 +77,7 @@ Every failure that is the caller's (a timestamp out of range, a batch too large)
 
 ## Native access
 
-FFM downcalls are a *restricted* operation: the JDK wants the application, not a library on its classpath, to say that native code may run. Without that the first call still works. On JDK 21 to 23 nothing is printed without the grant. From 24, a JVM without it prints a four-line warning naming the method that loads native code: `Linker::downcallHandle` on 25 and later, ending "Restricted methods will be blocked in a future release unless native access is enabled". Grant it where the JVM is launched:
+FFM downcalls are a *restricted* operation: the JDK wants the application, not a library on its classpath, to say that native code may run. Without that the first call still works. On JDK 21 to 23 nothing is printed without the grant. From 24, a JVM without it prints a four-line warning naming the method that loads native code: `System::load` on 24, where the JNI path loads the library, and `Linker::downcallHandle` on 25 and later, ending "Restricted methods will be blocked in a future release unless native access is enabled". Grant it where the JVM is launched:
 
 ```sh
 java --enable-native-access=ALL-UNNAMED -cp app.jar:hyperuuid.jar com.example.Main        # on the classpath
@@ -88,7 +88,7 @@ The jar's manifest carries `Automatic-Module-Name: io.github.skunkwerkx.hyperuui
 
 ### Shaded and fat jars
 
-Keep `Multi-Release: true` (maven-shade's `ManifestResourceTransformer`, Shadow's `manifest`). Without it JDK 25 runs the JNI path, which is correct, on the JNI path, and its warning names `System::load`.
+Keep `Multi-Release: true` (maven-shade's `ManifestResourceTransformer`, Shadow's `manifest`). Without it JDK 25 reads only the base and runs the JNI path: correct, slower, and its warning names `System::load`.
 
 ## Why not `java.util.UUID`?
 

@@ -424,7 +424,8 @@ points.
 ## Platforms
 
 Every GOOS and GOARCH Go has, with `CGO_ENABLED=0`, because the core is Go source. CI
-cross-compiles and vets the package for these 23 pairs on every push:
+cross-compiles and vets the package for these 23 pairs on every pull request that touches
+the Go binding, the core or the workflows, and on every release-mode run:
 
 | GOOS | GOARCH |
 | --- | --- |
@@ -511,7 +512,7 @@ system's source serves every call there. The binding adds about 141 KB to a Tiny
 of `fmt` and the runtime. Guest memory grows in 64 KiB pages; a maximum batch is out of
 reach on these 32-bit hosts ([Memory](#memory)).
 
-CI runs the whole suite three ways on every push, under TinyGo on wasip1 under wasmtime
+CI runs the whole suite three ways on the same gate, under TinyGo on wasip1 under wasmtime
 (with the checkout mounted and the corpus found through `HYPERUUID_CORPUS`), under stock Go on
 `js/wasm` under Node and on `wasip1/wasm` under wasmtime, and builds
 [`internal/tinygosmoke`](internal/tinygosmoke) with TinyGo and runs it in headless Chrome.
@@ -553,8 +554,9 @@ codegen, so one named toolchain makes the committed file reproducible, and a bum
 deliberate regenerate-and-commit. `HYPERUUID_CHECK_CORE=1 go test -run
 'TestCoreIsCurrent|TestRegenerationCarriesTheCrateVersion' .` regenerates into a temporary
 file and diffs it against the committed one (without the variable the test skips when the
-toolchain is missing); CI runs it on every push, and release preparation regenerates the
-core at the new version, since the version is a literal in the file.
+toolchain is missing); CI runs it on every pull request that touches the Go binding, the
+core or the workflows, and on every release-mode run, and release preparation regenerates
+the core at the new version, since the version is a literal in the file.
 
 ## Why not `google/uuid`'s own `NewV7`?
 
@@ -635,8 +637,9 @@ ID.) Go has no package registry to attest, and this module ships no binary: `go 
 straight from the `go/v<version>` git tag against this repo, and what it fetches is source,
 the generated core included. That file's provenance is reproducible generation, claimed
 exactly: `internal/core/core.go` is the deterministic output of wasm2go over the crate at that
-tag built with the pinned rustc, CI regenerates it with those pins on every push and fails on
-any diff, and anyone can repeat it with `go generate` in a checkout
+tag built with the pinned rustc, CI regenerates it with those pins on every pull request
+that touches the Go binding, the core or the workflows, and on every release-mode run, and
+fails on any diff, and anyone can repeat it with `go generate` in a checkout
 ([Building and regenerating](#building-and-regenerating)). No attestation is claimed for the
 intermediate wasm, which is not a release asset. The root README's
 [Provenance](../README.md#provenance) section has the picture for the artifacts the release

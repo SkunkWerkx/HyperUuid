@@ -259,9 +259,9 @@ iOS, the iOS simulator and Mac Catalyst get the same archives from a second bina
 `HyperUuidCoreApple.xcframework`: an app for those is built by Xcode, which links a static
 library out of an XCFramework and does not read a static-library artifact bundle. The
 manifest declares it only on a Mac, where those platforms can be built at all, and both
-targets define the one `HyperUuidCore` module the binding imports. CI's `test-apple-mobile`
-job runs the suite on an iOS simulator and as a Mac Catalyst process with `xcodebuild test`,
-and builds the package for an iOS device.
+targets define the one `HyperUuidCore` module the binding imports. The release board's
+`test-apple-mobile` job (never a pull request's) runs the suite on an iOS simulator and as a
+Mac Catalyst process with `xcodebuild test`, and builds the package for an iOS device.
 
 Android uses the same artifact bundle: it carries the core for `aarch64-unknown-linux-android`
 and `x86_64-unknown-linux-android`, and a package built with the
@@ -269,11 +269,11 @@ and `x86_64-unknown-linux-android`, and a package built with the
 (`swift build --swift-sdk aarch64-unknown-linux-android28`; Swift 6.3 or later, API 28 or
 later) links it like any other triple. Page alignment is the final link's, which the SDK
 does with the NDK's linker; NDK r28 and later align to the 16 KB pages Android 15 devices
-may use by default, and an older NDK needs `-Xlinker -z -Xlinker max-page-size=16384`. CI's
-`test-android` job cross-builds this whole suite for x86_64 and runs it in an emulator whose
-image uses 16 KB pages, and links the aarch64 build (`.github/scripts/android_build_suite.sh`
-and `android_device_test.sh`, which run the same way against a local emulator). The two
-1 GiB batch tests skip there.
+may use by default, and an older NDK needs `-Xlinker -z -Xlinker max-page-size=16384`. The
+release board's `test-android` job (never a pull request's) cross-builds this whole suite for
+x86_64 and runs it in an emulator whose image uses 16 KB pages, and links the aarch64 build
+(`.github/scripts/android_build_suite.sh` and `android_device_test.sh`, which run the same way
+against a local emulator). The two 1 GiB batch tests skip there.
 
 In a checkout of this repository the core is build output, never committed:
 `.github/scripts/local-core.sh` clears every binding's staged build artifact
@@ -335,8 +335,10 @@ const exitCode = wasi.start(instance);
 ```
 
 CI builds the smoke executable for WebAssembly on Swift 6.4 and runs it this way in headless
-Chrome on every PR, failing unless it exits 0. An executable that imports Foundation is
-large (tens of MB, most of it ICU data); `-c release` and `wasm-opt` bring that down.
+Chrome on the linux-x64 leg of every Swift run (a pull request's when it touched `swift/`, the
+core or `.github/`, and every release board's), failing unless it exits 0. An executable that
+imports Foundation is large (tens of MB, most of it ICU data); `-c release` and `wasm-opt`
+bring that down.
 
 The other direction — running the core as wasm *inside* a native Swift process — is not
 built: no wasm engine ships as a Swift

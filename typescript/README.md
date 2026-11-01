@@ -12,8 +12,9 @@ types for TypeScript and the same API under Node and Bun.
 It is not the fastest way to mint a single v4 in JavaScript: `crypto.randomUUID()` beats it
 per call on this machine, and the `uuid` package's `v7()` beats its v7 on Bun, where on Node
 it is 2.3x faster ([Benchmarks](#benchmarks)). What it gives
-you is the same engine, bit for bit, as the C#, Go, Java, PHP, Python, Ruby and Swift
-bindings, the SQL Server order, and batch and buffer generation that pay for randomness once.
+you is the same engine, bit for bit, as the C#, Go, Java, PHP, Python, R, Ruby and Swift
+bindings and the C and C++ archives, the SQL Server order, and batch and buffer generation
+that pay for randomness once.
 
 ## Install
 
@@ -21,12 +22,12 @@ bindings, the SQL Server order, and batch and buffer generation that pay for ran
 npm install hyperuuid
 ```
 
-The package itself is JavaScript and types; the core comes from one of ten packages. The
-native addon is a platform package that npm picks for you through `optionalDependencies`, so
-nothing compiles at install, one for each of eight platforms, as
-`@skunkwerkx/hyperuuid-<platform>`. The tenth, `@skunkwerkx/hyperuuid-wasm32-wasip1`, is the
-WebAssembly fallback: a plain dependency of the root, so it is always installed, and loaded only
-when no native addon fits.
+The package itself is JavaScript and types; the core comes from one of nine companion
+packages, ten on npm with this one. The native addon is a platform package that npm picks for
+you through `optionalDependencies`, so nothing compiles at install, one for each of eight
+platforms, as `@skunkwerkx/hyperuuid-<platform>`. The ninth,
+`@skunkwerkx/hyperuuid-wasm32-wasip1`, is the WebAssembly fallback: a plain dependency of the
+root, so it is always installed, and loaded only when no native addon fits.
 
 | | x64 | arm64 |
 | --- | :---: | :---: |
@@ -366,7 +367,7 @@ the version. `v7UnixMillis` is the cheaper one, with no `Date` built.
 ## Bun
 
 The same package runs under Bun on the native addon: `bun test tests/` runs this package's
-whole suite (the same 60 tests `node --test` runs), and the [Benchmarks](#benchmarks) below
+whole suite (the same 61 tests `node --test` runs), and the [Benchmarks](#benchmarks) below
 were taken on both. The WebAssembly fallback does not load on Bun 1.4.4
 ([above](#when-no-native-addon-fits)).
 

@@ -164,8 +164,8 @@ support is target-specific, not universal —
   share this dependency — so it's a decision left where it belongs, on your side.
   `v7::now_v7` is not compiled for wasm32 — a browser has no OS clock to read it from — so
   pass the time in yourself: `v7::new_v7(js_sys::Date::now() as u64)`. `rust/browser-test/`
-  is exactly this setup, and CI runs it in headless Chrome on every PR (`wasm-pack test
-  --headless --chrome` there).
+  is exactly this setup, and CI runs it in headless Chrome whenever the core changes
+  (`wasm-pack test --headless --chrome`, in the Forge's `hyper-build-wasm.yml`).
 
 A `wasm32-wasip1` build of the crate (`cargo rustc --release --crate-type cdylib --target
 wasm32-wasip1`, from inside this directory) imports one `wasi_snapshot_preview1` function,
@@ -282,10 +282,12 @@ Windows std's clock read cannot fail, so it is used as is.
 This crate also carries the native-extension entry points for this repo's Python, Ruby, and
 PHP bindings — `python` (PyO3), `ruby` (Magnus), and `php` (ext-php-rs, the whole PHP
 binding) — instead of each living in a satellite crate that
-path-depends back on this one. Two bindings do have one: the TypeScript binding's napi-rs
-addon in `typescript/`, and R's wrapper crate in `r/src/rust/`, which depends on this crate
-from crates.io at the package's exact version and links its `staticlib` build (`r/tools/vendor.sh`
-vendors the checkout's copy beside the other crates). All three are `optional`, off by default, and additive: a
+path-depends back on this one. Three bindings do have one: Java's JNI library in `java/jni/`,
+a `no_std` cdylib that path-depends on this crate with its `cdylib` feature; the TypeScript
+binding's napi-rs addon in `typescript/`; and R's wrapper crate in `r/src/rust/`, which depends
+on this crate from crates.io at the package's exact version and links its `staticlib` build
+(`r/tools/vendor.sh` vendors the checkout's copy beside the other crates). The three extension
+features are `optional`, off by default, and additive: a
 plain `cargo build` (or a `Cargo.toml` with no `features` line) pulls in nothing beyond
 `getrandom`/`sha1` (and `chacha20` on Linux and Android), unchanged from the dependency
 set above. Only one is ever enabled per build invocation — each generates a different C
@@ -364,7 +366,8 @@ cargo add hyperuuid
 ```
 
 Requires Rust 1.89 or later (`rust-version` in the manifest, the floor of the current `uuid`
-1.x); CI checks the library, with and without std, on exactly that toolchain on every PR.
+1.x); CI checks the library, with and without std, on exactly that toolchain whenever the core
+changes.
 
 Published to [crates.io](https://crates.io/crates/hyperuuid). Proven by CI building and testing this crate fresh on 5 real-hardware platform legs, on Intel macOS under Rosetta, and in Alpine containers for musl, plus the full `cargo test` suite (the benchmarks are compiled by clippy, not run) before every release (`.github/workflows/ci.yml`); `release.yml` doesn't retest anything itself — it finds that already-green run for the tagged commit and packs the crate from that same commit, with `cargo package`'s own verify build the only compile it does.
 

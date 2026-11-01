@@ -350,7 +350,7 @@ one at `require` time:
 | 3.4 (until its EOL 2028-03-31) | Magnus, `BACKEND == :native` | platform |
 | 3.3 (the floor, until its EOL 2027-03-31) | Fiddle | universal |
 
-What stands behind each cell: CI runs the whole suite through each Magnus extension — Ruby 4.0 on every pull request and Ruby 3.4 in the weekly and release builds, on all seven platform-gem platforms, the two musl ones inside each
+What stands behind each cell: CI runs the whole suite through each Magnus extension — Ruby 4.0 on every pull request that touches the gem, the core or the workflows (after the gem's lint passed once, on Linux arm64), and Ruby 3.4 in the weekly and release builds, which run everything — on all seven platform-gem platforms, the two musl ones inside each
 Ruby's own Alpine image — and the Fiddle suite on Ruby 4.0 on every one of them, plus on Ruby
 3.3 inside Alpine. Intel macOS has no CI leg: its library is cross-built and tested at the
 core, and Ruby there runs the universal gem's Fiddle backend over it. Anywhere else — a platform with no native build at
@@ -452,10 +452,11 @@ which read the clock through WASI.
   rename them to names of their own when CI builds the archive, which also fails if a newer
   Rust starts exporting another.
 
-What stands behind it: CI builds each minor's archive from the commit, packs the gem the way
-it ships, links it into a fresh interpreter and runs [`wasm-smoke/test.rb`](wasm-smoke/test.rb)
-under Node and in headless Chrome (the forge's `hyper-build-wasm.yml`). The published gem is
-packed around those attested archives.
+What stands behind it: in the weekly and release builds (not on pull requests), CI builds each
+minor's archive from the commit, packs the gem the way it ships, links it into a fresh
+interpreter and runs [`wasm-smoke/test.rb`](wasm-smoke/test.rb) under Node and in headless
+Chrome (the forge's `hyper-build-wasm.yml`). The published gem is packed around those attested
+archives.
 
 ## Development
 

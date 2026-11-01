@@ -24,7 +24,7 @@ What the TypeScript and R landing settled:
 - **TypeScript** published its loss up front, as planned. Batches recover it: `newV7Batch(1000)` is 3.5x (Node) to 6.2x (Bun) faster than 1000 single calls, and since the switch to `CCRandomGenerateBytes` a single `newV7()` on Node beats `uuid`'s `v7()` (Apple M6, 2026-10-30). Where no addon fits (`--omit=optional`, an unlisted platform) the root falls back to the WebAssembly package, at about 1.5 µs an id (2026-10-31).
 - **R** went straight to CRAN as a source package with vendored crates, rather than r-universe first. It exposes raw-matrix doors (`uuid_v4_raw`, `uuid_v7_raw`, `uuid_to_raw`) and the vectorised SQL-order conversions.
 - **Fork safety is done.** The Linux entropy pool lives in a mapping marked `MADV_WIPEONFORK`, refuses to run if that flag is not honoured, and `rust/tests/entropy_pool.rs` proves a forked child draws different bytes. No key outlives one second, which also covers snapshot restores.
-- **The v7 counter re-seeds on every new millisecond** (Unreleased; Phase 0 below). Two IDs no longer reveal how many were minted between them across a millisecond.
+- **The v7 counter re-seeds on every new millisecond** (1.1.0; Phase 0 below). Two IDs no longer reveal how many were minted between them across a millisecond.
 - **The About text is fixed** (Oct 29): it names all nine languages and v4, v5, v7 and the v8 SQL Server form, with no v6. C and C++ join it when the owner says go.
 
 ## Standing policies

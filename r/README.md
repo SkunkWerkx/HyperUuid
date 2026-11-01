@@ -16,7 +16,8 @@ install.packages("hyperuuid")
 ```
 
 CRAN ships the source package and compiles it per platform, so its binaries for Windows and
-macOS need no Rust; a source install (Linux, or `type = "source"`) does.
+macOS need no Rust; a source install (Linux, or `type = "source"`) does. R 4.2 or newer,
+on every platform.
 
 From a source tarball, which needs Rust (`cargo` and `rustc` 1.89 or newer, from
 [rustup](https://rustup.rs)):

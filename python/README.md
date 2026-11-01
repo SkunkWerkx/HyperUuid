@@ -67,7 +67,9 @@ gets `BufferError` instead of freeing the memory underneath. A thread writing it
 time through a `memoryview`, which takes no lock, races on its contents and nothing more: the
 bytes are whichever write landed last. No call releases the GIL on a GIL build: each is nanoseconds to microseconds
 of pure Rust, less than the handoff would cost. CI runs the whole suite on free-threaded 3.15
-on linux-x64, linux-arm64, osx-arm64, win-x64 and win-arm64, and installs each wheel on its own interpreters before it is published.
+on linux-x64, linux-arm64, osx-arm64, win-x64 and win-arm64 on the release board (a pull
+request runs it on linux-x64), and installs each wheel on its own interpreters before it is
+published.
 
 The package is typed: it ships `py.typed` and a stub for the extension module, so mypy and
 pyright see `uuid.UUID` and `datetime.datetime` rather than `Any`.
@@ -406,7 +408,12 @@ Both are the GitHub/Sigstore transparency-log route, checked with `gh attestatio
 same route every other artifact in this project uses. Separately, PyPI itself holds a
 [PEP 740](https://peps.python.org/pep-0740/) publish attestation for every wheel and the sdist, filed by
 `gh-action-pypi-publish` at publication and shown on each file's PyPI page, which PyPI-side
-tooling checks on its own. The root README's [Provenance](../README.md#provenance) section has
+tooling checks on its own. Those name the uploading workflow, and PyPI marks a release whose
+workflow differs from the previous one's: 1.0.0's name `pypi-recovery.yml`, the one-off
+workflow that uploaded that release's wheels after `release.yml`'s own upload failed before
+sending anything (the same packed and attested bytes, after the same checks), and 1.1.0's name
+`release.yml` again, so PyPI marks both. Every file of either still verifies from its tag with
+the commands above. The root README's [Provenance](../README.md#provenance) section has
 the whole picture.
 
 ## License

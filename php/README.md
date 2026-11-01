@@ -191,7 +191,7 @@ PIE itself needs:
 ### Platforms and PHP versions
 
 Every zip is NTS (non-thread-safe) only, the build every distribution's `php` CLI and FPM
-packages ship; a ZTS PHP (FrankenPHP, for one) has no zip yet. 18 zips a release, each one
+packages ship; a ZTS PHP (FrankenPHP, for one) has no zip. 18 zips a release, each one
 load-checked into the PHP it is named for, and run through the full suite there, before it is
 packed:
 
@@ -565,7 +565,8 @@ php -d extension=$PWD/../rust/target/php/release/libhyperuuid.dylib -r 'echo Hyp
 `HYPERUUID_PHP_EXTENSION` names another build for `composer test` and `composer bench`.
 `HYPERUUID_CHECK_STUBS=1 composer test` also regenerates the stub and compares it with the
 committed one (`php tools/generate-stubs.php` rewrites it; it needs the cargo-php version the
-script names, on Linux or macOS). `vendor/bin/phpcs` checks the tests and the benchmarks.
+script names, on Linux or macOS). `vendor/bin/phpcs` checks the tests, the benchmarks and the
+tools.
 
 See [the repo root README](../README.md) for the full RFC 9562 coverage table and the state of every other language binding.
 

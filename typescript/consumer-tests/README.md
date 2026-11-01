@@ -15,9 +15,11 @@ chain, one line per cause.
 The scenarios are the design spec's
 ([`docs/superpowers/specs/2026-10-31-typescript-wasi-fallback-design.md`](../../docs/superpowers/specs/2026-10-31-typescript-wasi-fallback-design.md),
 "The consumer tests: ci.yml's `test-npm-package`"); the header of `run.sh` lists them with what each asserts. In CI,
-`test-npm-package` in `ci.yml` runs them on Linux, macOS and Windows after the whole
-conformance suite under `NAPI_RS_FORCE_WASI=error` on each; the Docker scenarios (`floor`,
-`s390x`) and `mac-lockfile` run on Linux. `s390x` asserts a loss, not a platform: see below.
+`test-npm-package` in `ci.yml` runs them on Linux, macOS and Windows (on the pull-request
+board when the pull request touched `typescript/`, the core or `.github/`; on the release board
+always) after the whole conformance suite under `NAPI_RS_FORCE_WASI=error` on each; the
+Docker scenarios (`floor`, `s390x`) and `mac-lockfile` run on Linux. `s390x` asserts a loss,
+not a platform: see below.
 
 ## Running locally
 

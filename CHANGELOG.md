@@ -7,7 +7,7 @@ all of them. Each entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] — 2026-10-31
 
 ### Security
 
@@ -270,7 +270,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and SwiftPM downloads them and refuses one whose SHA-256 differs; the 22 committed files
   under `swift/` are gone. Nothing changes in a consumer's manifest. In a checkout, the bundle
   is build output: `.github/scripts/local-core.sh` builds the host's into it, `swift test`
-  links it, and `HYPERUUID_LOCAL_CORE` and the Swift core freshness check are gone.
+  links it, and `HYPERUUID_LOCAL_CORE` and the Swift core freshness check are gone. *(Swift)*
 - **The C header is generated.** `include/hyperuuid.h` comes from `rust/src/ffi.rs`'s doc
   comments through cbindgen, and a test fails when the committed copy differs; the Swift
   bundle carries the same file. The hand-written header it replaces never mentioned return
@@ -289,6 +289,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   walk). All on the M6, interleaved A/B (`walk-ab.sh`). A test holds the two walks to each other, and the no-panic proof links the
   WebAssembly one on the host (`--cfg hyperuuid_words_walk`), since `no-panic` cannot see an
   aborting panic. *(crate, C# Blazor, Go TinyGo, Swift WebAssembly)*
+- **The pull-request board runs only what the pull request could have broken.** The one
+  native matrix that built and tested every binding on every host on every push is now one job
+  per concern: the Rust core on all seven hosts first, with its export check and the C and C++
+  consumers, then one job per host and binding, each binding's suite started only when its
+  tree, the core or the workflows changed, after its lint passed once on a Linux arm64 runner.
+  A classifier reads the pull request's files and fails closed (an unknown path, an empty list
+  or an API failure runs everything), and one aggregate job is the status to read, red when a
+  job failed or was skipped while its gate said run. A pull request touching `.github/` runs
+  the whole grid: 104 jobs in 19m52, against 84 jobs and 24 min before. The release-mode
+  board, on dispatch and on the Monday schedule, is unchanged in coverage, and the Forge's
+  release workflows are untouched. The runner labels name the toolchain (`xcode-27`,
+  `windows-2025-vs2026`, `windows-11-vs2026-arm`, `ubuntu-26.04` and its arm64 twin), and the
+  Go, Swift, Python, Ruby, Java and .NET toolchains the images carry at the pinned versions are
+  used as installed. *(repository only)*
 
 ### Fixed
 
@@ -1816,7 +1830,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
-[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v1.0.0...HEAD
+[1.1.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.7.0...v0.8.0

@@ -61,10 +61,10 @@ default = ["std"]
 std = ["getrandom/std"]
 # The no_std static libraries, for the hosts that link the core in rather than load it: a
 # Blazor WebAssembly app (the NuGet package, wasm32-unknown-emscripten), a Swift executable
-# on Linux or WebAssembly, a Go binary built with cgo, a C# Native AOT publish, and an iOS or
-# Mac Catalyst app in Swift or C#. A static library is a final artifact as far as panics go,
-# so with `std` off it needs the
-# `#[panic_handler]` std would have supplied; this feature is that handler and nothing else
+# on Linux or WebAssembly, a C or C++ consumer of the release's archives, a C# Native AOT
+# publish, and an iOS or Mac Catalyst app in Swift or C#. A static library is a final
+# artifact as far as panics go, so with `std` off it needs the `#[panic_handler]` std would
+# have supplied; this feature is that handler and nothing else
 # (see lib.rs). It exists so those libraries carry no copy of Rust's standard library: two
 # Hyper* static libraries that each bundled std could not be linked into one program
 # (`duplicate symbol: rust_eh_personality`). Off by default, and never for an rlib consumer,
