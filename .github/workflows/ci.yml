@@ -1,4 +1,5 @@
 name: CI — build native, build wasm, test every binding
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('CI purpose={0}', inputs.purpose) || '' }}
 
 # The board: the Rust core first, on the seven hosts (hyper-core.yml, one caller job whose
 # matrix builds, tests, export-checks and C-smokes each leg and uploads native-<rid>), then
@@ -22,7 +23,8 @@ name: CI — build native, build wasm, test every binding
 # why prepare-release.yml dispatches this workflow after it pushes the bump — see
 # release.yml's tag-guard for the gate.
 #
-# The release tail, after the board and only on prepare-release.yml's dispatch at master:
+# The release tail, after the board and only on a master dispatch with purpose=release (the
+# default, which is what prepare-release.yml sends; purpose=board runs the board alone):
 # `forge` resolves the one Forge commit this run uses, the eight pack jobs pack from this
 # run's artifacts, `release-prepare` builds, attests and preserves the inventory (A, this
 # run, the Forge), `codeql` dispatches codeql.yml on this commit and requires a clean
@@ -38,6 +40,16 @@ name: CI — build native, build wasm, test every binding
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      # `release` (the default, what prepare-release.yml dispatches) runs the board and then
+      # the release tail; `board` runs the board alone, whatever the ref.
+      purpose:
+        description: "board: the board alone; release: the board, then the release tail"
+        type: choice
+        options:
+          - board
+          - release
+        default: release
   # The whole release-mode board once a week, so arm64, musl, iOS, the wheels and the second
   # Ruby ABI are exercised between releases instead of first on release day.
   schedule:
@@ -1304,7 +1316,7 @@ jobs:
             lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
             test-typescript, test-r, test-go, pack-c, build-wasm, build-wheels,
             test-nuget-package, test-npm-package, test-apple-mobile, test-android]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1341,7 +1353,7 @@ jobs:
   # signer_repo for the gems, the npm tarballs, the CRAN tarball and the C archives require.
   nuget-org-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-nuget.yml@master
     permissions:
       contents: read
@@ -1357,7 +1369,7 @@ jobs:
 
   crate-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-crate.yml@master
     permissions:
       contents: read
@@ -1366,7 +1378,7 @@ jobs:
 
   maven-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     uses: SkunkWerkx/.github/.github/workflows/hyper-pack-maven.yml@master
     permissions:
       contents: read
@@ -1384,7 +1396,7 @@ jobs:
 
   ruby-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1407,7 +1419,7 @@ jobs:
 
   npm-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1431,7 +1443,7 @@ jobs:
   # The CRAN source tarball: preserved and inventoried with everything else, uploaded by no job.
   r-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1453,7 +1465,7 @@ jobs:
   # with the header and c/'s package files.
   c-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1476,7 +1488,7 @@ jobs:
 
   pypi-pack:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1503,7 +1515,7 @@ jobs:
   # in this run. The release attestation over every file is the tag's (release.yml).
   release-prepare:
     needs: [changes, forge, nuget-org-pack, crate-pack, maven-pack, ruby-pack, npm-pack, r-pack, c-pack, pypi-pack]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1535,7 +1547,7 @@ jobs:
   # start a workflow; it checks nothing out.
   codeql:
     needs: [changes, forge]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -1564,7 +1576,7 @@ jobs:
   # at B by hand (RELEASING.md).
   stage-release:
     needs: [changes, forge, release-prepare, codeql]
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -1612,4 +1624,5 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           CHANGES: ${{ toJSON(needs.changes.outputs) }}
+          PURPOSE: ${{ inputs.purpose }}
         run: python3 .github/scripts/pr_board.py
