@@ -225,7 +225,7 @@ gh attestation verify HyperUuid.<version>.nupkg --repo SkunkWerkx/HyperUuid \
 
 | Attested artifact | Where | Signer |
 | --- | --- | --- |
-| Each native library, as built | `hyper-build-native.yml` | `SkunkWerkx/.github` |
+| Each native library, as built | `hyper-core.yml` | `SkunkWerkx/.github` |
 | The browser-wasm archive, as built | `hyper-build-wasm.yml` | `SkunkWerkx/.github` |
 | The `.nupkg` as packed, pre-push | `hyper-pack-nuget.yml` | `SkunkWerkx/.github` |
 | The `.nupkg` as published | `release.yml`, after the push | `SkunkWerkx/HyperUuid` |

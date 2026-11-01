@@ -194,13 +194,17 @@ promise, so every stable bump is re-proven by the legs that use it.
   is queued. The inventory records the
   commit and recovery requires it unchanged. Don't merge Forge changes while a release
   is in flight.
-- Fail fast: in the Forge's `hyper-build-native.yml` a new binding's steps go immediately
-  after the Rust compile steps, ahead of every binding that has already shipped, in the
-  desktop job and in the musl suite list alike. The newest code is where a run fails, and a
-  failure in the first minutes lets the owner cancel the rest of the tree and re-run. Once a
-  binding has been through a release, the next new one goes in front of it (today Go's
-  translated core leads, then Java's JNI path, TypeScript and R).
-- `prepare-release.yml`, `stage-native-binaries.yml` and ci.yml's `check-core` are one
+- The board is one Forge workflow per concern: `core` (`hyper-core.yml`, the seven core legs,
+  each with its cdylib export check and C smoke), `core-checks` (`hyper-core-checks.yml`,
+  the static checks on three hosts), `lint-<binding>` (one job on `ubuntu-26.04-arm`) and
+  `test-<binding>` (the binding's suite on its hosts), gated on what the pull request touched
+  (`changes`, from `.github/scripts/pr_changes.py`; `pr-board` is the one status to read, red
+  when a job failed or was skipped while its gate said run). The Forge's fail-fast ordering
+  rule (a new binding's steps first in `hyper-build-native.yml`) is moot here: every binding
+  is its own job, and a red lint starts no suite. Off a pull request nothing is gated and the
+  whole release-mode board runs. A new binding is one `lint-` and one `test-` caller, one
+  class in `pr_changes.py` and one gate in `pr_board.py` (its tests hold the three together).
+- `prepare-release.yml`, `stage-native-binaries.yml` and ci.yml's `core-checks` are one
   `uses:` each of a Forge reusable workflow; this repo keeps triggers, permissions and gates.
   `.github/hyper.json` is what the Forge knows about this project (crate and project names,
   the export rule, the cdylib smoke script; the ABI probe is `.github/scripts/abi_probe.c`,
@@ -219,6 +223,12 @@ promise, so every stable bump is re-proven by the legs that use it.
   packages, never by retagging or rebuilding.
 
 ## Local loop
+
+The PR board runs a binding's lint and suite only when its tree, the core (`rust/`,
+`include/`, `c/`, `corpus/`), or `.github/` changed; `python3 .github/scripts/pr_changes.py`
+classifies a `filename<TAB>previous_filename` list from stdin the way the `changes` job does
+(`--all` is the release board), and `python3 .github/scripts/pr_board.py` with `NEEDS`,
+`CHANGES` and `GITHUB_EVENT_NAME` set gives the verdict.
 
 C builds an archive from local libraries with the Forge's packer, then the smoke consumer
 against it (CMake and pkg-config on PATH), after `cargo cdylib` and `local-core.sh`:
@@ -287,7 +297,7 @@ target add wasm32-wasip1`): `npm run build:wasi`, then `NAPI_RS_FORCE_WASI=error
 (the suite on the fallback, failing rather than falling back; Bun 1.4.4 cannot load it). The
 consumer tests, `typescript/consumer-tests/README.md`: pack the ten tarballs with the Forge's
 `npm_package.py pack` (`--allow-missing-natives` locally, never in CI; CI's PR mode passes
-`--skip osx-x64`, since no osx-x64 addon is built there, as `test-c` does) and run
+`--skip osx-x64`, since no osx-x64 addon is built there, as `pack-c` does) and run
 `consumer-tests/run.sh <dir> <scenarios>`, which serves them from Verdaccio on port 4873 (one
 run at a time) and installs them in fresh consumers; `floor` and `s390x` need Docker
 (`REGISTRY_HOST=host.docker.internal` on Docker Desktop), and `mac-lockfile` needs the

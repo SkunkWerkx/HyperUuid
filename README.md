@@ -150,7 +150,7 @@ The losses, beside them. **The batch**: 1000 v7s in one call cost 2.84 µs here,
 
 ## Platform support
 
-Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s `build-native` matrix builds the Rust core fresh on each of 5 real-hardware legs, then runs that language's actual test suite against that leg's freshly-built native library (Go's against the committed translation of the same core) — not just that it compiles. A second job does the same for the two musl RIDs inside real Alpine containers, on the language's own official `*-alpine` image. Intel macOS has no leg of its own; see the osx-x64 note under the table.
+Every language, on every platform, proven for real: `.github/workflows/ci.yml`'s `core` job builds the Rust core fresh on each of 5 real-hardware legs and the two musl RIDs (in real Alpine containers), and each language's `test-<binding>` job then runs that language's actual test suite on the same hosts against that leg's freshly-built native library (Go's against the committed translation of the same core; the musl suites on the language's own official `*-alpine` image) — not just that it compiles. A pull request runs the bindings it touched; a dispatch runs them all. Intel macOS has no leg of its own; see the osx-x64 note under the table.
 
 | Language | linux-x64 | linux-arm64 | linux-musl-x64 | linux-musl-arm64 | osx-x64 | osx-arm64 | win-x64 | win-arm64 | Status |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | --- |

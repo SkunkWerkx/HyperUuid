@@ -310,7 +310,7 @@ gh attestation verify hyperuuid-<version>-<platform>.gem --repo SkunkWerkx/Hyper
 That is the release's second layer of checking, not the only one: before any gem is built, the
 same job verifies every native binary it packs — the Fiddle libraries, the Magnus extensions
 (one per Ruby ABI per platform), the `wasm32-wasip1` archives — against *their own* build
-provenance, signed from `SkunkWerkx/.github` by `hyper-build-native.yml` and
+provenance, signed from `SkunkWerkx/.github` by `hyper-core.yml`, `hyper-test-ruby.yml` and
 `hyper-build-wasm.yml` (so that check needs `--signer-repo SkunkWerkx/.github` added), and
 refuses to proceed on an unverified one. RubyGems.org has no unpublish and no
 duplicate-version overwrite, so all of this happens while a bad artifact is still reversible,
