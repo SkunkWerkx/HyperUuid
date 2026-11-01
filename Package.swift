@@ -17,9 +17,9 @@ import Foundation
 // checksum before using it. stage-native-binaries.yml writes the three lines below for every
 // release, from the zips the release then attaches; none resolves before the first release
 // that carries them (1.1.0).
-let coreRelease = "1.0.0"
-let coreChecksum = ""
-let appleCoreChecksum = ""
+let coreRelease = "1.1.0"
+let coreChecksum = "470dde0c285d1be436ee6c9931415c73df3ae304f3462e81da9aed0a1e536e43"
+let appleCoreChecksum = "43dd7f956f2c86f03e3352071a2c9a669843ad29d524579b213512114e81703b"
 
 // In this repository, CI and .github/scripts/local-core.sh write the core into
 // swift/HyperUuidCore.artifactbundle/ (gitignored), and then this file links that instead, the
