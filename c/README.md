@@ -1,5 +1,9 @@
 # hyperuuid for C and C++
 
+[![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
+[![C/C++](https://img.shields.io/github/v/release/SkunkWerkx/HyperUuid?label=c%2Fc%2B%2B&sort=semver)](https://github.com/SkunkWerkx/HyperUuid/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
+
 RFC 9562 UUIDs from the HyperUuid core: v4, v5 and v7, v7 batches, and the SQL Server order.
 It is the same core every HyperUuid binding uses, here through the C ABI in
 `include/hyperuuid.h`. C++23 has its own header over it, `include/hyperuuid.hpp`, linked

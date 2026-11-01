@@ -1,5 +1,9 @@
 # hyperuuid (R)
 
+[![CI](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml/badge.svg)](https://github.com/SkunkWerkx/HyperUuid/actions/workflows/ci.yml)
+[![CRAN](https://img.shields.io/cran/v/hyperuuid.svg)](https://cran.r-project.org/package=hyperuuid)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/SkunkWerkx/HyperUuid/blob/master/LICENSE)
+
 RFC 9562 UUID v4 (random), v5 (name-based) and v7 (time-ordered) generation for R, with
 inspection (version, variant, timestamp) and a version 8 SQL Server order for v7. A
 hand-written C shim calls the Rust core through `.Call`; the core is the same one every other

@@ -11,6 +11,7 @@
 [![npm](https://img.shields.io/npm/v/@skunkwerkx/hyperuuid.svg)](https://www.npmjs.com/package/@skunkwerkx/hyperuuid)
 [![CRAN](https://img.shields.io/cran/v/hyperuuid.svg)](https://cran.r-project.org/package=hyperuuid)
 [![Packagist](https://img.shields.io/packagist/v/skunkwerkx/hyperuuid.svg)](https://packagist.org/packages/skunkwerkx/hyperuuid)
+[![C/C++](https://img.shields.io/github/v/release/SkunkWerkx/HyperUuid?label=c%2Fc%2B%2B&sort=semver)](https://github.com/SkunkWerkx/HyperUuid/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **One [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html)-compliant UUID engine, written once in Rust, called in-process — no bridge process, no per-language reimplementation — from C#, Java, Go, Swift, Ruby, PHP, Python, TypeScript, R, C and C++.**
