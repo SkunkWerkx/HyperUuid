@@ -484,11 +484,14 @@ pub unsafe extern "system" fn JNI_OnLoad(vm: *mut JavaVM, _reserved: *mut c_void
     let mut penv: *mut c_void = null_mut();
     // SAFETY: the JVM passes a live `JavaVM`.
     let got = unsafe { ((**vm).v1_2.GetEnv)(vm, &mut penv, JNI_VERSION_1_8) };
-    if got != JNI_OK || penv.is_null() {
+    // The null check is on `env`, the pointer dereferenced below, not on `penv`: CodeQL's
+    // rust/access-invalid-pointer query takes `is_null()` as a barrier for its receiver only,
+    // and a guard on `penv` leaves the cast's result unguarded in its eyes (alert 28).
+    let env = penv.cast::<*const jni_sys::JNINativeInterface_>();
+    if got != JNI_OK || env.is_null() {
         return JNI_ERR;
     }
-    let env = penv.cast::<*const jni_sys::JNINativeInterface_>();
-    // SAFETY: `env` came from `GetEnv` above; the class name is NUL-terminated.
+    // SAFETY: `env` came from `GetEnv` above and is not null; the class name is NUL-terminated.
     let class = unsafe { ((**env).v1_2.FindClass)(env, CLASS.as_ptr().cast::<c_char>()) };
     if class.is_null() {
         return JNI_ERR;
