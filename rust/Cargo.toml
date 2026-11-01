@@ -1,6 +1,6 @@
 [package]
 name = "hyperuuid"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.89"
 description = "RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a version 8 SQL Server ordering — high-performance, allocation-free, with a real batch API and a Criterion suite benchmarked against the `uuid` crate."

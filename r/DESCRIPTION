@@ -1,7 +1,7 @@
 Package: hyperuuid
 Type: Package
 Title: RFC 9562 UUIDs: Versions 4, 5 and 7 and a 'SQL Server' Ordering
-Version: 1.0.0
+Version: 1.1.0
 Authors@R: c(
     person("Brian", "Buvinghausen", email = "buvinghausen@gmail.com",
            role = c("aut", "cre")),

@@ -19,7 +19,7 @@ require_relative "hyperuuid/runtime"
 module HyperUuid
   # This gem's own version — distinct from the RFC 9562 UUID *versions* (v4/v5/v7) the rest
   # of this module generates.
-  VERSION = "1.0.0"
+  VERSION = "1.1.0"
 
   # The widest batch count, and the longest v5 name in bytes, the native ABI carries (a u32).
   # (The millisecond count is a u64; unix_millis_from refuses anything wider.)

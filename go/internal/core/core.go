@@ -51,7 +51,7 @@ func (m *Module) fn0(v0, v1 int32) int32 {
 	return m._wasi_snapshot_preview1.Xrandom_get(v0, v1)
 }
 func (m *Module) Xhyperuuid_version() int32 {
-	return i32(65536)
+	return i32(65792)
 }
 func (m *Module) Xuuid_get_timestamp(v0, v1, v2 int32) int32 {
 	var v3, v4, v5, v6, v7 int32

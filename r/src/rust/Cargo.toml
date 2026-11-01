@@ -13,7 +13,7 @@ crate-type = ["staticlib"]
 # from the checkout's rust/ and vendors that source beside the other crates into
 # src/rust/vendor.tar.xz, so the package builds offline from the published graph.
 [dependencies]
-hyperuuid = { version = "=1.0.0", default-features = false, features = ["staticlib"] }
+hyperuuid = { version = "=1.1.0", default-features = false, features = ["staticlib"] }
 
 [profile.release]
 lto = true
