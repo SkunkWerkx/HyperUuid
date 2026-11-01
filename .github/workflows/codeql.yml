@@ -93,10 +93,12 @@ jobs:
             runner: ubuntu-latest
           # Swift's autobuild picks swift/Benchmarks and spends 10-25 minutes on the benchmark
           # package's dependency tree, reaching the library only through it. The build step
-          # below compiles the library alone.
+          # below compiles the library alone. macos-latest, not the build legs' xcode-27: on
+          # that image (macOS 27, Xcode 27.1) CodeQL 2.27.3's tracer broke SwiftPM's manifest
+          # compile with "posix_spawn error: Bad CPU type in executable" (2026-11-01).
           - language: swift
             build-mode: manual
-            runner: xcode-27
+            runner: macos-latest
           # Not scanned: C/C++, whose only files are hyperuuid.h in the CI-built Swift bundles
           # (nothing to compile; the C ABI is Rust's, rust/src/ffi.rs), and PHP, which CodeQL
           # does not support.
