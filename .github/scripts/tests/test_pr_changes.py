@@ -121,7 +121,7 @@ class ClassifyTests(unittest.TestCase):
 
     def test_dotfiles_are_docs(self):
         for path in ('.editorconfig', '.gitattributes', '.gitignore', '.claude/settings.json', 'LICENSE',
-                     'CRAN_CHECKLIST.md', 'ROADMAP.md', 'docs/benchmarks.md', 'docs/superpowers/specs/x.md', 'CHANGELOG.md'):
+                     'docs/ROADMAP.md', 'docs/CRAN_CHECKLIST.md', 'docs/benchmarks.md', 'docs/superpowers/specs/x.md', 'CHANGELOG.md'):
             with self.subTest(path=path):
                 self.assertOnly(classify(path), 'docs_only')
 

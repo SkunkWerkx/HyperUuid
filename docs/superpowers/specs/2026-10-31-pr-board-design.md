@@ -115,6 +115,11 @@ at 10 and 11 min. Two iOS simulators boot on a full board today: one in the Forg
    one caller per host in `ci.yml` with each binding's test callers per host too, which
    GitHub needs for per-host chaining since `needs` takes no expression; that is about
    seventy caller jobs and is taken only if the measurement says so.
+
+   Measured on the first board (run 41255218791, pull request #60, 2026-11-01): linux-arm64
+   1m39, linux-x64 1m47, osx-arm64 2m24, linux-musl-arm64 2m29, win-x64 2m47, linux-musl-x64
+   3m45, win-arm64 4m17. The barrier is 2m38, above the minute expected, and it is the
+   Windows arm64 leg alone; the escape hatch is not taken on one run.
 3. **`build-static`** and **`build-android`.** As today, when `core` or `ci`: the one job
    that builds the cross-target bundle (Apple, Android, the archives the NuGet targets link)
    and uploads `static-libs` and `swift-release-assets`, and the two Android legs that upload
@@ -130,6 +135,11 @@ at 10 and 11 min. Two iOS simulators boot on a full board today: one in the Forg
    legs, not a step of one: every binding job waits on the legs. The plan measures the
    longest matrix job; today's check-core jobs sum to about ten minutes, so the cut across
    three hosts has to keep each under the core legs' time or split once more.
+
+   Measured on the first board: ubuntu x64 7m32, Windows 2m48, ubuntu arm64 2m02. The x64 job
+   is above the longest core leg (4m17) and above most suites, but it gates nothing and ran
+   beside them; it ends before the board does, so a split waits until it is the critical
+   path.
 5. **`lint-<binding>`.** One caller per touched binding, no `needs`, calling that binding's
    lint workflow on `ubuntu-26.04-arm`: the formatter and linter, and whatever else today's
    lint job carries (R's also runs `cargo fmt --check` on `r/src/rust` and clang-format on
@@ -138,6 +148,13 @@ at 10 and 11 min. Two iOS simulators boot on a full board today: one in the Forg
    pin: today lint-go is 4 min, longer than a core leg, so Go's gate is gofmt and go vet, and
    golangci-lint runs beside Go's suites rather than ahead of them, unless its cache brings
    it under the legs' time (measured in the plan).
+
+   Measured on the first board: `lint-go` (the fast gate) 45 s, `lint-go-full` 3m22 beside
+   the suites, `lint-java` 1m05, every other lint 12 to 36 s, and `lint-r` 5m19, which is
+   above the slowest core leg, so `test-r` waited on its lint rather than on the core. By
+   this item's own rule R's lint is the next to move beside its suites, or to be cut (its
+   `R CMD INSTALL` of the vendored package for lintr is most of the time); not done on one
+   run.
 6. **`test-<binding>`.** One caller per touched binding, needing `lint-<binding>` and `core`
    (Swift's Linux legs and the NuGet consumer test also need `build-static`), calling that
    binding's test workflow, whose matrix is the hosts it ships on. One toolchain setup,
@@ -162,8 +179,12 @@ at 10 and 11 min. Two iOS simulators boot on a full board today: one in the Forg
    WASI module (`node-wasm32-wasip1`) when `core` or `typescript`; the Go wasm and TinyGo legs
    when `core` or `go`. The ruby.wasm legs stay release-only.
 9. **`build-wheels`.** The sdist build and the Pyodide wheel when `core`, `ci` or `python`,
-   as today in PR mode. The sdist fall-through (12 min) and the per-RID wheels are release
-   board.
+   as today in PR mode. The per-RID wheels are release board. The sdist fall-through runs in
+   PR mode too, by the Forge's deliberate choice (`hyper-build-wheels.yml`: the fall-through
+   needs the sdist in `pr` mode as well), which this document had wrong: on the first board
+   its PyPy leg was the longest job at 13m15, and it ran on the old board the same way.
+   Gating it on release mode would take about six minutes off a core-change board's wall
+   clock; a decision for the Forge, not taken here.
 10. **`test-nuget-package`** when `csharp`, `core` or `ci`, needing `core` and
     `build-static`; **`test-npm-package`** when `typescript`, `core` or `ci`, needing `core`
     and `build-wasm`. Both as today, the consumer tests of a packed package.
@@ -223,7 +244,7 @@ that matches, and a rename belongs to every class either of its paths matches:
 | Class | Paths |
 |---|---|
 | ci | `.github/**` |
-| docs | `*.md`, `**/*.md`, `docs/**`, `LICENSE`, `CRAN_CHECKLIST.md`, `ROADMAP.md` |
+| docs | `*.md`, `**/*.md`, `docs/**`, `LICENSE` |
 | dotfiles | `.editorconfig`, `.gitattributes`, `.gitignore`, `.claude/**`: same as docs |
 | core | `rust/**`, `include/**`, `c/**`, `corpus/**` |
 | csharp | `csharp/**`, `global.json` |
@@ -388,11 +409,19 @@ with the toolchain's version in the message.
 
 ### Expected shape, by pull request
 
-| PR touches | jobs | wall clock, expected |
-|---|---|---|
-| docs only | 2 | seconds |
-| one binding | `changes`, 7 core legs, 1 lint, up to 7 test legs, `pr-board`, plus that binding's extras | about 5 min |
-| the core, corpus or `.github/` | the whole grid: 7 core legs, 3 core-checks, 10 lints, about 60 test legs, static, Android, wasm, wheels, pack-c, the consumer tests | 12 to 16 min, in waves through the cap |
+| PR touches | jobs | wall clock, expected | measured |
+|---|---|---|---|
+| docs only | 2 | seconds | not yet run |
+| one binding | `changes`, 7 core legs, 1 lint, up to 7 test legs, `pr-board`, plus that binding's extras | about 5 min | not yet run |
+| the core, corpus or `.github/` | the whole grid: 7 core legs, 3 core-checks, 10 lints, about 60 test legs, static, Android, wasm, wheels, pack-c, the consumer tests | 12 to 16 min, in waves through the cap | 104 jobs (94 green, 10 skipped, all release-only), 19m52 (run 41255218791, 2026-11-01), against 84 jobs and 24 min on the old board's run 41230480668 |
+
+The first row measured is the third, the branch's own pull request (it touched `.github/`,
+so `changes` emitted every class). Its critical path was the sdist fall-through (13m15, item
+9) and `test-npm-package` on ubuntu (7m48), not core plus a binding; the Swift Windows legs
+(win-arm64 7m13, win-x64 5m22, both setup-swift's install) and `test-r` behind `lint-r` were
+the slowest suites. Three warnings, all carried over from the old board: `R CMD build` on
+Windows restoring the execute bit on `r/configure` and `r/cleanup` (a Windows checkout cannot
+hold it), and setup-swift's unsigned Windows installer (swift.org publishes no signature).
 
 The core-change sweep still exceeds the cap, and should: it is the pull request that
 deserves the whole grid and the rarest kind. Its total runner time rises against today's:
@@ -437,7 +466,9 @@ measured once the board runs (Proof) and written back into this section.
   `.github/workflows/ci.yml` and `.github/scripts/tests/test_workflow_contracts.py` are ci; a
   rename from `rust/` to `docs/` and the reverse are both core; an unclassified path is
   everything; `typescript/README.md` is docs, not typescript.
-- One deliberate pull request per row of the expected-shape table, before this merges:
+- The branch's own pull request is the third row's receipt (above). The other rows' controls
+  follow on master, each a pull request of its own.
+- One deliberate pull request per row of the expected-shape table:
   docs-only, one binding, core. Each receipt is the job count and wall clock from `gh run
   view`, with the `core` barrier (slowest leg minus fastest), the longest `core-checks`
   matrix job and every lint's duration on linux-arm64 read off the same runs; those numbers

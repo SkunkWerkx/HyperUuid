@@ -25,7 +25,7 @@ API_CAP = 3000
 # `**/*.<ext>` (that suffix at any depth, the root included) or an exact path.
 RULES = [
     ('ci', ['.github/**']),
-    ('docs', ['**/*.md', 'docs/**', 'LICENSE', 'CRAN_CHECKLIST.md', 'ROADMAP.md',
+    ('docs', ['**/*.md', 'docs/**', 'LICENSE',
               '.editorconfig', '.gitattributes', '.gitignore', '.claude/**']),
     ('core', ['rust/**', 'include/**', 'c/**', 'corpus/**']),
     ('csharp', ['csharp/**', 'global.json']),

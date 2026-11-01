@@ -505,6 +505,36 @@ beside the spike's; the others have the harness and the command.
 - **Attestations over every file, and a first publish by hand where a registry needs one to
   exist** (npm's ten names) before trusted publishing can attach.
 
+## What the pull-request board taught
+
+The board was one `build-native` matrix until 2026-11-01: every binding on every host on
+every push, 84 jobs and 24 minutes for a one-line change. It is now one Forge workflow per
+concern, the core on seven hosts first and then one job per host × binding, each binding's
+run gated on whether the pull request touched it, with one aggregate job red on any failure
+or on any job skipped while its gate said run (run 41255218791, the first; the receipts are
+in the spec, `docs/superpowers/specs/2026-10-31-pr-board-design.md`).
+
+- **Measure the barrier, not the leg.** Every suite waits for the slowest core leg, and on the
+  first board that was Windows arm64 at 4m17 against Linux arm64 at 1m39, a 2m38 spread the
+  spec had guessed at one minute. The lever (one caller per host) is written down and not
+  pulled on one run.
+- **A lint that is slower than the core is not a gate, it is the critical path.** Nine of ten
+  lints finished in 12 to 65 seconds on a single arm64 runner; R's took 5m19, so R's suites
+  waited on their lint instead of the core. The rule was written before the number existed
+  and the number says to apply it.
+- **The thing you called release-only was on every PR all along.** The sdist fall-through
+  (13m15) was the longest job on the board, as it had been on the old one; the spec said it
+  was release board, the Forge said otherwise in a comment, and the measurement sided with
+  the Forge. Read the gate, not the prose.
+- **Fail closed, then prove the token.** The classifier returns the whole board on anything it
+  does not understand, an empty list, the API's 3,000-file cap, or a malformed line, and the
+  job runs under `pipefail` so an API failure is red, not docs-only. The one unproven step
+  between a pull request and its board, reading the files endpoint with the default token,
+  took seven seconds on the first run.
+- **The warnings that survive a rewrite were never the rewrite's.** All three on the first
+  board (two from `R CMD build` on a Windows checkout without execute bits, one from an
+  unsigned Windows Swift installer) were on the old board's last green run.
+
 ## Open debts, so they are not lost
 
 - Java: the JNI path's JMH receipt on JDK 21, promised and not yet measured.
@@ -522,6 +552,9 @@ beside the spike's; the others have the harness and the command.
 - R: why a single v7 costs three times a single v4.
 - The core's entropy note gives a whole `new_v7` at 60 ns and its 11-byte draw at 67.5 ns in a
   separate C probe; one of the two measurements is the wrong shape for the comparison.
+- The pull-request board: the docs-only and one-binding controls, not yet run; `lint-r`
+  beside its suites, or cut below the core legs' time; the sdist fall-through's PR-mode gate,
+  a Forge decision; the Windows arm64 core leg's 4m17.
 - The obvious next experiment, given lesson 2: a buffered stream on Apple platforms inside the
   core itself, which is what Go did outside it, and which would move the TypeScript and R Apple
   rows. Not started, and not promised here.
