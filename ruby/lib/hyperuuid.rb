@@ -191,8 +191,9 @@ module HyperUuid
   end
 end
 
-# --- backend selection: the Magnus extension, when present, replaces the Runtime methods
-# above in place (no delegation layer) — Fiddle's measured per-call marshalling floor drops
+# --- backend selection: the Magnus extension, when present, defines the Runtime doors on
+# its singleton class, in front of the Fiddle definitions Runtime extends in (no delegation
+# layer, no redefinition) — Fiddle's measured per-call marshalling floor drops
 # to an ordinary extension call, while everything above Runtime (Uuid, the module doors,
 # batch slicing) stays shared byte-for-byte between backends. The pure-Fiddle definitions
 # remain the universal zero-compile fallback — the last resort, for a Ruby or a platform no

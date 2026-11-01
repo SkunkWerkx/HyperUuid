@@ -9,8 +9,8 @@
 RFC 9562 UUID v4 (random), v5 (deterministic) and v7 (time-sortable) generation, with a
 version 8 SQL Server order for v7 and two backends sharing one public surface. Ruby 3.3 is the floor. The fast path is a native
 extension built with [Magnus](https://github.com/matsadler/magnus) — the Rust core linked
-directly into the Ruby VM, auto-selected when loadable — which redefines the low-level
-`Runtime` methods in place on require; everything above them (`Uuid`, the module doors and
+directly into the Ruby VM, auto-selected when loadable — which defines the low-level
+`Runtime` doors in front of the Fiddle ones on require; everything above them (`Uuid`, the module doors and
 their argument checks, batch slicing) is shared byte-for-byte between backends. The
 last-resort fallback, in the universal gem only, calls the native `libhyperuuid` shared
 library via [`Fiddle`](https://docs.ruby-lang.org/en/master/Fiddle.html) — dlopen/dlsym plus

@@ -20,7 +20,8 @@ the Forge it uses to descend from it. Hold Forge merges while a preparation is i
    `Release-CI-Run-ID` and `Release-Forge-SHA` trailers. No binary is committed.
 3. Read the run's summary: B's trailers, the inventory, the digest listing, CodeQL clean.
    Nothing may be pushed to master between B and the tag; if anything was, prepare again.
-4. Push the root tag `vX.Y.Z` at B (lightweight, unsigned). The tag run holds the tag to B and
+4. Push the root tag `vX.Y.Z` at B, annotated and signed (`git tag -m "HyperUuid vX.Y.Z"
+   vX.Y.Z <B>`, with `tag.gpgsign` on). The tag run holds the tag to B and
    B to its run, downloads the preserved packages, re-verifies every file and the inventory at
    A, holds B's `Package.swift` to the preserved zips, signs the release attestation from the
    tag, and publishes to the six registries, each publisher verifying its files just before

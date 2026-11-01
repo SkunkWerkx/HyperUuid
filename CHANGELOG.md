@@ -7,6 +7,19 @@ all of them. Each entry marks which packages it actually affects.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Ruby — `require "hyperuuid"` is silent under `ruby -w`.** 1.1.0 printed "method
+  redefined; discarding old new_v4" and "previous definition of new_v4 was here" for each of
+  the thirteen `Runtime` doors whenever the Magnus extension loaded, 26 lines on every require
+  with warnings on: the Fiddle definitions sat on `Runtime`'s singleton class, where the
+  extension then defined its own. They now live in `Runtime::FiddleBackend`, a module
+  `Runtime` extends, so the extension's definitions go in front of them through the ancestor
+  chain and nothing is redefined. Method lookup and both backends' behaviour are unchanged;
+  `spec/native_backend_spec.rb` runs a `-w` require and requires an empty stderr. *(ruby)*
+
 ## [1.1.0] — 2026-11-01
 
 ### Security
@@ -1836,6 +1849,7 @@ tag to go out through the repository's own release pipeline rather than by hand.
   for Rust and C# only; PHP skips win-arm64, which PHP itself has never shipped a native build
   for.
 
+[Unreleased]: https://github.com/SkunkWerkx/HyperUuid/compare/v1.1.0...HEAD
 [1.1.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/SkunkWerkx/HyperUuid/compare/v0.8.0...v0.9.0
