@@ -49,7 +49,9 @@ check_version() {
   fi
 }
 
-# What a program asks the dynamic loader for, one name per line.
+# What a program asks the dynamic loader for, one name per line. Its readers below use
+# `grep >/dev/null`, never `grep -q`: -q exits at the first match, and under pipefail the
+# writer's SIGPIPE then fails the pipeline (musl's readelf, on a program that matched).
 needed() {
   case "$os" in
     macos) otool -L "$1" | tail -n +2 | awk '{print $1}' ;;
@@ -61,12 +63,12 @@ check_shared_link() {
   [ "$os" = windows ] && return 0
   local want=libhyperuuid.so
   [ "$os" = macos ] && want=@rpath/libhyperuuid.dylib
-  needed "$1" | grep -qx "$want" || fail "$1 does not load $want: $(needed "$1" | tr '\n' ' ')"
+  needed "$1" | grep -x "$want" >/dev/null || fail "$1 does not load $want: $(needed "$1" | tr '\n' ' ')"
 }
 
 check_static_link() {
   [ "$os" = windows ] && return 0
-  if needed "$1" | grep -q hyperuuid; then
+  if needed "$1" | grep hyperuuid >/dev/null; then
     fail "$1, linked statically, still loads $(needed "$1" | grep hyperuuid)"
   fi
 }

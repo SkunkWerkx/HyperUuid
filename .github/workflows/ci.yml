@@ -940,14 +940,14 @@ jobs:
           zipalign="$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -name zipalign | sort -V | tail -1)"
           for rid in android-x64 android-arm64; do
             case "$rid" in android-x64) abi=x86_64 ;; android-arm64) abi=arm64-v8a ;; esac
-            unzip -l "apks/coreclr-$rid.apk" | grep -q " lib/$abi/libhyperuuid.so\$" \
+            unzip -l "apks/coreclr-$rid.apk" | grep " lib/$abi/libhyperuuid.so\$" >/dev/null \
               || { echo "::error::the CoreCLR $rid APK has no lib/$abi/libhyperuuid.so"; exit 1; }
             "$zipalign" -c -P 16 -v 4 "apks/coreclr-$rid.apk" | grep "libhyperuuid.so"
             for runtime in coreclr aot; do
               "$zipalign" -c -P 16 4 "apks/$runtime-$rid.apk" \
                 || { echo "::error::the $runtime $rid APK fails zipalign -P 16"; exit 1; }
             done
-            if unzip -l "apks/aot-$rid.apk" | grep -q "/libhyperuuid.so\$"; then
+            if unzip -l "apks/aot-$rid.apk" | grep "/libhyperuuid.so\$" >/dev/null; then
               echo "::error::the Native AOT $rid APK carries libhyperuuid.so; the core should be linked into the app"
               exit 1
             fi

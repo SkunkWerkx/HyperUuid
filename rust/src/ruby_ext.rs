@@ -5,7 +5,8 @@
 //! plus building one 16-byte Ruby String.
 //!
 //! On require (after `lib/hyperuuid.rb` has defined the pure-Fiddle module), this extension
-//! redefines the `HyperUuid::Runtime` singleton methods **in place** — no delegation layer,
+//! defines the `HyperUuid::Runtime` doors on its singleton class, **in front of** the Fiddle
+//! ones `Runtime::FiddleBackend` holds (an override, not a redefinition) — no delegation layer,
 //! no second surface. Everything above Runtime (the `Uuid` class, the top-level `HyperUuid`
 //! doors and their argument checks, batch slicing) is shared byte-for-byte between backends,
 //! which is exactly what keeps them provably in agreement. Exceptions stay the package's own
@@ -238,7 +239,7 @@ fn packed_version() -> u32 {
 #[magnus::init(name = "hyperuuid_native")]
 fn init(ruby: &Ruby) -> Result<(), Error> {
     // rb_define_module returns the existing module — lib/hyperuuid.rb has already defined
-    // the pure-Fiddle Runtime; these redefinitions replace its methods in place.
+    // the pure-Fiddle Runtime; these definitions go in front of its FiddleBackend ones.
     let hyperuuid = ruby.define_module("HyperUuid")?;
     let runtime: RModule = hyperuuid.define_module("Runtime")?;
     let random_source_error: ExceptionClass = hyperuuid.const_get("RandomSourceError")?;
