@@ -289,7 +289,8 @@ class CiTests(unittest.TestCase):
         head = text.split('\njobs:')[0]
         block = re.search(r'^  workflow_dispatch:\n((?:    .*\n|\s*\n)+)', head, re.M)[1]
         self.assertRegex(block, r'(?m)^      purpose:\n(?:        .*\n)*?        type: choice\n')
-        self.assertRegex(block, r'(?m)^        default: release$')
+        self.assertRegex(block, r'(?m)^        required: true$')
+        self.assertNotRegex(block, r'(?m)^        default:')
         options = re.search(r'(?m)^        options:\n((?:          - .*\n)+)', block)[1]
         self.assertEqual(re.findall(r'- (\S+)', options), ['board', 'release'])
         # run-name yields `CI purpose=<purpose>` on a dispatch and defers to GitHub's default otherwise.
