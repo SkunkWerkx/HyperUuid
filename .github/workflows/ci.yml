@@ -23,8 +23,8 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('CI purpose={0}
 # why prepare-release.yml dispatches this workflow after it pushes the bump — see
 # release.yml's tag-guard for the gate.
 #
-# The release tail, after the board and only on a master dispatch with purpose=release (the
-# default, which is what prepare-release.yml sends; purpose=board runs the board alone):
+# The release tail, after the board and only on a master dispatch with purpose=release (what
+# prepare-release.yml sends; purpose=board runs the board alone):
 # `forge` resolves the one Forge commit this run uses, the eight pack jobs pack from this
 # run's artifacts, `release-prepare` builds, attests and preserves the inventory (A, this
 # run, the Forge), `codeql` dispatches codeql.yml on this commit and requires a clean
@@ -41,15 +41,16 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      # `release` (the default, what prepare-release.yml dispatches) runs the board and then
-      # the release tail; `board` runs the board alone, whatever the ref.
+      # Required, with no default: a dispatch says what it is for. `release` (what
+      # prepare-release.yml dispatches) runs the board and then the release tail; `board` runs
+      # the board alone, whatever the ref.
       purpose:
         description: "board: the board alone; release: the board, then the release tail"
+        required: true
         type: choice
         options:
           - board
           - release
-        default: release
   # The whole release-mode board once a week, so arm64, musl, iOS, the wheels and the second
   # Ruby ABI are exercised between releases instead of first on release day.
   schedule:
