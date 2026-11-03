@@ -34,7 +34,10 @@ final class ThreadSafetyTest extends TestCase
 
     public function testAStartupLoadWorksOnThisPhp(): void
     {
-        $out = self::child(['-n', '-d', 'extension=' . self::ext()], 'echo (int) PHP_ZTS, " ", (int) extension_loaded("hyperuuid");');
+        $out = self::child(
+            ['-n', '-d', 'extension=' . self::ext()],
+            'echo (int) PHP_ZTS, " ", (int) extension_loaded("hyperuuid");'
+        );
         self::assertSame((PHP_ZTS ? '1' : '0') . ' 1', $out);
     }
 
@@ -58,7 +61,8 @@ final class ThreadSafetyTest extends TestCase
         self::assertSame('', trim($out), $err);
         self::assertStringContainsString('Unable to start hyperuuid module', $err);
         self::assertStringContainsString(
-            'hyperuuid: a thread-safe PHP loads this extension at startup only: add extension=hyperuuid to php.ini (PIE writes it) rather than calling dl()',
+            'hyperuuid: a thread-safe PHP loads this extension at startup only: '
+            . 'add extension=hyperuuid to php.ini (PIE writes it) rather than calling dl()',
             $err
         );
     }
