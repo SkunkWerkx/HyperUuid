@@ -77,13 +77,13 @@ check_static_link() {
 run_program() {
   local how="$1" program="$2" linkage="$3" output
   if [ "$linkage" = static ]; then check_static_link "$program"; else check_shared_link "$program"; fi
-  output="$("${run_as[@]}" "$program")" || fail "$program ($how) failed"
+  output="$(${run_as[@]+"${run_as[@]}"} "$program")" || fail "$program ($how) failed"
   check_version "hyperuuid_version() ($how)" "$(printf '%s' "$output" | tr -d '\r')"
 }
 
 cmake_build() {
   local name="$1" static="$2" build="$work/cmake-$1"
-  cmake -S "$here" -B "$build" -DCMAKE_PREFIX_PATH="$pkg" -DHYPERUUID_SMOKE_STATIC="$static" "${cmake_arch[@]}" \
+  cmake -S "$here" -B "$build" -DCMAKE_PREFIX_PATH="$pkg" -DHYPERUUID_SMOKE_STATIC="$static" ${cmake_arch[@]+"${cmake_arch[@]}"} \
     -DHYPERUUID_SMOKE_CXX="$([ "${SMOKE_CXX:-}" = 1 ] && echo ON || echo OFF)" \
     -DCMAKE_BUILD_TYPE=Release >"$work/$name.log" 2>&1 || { cat "$work/$name.log"; fail "cmake configure ($name)"; }
   cmake --build "$build" --config Release >>"$work/$name.log" 2>&1 || { cat "$work/$name.log"; fail "cmake build ($name)"; }
@@ -110,10 +110,10 @@ if [ "$os" != windows ]; then
   check_version "pkg-config --modversion" "$(pkg-config --modversion hyperuuid)"
   libdir="$(pkg-config --variable=libdir hyperuuid)"
   # shellcheck disable=SC2046 # pkg-config's flags are meant to split
-  cc "${arch_flags[@]}" -o "$work/pc-shared" "$here/main.c" $(pkg-config --cflags --libs hyperuuid) -Wl,-rpath,"$libdir"
+  cc ${arch_flags[@]+"${arch_flags[@]}"} -o "$work/pc-shared" "$here/main.c" $(pkg-config --cflags --libs hyperuuid) -Wl,-rpath,"$libdir"
   run_program "pkg-config, shared" "$work/pc-shared" shared
   # shellcheck disable=SC2046
-  cc "${arch_flags[@]}" -o "$work/pc-static" "$here/main.c" $(pkg-config --cflags hyperuuid) "$libdir/libhyperuuid.a"
+  cc ${arch_flags[@]+"${arch_flags[@]}"} -o "$work/pc-static" "$here/main.c" $(pkg-config --cflags hyperuuid) "$libdir/libhyperuuid.a"
   run_program "pkg-config, static" "$work/pc-static" static
 fi
 
