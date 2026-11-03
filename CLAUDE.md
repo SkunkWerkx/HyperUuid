@@ -50,7 +50,8 @@ re-running the harness, and don't drop a loss.
   which `check_exports.py`'s `jni_no_panic` enforces and `test_check_exports.py` pins), PHP's
   `rust/src/php_ext/` and its committed stub (not a C ABI site: every PHP-callable body starts
   with `guard(`, which `check_exports.py`'s `php_guard` enforces and `test_check_exports.py`
-  pins), `cdylib_smoke.py`, the C++ header `include/hyperuuid.hpp` (hand-written; its
+  pins, and every extern block naming the engine's Windows library takes the `php8`/`php8ts`
+  pair `build.rs`'s `php_zts` picks, which `php_link` enforces), `cdylib_smoke.py`, the C++ header `include/hyperuuid.hpp` (hand-written; its
   `::`-qualified calls are a `check_exports.py` site) and the C smoke consumers in `c/smoke/`,
   the prefixes in `.github/hyper.json` (the Forge's symbol check reads them), the AOT and wasm
   smoke tests, and the export count in the READMEs. The Blazor archive needs no export list:
@@ -119,9 +120,9 @@ re-running the harness, and don't drop a loss.
   `WINDOWS_COMPILERS`, the `vsNN` each minor's Windows build uses, and `WINDOWS_TOOLSETS`, the
   MSVC toolset each `vsNN` links with: PHP refuses a DLL linked newer than its core), the
   `minors` default in `hyper-pie-acceptance.yml` (`test_forge_producers.py` holds those
-  equal), and the platform and minor table in `php/README.md`. A new minor is 6 more zips on the
-  release; the count (18 today) is in `php/README.md`, `.github/RELEASING.md` and the CHANGELOG.
-  No Intel macOS zip and no leg that compiles a PHP: a leg takes the PHP its platform packages,
+  equal), and the platform and minor table in `php/README.md`. A new minor is 12 more zips on the
+  release (six platforms, NTS and ZTS); the count (36 today) is in `php/README.md`,
+  `.github/RELEASING.md` and the CHANGELOG. No Intel macOS zip and no leg that compiles a PHP: a leg takes the PHP its platform packages,
   or there is no leg (the Forge's `CLAUDE.md` has the rule; never build a language runtime).
 - The Python sdist: built in the Forge's `hyper-build-wheels.yml` when `.github/hyper.json`
   says `sdist: true`; one more pypi inventory file, `hyperuuid-<version>.tar.gz`, beside the 17

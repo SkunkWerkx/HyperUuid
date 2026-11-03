@@ -55,7 +55,8 @@ pub(crate) fn finish() {
         .flatten()
     {
         // SAFETY: a live, registered class entry, written before any request on the startup
-        // thread (or in a `dl()` load's own RINIT; NTS only).
+        // thread (or in a `dl()` load's own RINIT, which only an NTS PHP gets: MINIT refuses
+        // a thread-safe PHP's `dl()`).
         unsafe { (*ce).ce_flags |= ZEND_ACC_FINAL };
     }
     widen_unix_millis();

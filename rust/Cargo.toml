@@ -42,6 +42,11 @@ libc = { version = "0.2.189", default-features = false }
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 chacha20 = { version = "0.10.2", default-features = false, features = ["cipher"] }
 
+[build-dependencies]
+# The `php` feature's build script asks the PHP that ext-php-rs builds against whether it is
+# thread-safe, with ext-php-rs's own lookup (`PHP`, else `php` on PATH): build.rs has why.
+ext-php-rs-build = { version = "0.1.1", optional = true }
+
 # One crate, three optional native-extension entry points instead of three satellite
 # crates each path-depending back on this one. Nothing in a plain `cargo cdylib` (the
 # shared library every C-ABI binding loads) changes —
@@ -84,7 +89,7 @@ staticlib = []
 cdylib = ["staticlib"]
 python = ["dep:pyo3", "std"]
 ruby = ["dep:magnus", "std"]
-php = ["dep:ext-php-rs", "std"]
+php = ["dep:ext-php-rs", "dep:ext-php-rs-build", "std"]
 # Proves at link time that the public API cannot panic, the way `ryu` and `itoa` do: every
 # generation, parsing and conversion function and every C export carries `#[no_panic]` under
 # this feature, which turns any panic path the optimizer leaves in into an undefined symbol.
