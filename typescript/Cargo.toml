@@ -9,7 +9,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 hyperuuid = { path = "../rust" }
-napi = { version = "3", default-features = false, features = ["napi5"] }
+# napi10, the Node-API version every Node `engines` admits supports: type tags (napi8) among
+# it, so a method called on another class's instance is refused by Node before the native cast.
+napi = { version = "3", default-features = false, features = ["napi10"] }
 napi-derive = "3"
 
 [build-dependencies]

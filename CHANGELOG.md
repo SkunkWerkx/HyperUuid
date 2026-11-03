@@ -9,6 +9,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **TypeScript — the Node floor is 22.14 (`^22.14.0 || >=23.6.0`), up from 22.13.** The
+  addon now builds against Node-API 10, the first releases with it, and so takes Node-API 8's
+  type tags: a method called on another class's instance is refused by Node itself before the
+  native cast. Node 22.13.x and 23.5.x no longer install it (`EBADENGINE` under
+  engine-strict); 23 is past end of life, and 22.14 shipped in February 2025. Bun is
+  unchanged. *(TypeScript)*
+
 ### Fixed
 
 - **Ruby — `require "hyperuuid"` is silent under `ruby -w`.** 1.1.0 printed "method

@@ -1175,7 +1175,7 @@ jobs:
   # with the WASI package present and an empty stderr; --omit=optional, a deleted native and
   # a forced run load wasm32-wasip1; three negative controls fail or report unavailability
   # the documented way; on Linux also npm/cli#4828's damaged lockfile, the exact Node floor
-  # in node:22.13.0-alpine with engine-strict, an emulated s390x host (QEMU, so no native
+  # in node:22.14.0-alpine with engine-strict, an emulated s390x host (QEMU, so no native
   # package fits; big-endian, so the smoke's checks pass and the documented exit hang is
   # asserted, not hidden) and two bundlers. Bun runs the forced-WASI suite too, and its result is
   # recorded in the step summary without failing the job: Bun's node:wasi cannot initialise

@@ -42,8 +42,8 @@ the whole suite passes on it on Linux x64 (glibc), macOS arm64 and Windows x64, 
 consumer smoke on Alpine; elsewhere little-endian it should load, and is not tested. On a
 big-endian host (s390x) it loads and the consumer smoke's checks pass, and the process then
 never exits: a printed loss, [below](#when-no-native-addon-fits).
-It runs on Node 22.13 or newer
-(`^22.13.0 || >=23.5.0`, the floor of the WebAssembly runtime), or Bun. An install run with
+It runs on Node 22.14 or newer
+(`^22.14.0 || >=23.6.0`, the first releases with Node-API 10), or Bun. An install run with
 `--omit=optional`, or on a platform outside the eight, gets the fallback instead of the addon
 ([below](#when-no-native-addon-fits)).
 
@@ -211,7 +211,7 @@ same, the suite is the same, and `isAvailable()` is `true`. What differs:
 `NAPI_RS_FORCE_WASI=error` in the environment loads the fallback even where an addon is
 installed and fails rather than falling back further; that is how CI runs the whole suite
 against it on Linux x64 (glibc), macOS arm64 and Windows x64, and how to try it locally. The
-consumer smoke runs from the published tarballs on Alpine, at the exact floor, Node 22.13.0,
+consumer smoke runs from the published tarballs on Alpine, at the exact floor, Node 22.14.0,
 and on the floating Node 22 and 24 images; the Node floor is enforced (`engines`), not
 advisory.
 
