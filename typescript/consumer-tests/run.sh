@@ -28,7 +28,7 @@
 #                           node_modules names darwin-arm64 only, and `npm ci` from it as a Linux
 #                           x64 consumer installs no native and loads wasm32-wasip1 (needs the
 #                           darwin-arm64 package in the registry; runs on any host)
-#   floor                   container/consumer.sh in node:22.13.0-alpine with engine-strict,
+#   floor                   container/consumer.sh in node:22.14.0-alpine with engine-strict,
 #                           then node:22-alpine and node:24-alpine (Docker)
 #   s390x                   container/consumer.sh in node:24-alpine for linux/s390x under QEMU, a
 #                           big-endian host: the smoke's checks must pass, and the process must
@@ -43,10 +43,10 @@
 #
 # Containers reach the registry over --network host at 127.0.0.1 on Linux; on Docker Desktop
 # set REGISTRY_HOST=host.docker.internal (Verdaccio listens on 0.0.0.0 either way).
-# FLOOR_IMAGE overrides the exact-floor image (the negative control uses node:22.12.0-alpine).
+# FLOOR_IMAGE overrides the exact-floor image (the negative control uses node:22.13.0-alpine).
 set -euo pipefail
 
-# The npm the mac-lockfile scenario reproduces npm/cli#4828 with: the one Node 22.13.0, the
+# The npm the mac-lockfile scenario reproduces npm/cli#4828 with: the one Node 22.14.0, the
 # floor, bundles, so it moves with the floor (CLAUDE.md, "The Node floor"). npm 11.20.0 has
 # the fix on both sides (a regenerated lockfile names every platform, and `npm ci` refuses one
 # that does not), so the scenario asserts the shape this npm writes and fails loudly on another.
@@ -312,8 +312,8 @@ container_run() { # container_run <scenario> <image> [docker run flags...]
 
 scenario_floor() {
   command -v docker > /dev/null || die "floor: docker is not available"
-  container_run floor "${FLOOR_IMAGE:-node:22.13.0-alpine}" || die "floor: the exact floor image failed"
-  ok "floor: ${FLOOR_IMAGE:-node:22.13.0-alpine} with engine-strict installs and loads $wasi"
+  container_run floor "${FLOOR_IMAGE:-node:22.14.0-alpine}" || die "floor: the exact floor image failed"
+  ok "floor: ${FLOOR_IMAGE:-node:22.14.0-alpine} with engine-strict installs and loads $wasi"
   for image in node:22-alpine node:24-alpine; do
     container_run floor "$image" || die "floor: $image failed"
     ok "floor: $image installs and loads $wasi"

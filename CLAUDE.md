@@ -72,11 +72,11 @@ re-running the harness, and don't drop a loss.
   from which the Forge's `npm_package.py` writes the WASI package's `dependencies` at pack time
   (napi's own manifest carries a range). Dependabot moves them with `@napi-rs/cli`; the emnapi
   trio must stay at the one version the CLI accepts.
-- The Node floor: `engines.node` (`^22.13.0 || >=23.5.0`, the WASI runtime's floor) in
+- The Node floor: `engines.node` (`^22.14.0 || >=23.6.0`, Node-API 10's floor; the WASI runtime's is lower) in
   `typescript/package.json`, the same string in `WASI_NODE_ENGINES` in the Forge's
   `npm_package.py` (the packer refuses a WASI manifest that differs), the Forge's
   `node_floor_versions` default (`"22 24"`, an input override in `ci.yml` if this repo ever
-  differs), `FLOOR_IMAGE`'s default `node:22.13.0-alpine` and `LOCKFILE_NPM` (`10.9.2`, the npm that Node
+  differs), `FLOOR_IMAGE`'s default `node:22.14.0-alpine` and `LOCKFILE_NPM` (`10.9.2`, the npm that Node
   bundles, the one npm bug 4828 still reproduces with) in `typescript/consumer-tests/run.sh`,
   and the floor sentences in `typescript/README.md`,
   `README.md` and the CHANGELOG. Node 22 reaches EOL on 2027-04-30: then drop it from all of

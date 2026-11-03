@@ -52,7 +52,7 @@ REGISTRY_HOST=host.docker.internal typescript/consumer-tests/run.sh /tmp/npm-loc
 
 `mac-lockfile` needs only the darwin-arm64 package in the registry, so it runs from a local
 pack too (`run.sh <dir> mac-lockfile`). Negative controls: `CORPUS_DIR=$(mktemp -d) run.sh <dir> plain` fails on the
-vector check; `FLOOR_IMAGE=node:22.12.0-alpine run.sh <dir> floor` fails the install with
+vector check; `FLOOR_IMAGE=node:22.13.0-alpine run.sh <dir> floor` fails the install with
 `EBADENGINE`.
 
 ## What the runs established (2026-10-31, Apple M6, Node 26.13.0, npm 11.20.0)
