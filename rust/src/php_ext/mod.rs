@@ -4,7 +4,9 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use ext_php_rs::error::php_error;
 use ext_php_rs::exception::{PhpException, PhpResult};
+use ext_php_rs::flags::ErrorType;
 use ext_php_rs::prelude::*;
 use ext_php_rs::types::Zval;
 
@@ -97,11 +99,23 @@ extern "C" fn request_startup(_type: i32, _module_number: i32) -> i32 {
     0
 }
 
+/// Why a thread-safe PHP's `dl()` fails: ext-php-rs keeps each class's entry in process-wide
+/// state, and a `dl()` registers the classes again from the request thread that called it,
+/// into that thread's class table, for that request only. Another thread's `dl()` would
+/// overwrite the state with its own entries, freed when its request ends. A load at startup,
+/// the `extension=` line PIE writes, registers them once, before any request thread exists.
+const DL_REFUSED: &str = "hyperuuid: a thread-safe PHP loads this extension at startup only: add extension=hyperuuid to php.ini (PIE writes it) rather than calling dl()";
+
 /// MINIT, run before ext-php-rs registers the classes: registers the exception classes as
 /// plain `\RuntimeException` subclasses (see `errors::Thrown`), and schedules `Uuid`'s
 /// serialization switch for after every module's MINIT (see `uuid::allow_serialization`).
-/// A failed registration fails MINIT, so the extension doesn't load without its exceptions.
+/// A failed registration fails MINIT, so the extension doesn't load without its exceptions;
+/// so does a thread-safe PHP's `dl()` ([`DL_REFUSED`]), before anything registers.
 extern "C" fn module_startup(module_type: i32, _module_number: i32) -> i32 {
+    if cfg!(php_zts) && module_type != uuid::MODULE_PERSISTENT {
+        let _ = catch_unwind(|| php_error(&ErrorType::Warning, DL_REFUSED));
+        return -1;
+    }
     if !matches!(catch_unwind(errors::register_exceptions), Ok(Ok(()))) {
         return -1;
     }

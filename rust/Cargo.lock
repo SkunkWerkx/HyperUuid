@@ -743,6 +743,7 @@ dependencies = [
  "chacha20",
  "criterion",
  "ext-php-rs",
+ "ext-php-rs-build",
  "getrandom",
  "libc",
  "magnus",

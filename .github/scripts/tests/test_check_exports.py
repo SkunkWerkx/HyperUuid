@@ -123,6 +123,8 @@ class JavaSiteTests(unittest.TestCase):
             mod.core_exports = lambda: exports
             mod.napi_catch_unwind = lambda path: None
             mod.php_guard = lambda path: None
+            self.addCleanup(setattr, mod, 'php_link', mod.php_link)
+            mod.php_link = lambda path: None
             out = io.StringIO()
             with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as caught:
                 mod.main()
@@ -149,6 +151,66 @@ class JavaSiteTests(unittest.TestCase):
 
     def test_jni_no_panic_holds_on_the_shim(self):
         self.mod.jni_no_panic('java/jni/src/lib.rs')
+
+
+class PhpLinkTests(unittest.TestCase):
+    """The PHP extension's Windows link rule: an extern block that names the engine's import
+    library names php8 on an NTS PHP and php8ts on a TS one, chosen by `php_zts`, which build.rs
+    sets from the same PHP ext-php-rs builds against."""
+
+    NTS = '#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]\n'
+    TS = '#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]\n'
+    BLOCK = 'unsafe extern "C" {\n    static spl_ce_RuntimeException: *mut c_void;\n}\n'
+
+    def setUp(self):
+        self.mod = load('check_exports')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def source(self, text):
+        (Path(self.tmp.name) / 'a.rs').write_text(text, encoding='utf-8')
+        return self.tmp.name
+
+    def test_the_pair_passes(self):
+        self.mod.php_link(self.source('use x;\n\n' + self.NTS + self.TS + self.BLOCK + '\n#[cfg(windows)]\n'
+                                      + self.NTS + self.TS + 'unsafe extern "vectorcall" {\n}\n'))
+
+    def test_php8_alone_is_named_with_its_line(self):
+        # What every block said before ZTS: a TS PHP has no php8.lib to link and no php8.dll to
+        # load the DLL against.
+        for bare in ('#[cfg_attr(windows, link(name = "php8"))]\n', '#[link(name = "php8")]\n', self.NTS, self.TS):
+            with self.subTest(bare=bare), self.assertRaisesRegex(SystemExit, r'a\.rs:3'):
+                self.mod.php_link(self.source('use x;\n\n' + bare + self.BLOCK))
+
+    def test_the_pair_out_of_order_or_apart_is_named(self):
+        for text in (self.TS + self.NTS + self.BLOCK, self.NTS + '\n' + self.TS + self.BLOCK,
+                     self.NTS + self.NTS + self.TS + self.BLOCK):
+            with self.subTest(text=text), self.assertRaisesRegex(SystemExit, r'a\.rs:1'):
+                self.mod.php_link(self.source(text))
+
+    def test_the_pair_must_open_an_extern_block(self):
+        with self.assertRaisesRegex(SystemExit, r'a\.rs:1'):
+            self.mod.php_link(self.source(self.NTS + self.TS + 'fn f() {}\n'))
+        self.mod.php_link(self.source(self.NTS + self.TS + '#[cfg(windows)]\n' + self.BLOCK))
+
+    def test_another_library_is_not_this_rules(self):
+        self.mod.php_link(self.source('#[link(name = "kernel32")]\n' + self.BLOCK))
+
+    def test_a_comment_naming_php8_is_not_an_attribute(self):
+        self.mod.php_link(self.source('// #[link(name = "php8")] was the NTS-only spelling\n' + self.BLOCK))
+
+    def test_the_real_extension_holds(self):
+        self.mod.php_link('rust/src/php_ext')
+
+    def test_build_rs_sets_the_cfg_from_the_php_ext_php_rs_asks(self):
+        build = (ROOT / 'rust/build.rs').read_text(encoding='utf-8')
+        self.assertIn('ext_php_rs_build::find_php()', build)
+        self.assertIn('.thread_safety()', build)
+        self.assertIn('cargo:rustc-cfg=php_zts', build)
+        self.assertIn('cargo::rustc-check-cfg=cfg(php_zts)', build)
+        manifest = (ROOT / 'rust/Cargo.toml').read_text(encoding='utf-8')
+        self.assertRegex(manifest, r'(?m)^ext-php-rs-build = \{ version = "[^"]+", optional = true \}$')
+        self.assertRegex(manifest, r'(?m)^php = \[[^\]]*"dep:ext-php-rs-build"')
 
 
 class PhpGuardTests(unittest.TestCase):

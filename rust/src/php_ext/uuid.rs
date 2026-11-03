@@ -49,7 +49,8 @@ use crate::{Layout, Variant, v7};
 
 // `\JsonSerializable`'s class entry, a data symbol ext/json exports (always built in since
 // PHP 8.0); read like SPL's in errors.rs, and linked the same way on Windows.
-#[cfg_attr(windows, link(name = "php8"))]
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
 unsafe extern "C" {
     static php_json_serializable_ce: *mut ext_php_rs::ffi::zend_class_entry;
 }
@@ -237,7 +238,8 @@ fn sixteen(bytes: &[u8]) -> PhpResult<Uuid> {
 
 // The engine's hook for work after every MINIT and before any request (`zend.h`), which
 // bindgen doesn't carry. Read and written only during startup, on the one startup thread.
-#[cfg_attr(windows, link(name = "php8"))]
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
 unsafe extern "C" {
     static mut zend_post_startup_cb: Option<unsafe extern "C" fn() -> i32>;
 }
@@ -246,7 +248,7 @@ unsafe extern "C" {
 static PREVIOUS_POST_STARTUP: Mutex<Option<unsafe extern "C" fn() -> i32>> = Mutex::new(None);
 
 /// `MODULE_PERSISTENT` (`zend_modules.h`): loaded at startup, as opposed to by `dl()`.
-const MODULE_PERSISTENT: i32 = 1;
+pub(crate) const MODULE_PERSISTENT: i32 = 1;
 
 /// Arranges for `Uuid` to accept `unserialize` before any request runs. Called from MINIT.
 ///
@@ -313,9 +315,8 @@ pub(crate) fn allow_serialization_late() {
 pub(crate) fn clear_not_serializable() {
     if let Some(found) = super::registration::own_entry::<Uuid>() {
         // SAFETY: `found` is the live, registered class entry. This runs at post-startup,
-        // before any request, or for a `dl()` load in that request's own RINIT; the extension
-        // is NTS only, so no other thread reads it. ZTS: revisit, since the `dl()` path would
-        // then write a class entry other threads share.
+        // before any request, or for a `dl()` load in that request's own RINIT, which only an
+        // NTS PHP gets (MINIT refuses a thread-safe PHP's `dl()`), so no other thread reads it.
         unsafe { (*found).ce_flags &= !ClassFlags::NotSerializable.bits() };
     }
 }

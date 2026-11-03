@@ -325,7 +325,9 @@ class CiTests(unittest.TestCase):
         ext = composer['php-ext']
         self.assertEqual(ext['extension-name'], 'hyperuuid')
         self.assertEqual(ext['download-url-method'], ['pre-packaged-binary'])
-        self.assertIs(ext['support-zts'], False)
+        # Both builds ship (php_ext_package.py in the Forge): PIE refuses a ZTS PHP otherwise.
+        self.assertIs(ext['support-nts'], True)
+        self.assertIs(ext['support-zts'], True)
         self.assertEqual(ext['os-families'], ['linux', 'darwin', 'windows'])
         self.assertNotIn('autoload', composer)
         self.assertNotIn('ext-ffi', composer['require'])

@@ -15,9 +15,10 @@ use crate::v7;
 // SPL's class entries, read from the PHP binary's exported data symbols. Not `ClassEntry::try_find`:
 // it returns `None` while `ExecutorGlobals::class_table()` is null, which it is at MINIT, when the
 // `extends` entries are read. A data symbol imported from a DLL needs the import library on
-// Windows, as ext-php-rs's windows_build.rs adds to its own bindgen blocks; that name is
-// `php8` for the NTS release build this crate ships (debug and ZTS builds use other names).
-#[cfg_attr(windows, link(name = "php8"))]
+// Windows, as ext-php-rs's windows_build.rs adds to its own bindgen blocks: `php8` for an NTS
+// PHP, `php8ts` for a thread-safe one (build.rs sets `php_zts`).
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
 unsafe extern "C" {
     static spl_ce_RuntimeException: *mut ext_php_rs::ffi::zend_class_entry;
     static spl_ce_InvalidArgumentException: *mut ext_php_rs::ffi::zend_class_entry;

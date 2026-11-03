@@ -61,7 +61,7 @@ fn now_millis() -> i64 {
 
 // The engine's `*` operator (`zend_operators.h`), declared `ZEND_FASTCALL`: the C convention
 // except under MSVC, where it is `__vectorcall`. That changes the symbol too (`mul_function@@24`
-// in php8.lib), so Windows declares the real convention and rustc emits the decorated name.
+// in php8.lib and php8ts.lib), so Windows declares the real convention and rustc emits the decorated name.
 #[cfg(not(windows))]
 unsafe extern "C" {
     fn mul_function(
@@ -72,7 +72,8 @@ unsafe extern "C" {
 }
 
 #[cfg(windows)]
-#[link(name = "php8")]
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
 unsafe extern "vectorcall" {
     fn mul_function(
         result: *mut ext_php_rs::ffi::zval,

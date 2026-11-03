@@ -190,17 +190,22 @@ PIE itself needs:
 
 ### Platforms and PHP versions
 
-Every zip is NTS (non-thread-safe) only, the build every distribution's `php` CLI and FPM
-packages ship; a ZTS PHP (FrankenPHP, for one) has no zip. 18 zips a release, each one
-load-checked into the PHP it is named for, and run through the full suite there, before it is
-packed:
+Every platform and minor ships twice: NTS (non-thread-safe), the build every distribution's
+`php` CLI and FPM packages ship, and ZTS (thread-safe), the build FrankenPHP, Apache's threaded
+MPMs and the thread-safe Windows downloads run. PIE picks the one that matches the PHP it
+installs into. 36 zips a release, each one load-checked into the PHP it is named for, and run
+through the full suite there, before it is packed:
 
-| Platform | PHP 8.3 | PHP 8.4 | PHP 8.5 | Zip on the release |
+| Platform | PHP 8.3 | PHP 8.4 | PHP 8.5 | Zip on the release (NTS, ZTS) |
 | --- | :---: | :---: | :---: | --- |
-| Linux x64, arm64 (glibc 2.34 or newer) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-glibc-nts.zip` |
-| Linux x64, arm64 (musl: Alpine) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-musl-nts.zip` |
-| macOS arm64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-arm64-darwin-bsdlibc-nts.zip` |
-| Windows x64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>-<minor>-nts-{vs16,vs17}-x86_64.zip` (VS16 for 8.3, VS17 from 8.4) |
+| Linux x64, arm64 (glibc 2.34 or newer) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-glibc-{nts,zts}.zip` |
+| Linux x64, arm64 (musl: Alpine) | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-{x86_64,arm64}-linux-musl-{nts,zts}.zip` |
+| macOS arm64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>_php<minor>-arm64-darwin-bsdlibc-{nts,zts}.zip` |
+| Windows x64 | ✅ | ✅ | ✅ | `php_hyperuuid-v<version>-<minor>-{nts,ts}-{vs16,vs17}-x86_64.zip` (VS16 for 8.3, VS17 from 8.4) |
+
+On a thread-safe PHP the extension loads at startup only, from the `extension=hyperuuid` line PIE
+writes to php.ini (or `docker-php-ext-enable hyperuuid` in a Docker image): a `dl()` there stops the
+script with a warning naming that line. On an NTS PHP `dl()` loads it as before.
 
 glibc 2.34 means Debian 12, Ubuntu 22.04, RHEL 9, Amazon Linux 2023 or newer. An extension is
 tied to one PHP minor, so a zip built for 8.4 is refused by 8.5; PIE picks by the PHP it runs

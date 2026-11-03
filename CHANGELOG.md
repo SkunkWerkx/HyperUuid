@@ -9,6 +9,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **PHP — thread-safe (ZTS) builds.** Every platform and minor now ships a ZTS zip beside the
+  NTS one, 36 in all, for FrankenPHP, Apache's threaded MPMs and thread-safe Windows PHP; PIE
+  picks the one matching the PHP it installs into, and `composer.json` declares
+  `support-zts`. On a ZTS PHP the extension loads from php.ini only (the `extension=` line PIE
+  writes): a `dl()` there stops the script with a warning naming that line. NTS is unchanged.
+  *(PHP)*
+
 ### Changed
 
 - **TypeScript — the Node floor is 22.14 (`^22.14.0 || >=23.6.0`), up from 22.13.** The

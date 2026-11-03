@@ -268,9 +268,9 @@ the XPS yet. Both are debts, named here so they are not forgotten.
 
 **Packaging.** Native libraries were committed to git in August because Packagist has no
 packing step; the Composer archive carried every binding until export-ignore took it from 3.5
-to 2.6 MB (0.5.0). Now: 18 zips on the release (8.3, 8.4, 8.5; NTS; six platforms), the
+to 2.6 MB (0.5.0). Now: 36 zips on the release (8.3, 8.4, 8.5; NTS and ZTS; six platforms), the
 Windows build on stable with `RUSTC_BOOTSTRAP=1` for `abi_vectorcall` because dropping Windows
-would have been a regression, no source fallback, no win-arm64 (PHP ships none), no ZTS. The
+would have been a regression, no source fallback, no win-arm64 (PHP ships none). The
 first PIE install from Packagist is proven only at the rehearsal or 1.1.0, and a red
 acceptance after publish means a patch release. There was a seventh platform for a week:
 Intel macOS, whose leg compiled an x86_64 PHP from php.net's source under Rosetta on every

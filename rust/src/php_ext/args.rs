@@ -42,7 +42,8 @@ use super::uuid::Uuid;
 use super::value_name;
 
 // The engine's weak-mode check for a scalar parameter (`zend_execute.h`, PHP 8.3 to 8.5).
-#[cfg_attr(windows, link(name = "php8"))]
+#[cfg_attr(all(windows, not(php_zts)), link(name = "php8"))]
+#[cfg_attr(all(windows, php_zts), link(name = "php8ts"))]
 unsafe extern "C" {
     fn zend_verify_scalar_type_hint(
         type_mask: u32,
