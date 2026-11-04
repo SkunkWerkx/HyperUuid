@@ -378,7 +378,7 @@ class CiTests(unittest.TestCase):
         self.assertIn('        os: [ubuntu-26.04, xcode-27, windows-2025-vs2026]\n', header(job))
         self.assertIn('      fail-fast: false\n', header(job))
         self.assertEqual(self.gate(job), self.g('typescript', 'core', 'ci'))
-        for needle in ('npm_package.py" pack', 'NAPI_RS_FORCE_WASI=error npm test', 'npm run typecheck',
+        for needle in ('npm_package.py" pack', 'NAPI_RS_FORCE_WASI=error bun run test', 'bun run typecheck',
                        'node-wasm32-wasip1', 'run.sh', 'setup-qemu-action', 'path: .hyperforge',
                        'repository: SkunkWerkx/.github', 'ref: master', 'persist-credentials: false',
                        'node-version: "26"', 'oven-sh/setup-bun@', 'merge-multiple: false', 'GITHUB_STEP_SUMMARY'):
@@ -404,7 +404,7 @@ class CiTests(unittest.TestCase):
         # annotations per leg on the 1.1.0 preparation. Commands are off for its output, resumed
         # before the exit status is returned, so the step after still records the result.
         self.assertIn('echo "::stop-commands::$token"', bun)
-        self.assertIn('NAPI_RS_FORCE_WASI=error npm run test:bun || status=$?', bun)
+        self.assertIn('NAPI_RS_FORCE_WASI=error bun run test:bun || status=$?', bun)
         self.assertIn('echo "::$token::"\n          exit "$status"', bun)
         self.assertEqual(job.count('continue-on-error: true'), 1, 'nothing but Bun is tolerated')
         for step in re.split(r'\n      - ', job)[1:]:

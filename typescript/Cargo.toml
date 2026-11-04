@@ -25,7 +25,7 @@ lto = true
 codegen-units = 1
 strip = "symbols"
 
-# The WASI build only (`npm run build:wasi`). wasm32-wasip1's std ships no unwinder: rustc
+# The WASI build only (`bun run build:wasi`). wasm32-wasip1's std ships no unwinder: rustc
 # 1.99.1 refuses `-C panic=unwind` for it, and cargo never passes that flag for a profile
 # that says "unwind" (it emits `-C panic` only for abort), so the release profile's unwind
 # above is silently the target's abort there. This profile says abort explicitly, so the

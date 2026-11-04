@@ -57,7 +57,7 @@ remove "r/tools/vendor.sh" \
   r/src/rust/vendor.tar.xz r/src/rust/Cargo.lock r/tests/testthat/corpus r/src/*.o r/src/*.so r/src/*.dll
 # TypeScript: the addon, the WASI module and its loaders, the browser page's bundle, and the
 # consumer tests' work directory.
-remove "npm run build and npm run build:wasi in typescript/" \
+remove "bun run build and bun run build:wasi in typescript/" \
   typescript/*.node typescript/hyperuuid.wasm32-wasip1*.wasm typescript/hyperuuid.wasip1* typescript/browser.js \
   typescript/browser-smoke/dist typescript/consumer-tests/work
 

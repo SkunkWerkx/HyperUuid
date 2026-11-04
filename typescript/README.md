@@ -22,6 +22,8 @@ that pay for randomness once.
 npm install @skunkwerkx/hyperuuid
 ```
 
+`bun add @skunkwerkx/hyperuuid` installs the same packages, and Node runs the result.
+
 The package itself is JavaScript and types; the core comes from one of nine companion
 packages, ten on npm with this one. The native addon is a platform package that npm picks for
 you through `optionalDependencies`, so nothing compiles at install, one for each of eight
@@ -374,7 +376,7 @@ were taken on both. The WebAssembly fallback does not load on Bun 1.4.4
 ## Benchmarks
 
 Apple M6 (Mac18,5), macOS, Node 26.13.0 / Bun 1.4.4, measured 2026-10-30, with
-[mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`; see
+[mitata](https://github.com/evanwashere/mitata) (`bun run bench` and `bun run bench:bun`; see
 `bench/bench.ts`). These numbers are not comparable to the [linux-x64 tables](../docs/benchmarks.md), which were
 measured on linux-x64 on an Intel Core i9-11900H. A second run the same night landed within 4%
 of every figure below except Node's `newV7BatchBytes(1000)` (3.07 µs). Bun's `uuid` `v7()` is
@@ -399,7 +401,7 @@ the whole batch, about 44 ns an id as strings on Node and 3.6 ns as bytes. If yo
 at a time and only need v4, `crypto.randomUUID()` is the faster call.
 
 The WebAssembly fallback, measured 2026-10-31 on the same machine (`NAPI_RS_FORCE_WASI=error
-npm run bench`, Node 26.13.0, rustc 1.99.1, `@napi-rs/wasm-runtime` 1.2.6), with the native
+bun run bench`, Node 26.13.0, rustc 1.99.1, `@napi-rs/wasm-runtime` 1.2.6), with the native
 addon's figures from the same session beside it, since the night before's differ by a few
 per cent:
 
@@ -428,21 +430,21 @@ only the shipped form, so the table above is the receipt.
 From `typescript/`, with a Rust toolchain installed:
 
 ```sh
-npm ci
-npm run build       # the release addon for this machine, plus binding.js and binding.d.ts
-npm test            # node --test
-npm run test:bun    # bun test
-npm run typecheck
-npm run lint
-npm run bench
+bun install --frozen-lockfile
+bun run build       # the release addon for this machine, plus binding.js and binding.d.ts
+bun run test        # node --test
+bun run test:bun    # bun test
+bun run typecheck
+bun run lint
+bun run bench
 ```
 
 The WebAssembly fallback needs the `wasm32-wasip1` target (`rustup target add wasm32-wasip1`):
 
 ```sh
-npm run build:wasi                  # hyperuuid.wasm32-wasip1.wasm and the hyperuuid.wasip1* loaders
-NAPI_RS_FORCE_WASI=error npm test   # the same suite on the fallback, failing rather than falling back
-NAPI_RS_FORCE_WASI=error npm run bench
+bun run build:wasi                  # hyperuuid.wasm32-wasip1.wasm and the hyperuuid.wasip1* loaders
+NAPI_RS_FORCE_WASI=error bun run test   # the same suite on the fallback, failing rather than falling back
+NAPI_RS_FORCE_WASI=error bun run bench
 ```
 
 Pass `--js binding.js --dts binding.d.ts` and `--platform` to any other `napi build` (a

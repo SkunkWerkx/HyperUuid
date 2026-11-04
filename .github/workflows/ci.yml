@@ -1177,7 +1177,8 @@ jobs:
   # the documented way; on Linux also npm/cli#4828's damaged lockfile, the exact Node floor
   # in node:22.14.0-alpine with engine-strict, an emulated s390x host (QEMU, so no native
   # package fits; big-endian, so the smoke's checks pass and the documented exit hang is
-  # asserted, not hidden) and two bundlers. Bun runs the forced-WASI suite too, and its result is
+  # asserted, not hidden), two bundlers and, on every OS, a `bun add` whose result Node loads,
+  # its lock agreeing with npm's. Bun runs the forced-WASI suite too, and its result is
   # recorded in the step summary without failing the job: Bun's node:wasi cannot initialise
   # the module today (the design spec's Bun decision); native Bun stays green on the TypeScript legs.
   # The Forge is checked out at master here, as release.yml does, for the pack script; the
@@ -1206,7 +1207,6 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26"
-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
@@ -1225,11 +1225,11 @@ jobs:
         working-directory: typescript
         run: |
           set -euo pipefail
-          npm ci
+          bun install --frozen-lockfile
           cp ../artifacts/node/node-wasm32-wasip1/* .
           ls -l hyperuuid.wasm32-wasip1.wasm
-          NAPI_RS_FORCE_WASI=error npm test
-          npm run typecheck
+          NAPI_RS_FORCE_WASI=error bun run test
+          bun run typecheck
 
       # Bun's runner prints each failure as a `::error` workflow command when it sees GitHub
       # Actions, and Bun 1.4.4 cannot load the WASI module, so this tolerated step posted ten
@@ -1246,7 +1246,7 @@ jobs:
           token="$(node -e 'console.log(require("node:crypto").randomBytes(16).toString("hex"))')"
           echo "::stop-commands::$token"
           status=0
-          NAPI_RS_FORCE_WASI=error npm run test:bun || status=$?
+          NAPI_RS_FORCE_WASI=error bun run test:bun || status=$?
           echo "::$token::"
           exit "$status"
 
@@ -1278,7 +1278,7 @@ jobs:
       - name: The consumer-test harness
         shell: bash
         working-directory: typescript/consumer-tests
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       # s390x for the emulated-host scenario; the floor and s390x scenarios need Docker, which
       # only this leg has, and the lockfile scenario runs beside them.
@@ -1298,7 +1298,7 @@ jobs:
         run: >-
           bash typescript/consumer-tests/run.sh "$GITHUB_WORKSPACE/npm-packages"
           negative-unpublished plain omit-optional absent-native forced-wasi
-          negative-deleted-package negative-deleted-wasm bundlers
+          negative-deleted-package negative-deleted-wasm bundlers bun-install
 
   # The release tail. A release's run is dispatched by prepare-release.yml at master once the
   # bump is pushed as A; pull requests and the weekly schedule never reach it. Everything below

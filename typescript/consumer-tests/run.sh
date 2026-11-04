@@ -39,6 +39,11 @@
 #   bundlers                esbuild and webpack bundle bundled.cjs; the bundle runs from a
 #                           directory outside the repository under NAPI_RS_FORCE_WASI=error,
 #                           plain first, then with @skunkwerkx/hyperuuid external and installed beside it
+#   bun-install             `bun add` from a cold cache, then Node runs the result: native loads,
+#                           stderr is empty, one platform package and the WASI package are
+#                           installed, `bun install --frozen-lockfile` reproduces it, and each
+#                           @skunkwerkx package has the integrity npm's lock gives it. Bun's and
+#                           npm's cold install times are printed, never asserted
 #   all                     every scenario above, in that order
 #
 # Containers reach the registry over --network host at 127.0.0.1 on Linux; on Docker Desktop
@@ -65,7 +70,7 @@ shift
 scenarios=("$@")
 if [ "${scenarios[*]}" = all ]; then
   scenarios=(negative-unpublished plain omit-optional absent-native forced-wasi negative-deleted-package
-             negative-deleted-wasm mac-lockfile floor s390x bundlers)
+             negative-deleted-wasm mac-lockfile floor s390x bundlers bun-install)
 fi
 
 # A relative require from the package's own directory: a POSIX path inside a quoted
@@ -86,7 +91,7 @@ native_file() { echo "$(native_path "$(dirname "$1")")/$(basename "$1")"; }
 corpus_env="$(native_path "$corpus")"
 
 if [ ! -x node_modules/.bin/verdaccio ] && [ ! -f node_modules/.bin/verdaccio ]; then
-  npm ci --no-audit --no-fund
+  bun install --frozen-lockfile
 fi
 rm -rf work
 mkdir -p work/storage
@@ -385,6 +390,58 @@ scenario_bundlers() {
   ok "bundlers: both bundlers have a passing form"
 }
 
+now_ms() { node -p 'Date.now()'; }
+# Every @skunkwerkx package a lock resolves, one `name integrity` a line, sorted. bun.lock is
+# JSON with trailing commas, each package `[ "name@version", "", {...}, "sha512-..." ]`.
+locked_integrities() { # locked_integrities <package-lock.json|bun.lock>
+  node -e '
+    const fs = require("node:fs")
+    const text = fs.readFileSync(process.argv[1], "utf8")
+    const lock = JSON.parse(text.replace(/,(\s*[}\]])/g, "$1"))
+    const rows = Object.entries(lock.packages).flatMap(([key, entry]) => {
+      const name = key.split("node_modules/").pop()
+      const integrity = Array.isArray(entry) ? entry[entry.length - 1] : entry.integrity
+      return name.startsWith("@skunkwerkx/") ? [`${name} ${integrity}`] : []
+    })
+    console.log(rows.sort().join("\n"))
+  ' "$1"
+}
+
+scenario_bun_install() {
+  command -v bun > /dev/null 2>&1 || die "bun-install: bun is not installed"
+  local dir; dir="$(consumer bun-install)"
+  local start bun_ms npm_ms
+  start="$(now_ms)"
+  (cd "$dir" && BUN_INSTALL_CACHE_DIR="$(native_path "$dir/cache")" bun add "$scope@$version" > install.log 2>&1) \
+    || { cat "$dir/install.log"; die "bun-install: bun add failed"; }
+  bun_ms=$(( $(now_ms) - start ))
+  [ -f "$dir/bun.lock" ] || die "bun-install: no bun.lock"
+  [ -f "$dir/node_modules/$scope-$wasi/package.json" ] || die "bun-install: the WASI package is not installed"
+  [ "$(platform_packages "$dir" | wc -l)" -eq 1 ] \
+    || die "bun-install: expected one platform package, got: $(platform_packages "$dir" | tr '\n' ' ')"
+  smoke "$dir" || die "bun-install: smoke failed"
+  expect_target "$dir" native bun-install
+  expect_stderr_empty "$dir" bun-install
+
+  rm -rf "$dir/node_modules"
+  (cd "$dir" && BUN_INSTALL_CACHE_DIR="$(native_path "$dir/cache")" bun install --frozen-lockfile > install-frozen.log 2>&1) \
+    || { cat "$dir/install-frozen.log"; die "bun-install: bun install --frozen-lockfile failed"; }
+  smoke "$dir" || die "bun-install: smoke failed after --frozen-lockfile"
+  expect_target "$dir" native bun-install
+
+  local npm_dir; npm_dir="$(consumer bun-install-npm)"
+  start="$(now_ms)"
+  install_in "$npm_dir" "$scope@$version"
+  npm_ms=$(( $(now_ms) - start ))
+  local ours theirs
+  ours="$(locked_integrities "$(native_file "$dir/bun.lock")")"
+  theirs="$(locked_integrities "$(native_file "$npm_dir/package-lock.json")")"
+  # npm locks every platform package, Bun the same: both name what the manifest names.
+  [ -n "$ours" ] && [ "$ours" = "$theirs" ] || { echo "bun: $ours"; echo "npm: $theirs"; die "bun-install: the locks disagree"; }
+  echo "cold install, this registry: bun $(bun --version) ${bun_ms} ms, npm $(npm --version) ${npm_ms} ms"
+  ok "bun-install: Node loaded native from a Bun install, and the locks agree"
+}
+
 for s in "${scenarios[@]}"; do
   if [ "$s" = negative-unpublished ]; then
     echo "== $s"
@@ -406,6 +463,7 @@ for s in "${scenarios[@]}"; do
     floor) scenario_floor ;;
     s390x) scenario_s390x ;;
     bundlers) scenario_bundlers ;;
+    bun-install) scenario_bun_install ;;
     *) die "unknown scenario $s" ;;
   esac
 done
