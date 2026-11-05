@@ -53,11 +53,11 @@ class GateTests(unittest.TestCase):
                 on = {name for name, gate in gates.items() if gate}
                 self.assertEqual(on, {'changes', 'core', 'core-proofs', f'test-{binding}'} | extra)
 
-    def test_a_core_change_lints_rust_and_runs_every_suite(self):
+    def test_a_core_change_runs_every_suite(self):
         gates = pr_board.gates(outputs(core=True, lint_rust=True, **{b: True for b in BINDINGS}), 'pull_request',
                                'refs/pull/1/merge')
         on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'core-proofs', 'lint-rust', 'build-static',
+        self.assertEqual(on, {'changes', 'core', 'core-proofs', 'build-static',
                               *(f'test-{b}' for b in BINDINGS)})
 
     def test_the_proofs_gate_every_pull_request_that_builds_the_core(self):
@@ -68,10 +68,9 @@ class GateTests(unittest.TestCase):
         # Off a pull request core-checks runs the same proofs.
         self.assertFalse(pr_board.gates(outputs(core=True), 'schedule', 'refs/heads/master')['core-proofs'])
 
-    def test_core_gates_nothing_on_a_release_but_the_rust_lint(self):
+    def test_core_gates_nothing_on_a_release(self):
         everything = outputs(**{key: True for key in ['core', 'ci', 'lint_rust'] + BINDINGS + [f'lint_{b}' for b in BINDINGS]})
         gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
-        self.assertFalse(gates['lint-rust'], 'core-checks lints off a pull request')
         self.assertTrue(gates['core-checks'])
 
     def test_release_only_jobs_are_gated_off_on_pull_requests(self):
@@ -79,9 +78,9 @@ class GateTests(unittest.TestCase):
         self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-apple-mobile'])
         self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-android'])
         gates = pr_board.gates(everything, 'workflow_dispatch', 'refs/heads/master', 'release')
-        self.assertTrue(all(gate for name, gate in gates.items() if name not in ('lint-rust', 'core-proofs')))
+        self.assertTrue(all(gate for name, gate in gates.items() if name != 'core-proofs'))
         gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
-        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL and name not in ('lint-rust', 'core-proofs')))
+        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL and name != 'core-proofs'))
 
     def test_the_tail_is_gated_on_a_release_dispatch_at_master_only(self):
         on = pr_board.gates(outputs(core=True), 'workflow_dispatch', 'refs/heads/master', 'release')
@@ -159,12 +158,12 @@ class VerdictTests(unittest.TestCase):
         skipped = {name: 'skipped' for name in pr_board.JOBS if name != 'changes'}
         self.assertEqual(pr_board.verdict(results(**skipped), gates), (True, 'ok'))
 
-    def test_lint_failure_is_named_before_the_skipped_suites(self):
+    def test_core_failure_is_named_before_the_skipped_suites(self):
         gates = pr_board.gates(outputs(java=True, lint_rust=True), 'pull_request')
-        given = {'test-java': 'skipped', 'lint-rust': 'failure'}
+        given = {'test-java': 'skipped', 'core': 'failure'}
         given.update({name: 'skipped' for name in pr_board.JOBS if name not in given and name not in ('changes', 'core')})
         ok, why = pr_board.verdict(results(**given), gates)
-        self.assertEqual((ok, why), (False, 'lint-rust failed'))
+        self.assertEqual((ok, why), (False, 'core failed'))
 
     def test_a_failed_classifier_is_red(self):
         gates = pr_board.gates(outputs(), 'pull_request')

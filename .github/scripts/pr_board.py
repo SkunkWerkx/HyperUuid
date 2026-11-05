@@ -21,7 +21,7 @@ BINDINGS = ['csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r
 # dispatch, whatever changed.
 TAIL = ['forge', 'nuget-org-pack', 'crate-pack', 'maven-pack', 'ruby-pack', 'npm-pack', 'r-pack', 'c-pack', 'pypi-pack',
         'release-prepare', 'codeql', 'stage-release']
-JOBS = (['changes'] + ['lint-rust', 'core', 'core-checks', 'core-proofs', 'build-static', 'build-android']
+JOBS = (['changes'] + ['core', 'core-checks', 'core-proofs', 'build-static', 'build-android']
         + [f'test-{b}' for b in BINDINGS]
         + ['pack-c', 'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package', 'test-apple-mobile', 'test-android']
         + TAIL)
@@ -42,7 +42,6 @@ def gates(outputs, event, ref='', purpose=''):
               'build-wasm': release, 'build-android': release, 'core-checks': release, 'pack-c': release,
               'build-wheels': release, 'test-nuget-package': release, 'test-npm-package': release,
               'test-apple-mobile': release, 'test-android': release,
-              'lint-rust': not release and on.get('lint_rust', False),
               'core-proofs': not release and not on.get('docs_only', False)}
     for name in BINDINGS:
         result[f'test-{name}'] = binding(name)
