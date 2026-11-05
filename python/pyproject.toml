@@ -45,7 +45,7 @@ Issues = "https://github.com/SkunkWerkx/HyperUuid/issues"
 
 [project.optional-dependencies]
 # mypy is what tests/test_typing.py checks a consumer with; that one test skips without it.
-test = ["pytest>=9.1.1", "mypy>=2.4.0"]
+test = ["pytest>=9.2.0", "mypy>=2.4.1"]
 bench = ["pyperf>=2.10.0"]
 
 [tool.maturin]

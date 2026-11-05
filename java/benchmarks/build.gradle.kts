@@ -3,7 +3,7 @@
 // v4/v5/v7, plus batch-vs-1000-individual-calls, run by hand with `./gradlew :benchmarks:jmh`.
 plugins {
     java
-    id("me.champeau.jmh") version "0.7.3"
+    id("me.champeau.jmh") version "0.7.4"
 }
 
 repositories {

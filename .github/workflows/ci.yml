@@ -741,7 +741,7 @@ jobs:
           echo "the Go suite builds for an iOS device"
 
       # The SDK global.json names, as the Forge's C# legs take it.
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: ${{ !cancelled() }}
         with:
           global-json-file: global.json
@@ -885,12 +885,12 @@ jobs:
               || { echo "::error::static-libs has no csharp/HyperUuid/staticlibs/$rid/libhyperuuid.a"; exit 1; }
           done
 
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 
       # The android workload's build tasks run on a JDK.
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "25"
@@ -1051,7 +1051,7 @@ jobs:
           [ -f csharp/HyperUuid/staticlibs/linux-x64/libhyperuuid.a ] \
             || { echo "::error::static-libs has no csharp/HyperUuid/staticlibs/linux-x64/libhyperuuid.a"; exit 1; }
 
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 

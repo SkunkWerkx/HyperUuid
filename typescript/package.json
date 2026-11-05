@@ -39,7 +39,8 @@
       "wasm32-wasip1"
     ],
     "wasm": {
-      "initialMemory": 992
+      "initialMemory": 992,
+      "cpu": false
     }
   },
   "scripts": {
@@ -55,13 +56,13 @@
     "bench:bun": "bun bench/bench.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.4",
-    "@emnapi/core": "2.0.0-beta.2",
-    "@emnapi/runtime": "2.0.0-beta.2",
-    "@napi-rs/cli": "3.10.9",
-    "@napi-rs/wasm-runtime": "1.2.6",
+    "@biomejs/biome": "2.6.5",
+    "@emnapi/core": "2.0.0-beta.3",
+    "@emnapi/runtime": "2.0.0-beta.3",
+    "@napi-rs/cli": "3.10.12",
+    "@napi-rs/wasm-runtime": "1.2.7",
     "@types/node": "26.6.6",
-    "emnapi": "2.0.0-beta.2",
+    "emnapi": "2.0.0-beta.3",
     "mitata": "1.0.34",
     "typescript": "7.0.2",
     "uuid": "14.0.3"

@@ -23,8 +23,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ordo-one/malloc-interposer.git",
       "state" : {
-        "revision" : "f479398f73b14dbd1d25f4e01fd667171ddc9f18",
-        "version" : "1.6.0"
+        "revision" : "977dc0639b742ecd05ac03fecc53664095821a5d",
+        "version" : "1.6.1"
       }
     },
     {
@@ -52,15 +52,6 @@
       "state" : {
         "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
         "version" : "1.1.1"
-      }
-    },
-    {
-      "identity" : "swift-runtime-interposer",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ordo-one/swift-runtime-interposer.git",
-      "state" : {
-        "revision" : "7631b4611a446868f1ecc94fde10b4b14c41f711",
-        "version" : "2.0.0"
       }
     },
     {
