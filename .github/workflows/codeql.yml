@@ -6,25 +6,21 @@ name: CodeQL
 # package (see the matrix). Default setup must stay disabled in the repository settings: while it
 # is on, GitHub rejects every upload from this workflow.
 #
-# Everything else mirrors what default setup ran — the same nine languages, the same default
-# query suite, the same weekly cadence — and `category` is spelled out below so alerts keep the
+# Everything else mirrors what default setup ran — the same nine languages and the same default
+# query suite — and `category` is spelled out below so alerts keep the
 # `/language:<lang>` identity they had under default setup instead of being re-raised from
 # scratch as new ones.
 #
 # The cost of the switch is that this file now owns what default setup owned: a language added
 # to the repository is unscanned until it is added to the matrix.
 
-# Weekly and on demand, not on pull requests or pushes: the scan is a release gate, run on A by
+# On demand, never on a schedule, a pull request or a push: the scan is a release gate, run on A by
 # the preparation run's `codeql` job (ci.yml's tail), which dispatches it and
-# requires a clean dashboard before B is staged (.github/RELEASING.md), and the weekly run keeps
-# the dashboard current between releases. Swift alone is why: under CodeQL's tracer a Swift build of this
+# requires a clean dashboard before B is staged (.github/RELEASING.md). Swift alone is why: under CodeQL's tracer a Swift build of this
 # library costs 7-8½ minutes however it is invoked (`swift build --target` took 7m37s, `swiftc`
 # on the library's sources directly 8m27s; untraced, either takes seconds), a fixed cost of the
 # extractor rather than of the code, and not one worth paying on every pull request.
 on:
-  schedule:
-    # Weekly, off the hour and off CI's Monday board.
-    - cron: "27 4 * * 2"
   workflow_dispatch:
 
 # A run for a ref waits for the one before it rather than cancelling it: a run to completion is
