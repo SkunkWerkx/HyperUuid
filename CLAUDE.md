@@ -199,13 +199,13 @@ promise, so every stable bump is re-proven by the legs that use it.
 - The board is one Forge workflow per concern: `core` (`hyper-core.yml`, the seven core legs,
   each with its cdylib export check and C smoke), `core-proofs` (`hyper-core-proofs.yml`, the
   no_std, no-allocator and no-panic proofs, on every pull request that builds the core), `core-checks` (`hyper-core-checks.yml`,
-  the static checks on three hosts), `lint-<binding>` (one job on `ubuntu-26.04-arm`) and
-  `test-<binding>` (the binding's suite on its hosts), gated on what the pull request touched
+  the static checks on three hosts) and `test-<binding>` (one job per binding: its toolchain once, on a pull request that touched
+  its tree or `.github/` its linters on one leg, then its suite on its hosts), gated on what the pull request touched
   (`changes`, from `.github/scripts/pr_changes.py`; `pr-board` is the one status to read, red
   when a job failed or was skipped while its gate said run). The Forge's fail-fast ordering
   rule (a new binding's steps first in `hyper-build-native.yml`) is moot here: every binding
-  is its own job, and a red lint starts no suite. Off a pull request nothing is gated and the
-  whole release-mode board runs. A new binding is one `lint-` and one `test-` caller, one
+  is its own job, and a red lint stops its suite. Off a pull request nothing is gated and the
+  whole release-mode board runs. A new binding is one `test-` caller, one
   class in `pr_changes.py` and one gate in `pr_board.py` (its tests hold the three together).
 - `prepare-release.yml` and ci.yml's `core-checks` are one `uses:` each of a Forge reusable
   workflow; this repo keeps triggers, permissions and gates.
@@ -231,7 +231,7 @@ promise, so every stable bump is re-proven by the legs that use it.
 ## Local loop
 
 The PR board always builds the core and proves its thesis (`core-proofs`). A binding's suite runs when its tree, the core (`rust/`,
-`include/`, `c/`, `corpus/`) or `.github/` changed; its lint when its tree or `.github/` did;
+`include/`, `c/`, `corpus/`) or `.github/` changed, with its linters ahead of it when its tree or `.github/` did;
 Rust's lint when the core or `.github/` did; `python3 .github/scripts/pr_changes.py`
 classifies a `filename<TAB>previous_filename` list from stdin the way the `changes` job does
 (`--all` is the release board), and `python3 .github/scripts/pr_board.py` with `NEEDS`,
