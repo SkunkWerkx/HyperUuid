@@ -52,21 +52,22 @@ class GateTests(unittest.TestCase):
         self.assertEqual(on, {'changes', 'core', 'lint-java', 'test-java'})
         gates = pr_board.gates(outputs(csharp=True), 'pull_request')
         on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'lint-csharp', 'test-csharp', 'build-static', 'build-wasm', 'test-nuget-package'})
+        self.assertEqual(on, {'changes', 'core', 'lint-csharp', 'test-csharp', 'build-static'})
         gates = pr_board.gates(outputs(typescript=True), 'pull_request')
         on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'lint-typescript', 'test-typescript', 'build-wasm', 'test-npm-package'})
+        self.assertEqual(on, {'changes', 'core', 'lint-typescript', 'test-typescript'})
         gates = pr_board.gates(outputs(python=True), 'pull_request')
-        self.assertTrue(gates['build-wheels'])
+        self.assertFalse(gates['build-wheels'])
         gates = pr_board.gates(outputs(swift=True), 'pull_request')
         self.assertTrue(gates['build-static'])
         gates = pr_board.gates(outputs(go=True), 'pull_request')
-        self.assertTrue(gates['lint-go-full'] and gates['build-wasm'])
+        self.assertFalse(gates['lint-go-full'] or gates['build-wasm'])
 
     def test_core_gates_everything_but_the_release_jobs(self):
         gates = pr_board.gates(outputs(core=True), 'pull_request', 'refs/pull/1/merge')
         off = {name for name, gate in gates.items() if not gate}
-        self.assertEqual(off, {'test-apple-mobile', 'test-android', *pr_board.TAIL})
+        self.assertEqual(off, {'test-apple-mobile', 'test-android', 'lint-go-full', 'core-checks', 'build-android', 'pack-c',
+                               'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package', *pr_board.TAIL})
 
     def test_release_only_jobs_are_gated_off_on_pull_requests(self):
         everything = outputs(**{key: True for key in ['core', 'ci'] + BINDINGS})
@@ -118,7 +119,8 @@ class GateTests(unittest.TestCase):
                     # The release tail: a release-purpose master dispatch and nothing else, whatever changed.
                     self.assertEqual(gate[1], tail_gate)
                     continue
-                if name in ('core', 'test-apple-mobile', 'test-android'):
+                if name in ('core', 'test-apple-mobile', 'test-android', 'lint-go-full', 'core-checks', 'build-android', 'pack-c',
+                            'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package'):
                     continue
                 on = {key for key in outputs() if pr_board.gates(outputs(**{key: True}), 'pull_request', 'refs/pull/1/merge')[name]}
                 self.assertEqual(on, classes)

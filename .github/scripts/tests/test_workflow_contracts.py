@@ -263,6 +263,9 @@ TAIL = ['forge', 'nuget-org-pack', 'crate-pack', 'maven-pack', 'ruby-pack', 'npm
 TAIL_GATE = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.purpose == 'release'"
 
 
+OFF_A_PULL_REQUEST = "github.event_name != 'pull_request'"
+
+
 class CiTests(unittest.TestCase):
     def setUp(self):
         self.jobs = jobs(WORKFLOWS / 'ci.yml')
@@ -298,10 +301,12 @@ class CiTests(unittest.TestCase):
         self.assertIn('          PURPOSE: ${{ inputs.purpose }}\n', self.jobs['pr-board'])
 
     def test_mobile_dependencies(self):
-        # Release board only, both of them; the C smoke's simulator run joins test-apple-mobile,
-        # which is why it waits for the packed archives.
+        # Release board only, both of them. Apple mobile packs its own C archives from static-libs,
+        # so it starts once they exist and only the final checkpoints wait on it.
         apple, android = self.jobs['test-apple-mobile'], self.jobs['test-android']
-        self.assertEqual(self.needs(apple), {'changes', 'build-static', 'pack-c'})
+        self.assertEqual(self.needs(apple), {'changes', 'build-static'})
+        waiting = {name for name, job in self.jobs.items() if 'test-apple-mobile' in self.needs(job)}
+        self.assertEqual(waiting, {'forge', 'pr-board'})
         self.assertEqual(self.needs(android), {'changes', 'build-static', 'build-android'})
         for job in (apple, android):
             self.assertIn("    if: github.event_name != 'pull_request'\n", header(job))
@@ -362,7 +367,7 @@ class CiTests(unittest.TestCase):
         job = self.jobs['test-nuget-package']
         self.assertEqual(self.needs(job), {'changes', 'core', 'build-static'})
         self.assertIn('    runs-on: ubuntu-26.04\n', header(job))
-        self.assertEqual(self.gate(job), self.g('csharp', 'core', 'ci'))
+        self.assertEqual(self.gate(job), OFF_A_PULL_REQUEST)
         self.assertIn('setup-dotnet', job)
         self.assertIn('global-json-file: global.json', job)
         self.assertNotIn('dotnet-version', job)
@@ -377,7 +382,7 @@ class CiTests(unittest.TestCase):
         self.assertIn('    runs-on: ${{ matrix.os }}\n', header(job))
         self.assertIn('        os: [ubuntu-26.04, xcode-27, windows-2025-vs2026]\n', header(job))
         self.assertIn('      fail-fast: false\n', header(job))
-        self.assertEqual(self.gate(job), self.g('typescript', 'core', 'ci'))
+        self.assertEqual(self.gate(job), OFF_A_PULL_REQUEST)
         for needle in ('npm_package.py" pack', 'NAPI_RS_FORCE_WASI=error bun run test', 'bun run typecheck',
                        'node-wasm32-wasip1', 'run.sh', 'setup-qemu-action', 'path: .hyperforge',
                        'repository: SkunkWerkx/.github', 'ref: master', 'persist-credentials: false',
@@ -494,7 +499,7 @@ class CiTests(unittest.TestCase):
         core = self.jobs['core-checks']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-core-checks.yml@master', core)
         self.assertEqual(self.needs(core), {'changes'})
-        self.assertEqual(self.gate(core), self.g('core', 'ci'))
+        self.assertEqual(self.gate(core), OFF_A_PULL_REQUEST)
         self.assertEqual(with_block(core), {'no_std_rustflags', 'extra_features', 'no_panic_command',
                                              'clippy_targets', 'big_endian'})
         self.assertIn('big_endian: s390x-unknown-linux-gnu', core)
@@ -550,7 +555,7 @@ class CiTests(unittest.TestCase):
                 self.assertFalse(re.findall(r'^      [a-z-]+: write$', header(lint), re.M), 'a lint attests nothing')
         full = self.jobs['lint-go-full']
         self.assertEqual(self.needs(full), {'changes'})
-        self.assertEqual(self.gate(full), self.g('go', 'core', 'ci'))
+        self.assertEqual(self.gate(full), OFF_A_PULL_REQUEST)
 
     def test_every_test_caller_needs_its_lint_and_core(self):
         extra = {'csharp': {'build-static'}, 'swift': {'build-static'}}
@@ -589,7 +594,7 @@ class CiTests(unittest.TestCase):
         pack = self.jobs['pack-c']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master', pack)
         self.assertEqual(self.needs(pack), {'changes', 'core', 'build-static', 'build-android'})
-        self.assertEqual(self.gate(pack), self.g('core', 'ci'))
+        self.assertEqual(self.gate(pack), OFF_A_PULL_REQUEST)
         self.assertEqual(re.findall(r'^      (smokes|lint): (\w+)$', pack, re.M), [('smokes', 'false'), ('lint', 'false')])
         self.assertIn('      mode: ' + MODE + '\n', pack)
 
@@ -599,24 +604,24 @@ class CiTests(unittest.TestCase):
         self.assertEqual(self.gate(static), self.g('core', 'ci', 'csharp', 'swift'))
         android = self.jobs['build-android']
         self.assertEqual(self.needs(android), {'changes'})
-        self.assertEqual(self.gate(android), self.g('core', 'ci'))
+        self.assertEqual(self.gate(android), OFF_A_PULL_REQUEST)
 
-    def test_php_pr_legs_are_two_paths(self):
+    def test_php_passes_only_its_floor(self):
         php = self.jobs['test-php']
-        self.assertIn('      pr_legs: two-paths\n', php)
+        self.assertNotIn('pr_legs', php)
         self.assertIn('      php_floor_version: "8.3"\n', php)
 
     def test_build_wasm_inputs_are_gated(self):
         wasm = self.jobs['build-wasm']
         self.assertEqual(self.needs(wasm), {'changes'})
-        self.assertEqual(self.gate(wasm), self.g('core', 'ci', 'csharp', 'typescript', 'go'))
+        self.assertEqual(self.gate(wasm), OFF_A_PULL_REQUEST)
         self.assertIn('      archive: ${{ ' + self.g('core', 'ci', 'csharp') + ' }}\n', wasm, 'the archive itself, not only its check')
         self.assertIn("      blazor_check: ${{ (" + self.g('core', 'ci', 'csharp') + ") && 'csharp/HyperUuid.WasmSmokeTest/check.sh' || '' }}\n", wasm)
         self.assertIn("      rust_browser_test: ${{ (" + self.g('core', 'ci') + ") && 'rust/browser-test' || '' }}\n", wasm)
         self.assertIn('      ruby_wasm_smoke: ruby/wasm-smoke\n', wasm)
         wheels = self.jobs['build-wheels']
         self.assertEqual(self.needs(wheels), {'changes'})
-        self.assertEqual(self.gate(wheels), self.g('python', 'core', 'ci'))
+        self.assertEqual(self.gate(wheels), OFF_A_PULL_REQUEST)
 
     def test_no_job_excludes_release_mode(self):
         for name, job in self.jobs.items():
@@ -721,14 +726,15 @@ class CiTests(unittest.TestCase):
 
     def test_one_simulator_boot_on_the_full_board(self):
         # The C archives' Apple mobile smoke runs in test-apple-mobile's simulator, not a second
-        # one of its own: one boot on the whole board, after the packed archives are in.
+        # one of its own: one boot on the whole board. It packs those archives itself, from static-libs.
         text = (WORKFLOWS / 'ci.yml').read_text()
         self.assertEqual(text.count('xcrun simctl boot '), 1)
         apple = self.jobs['test-apple-mobile']
-        self.assertIn('pack-c', self.needs(apple))
+        self.assertNotIn('pack-c', self.needs(apple))
         steps = re.split(r'\n      - ', apple)[1:]
         names = [step.splitlines()[0] for step in steps]
-        download = next(i for i, step in enumerate(steps) if 'name: c-packages-ci' in step)
+        download = next(i for i, n in enumerate(names) if n == 'name: Pack the four Apple mobile archives')
+        self.assertNotIn('c-packages-ci', apple)
         boot = next(i for i, n in enumerate(names) if n == 'name: Boot an iPhone simulator')
         smoke = next(i for i, n in enumerate(names) if n == 'name: C — the four Apple mobile archives, built against and run')
         self.assertLess(download, smoke)

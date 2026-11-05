@@ -11,6 +11,11 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('CI purpose={0}
 # docs_only false — so the release-mode board is the whole board, and pr-board, the one
 # status to read, is red when any needed job failed or was skipped while its gate said run.
 #
+# A pull request asks whether the code broke: each touched binding's lint, then its suite through
+# the corpus on linux-x64, PHP included. Everything else (the other platforms, musl, wheels,
+# wasm, Android, the packed-package jobs, the core's source checks) runs on the board and a
+# release, a cost paid by dispatching it.
+#
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
 # Magnus extension) get uploaded here for later reuse, as do the 17 PyPI wheels, which
@@ -159,7 +164,7 @@ jobs:
 
   build-android:
     needs: [changes]
-    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-android.yml@master
     permissions:
       contents: read
@@ -186,7 +191,7 @@ jobs:
   # own lints are the lint-<binding> jobs below. None of it waits on the core legs.
   core-checks:
     needs: [changes]
-    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-core-checks.yml@master
     permissions:
       contents: read
@@ -307,7 +312,7 @@ jobs:
 
   lint-go-full:
     needs: [changes]
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-go.yml@master
     permissions:
       contents: read
@@ -412,12 +417,10 @@ jobs:
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       crate: hyperuuid
       # The floor composer.json declares; explicit because the Forge's default (8.2) serves
-      # the siblings. A pull request builds and tests the extension on two legs, one per build
-      # path: linux-x64 on the newest minor from the image's own PHP, and win-x64 on this
-      # floor through setup-php (the floor's Windows build takes another toolset). Release
-      # mode ignores pr_legs and builds every minor on six RIDs.
+      # the siblings.
+      # A pull request builds and tests the extension on linux-x64 alone, on the newest minor;
+      # release mode builds every minor on six RIDs.
       php_floor_version: "8.3"
-      pr_legs: two-paths
   test-swift:
     needs: [changes, lint-swift, core, build-static]
     if: needs.changes.outputs.swift == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
@@ -463,11 +466,11 @@ jobs:
   # The C archives the release attaches, packed from this run's libraries the way the tag run
   # packs them (c_package.py pack over every RID, the Android archives included, and the
   # layout check), uploaded as c-packages-ci. The per-RID smokes ran on the core legs and the
-  # formatter in core-checks, so this is the pack alone; the Apple mobile smoke takes the
-  # packed archives in test-apple-mobile.
+  # formatter in core-checks, so this is the pack alone; test-apple-mobile packs and smokes
+  # its four Apple mobile archives itself, so it never waits on this job.
   pack-c:
     needs: [changes, core, build-static, build-android]
-    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-c.yml@master
     permissions:
       contents: read
@@ -476,11 +479,11 @@ jobs:
       smokes: false
       lint: false
 
-  # C#/NuGet's WASM support is a shipped surface (Norse Architecture needs it), so it's
-  # built on every pull request that can reach it, not just at release time.
+  # C#/NuGet's WASM support is a shipped surface (Norse Architecture needs it), so the
+  # board and every release build it.
   build-wasm:
     needs: [changes]
-    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.csharp == 'true' || needs.changes.outputs.typescript == 'true' || needs.changes.outputs.go == 'true'
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wasm.yml@master
     # Handed down for the same reason as core's: the ruby.wasm job attests the archives the
     # companion gem ships, and the WASI job its module.
@@ -523,14 +526,14 @@ jobs:
   # included (the musl ones on Alpine, osx-x64 under Rosetta, the Pyodide one in Pyodide
   # under Node and in headless Chrome, where the whole pytest suite runs too), called
   # into, attested and uploaded as pypi-wheels-{rid}. release.yml publishes these exact
-  # files. A wheel that cannot be installed therefore fails the pull request; while they
+  # files. A wheel that cannot be installed therefore fails the board; while they
   # were built in release.yml, 0.4.0's osx-x64 wheel failed its first install with four
   # registries already published. With `sdist` in `.github/hyper.json`, the source
   # distribution too: built, `pip install`ed at exactly `rust-version` on manylinux2014 and
   # Alpine (one minor lower must fail), attested and uploaded as `pypi-wheels-sdist`.
   build-wheels:
     needs: [changes]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-wheels.yml@master
     # Same two scopes core hands down, for the same reason: the forge attests each wheel and
     # cannot escalate past what this job was granted.
@@ -563,7 +566,7 @@ jobs:
   #    device with signing off. No runner has a device, so that last one is proved as far as
   #    a link goes: the app's executable must define the core's symbols.
   #
-  #  * C takes the four archives pack-c packed (header, static library, CMake and pkg-config
+  #  * C packs its four archives here from static-libs, the bytes pack-c packs (header, static library, CMake and pkg-config
   #    files): c/smoke/apple-mobile.sh builds the smoke consumer against each and runs the
   #    simulator and Catalyst ones, in the simulator booted below.
   #  * Go takes none: its core is Go source (go/internal/core), so the suite here proves the
@@ -581,8 +584,9 @@ jobs:
   # app also writes what it prints to a file in its container (SmokeLog.cs) and that file is
   # what is checked.
   test-apple-mobile:
-    needs: [changes, build-static, pack-c]
-    # Start when the static archives and the packed C archives are ready; release board only.
+    needs: [changes, build-static]
+    # Starts as soon as the static archives exist and holds nothing back: only forge and
+    # pr-board wait on it. Release board only.
     if: github.event_name != 'pull_request'
     # The .NET 11 RC2 ios and maccatalyst workloads (27.0.x) are built against Xcode 27.0 and
     # refuse any other version; macos-latest (macOS 26) tops out at Xcode 26.6. The xcode-27
@@ -635,14 +639,33 @@ jobs:
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       # The C archives' four Apple mobile smokes, moved here from the Forge's hyper-test-c.yml
-      # so the full board boots one simulator: the archives pack-c packed, unpacked and built
+      # so the full board boots one simulator: its four archives, packed here and built
       # against through CMake (c/smoke/apple-mobile.sh: the iOS and simulator slices, Mac
       # Catalyst on both architectures, maccatalyst-x64 under Rosetta), in the simulator above.
+      - name: Check out the Forge at master
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: SkunkWerkx/.github
+          ref: master
+          path: .hyperforge
+          persist-credentials: false
+
+      # c_package.py needs a newer Python than the system one.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.x"
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ !cancelled() }}
         with:
-          name: c-packages-ci
-          path: c-packages
+          name: static-libs
+          path: c-artifacts/static-libs
+
+      - name: Pack the four Apple mobile archives
+        if: ${{ !cancelled() }}
+        run: python3 .hyperforge/.github/scripts/c_package.py pack --artifacts c-artifacts --out c-packages --only ios-arm64 --only iossimulator-arm64 --only maccatalyst-arm64 --only maccatalyst-x64
 
       - name: Unpack the four Apple mobile archives
         if: ${{ !cancelled() }}
@@ -1020,7 +1043,7 @@ jobs:
   # The runner image's SDK is not assumed to be the only one: the job logs which are there.
   test-nuget-package:
     needs: [changes, core, build-static]
-    if: needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
@@ -1186,7 +1209,7 @@ jobs:
   test-npm-package:
     # node-<rid> comes from the TypeScript legs, node-wasm32-wasip1 from build-wasm.
     needs: [changes, core, build-wasm, test-typescript]
-    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:

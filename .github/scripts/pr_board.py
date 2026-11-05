@@ -40,11 +40,9 @@ def gates(outputs, event, ref='', purpose=''):
     release = event != 'pull_request'
     result = {'changes': True, 'core': not on.get('docs_only', False),
               'build-static': core_or_ci or on.get('csharp', False) or on.get('swift', False),
-              'build-android': core_or_ci, 'core-checks': core_or_ci, 'pack-c': core_or_ci,
-              'build-wasm': core_or_ci or on.get('csharp', False) or on.get('typescript', False) or on.get('go', False),
-              'build-wheels': binding('python'), 'test-nuget-package': binding('csharp'),
-              'test-npm-package': binding('typescript'), 'test-apple-mobile': release, 'test-android': release,
-              'lint-go-full': binding('go')}
+              'build-wasm': release, 'build-android': release, 'core-checks': release, 'pack-c': release,
+              'build-wheels': release, 'test-nuget-package': release, 'test-npm-package': release,
+              'test-apple-mobile': release, 'test-android': release, 'lint-go-full': release}
     for name in BINDINGS:
         result[f'lint-{name}'] = result[f'test-{name}'] = binding(name)
     train = event == 'workflow_dispatch' and ref == 'refs/heads/master' and purpose == 'release'
