@@ -7,7 +7,7 @@ This is a new submission.
 * macOS 27.2 on Apple M6 (aarch64-apple-darwin27.0.0), R 4.6.2 (Homebrew build), rustc and
   cargo 1.99.1.
 * Debian forky/sid on x86-64 (the `rocker/r-devel` image), R Under development (unstable)
-  (2026-10-25 r90763), with the distribution's rustc and cargo 1.97.1.
+  (2026-11-01 r90825), with the distribution's rustc and cargo 1.97.1.
 * The release's CI (GitHub Actions, rustc and cargo 1.99.1), `R CMD check --no-manual
   --as-cran` failing on any NOTE, on the source the submitted tarball was built from: Ubuntu
   26.04 x86-64 with R 4.6.2 and R 4.5.3, Ubuntu 26.04 aarch64 with R 4.6.2, macOS 27 aarch64
@@ -27,21 +27,18 @@ macOS, R 4.6.2, with the PDF manual (TinyTeX), `checkbashisms`, `qpdf` and `pand
 
     New submission
 
-R-devel on Debian, `--no-manual`:
+R-devel on Debian, `--no-manual`, with `pandoc` installed and that image's own hardening flags
+(`-Wdate-time -Werror=format-security -Wformat`, from Debian's `R CMD config CFLAGS`, not from this
+package's `Makevars`, which sets no compiler flags) declared in
+`_R_CHECK_COMPILATION_FLAGS_KNOWN_`:
 
-    Status: 2 NOTEs
+    Status: 1 NOTE
 
     * checking CRAN incoming feasibility ... NOTE
     New submission
 
-    * checking compilation flags used ... NOTE
-    Compilation used the following non-portable flag(s):
-      '-Wdate-time' '-Werror=format-security' '-Wformat'
-
-The first NOTE is the new-submission notice. The second names flags from that image's R
-build configuration (Debian's hardening defaults in `R CMD config CFLAGS`), not from this
-package's `Makevars`, which sets no compiler flags. On both, the 1,228 testthat expectations
-pass, including the replay of the five bundled corpus files.
+The NOTE is the new-submission notice. On both, the 1,235 testthat expectations pass, including
+the replay of the five bundled corpus files.
 `NEWS.md`'s heading carries the version number, which R's NEWS parser requires.
 
 ## Compiled code

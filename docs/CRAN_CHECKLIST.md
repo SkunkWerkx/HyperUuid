@@ -20,7 +20,7 @@ This is the list a CRAN reviewer works through by hand.
 ### Checks
 
 - [x] Local `devtools::check()`, run as `--as-cran` on R-devel
-  _`R CMD check --as-cran` on the tarball: R 4.6.2 on macOS, 1 NOTE (new submission); R-devel r90763 on x86-64 Debian (`rocker/r-devel`, the distribution's rustc 1.97.1), 2 NOTEs (new submission; that image's own hardening `CFLAGS`). The first R-devel run also flagged `command -v` in `configure` as a bashism (the image's checkbashisms 2.19.4); fixed in `configure` and `configure.win`._
+  _`R CMD check --as-cran` on the tarball: R 4.6.2 on macOS, 1 NOTE (new submission); R-devel r90825 on x86-64 Debian (`rocker/r-devel`, the distribution's rustc 1.97.1), 1 NOTE (new submission), with `pandoc` installed and that image's own hardening `CFLAGS` declared in `_R_CHECK_COMPILATION_FLAGS_KNOWN_`. The first R-devel run also flagged `command -v` in `configure` as a bashism (the image's checkbashisms 2.19.4); fixed in `configure` and `configure.win`._
 - [ ] `devtools::check_win_devel()` and `devtools::check_mac_release()`
   _Not run: both upload the package and win-builder emails the maintainer. Windows is the one platform no local check covers._
 - [ ] rhub v2 through GitHub Actions (the old single-call rhub method is retired)
