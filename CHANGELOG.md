@@ -17,9 +17,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `support-zts`. On a ZTS PHP the extension loads from php.ini only (the `extension=` line PIE
   writes): a `dl()` there stops the script with a warning naming that line. NTS is unchanged.
   *(PHP)*
+- **TypeScript — `bun add` is a tested install.** On every OS the consumer tests install the
+  package with Bun, run it under Node and hold each package's integrity to npm's lock.
+  *(TypeScript)*
 
 ### Changed
 
+- **The JavaScript toolchain is Bun.** Every dependency tree here (`typescript/`, its browser
+  smoke and consumer-test harness, `ruby/wasm-smoke/`) is locked by `bun.lock` and installed with
+  `bun install --frozen-lockfile`, and CI, the local loop and Dependabot follow. npm keeps what
+  publishing needs: `npm pack` and `npm publish`, and the consumer scenarios that install as an
+  npm user does. Node still runs the suite, and the packages install from npm with either tool.
 - **TypeScript — the Node floor is 22.14 (`^22.14.0 || >=23.6.0`), up from 22.13.** The
   addon now builds against Node-API 10, the first releases with it, and so takes Node-API 8's
   type tags: a method called on another class's instance is refused by Node itself before the

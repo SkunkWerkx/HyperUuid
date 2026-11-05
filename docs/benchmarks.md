@@ -124,7 +124,7 @@ Go 1.27.3, `go test -bench=. -benchmem -count 6` from `go/`, benchstat medians, 
 
 The same binding on Linux arm64, in Docker on the same Mac (`golang:1.27`, 3 runs, medians; the spike put this leg's noise at up to ±26%): `NewV4` 55.1 ns against `NewRandom()` 57.8 ns, level; `NewV7At` 54.9 ns against `NewV7()` 98.6 ns, 1.8x faster, both 1.3-1.4x behind the cgo binding's own 41 and 40 ns there; the batch 3.3 µs against the cgo binding's 3.46 µs, level in this run and 5.0 µs in an earlier one of the same count; and 12 goroutines minting v4s at 10.2 ns a call aggregate, where the cgo binding's archive, drawing from the core's ChaCha20 pool, ran at 4.9 ns: **2x slower** under contention on Linux, the pool having closed most of the gap from the 130 ns one mutexed instance measured in the spike. The x64 columns await the owner's XPS run ([go/README.md](../go/README.md#benchmarks) has the WebAssembly numbers, where `google/uuid` is level or ahead per single call and the binding wins only the batch, and the memory receipts; the raw outputs are committed beside the spike's results as `*-shipped-*.txt`).
 
-TypeScript, Node 26.13.0 and Bun 1.4.4, with [mitata](https://github.com/evanwashere/mitata) (`npm run bench` and `npm run bench:bun`, from `typescript/`), averages per call; Bun's `uuid` `v7()` is the noisiest baseline here, so read its ratio with that spread:
+TypeScript, Node 26.13.0 and Bun 1.4.4, with [mitata](https://github.com/evanwashere/mitata) (`bun run bench` and `bun run bench:bun`, from `typescript/`), averages per call; Bun's `uuid` `v7()` is the noisiest baseline here, so read its ratio with that spread:
 
 | Call | Node 26 | Bun 1.4 | vs. | Node 26, WebAssembly fallback (2026-10-31) |
 | --- | ---: | ---: | --- | ---: |
@@ -134,7 +134,7 @@ TypeScript, Node 26.13.0 and Bun 1.4.4, with [mitata](https://github.com/evanwas
 | `newV7BatchBytes(1000)` | 3.62 µs | 2.93 µs | `newV7Batch(1000)`: 12x / 9.3x faster | 40.4 µs |
 | `v7UnixMillis(id)` | 115 ns | 156 ns | | 890 ns |
 
-The WebAssembly column is the fallback forced (`NAPI_RS_FORCE_WASI=error npm run bench`) a day later on the same machine; its session's native figures, within a few per cent of the table's, are beside it in [`typescript/README.md`](../typescript/README.md#benchmarks). Every call pays the WASI boundary (about 0.9 µs where the addon pays 0.1), so the fallback is 6x to 13x behind the addon and loses to both JavaScript baselines on single ids; batches still pay it once. Bun 1.4.4 cannot initialise the module, so it has no WebAssembly column.
+The WebAssembly column is the fallback forced (`NAPI_RS_FORCE_WASI=error bun run bench`) a day later on the same machine; its session's native figures, within a few per cent of the table's, are beside it in [`typescript/README.md`](../typescript/README.md#benchmarks). Every call pays the WASI boundary (about 0.9 µs where the addon pays 0.1), so the fallback is 6x to 13x behind the addon and loses to both JavaScript baselines on single ids; batches still pay it once. Bun 1.4.4 cannot initialise the module, so it has no WebAssembly column.
 
 The losses are the random source: on Apple platforms the core asks `CCRandomGenerateBytes` for every id (the user-space ChaCha20 pool in `rust/src/entropy.rs` is Linux only), which costs more from 12 bytes up, and a v4 draws 16 where a v7 draws 11. A round trip into the addon that touches no randomness (`v7UnixMillis`) is 115 ns on Node. `crypto.randomUUID()` draws from a buffer of random bytes it refills in bulk, and a batch pays once in the same way.
 

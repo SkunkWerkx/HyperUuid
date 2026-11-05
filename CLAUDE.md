@@ -69,7 +69,7 @@ re-running the harness, and don't drop a loss.
   after.
 - The WASI package's runtime: `@napi-rs/wasm-runtime`, `@emnapi/core` and `@emnapi/runtime`
   (`WASI_RUNTIME` in the Forge's `release_package_metadata.py`), with `emnapi` beside them, all
-  exact devDependencies in `typescript/package.json` and pinned by its `package-lock.json`,
+  exact devDependencies in `typescript/package.json` and pinned by its `bun.lock`,
   from which the Forge's `npm_package.py` writes the WASI package's `dependencies` at pack time
   (napi's own manifest carries a range). Dependabot moves them with `@napi-rs/cli`; the emnapi
   trio must stay at the one version the CLI accepts.
@@ -293,12 +293,12 @@ variable, and a cache from a plain cargo run for that target builds a different 
 Forge's `wasm_archive_guard.py` checks the result.
 
 TypeScript builds its own addon, a napi-rs crate path-depending on `rust/`: from
-`typescript/`, `npm ci && npm run build && npm test`, then `npm run test:bun` and `npm run
+`typescript/`, `bun install --frozen-lockfile && bun run build && bun run test`, then `bun run test:bun` and `bun run
 lint`. Both build scripts pass `--platform --js binding.js --dts binding.d.ts`; a `napi build`
 without the last two (a hand-run `--target` cross build, say) writes napi's own loader over the
 hand-written `index.js` and `index.d.ts`, and CI fails on that diff; without `--platform` the
 WASI build deletes `binding.js` as a stale managed file. The WebAssembly fallback (`rustup
-target add wasm32-wasip1`): `npm run build:wasi`, then `NAPI_RS_FORCE_WASI=error npm test`
+target add wasm32-wasip1`): `bun run build:wasi`, then `NAPI_RS_FORCE_WASI=error bun run test`
 (the suite on the fallback, failing rather than falling back; Bun 1.4.4 cannot load it). The
 consumer tests, `typescript/consumer-tests/README.md`: pack the ten tarballs with the Forge's
 `npm_package.py pack` (`--allow-missing-natives` locally, never in CI; CI's PR mode passes
@@ -336,6 +336,15 @@ csproj packs whatever sits in the gitignored `runtimes/` and `staticlibs/` under
 the csproj copies `rust/target/release/libhyperuuid.dylib` only when no library is staged, so a
 stale staging links into the wrong build and is not consumer-visible: `local-clean.sh` clears
 it, and `local-core.sh` restages the host's archive.
+
+## Bun and npm
+
+Bun is the package manager and script runner for every JavaScript tree here, locked by `bun.lock`.
+npm is confined to the published packages: the Forge's `npm pkg set` and `npm pack`, `npm publish`,
+and the consumer scenarios that install as an npm user does (`bun-install` is the Bun user's; Bun
+has no s390x build, so the `s390x` scenario could not move in any case). Don't add another npm call.
+Bun's own runtime still can't load the WASI module, so `test:bun` under `NAPI_RS_FORCE_WASI=error`
+stays recorded, never gating. `bun run test` is the package script; `bun test` is Bun's runner.
 
 ## Working with the owner
 

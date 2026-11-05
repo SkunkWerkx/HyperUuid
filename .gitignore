@@ -74,7 +74,7 @@ php/.phpunit.result.cache
 
 # Node: the TypeScript binding and ruby/wasm-smoke's test harness.
 **/node_modules/
-# The napi-rs addon `npm run build` writes for this machine, and the per-platform package
+# The napi-rs addon `bun run build` writes for this machine, and the per-platform package
 # directories `napi create-npm-dirs` writes (the Forge's pack-npm action runs it on a copy of
 # typescript/ at release time); never committed.
 typescript/*.node

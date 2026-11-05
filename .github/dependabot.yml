@@ -73,7 +73,7 @@ updates:
       default-days: 7
 
   # Not ruby/wasm-smoke: its Gemfile names the gem under test from the environment. Its js and
-  # ruby_wasm gems move with the npm package below and are bumped by hand alongside it.
+  # ruby_wasm gems move with the package below and are bumped by hand alongside it.
   - package-ecosystem: bundler
     directory: "/ruby"
     patterns: ["*"]
@@ -83,7 +83,7 @@ updates:
 
   # The TypeScript binding, its browser smoke page and consumer-test harness, and
   # ruby/wasm-smoke's harness.
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directories: ["/typescript", "/typescript/browser-smoke", "/typescript/consumer-tests", "/ruby/wasm-smoke"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
