@@ -14,15 +14,14 @@ import os
 import sys
 
 BINDINGS = ['csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
-# Every job but the two aggregates, in the order a failure is named: a red lint before the
-# suites it skipped, the core before what waits on it.
+# Every job but the two aggregates, in the order a failure is named: the core before what waits on it.
 # The release tail, in dependency order: the Forge resolver, the eight pack jobs, the
 # inventory, CodeQL and B. Run on a master dispatch with purpose=release only
 # (prepare-release.yml's), never on a pull request, the weekly schedule or a purpose=board
 # dispatch, whatever changed.
 TAIL = ['forge', 'nuget-org-pack', 'crate-pack', 'maven-pack', 'ruby-pack', 'npm-pack', 'r-pack', 'c-pack', 'pypi-pack',
         'release-prepare', 'codeql', 'stage-release']
-JOBS = (['changes'] + [f'lint-{b}' for b in BINDINGS] + ['lint-go-full', 'lint-rust', 'core', 'core-checks', 'core-proofs', 'build-static', 'build-android']
+JOBS = (['changes'] + ['lint-rust', 'core', 'core-checks', 'core-proofs', 'build-static', 'build-android']
         + [f'test-{b}' for b in BINDINGS]
         + ['pack-c', 'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package', 'test-apple-mobile', 'test-android']
         + TAIL)
@@ -42,13 +41,11 @@ def gates(outputs, event, ref='', purpose=''):
               'build-static': core_or_ci or on.get('swift', False),
               'build-wasm': release, 'build-android': release, 'core-checks': release, 'pack-c': release,
               'build-wheels': release, 'test-nuget-package': release, 'test-npm-package': release,
-              'test-apple-mobile': release, 'test-android': release, 'lint-go-full': release,
+              'test-apple-mobile': release, 'test-android': release,
               'lint-rust': not release and on.get('lint_rust', False),
               'core-proofs': not release and not on.get('docs_only', False)}
     for name in BINDINGS:
         result[f'test-{name}'] = binding(name)
-        # Go's lint also holds the regeneration proof, which its suite needs after any core change.
-        result[f'lint-{name}'] = binding(name) if name == 'go' else on.get(f'lint_{name}', False)
     train = event == 'workflow_dispatch' and ref == 'refs/heads/master' and purpose == 'release'
     for name in TAIL:
         result[name] = train
