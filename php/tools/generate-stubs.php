@@ -28,7 +28,7 @@ declare(strict_types=1);
 // A script, run directly: its helper functions sit beside the steps that use them.
 // phpcs:disable PSR1.Files.SideEffects.FoundWithSymbols
 
-const CARGO_PHP_VERSION = '0.2.1';
+const CARGO_PHP_VERSION = '0.2.2';
 
 /**
  * PHP symbols the extension imports beyond cargo-php's stand-ins: data as null pointers,

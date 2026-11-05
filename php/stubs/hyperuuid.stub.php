@@ -3,7 +3,7 @@
 /**
  * Stubs for the hyperuuid extension, for IDEs and static analysis. Generated: don't edit.
  * Regenerate from php/ with `php tools/generate-stubs.php`, which runs
- * `cargo php stubs --stdout` (cargo-php 0.2.1) on the debug build of the extension and
+ * `cargo php stubs --stdout` (cargo-php 0.2.2) on the debug build of the extension and
  * completes its output (the tool says how).
  */
 

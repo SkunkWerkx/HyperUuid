@@ -156,7 +156,7 @@ re-running the harness, and don't drop a loss.
   `rust/src/ffi.rs`: `HYPERUUID_BLESS=1 cargo test --test header` in `rust/` rewrites both.
 - `php/stubs/hyperuuid.stub.php` is generated from the extension by `php
   tools/generate-stubs.php` in `php/` (Linux or macOS), with cargo-php pinned to the
-  `CARGO_PHP_VERSION` that script names (0.2.1; the Forge's stub leg installs the same one).
+  `CARGO_PHP_VERSION` that script names (0.2.2; the Forge's stub leg installs the same one).
   `StubTest` regenerates it and compares when `HYPERUUID_CHECK_STUBS=1`.
 - Versions: bump through `prepare-release.yml`. The libraries embed their version, so a
   hand bump ships binaries reporting the old one.
