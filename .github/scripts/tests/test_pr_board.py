@@ -24,7 +24,7 @@ pr_board = load()
 
 def outputs(**on):
     """`changes`' outputs as GitHub hands them over: strings, every key present."""
-    keys = ['core', 'ci', 'docs_only'] + BINDINGS
+    keys = ['core', 'ci', 'docs_only', 'lint_rust'] + [f'lint_{b}' for b in BINDINGS] + BINDINGS
     return {key: 'true' if on.get(key, False) else 'false' for key in keys}
 
 
@@ -47,36 +47,33 @@ class GateTests(unittest.TestCase):
         self.assertTrue(pr_board.gates(outputs(), 'pull_request')['core'], 'an empty classification is not docs-only')
 
     def test_one_binding_gates_its_lint_and_test_and_nothing_else(self):
-        gates = pr_board.gates(outputs(java=True), 'pull_request')
-        on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'lint-java', 'test-java'})
-        gates = pr_board.gates(outputs(csharp=True), 'pull_request')
-        on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'lint-csharp', 'test-csharp', 'build-static'})
-        gates = pr_board.gates(outputs(typescript=True), 'pull_request')
-        on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'lint-typescript', 'test-typescript'})
-        gates = pr_board.gates(outputs(python=True), 'pull_request')
-        self.assertFalse(gates['build-wheels'])
-        gates = pr_board.gates(outputs(swift=True), 'pull_request')
-        self.assertTrue(gates['build-static'])
-        gates = pr_board.gates(outputs(go=True), 'pull_request')
-        self.assertFalse(gates['lint-go-full'] or gates['build-wasm'])
+        for binding, extra in (('java', set()), ('csharp', set()), ('typescript', set()), ('swift', {'build-static'})):
+            with self.subTest(binding=binding):
+                gates = pr_board.gates(outputs(**{binding: True, f'lint_{binding}': True}), 'pull_request')
+                on = {name for name, gate in gates.items() if gate}
+                self.assertEqual(on, {'changes', 'core', f'lint-{binding}', f'test-{binding}'} | extra)
 
-    def test_core_gates_everything_but_the_release_jobs(self):
-        gates = pr_board.gates(outputs(core=True), 'pull_request', 'refs/pull/1/merge')
-        off = {name for name, gate in gates.items() if not gate}
-        self.assertEqual(off, {'test-apple-mobile', 'test-android', 'lint-go-full', 'core-checks', 'build-android', 'pack-c',
-                               'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package', *pr_board.TAIL})
+    def test_a_core_change_lints_rust_and_runs_every_suite(self):
+        gates = pr_board.gates(outputs(core=True, lint_rust=True, **{b: True for b in BINDINGS}), 'pull_request',
+                               'refs/pull/1/merge')
+        on = {name for name, gate in gates.items() if gate}
+        self.assertEqual(on, {'changes', 'core', 'lint-rust', 'build-static', 'lint-go',
+                              *(f'test-{b}' for b in BINDINGS)})
+
+    def test_core_gates_nothing_on_a_release_but_the_rust_lint(self):
+        everything = outputs(**{key: True for key in ['core', 'ci', 'lint_rust'] + BINDINGS + [f'lint_{b}' for b in BINDINGS]})
+        gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
+        self.assertFalse(gates['lint-rust'], 'core-checks lints off a pull request')
+        self.assertTrue(gates['core-checks'])
 
     def test_release_only_jobs_are_gated_off_on_pull_requests(self):
-        everything = outputs(**{key: True for key in ['core', 'ci'] + BINDINGS})
+        everything = outputs(**{key: True for key in ['core', 'ci', 'lint_rust'] + BINDINGS + [f'lint_{b}' for b in BINDINGS]})
         self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-apple-mobile'])
         self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-android'])
         gates = pr_board.gates(everything, 'workflow_dispatch', 'refs/heads/master', 'release')
-        self.assertTrue(all(gates.values()))
+        self.assertTrue(all(gate for name, gate in gates.items() if name != 'lint-rust'))
         gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
-        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL))
+        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL and name != 'lint-rust'))
 
     def test_the_tail_is_gated_on_a_release_dispatch_at_master_only(self):
         on = pr_board.gates(outputs(core=True), 'workflow_dispatch', 'refs/heads/master', 'release')
@@ -139,13 +136,13 @@ class VerdictTests(unittest.TestCase):
             self.assertEqual(why, 'test-ruby failed')
 
     def test_skipped_but_gated_on_is_red(self):
-        gates = pr_board.gates(outputs(java=True), 'pull_request')
+        gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
         ok, why = pr_board.verdict(results(**{name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'lint-java')}), gates)
         self.assertFalse(ok)
         self.assertEqual(why, 'test-java skipped but gated on')
 
     def test_skipped_and_gated_off_is_green(self):
-        gates = pr_board.gates(outputs(java=True), 'pull_request')
+        gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
         skipped = {name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'lint-java', 'test-java')}
         self.assertEqual(pr_board.verdict(results(**skipped), gates), (True, 'ok'))
 
@@ -155,7 +152,7 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(pr_board.verdict(results(**skipped), gates), (True, 'ok'))
 
     def test_lint_failure_is_named_before_the_skipped_suites(self):
-        gates = pr_board.gates(outputs(java=True), 'pull_request')
+        gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
         given = {'test-java': 'skipped', 'lint-java': 'failure'}
         given.update({name: 'skipped' for name in pr_board.JOBS if name not in given and name not in ('changes', 'core')})
         ok, why = pr_board.verdict(results(**given), gates)

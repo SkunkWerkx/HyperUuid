@@ -31,7 +31,6 @@
 /.gitignore        export-ignore
 /CHANGELOG.md      export-ignore
 /CLAUDE.md         export-ignore
-/CRAN_CHECKLIST.md export-ignore
 /global.json       export-ignore
 /Package.swift     export-ignore
 /ROADMAP.md        export-ignore

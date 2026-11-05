@@ -254,7 +254,7 @@ ATTESTING = {'hyper-core.yml', 'hyper-build-static.yml', 'hyper-build-android.ym
              'hyper-build-wheels.yml', 'hyper-build-php-extension.yml', 'hyper-test-java.yml',
              'hyper-test-typescript.yml', 'hyper-test-ruby.yml',
              'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
-NO_MODE = {'hyper-core-checks.yml', 'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
+NO_MODE = {'hyper-core-checks.yml', 'hyper-lint-rust.yml', 'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
 # The release tail of ci.yml, in dependency order (pr_board.py's TAIL): the Forge resolver, the
 # eight pack jobs, the inventory, CodeQL and B; gated on prepare-release.yml's master dispatch
 # with purpose=release (the default), so a purpose=board dispatch runs the board alone.
@@ -456,7 +456,7 @@ class CiTests(unittest.TestCase):
         go = self.jobs['test-go']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-go.yml@master', go)
         self.assertEqual(self.needs(go), {'changes', 'lint-go'})
-        self.assertIn('      linters: fast\n', self.jobs['lint-go'])
+        self.assertIn("      linters: ${{ needs.changes.outputs.lint_go == 'true' && 'fast' || 'core' }}\n", self.jobs['lint-go'])
         self.assertIn('      linters: full\n', self.jobs['lint-go-full'])
         self.assertEqual({name for name, job in self.jobs.items() if 'lint-go-full' in self.needs(job)},
                          {'forge', 'pr-board'}, 'the full Go lint gates nothing but the two aggregates')
@@ -550,7 +550,7 @@ class CiTests(unittest.TestCase):
             with self.subTest(binding=binding):
                 lint = self.jobs[f'lint-{binding}']
                 self.assertEqual(self.needs(lint), {'changes'})
-                self.assertEqual(self.gate(lint), self.g(binding, 'core', 'ci'))
+                self.assertEqual(self.gate(lint), self.g(binding, 'core', 'ci') if binding == 'go' else self.g(f'lint_{binding}'))
                 self.assertIn(f'uses: SkunkWerkx/.github/.github/workflows/hyper-lint-{binding}.yml@master', lint)
                 self.assertFalse(re.findall(r'^      [a-z-]+: write$', header(lint), re.M), 'a lint attests nothing')
         full = self.jobs['lint-go-full']
@@ -566,7 +566,12 @@ class CiTests(unittest.TestCase):
                 test = self.jobs[f'test-{binding}']
                 core = set() if binding == 'go' else {'core'}
                 self.assertEqual(self.needs(test), {'changes', f'lint-{binding}'} | core | extra.get(binding, set()))
-                self.assertEqual(self.gate(test), self.g(binding, 'core', 'ci'))
+                gate = self.gate(test)
+                self.assertIn(f"({self.g(binding, 'core', 'ci')})", gate) if binding != 'go' else self.assertEqual(gate, self.g(binding, 'core', 'ci'))
+                if binding != 'go':
+                    self.assertTrue(gate.startswith('${{ !cancelled() && '), gate)
+                    self.assertIn("needs.core.result == 'success'", gate)
+                    self.assertIn(f"(needs.lint-{binding}.result == 'success' || needs.lint-{binding}.result == 'skipped')", gate)
                 self.assertIn(f'uses: SkunkWerkx/.github/.github/workflows/{workflow[binding]}@master', test)
 
     def test_attesting_callers_hold_the_write_scopes(self):
@@ -601,7 +606,7 @@ class CiTests(unittest.TestCase):
     def test_build_static_runs_for_the_bindings_that_link_it(self):
         static = self.jobs['build-static']
         self.assertEqual(self.needs(static), {'changes'})
-        self.assertEqual(self.gate(static), self.g('core', 'ci', 'csharp', 'swift'))
+        self.assertEqual(self.gate(static), self.g('core', 'ci', 'swift'))
         android = self.jobs['build-android']
         self.assertEqual(self.needs(android), {'changes'})
         self.assertEqual(self.gate(android), OFF_A_PULL_REQUEST)
@@ -626,12 +631,15 @@ class CiTests(unittest.TestCase):
     def test_no_job_excludes_release_mode(self):
         for name, job in self.jobs.items():
             with self.subTest(job=name):
-                self.assertNotIn("event_name == 'pull_request'", self.gate(job) or '')
+                # lint-rust alone: off a pull request core-checks lints the same way.
+                if name != 'lint-rust':
+                    self.assertNotIn("event_name == 'pull_request'", self.gate(job) or '')
 
     def test_the_tail_replaces_request_staging(self):
         self.assertNotIn('request-staging', self.jobs)
         self.assertFalse((WORKFLOWS / 'stage-native-binaries.yml').exists())
-        board = set(self.jobs) - set(TAIL) - {'pr-board'}
+        # lint-rust is a pull request's alone; forge would skip on it.
+        board = set(self.jobs) - set(TAIL) - {'pr-board', 'lint-rust'}
         self.assertEqual(self.needs(self.jobs['forge']), board)
         for name in TAIL:
             with self.subTest(job=name):
@@ -702,8 +710,9 @@ class CiTests(unittest.TestCase):
         self.assertIn('    permissions:\n      contents: read\n      pull-requests: read\n', header(job))
         self.assertIn('persist-credentials: false', job)
         outputs = re.findall(r'^      ([a-z_]+): \$\{\{ steps\.classify\.outputs\.([a-z_]+) \}\}$', header(job), re.M)
-        self.assertEqual([a for a, _ in outputs], ['core', 'ci', 'docs_only', 'csharp', 'java', 'python', 'ruby', 'php',
-                                                   'swift', 'typescript', 'r', 'go'])
+        bindings = ['csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
+        self.assertEqual([a for a, _ in outputs], ['core', 'ci', 'docs_only', 'lint_rust',
+                                                   *(f'lint_{binding}' for binding in bindings), *bindings])
         self.assertTrue(all(a == b for a, b in outputs))
         step = next(step for step in re.split(r'\n      - ', job)[1:] if 'id: classify' in step)
         for needle in ('set -euo pipefail', '--paginate', 'tee -a "$GITHUB_OUTPUT"', 'python3 .github/scripts/pr_changes.py',

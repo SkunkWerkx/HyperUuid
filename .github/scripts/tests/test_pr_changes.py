@@ -11,8 +11,8 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
-KEYS = ['core', 'ci', 'docs_only', 'csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
-BINDINGS = KEYS[3:]
+BINDINGS = ['csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
+KEYS = ['core', 'ci', 'docs_only', 'lint_rust', *(f'lint_{binding}' for binding in BINDINGS), *BINDINGS]
 
 
 def load():
@@ -34,7 +34,9 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(result, {**{key: True for key in KEYS}, 'docs_only': False})
 
     def assertOnly(self, result, *on):
-        self.assertEqual({key for key, value in result.items() if value}, set(on))
+        # A binding named here is a touched binding: its suite and its lint.
+        expected = set(on) | {f'lint_{key}' for key in on if key in BINDINGS}
+        self.assertEqual({key for key, value in result.items() if value}, expected)
 
     def test_keys(self):
         self.assertEqual(list(classify('README.md')), KEYS)
@@ -100,6 +102,27 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(binding=binding):
                 self.assertOnly(classify(path), binding)
 
+    def test_a_core_change_lints_rust_and_no_binding(self):
+        result = classify('rust/src/lib.rs')
+        self.assertTrue(result['lint_rust'])
+        for binding in BINDINGS:
+            self.assertFalse(result[f'lint_{binding}'], binding)
+
+    def test_a_binding_change_lints_itself_and_not_rust(self):
+        result = classify('php/tests/ExampleTest.php')
+        self.assertFalse(result['lint_rust'])
+        self.assertFalse(result['core'])
+        self.assertEqual({key for key, value in result.items() if key.startswith('lint_') and value}, {'lint_php'})
+
+    def test_core_and_binding_together_lint_both(self):
+        result = classify('rust/src/lib.rs', 'php/tests/ExampleTest.php')
+        self.assertEqual({key for key, value in result.items() if key.startswith('lint_') and value},
+                         {'lint_rust', 'lint_php'})
+
+    def test_a_workflow_change_lints_everything(self):
+        result = classify('.github/workflows/ci.yml')
+        self.assertTrue(all(value for key, value in result.items() if key.startswith('lint_')))
+
     def test_core_implies_every_binding(self):
         for path in ('rust/src/lib.rs', 'include/hyperuuid.hpp', 'c/smoke/run.sh', 'corpus/v7.json'):
             with self.subTest(path=path):
@@ -145,9 +168,9 @@ class MainTests(unittest.TestCase):
     def test_main_prints_every_key(self):
         code, lines = self.run_main([], 'typescript/src/index.ts\t\n')
         self.assertEqual(code, 0)
-        self.assertEqual(len(lines), 12)
+        self.assertEqual(len(lines), len(KEYS))
         self.assertEqual(dict(line.split('=') for line in lines),
-                         {key: 'true' if key == 'typescript' else 'false' for key in KEYS})
+                         {key: 'true' if key in ('typescript', 'lint_typescript') else 'false' for key in KEYS})
 
     def test_main_reads_a_rename(self):
         code, lines = self.run_main([], 'docs/x.md\trust/src/x.rs\n')

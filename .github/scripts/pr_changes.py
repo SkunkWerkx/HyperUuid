@@ -10,15 +10,18 @@ renamed) and prints one `key=true|false` line per class, in ci.yml's output orde
 `tee -a "$GITHUB_OUTPUT"`. The rules are the design spec's table
 (docs/superpowers/specs/2026-10-31-pr-board-design.md, "Change detection"): a path belongs to
 the first class that names it, `ci` first, since a workflow edit can reach any job; a rename
-belongs to every class either of its paths matches. `ci` and `core` imply every binding; a
+belongs to every class either of its paths matches. `ci` and `core` imply every binding's suite;
+the lints follow what changed: `lint_rust` when the core or `ci` did, `lint_<binding>` when that
+binding or `ci` did. So a core change lints Rust and runs every suite, a binding change lints and
+runs that binding, and neither lints the other. A
 path no rule names, an empty list, or a list at the API's 3,000-file cap is `everything`,
 the fail-safe: the whole board runs rather than guessing. Standard library only, so the job
 runs it with no install.
 """
 import sys
 
-KEYS = ['core', 'ci', 'docs_only', 'csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
-BINDINGS = KEYS[3:]
+BINDINGS = ['csharp', 'java', 'python', 'ruby', 'php', 'swift', 'typescript', 'r', 'go']
+KEYS = ['core', 'ci', 'docs_only', 'lint_rust', *(f'lint_{binding}' for binding in BINDINGS), *BINDINGS]
 API_CAP = 3000
 
 # (class, rules), first match wins. A rule is `<dir>/**` (every path under the directory),
@@ -71,6 +74,8 @@ def classify(paths):
     result['core'] = 'core' in classes or result['ci']
     for binding in BINDINGS:
         result[binding] = binding in classes or result['core']
+        result[f'lint_{binding}'] = binding in classes or result['ci']
+    result['lint_rust'] = 'core' in classes or result['ci']
     result['docs_only'] = classes <= {'docs'}
     return result
 

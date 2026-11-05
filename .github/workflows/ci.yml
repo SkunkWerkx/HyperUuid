@@ -11,10 +11,13 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('CI purpose={0}
 # docs_only false — so the release-mode board is the whole board, and pr-board, the one
 # status to read, is red when any needed job failed or was skipped while its gate said run.
 #
-# A pull request asks whether the code broke: each touched binding's lint, then its suite through
-# the corpus on linux-x64, PHP included. Everything else (the other platforms, musl, wheels,
-# wasm, Android, the packed-package jobs, the core's source checks) runs on the board and a
-# release, a cost paid by dispatching it.
+# A pull request asks whether the code broke: the core compiled and its suite run, then the corpus
+# through the bindings it can reach, each on one leg (linux-x64; Swift on xcode-27, PHP on ZTS).
+# A core change lints Rust and runs every binding's suite, linting none of them but Go's regeneration
+# proof, without which test-go would pass on a stale committed core. A binding change builds the
+# core and lints and runs that binding, linting no Rust. Everything else (the other platforms, musl,
+# floors, static targets beyond Swift's one, wheels, wasm, Android, iOS, the packed-package jobs,
+# the core's source checks) runs on the board and a release, a cost paid by dispatching it.
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
@@ -94,6 +97,16 @@ jobs:
       core: ${{ steps.classify.outputs.core }}
       ci: ${{ steps.classify.outputs.ci }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      lint_rust: ${{ steps.classify.outputs.lint_rust }}
+      lint_csharp: ${{ steps.classify.outputs.lint_csharp }}
+      lint_java: ${{ steps.classify.outputs.lint_java }}
+      lint_python: ${{ steps.classify.outputs.lint_python }}
+      lint_ruby: ${{ steps.classify.outputs.lint_ruby }}
+      lint_php: ${{ steps.classify.outputs.lint_php }}
+      lint_swift: ${{ steps.classify.outputs.lint_swift }}
+      lint_typescript: ${{ steps.classify.outputs.lint_typescript }}
+      lint_r: ${{ steps.classify.outputs.lint_r }}
+      lint_go: ${{ steps.classify.outputs.lint_go }}
       csharp: ${{ steps.classify.outputs.csharp }}
       java: ${{ steps.classify.outputs.java }}
       python: ${{ steps.classify.outputs.python }}
@@ -146,10 +159,12 @@ jobs:
       project: HyperUuid
 
   # The cross-target bundle (Apple, Android, the archives the NuGet targets link), one
-  # producer of static-libs: C#'s and Swift's suites and the NuGet consumer test download it.
+  # producer of static-libs: C#'s and Swift's suites and the NuGet consumer test download it. On a
+  # pull request it builds the one archive Swift's leg links: `cargo cdylib` already compiled the
+  # same no_std source, so only a target-specific break waits for a board.
   build-static:
     needs: [changes]
-    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.csharp == 'true' || needs.changes.outputs.swift == 'true'
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.swift == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-static.yml@master
     permissions:
       contents: read
@@ -173,6 +188,17 @@ jobs:
     with:
       crate: hyperuuid
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+
+  # rustfmt and clippy on a pull request that moved the core or .github/. Off a pull request
+  # core-checks lints the same way, beside its release checks.
+  lint-rust:
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.lint_rust == 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-rust.yml@master
+    permissions:
+      contents: read
+    with:
+      extra_features: uuid1
 
   # Every static check on the core, in one Forge job on three hosts (hyper-core-checks.yml):
   # rustfmt and clippy, the C ABI held to rust/src/ffi.rs by .github/scripts/check_exports.py,
@@ -202,14 +228,15 @@ jobs:
       big_endian: s390x-unknown-linux-gnu
       clippy_targets: aarch64-linux-android
 
-  # Each binding's formatter and linter, once, on ubuntu-26.04-arm, ahead of its suites. The
+  # Each binding's formatter and linter, once, on ubuntu-26.04-arm, ahead of its suites, when that
+  # binding or .github/ changed (lint_<binding>); a suite runs through a skipped lint. The
   # Forge's lint_node, lint_r and lint_java_jni default false until the siblings carry those
   # bindings; everything else defaults on. Go's fast gate is gofmt, go vet, revive and the
-  # committed-core regeneration check; lint-go-full adds the cross-compile sweep and the race
+  # committed-core regeneration check, and a core change runs that check alone; lint-go-full adds the cross-compile sweep and the race
   # run beside the suites, gating nothing.
   lint-csharp:
     needs: [changes]
-    if: needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_csharp == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-csharp.yml@master
     permissions:
       contents: read
@@ -220,7 +247,7 @@ jobs:
 
   lint-java:
     needs: [changes]
-    if: needs.changes.outputs.java == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_java == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-java.yml@master
     permissions:
       contents: read
@@ -232,7 +259,7 @@ jobs:
 
   lint-python:
     needs: [changes]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_python == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-python.yml@master
     permissions:
       contents: read
@@ -243,7 +270,7 @@ jobs:
 
   lint-ruby:
     needs: [changes]
-    if: needs.changes.outputs.ruby == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_ruby == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-ruby.yml@master
     permissions:
       contents: read
@@ -254,7 +281,7 @@ jobs:
 
   lint-php:
     needs: [changes]
-    if: needs.changes.outputs.php == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_php == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-php.yml@master
     permissions:
       contents: read
@@ -265,7 +292,7 @@ jobs:
 
   lint-swift:
     needs: [changes]
-    if: needs.changes.outputs.swift == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_swift == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-swift.yml@master
     permissions:
       contents: read
@@ -276,7 +303,7 @@ jobs:
 
   lint-typescript:
     needs: [changes]
-    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_typescript == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-typescript.yml@master
     permissions:
       contents: read
@@ -288,7 +315,7 @@ jobs:
 
   lint-r:
     needs: [changes]
-    if: needs.changes.outputs.r == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.lint_r == 'true'
     uses: SkunkWerkx/.github/.github/workflows/hyper-lint-r.yml@master
     permissions:
       contents: read
@@ -308,7 +335,8 @@ jobs:
       mode: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
       crate: hyperuuid
       project: HyperUuid
-      linters: fast
+      # A core change without a go/ change keeps the regeneration proof and skips Go's linters.
+      linters: ${{ needs.changes.outputs.lint_go == 'true' && 'fast' || 'core' }}
 
   lint-go-full:
     needs: [changes]
@@ -329,7 +357,7 @@ jobs:
   # scopes, as core does.
   test-csharp:
     needs: [changes, lint-csharp, core, build-static]
-    if: needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.build-static.result == 'success' || needs.build-static.result == 'skipped') && (needs.lint-csharp.result == 'success' || needs.lint-csharp.result == 'skipped') && (needs.changes.outputs.csharp == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-csharp.yml@master
     permissions:
       contents: read
@@ -355,7 +383,7 @@ jobs:
       csharp_runtimes_dir: csharp/HyperUuid/runtimes
   test-java:
     needs: [changes, lint-java, core]
-    if: needs.changes.outputs.java == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.lint-java.result == 'success' || needs.lint-java.result == 'skipped') && (needs.changes.outputs.java == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-java.yml@master
     permissions:
       contents: read
@@ -374,7 +402,7 @@ jobs:
       jdk_floor_version: "21"
   test-python:
     needs: [changes, lint-python, core]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.lint-python.result == 'success' || needs.lint-python.result == 'skipped') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-python.yml@master
     permissions:
       contents: read
@@ -384,7 +412,7 @@ jobs:
       project: HyperUuid
   test-ruby:
     needs: [changes, lint-ruby, core]
-    if: needs.changes.outputs.ruby == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.lint-ruby.result == 'success' || needs.lint-ruby.result == 'skipped') && (needs.changes.outputs.ruby == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-ruby.yml@master
     permissions:
       contents: read
@@ -407,7 +435,7 @@ jobs:
       ruby_compat_version: "3.4"
   test-php:
     needs: [changes, lint-php, core]
-    if: needs.changes.outputs.php == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.lint-php.result == 'success' || needs.lint-php.result == 'skipped') && (needs.changes.outputs.php == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-build-php-extension.yml@master
     permissions:
       contents: read
@@ -423,7 +451,7 @@ jobs:
       php_floor_version: "8.3"
   test-swift:
     needs: [changes, lint-swift, core, build-static]
-    if: needs.changes.outputs.swift == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && needs.build-static.result == 'success' && (needs.lint-swift.result == 'success' || needs.lint-swift.result == 'skipped') && (needs.changes.outputs.swift == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-swift.yml@master
     permissions:
       contents: read
@@ -433,7 +461,7 @@ jobs:
       project: HyperUuid
   test-typescript:
     needs: [changes, lint-typescript, core]
-    if: needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.lint-typescript.result == 'success' || needs.lint-typescript.result == 'skipped') && (needs.changes.outputs.typescript == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-typescript.yml@master
     permissions:
       contents: read
@@ -445,7 +473,7 @@ jobs:
       project: HyperUuid
   test-r:
     needs: [changes, lint-r, core]
-    if: needs.changes.outputs.r == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true'
+    if: ${{ !cancelled() && needs.core.result == 'success' && (needs.lint-r.result == 'success' || needs.lint-r.result == 'skipped') && (needs.changes.outputs.r == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ci == 'true') }}
     uses: SkunkWerkx/.github/.github/workflows/hyper-test-r.yml@master
     permissions:
       contents: read
@@ -1628,7 +1656,7 @@ jobs:
   # cancelled, or was skipped while `changes` said it should run (a too-narrow classifier
   # would otherwise be invisible); .github/scripts/pr_board.py has the gates, one per job.
   pr-board:
-    needs: [changes, core, build-static, build-android, core-checks, lint-csharp, lint-java,
+    needs: [changes, core, build-static, build-android, core-checks, lint-rust, lint-csharp, lint-java,
             lint-python, lint-ruby, lint-php, lint-swift, lint-typescript, lint-r, lint-go,
             lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
             test-typescript, test-r, test-go, pack-c, build-wasm, build-wheels,
