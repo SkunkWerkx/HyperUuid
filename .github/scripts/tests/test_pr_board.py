@@ -46,18 +46,18 @@ class GateTests(unittest.TestCase):
         self.assertTrue(pr_board.gates(outputs(go=True), 'pull_request')['core'])
         self.assertTrue(pr_board.gates(outputs(), 'pull_request')['core'], 'an empty classification is not docs-only')
 
-    def test_one_binding_gates_its_lint_and_test_and_nothing_else(self):
+    def test_one_binding_gates_its_job_and_nothing_else(self):
         for binding, extra in (('java', set()), ('csharp', set()), ('typescript', set()), ('swift', {'build-static'})):
             with self.subTest(binding=binding):
                 gates = pr_board.gates(outputs(**{binding: True, f'lint_{binding}': True}), 'pull_request')
                 on = {name for name, gate in gates.items() if gate}
-                self.assertEqual(on, {'changes', 'core', 'core-proofs', f'lint-{binding}', f'test-{binding}'} | extra)
+                self.assertEqual(on, {'changes', 'core', 'core-proofs', f'test-{binding}'} | extra)
 
     def test_a_core_change_lints_rust_and_runs_every_suite(self):
         gates = pr_board.gates(outputs(core=True, lint_rust=True, **{b: True for b in BINDINGS}), 'pull_request',
                                'refs/pull/1/merge')
         on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'core-proofs', 'lint-rust', 'build-static', 'lint-go',
+        self.assertEqual(on, {'changes', 'core', 'core-proofs', 'lint-rust', 'build-static',
                               *(f'test-{b}' for b in BINDINGS)})
 
     def test_the_proofs_gate_every_pull_request_that_builds_the_core(self):
@@ -124,7 +124,7 @@ class GateTests(unittest.TestCase):
                     # The release tail: a release-purpose master dispatch and nothing else, whatever changed.
                     self.assertEqual(gate[1], tail_gate)
                     continue
-                if name in ('core', 'core-proofs', 'test-apple-mobile', 'test-android', 'lint-go-full', 'core-checks', 'build-android', 'pack-c',
+                if name in ('core', 'core-proofs', 'test-apple-mobile', 'test-android', 'core-checks', 'build-android', 'pack-c',
                             'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package'):
                     continue
                 on = {key for key in outputs() if pr_board.gates(outputs(**{key: True}), 'pull_request', 'refs/pull/1/merge')[name]}
@@ -145,13 +145,13 @@ class VerdictTests(unittest.TestCase):
 
     def test_skipped_but_gated_on_is_red(self):
         gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
-        ok, why = pr_board.verdict(results(**{name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'core-proofs', 'lint-java')}), gates)
+        ok, why = pr_board.verdict(results(**{name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'core-proofs')}), gates)
         self.assertFalse(ok)
         self.assertEqual(why, 'test-java skipped but gated on')
 
     def test_skipped_and_gated_off_is_green(self):
         gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
-        skipped = {name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'core-proofs', 'lint-java', 'test-java')}
+        skipped = {name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'core-proofs', 'test-java')}
         self.assertEqual(pr_board.verdict(results(**skipped), gates), (True, 'ok'))
 
     def test_docs_only_board_is_green_with_everything_skipped(self):
@@ -160,11 +160,11 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(pr_board.verdict(results(**skipped), gates), (True, 'ok'))
 
     def test_lint_failure_is_named_before_the_skipped_suites(self):
-        gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
-        given = {'test-java': 'skipped', 'lint-java': 'failure'}
+        gates = pr_board.gates(outputs(java=True, lint_rust=True), 'pull_request')
+        given = {'test-java': 'skipped', 'lint-rust': 'failure'}
         given.update({name: 'skipped' for name in pr_board.JOBS if name not in given and name not in ('changes', 'core')})
         ok, why = pr_board.verdict(results(**given), gates)
-        self.assertEqual((ok, why), (False, 'lint-java failed'))
+        self.assertEqual((ok, why), (False, 'lint-rust failed'))
 
     def test_a_failed_classifier_is_red(self):
         gates = pr_board.gates(outputs(), 'pull_request')

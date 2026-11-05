@@ -444,26 +444,21 @@ class CiTests(unittest.TestCase):
         self.assertIn('if grep -qF "HYPERUUID003"', step)
 
     def test_typescript_and_r_callers(self):
-        # The Forge's lint_node and lint_r default false until the siblings carry the bindings;
-        # the test workflows' toggles default true.
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-typescript.yml@master', self.jobs['test-typescript'])
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-r.yml@master', self.jobs['test-r'])
-        self.assertIn('      lint_node: true\n', self.jobs['lint-typescript'])
-        self.assertIn('      lint_r: true\n', self.jobs['lint-r'])
 
     def test_go_caller_and_wasm_legs(self):
         # Go's core is Go source (go/internal/core, translated from the wasm32-wasip1 build):
-        # no archive is staged for it anywhere, its suites wait for nothing but its lint, and
+        # no archive is staged for it anywhere, its suites wait for nothing, and
         # the wasm workflow runs its whole suite under TinyGo and stock Go beside the browser build.
         ci = (WORKFLOWS / 'ci.yml').read_text()
         self.assertNotIn('go/staticlib', ci)
         go = self.jobs['test-go']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-test-go.yml@master', go)
-        self.assertEqual(self.needs(go), {'changes', 'lint-go'})
-        self.assertIn("      linters: ${{ needs.changes.outputs.lint_go == 'true' && 'fast' || 'core' }}\n", self.jobs['lint-go'])
-        self.assertIn('      linters: full\n', self.jobs['lint-go-full'])
-        self.assertEqual({name for name, job in self.jobs.items() if 'lint-go-full' in self.needs(job)},
-                         {'forge', 'pr-board'}, 'the full Go lint gates nothing but the two aggregates')
+        self.assertEqual(self.needs(go), {'changes'})
+        # The regeneration proof on every pull request, the linters when go/ moved, the sweep and
+        # the race run off one.
+        self.assertIn("      linters: ${{ github.event_name != 'pull_request' && 'sweep' || needs.changes.outputs.lint_go == 'true' && 'fast' || 'core' }}\n", go)
         wasm = self.jobs['build-wasm']
         go_gate = self.g('core', 'ci', 'go')
         self.assertIn('      go_wasm_suite: ${{ ' + go_gate + ' }}\n', wasm)
@@ -497,7 +492,6 @@ class CiTests(unittest.TestCase):
         java = self.jobs['test-java']
         self.assertIn('      java_jni: true\n', java)
         self.assertIn('      jdk_floor_version: "21"\n', java)
-        self.assertIn('      lint_java_jni: true\n', self.jobs['lint-java'])
 
     def test_the_proofs_gate_a_pull_request_with_what_core_checks_proves(self):
         proofs = self.jobs['core-proofs']
@@ -529,7 +523,7 @@ class CiTests(unittest.TestCase):
             if name.startswith('lint-'):
                 self.assertIn('    uses: SkunkWerkx/.github/.github/workflows/hyper-lint-', self.jobs[name], name)
 
-    # The board's shape: every gate reads `changes`, every suite waits for its lint and the core,
+    # The board's shape: every gate reads `changes`, every suite waits for the core,
     # the two consumer tests and the two mobile jobs keep their inputs, and pr-board reads it all.
 
     def test_changes_and_pr_board_are_the_only_unconditional_jobs(self):
@@ -558,19 +552,17 @@ class CiTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r'^      ([a-z-]+): write$', header(core), re.M)), {'id-token', 'attestations'})
         self.assertEqual([name for name, job in self.jobs.items() if 'workflows/hyper-core.yml@master' in job], ['core'])
 
-    def test_every_lint_caller_needs_only_changes(self):
+    def test_every_binding_lints_in_its_own_job_and_only_on_a_pull_request(self):
+        # What reached master has been linted, and a second job would set the toolchain up twice.
         for binding in BINDINGS:
             with self.subTest(binding=binding):
-                lint = self.jobs[f'lint-{binding}']
-                self.assertEqual(self.needs(lint), {'changes'})
-                self.assertEqual(self.gate(lint), self.g(binding, 'core', 'ci') if binding == 'go' else self.g(f'lint_{binding}'))
-                self.assertIn(f'uses: SkunkWerkx/.github/.github/workflows/hyper-lint-{binding}.yml@master', lint)
-                self.assertFalse(re.findall(r'^      [a-z-]+: write$', header(lint), re.M), 'a lint attests nothing')
-        full = self.jobs['lint-go-full']
-        self.assertEqual(self.needs(full), {'changes'})
-        self.assertEqual(self.gate(full), OFF_A_PULL_REQUEST)
+                self.assertNotIn(f'lint-{binding}', self.jobs)
+                if binding != 'go':
+                    self.assertIn(f"      lint: ${{{{ github.event_name == 'pull_request' && needs.changes.outputs.lint_{binding} == 'true' }}}}\n",
+                                  self.jobs[f'test-{binding}'])
+        self.assertNotIn('lint-go-full', self.jobs)
 
-    def test_every_test_caller_needs_its_lint_and_core(self):
+    def test_every_test_caller_needs_the_core(self):
         extra = {'csharp': {'build-static'}, 'swift': {'build-static'}}
         workflow = {binding: f'hyper-test-{binding}.yml' for binding in BINDINGS}
         workflow['php'] = 'hyper-build-php-extension.yml'
@@ -578,13 +570,12 @@ class CiTests(unittest.TestCase):
             with self.subTest(binding=binding):
                 test = self.jobs[f'test-{binding}']
                 core = set() if binding == 'go' else {'core'}
-                self.assertEqual(self.needs(test), {'changes', f'lint-{binding}'} | core | extra.get(binding, set()))
+                self.assertEqual(self.needs(test), {'changes'} | core | extra.get(binding, set()))
                 gate = self.gate(test)
                 self.assertIn(f"({self.g(binding, 'core', 'ci')})", gate) if binding != 'go' else self.assertEqual(gate, self.g(binding, 'core', 'ci'))
                 if binding != 'go':
                     self.assertTrue(gate.startswith('${{ !cancelled() && '), gate)
                     self.assertIn("needs.core.result == 'success'", gate)
-                    self.assertIn(f"(needs.lint-{binding}.result == 'success' || needs.lint-{binding}.result == 'skipped')", gate)
                 self.assertIn(f'uses: SkunkWerkx/.github/.github/workflows/{workflow[binding]}@master', test)
 
     def test_attesting_callers_hold_the_write_scopes(self):
