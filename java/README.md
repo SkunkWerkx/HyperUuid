@@ -239,8 +239,8 @@ The jar carries two native libraries per platform, so build both before Gradle r
 Gradle, Spotless, javadoc and publishing run on JDK 25. `./gradlew check` and `./gradlew build` also run `testFloor`, the same suite on JDK 21 (the JNI path end to end), which needs a local JDK 21: `gradle.properties` turns toolchain auto-download off, so pass it explicitly.
 
 ```sh
-./gradlew check -Porg.gradle.java.installations.paths=<path to a JDK 21> \
-  -Porg.gradle.java.installations.auto-detect=false
+./gradlew check -Dorg.gradle.java.installations.paths=<path to a JDK 21> \
+  -Dorg.gradle.java.installations.auto-detect=false
 ```
 
 Without a JDK 21 Gradle can see, `testFloor` fails with "Cannot find a Java installation … matching: {languageVersion=21 …}".

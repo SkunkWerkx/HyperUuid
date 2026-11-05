@@ -27,7 +27,8 @@ repositories {
 // The one source of the JDK floor: the base of the multi-release jar (UuidGenerator and the
 // JNI NativeCore) compiles with --release jdkFloor, and src/main/java25 (the FFM NativeCore)
 // with --release 25. Gradle, Spotless, javadoc and publish all run on JDK 25.
-val jdkFloor by extra(21)
+val jdkFloor = 21
+extra.set("jdkFloor", jdkFloor)
 
 // The formatter, over every Java file in the build: the library, its tests, the AOT smoke
 // test and the JMH benchmarks. palantir-java-format is google-java-format's rules at a

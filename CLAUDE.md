@@ -197,7 +197,8 @@ promise, so every stable bump is re-proven by the legs that use it.
   queued. The inventory records the commit that packed, and the tag run requires its own
   Forge to descend from it. Don't merge Forge changes while a preparation is in flight.
 - The board is one Forge workflow per concern: `core` (`hyper-core.yml`, the seven core legs,
-  each with its cdylib export check and C smoke), `core-checks` (`hyper-core-checks.yml`,
+  each with its cdylib export check and C smoke), `core-proofs` (`hyper-core-proofs.yml`, the
+  no_std, no-allocator and no-panic proofs, on every pull request that builds the core), `core-checks` (`hyper-core-checks.yml`,
   the static checks on three hosts), `lint-<binding>` (one job on `ubuntu-26.04-arm`) and
   `test-<binding>` (the binding's suite on its hosts), gated on what the pull request touched
   (`changes`, from `.github/scripts/pr_changes.py`; `pr-board` is the one status to read, red
@@ -229,7 +230,7 @@ promise, so every stable bump is re-proven by the legs that use it.
 
 ## Local loop
 
-The PR board always builds the core. A binding's suite runs when its tree, the core (`rust/`,
+The PR board always builds the core and proves its thesis (`core-proofs`). A binding's suite runs when its tree, the core (`rust/`,
 `include/`, `c/`, `corpus/`) or `.github/` changed; its lint when its tree or `.github/` did;
 Rust's lint when the core or `.github/` did; `python3 .github/scripts/pr_changes.py`
 classifies a `filename<TAB>previous_filename` list from stdin the way the `changes` job does

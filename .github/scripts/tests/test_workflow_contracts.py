@@ -36,6 +36,10 @@ def header(job):
     return job.split('    steps:')[0]
 
 
+def with_lines(job):
+    return [line for line in job.split('    with:\n', 1)[1].splitlines() if line.strip()]
+
+
 def with_block(text):
     """The `with:` keys of one job or step body."""
     match = re.search(r'^( +)with:\n((?:\1  .*\n?)+)', text, re.M)
@@ -254,7 +258,7 @@ ATTESTING = {'hyper-core.yml', 'hyper-build-static.yml', 'hyper-build-android.ym
              'hyper-build-wheels.yml', 'hyper-build-php-extension.yml', 'hyper-test-java.yml',
              'hyper-test-typescript.yml', 'hyper-test-ruby.yml',
              'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
-NO_MODE = {'hyper-core-checks.yml', 'hyper-lint-rust.yml', 'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
+NO_MODE = {'hyper-core-checks.yml', 'hyper-core-proofs.yml', 'hyper-lint-rust.yml', 'hyper-pack-nuget.yml', 'hyper-pack-crate.yml', 'hyper-pack-maven.yml'}
 # The release tail of ci.yml, in dependency order (pr_board.py's TAIL): the Forge resolver, the
 # eight pack jobs, the inventory, CodeQL and B; gated on prepare-release.yml's master dispatch
 # with purpose=release (the default), so a purpose=board dispatch runs the board alone.
@@ -495,6 +499,15 @@ class CiTests(unittest.TestCase):
         self.assertIn('      jdk_floor_version: "21"\n', java)
         self.assertIn('      lint_java_jni: true\n', self.jobs['lint-java'])
 
+    def test_the_proofs_gate_a_pull_request_with_what_core_checks_proves(self):
+        proofs = self.jobs['core-proofs']
+        self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-core-proofs.yml@master', proofs)
+        self.assertEqual(self.gate(proofs), "github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'")
+        self.assertEqual(self.needs(proofs), self.needs(self.jobs['core-checks']))
+        self.assertIn('core-proofs', self.needs(self.jobs['pr-board']))
+        for line in with_lines(proofs):
+            self.assertIn(line, self.jobs['core-checks'])
+
     def test_core_checks_is_the_forge_matrix_with_the_core_inputs(self):
         core = self.jobs['core-checks']
         self.assertIn('uses: SkunkWerkx/.github/.github/workflows/hyper-core-checks.yml@master', core)
@@ -631,15 +644,15 @@ class CiTests(unittest.TestCase):
     def test_no_job_excludes_release_mode(self):
         for name, job in self.jobs.items():
             with self.subTest(job=name):
-                # lint-rust alone: off a pull request core-checks lints the same way.
-                if name != 'lint-rust':
+                # lint-rust and core-proofs alone: off a pull request core-checks does the same.
+                if name not in ('lint-rust', 'core-proofs'):
                     self.assertNotIn("event_name == 'pull_request'", self.gate(job) or '')
 
     def test_the_tail_replaces_request_staging(self):
         self.assertNotIn('request-staging', self.jobs)
         self.assertFalse((WORKFLOWS / 'stage-native-binaries.yml').exists())
-        # lint-rust is a pull request's alone; forge would skip on it.
-        board = set(self.jobs) - set(TAIL) - {'pr-board', 'lint-rust'}
+        # lint-rust and core-proofs are a pull request's alone; forge would skip on them.
+        board = set(self.jobs) - set(TAIL) - {'pr-board', 'lint-rust', 'core-proofs'}
         self.assertEqual(self.needs(self.jobs['forge']), board)
         for name in TAIL:
             with self.subTest(job=name):

@@ -11,10 +11,10 @@ repositories {
 }
 
 dependencies {
-    implementation(rootProject)
+    implementation(project(":"))
 }
 
-val jdkFloor: Int by rootProject.extra
+val jdkFloor = rootProject.extra["jdkFloor"] as Int
 
 java {
     sourceCompatibility = JavaVersion.toVersion(jdkFloor)

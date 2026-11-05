@@ -60,6 +60,14 @@ class GateTests(unittest.TestCase):
         self.assertEqual(on, {'changes', 'core', 'lint-rust', 'build-static', 'lint-go',
                               *(f'test-{b}' for b in BINDINGS)})
 
+    def test_the_proofs_gate_every_pull_request_that_builds_the_core(self):
+        for changed in (outputs(core=True), outputs(ci=True), outputs(java=True), outputs()):
+            with self.subTest(changed=changed):
+                self.assertTrue(pr_board.gates(changed, 'pull_request')['core-proofs'])
+        self.assertFalse(pr_board.gates(outputs(docs_only=True), 'pull_request')['core-proofs'])
+        # Off a pull request core-checks runs the same proofs.
+        self.assertFalse(pr_board.gates(outputs(core=True), 'schedule', 'refs/heads/master')['core-proofs'])
+
     def test_core_gates_nothing_on_a_release_but_the_rust_lint(self):
         everything = outputs(**{key: True for key in ['core', 'ci', 'lint_rust'] + BINDINGS + [f'lint_{b}' for b in BINDINGS]})
         gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
@@ -116,7 +124,7 @@ class GateTests(unittest.TestCase):
                     # The release tail: a release-purpose master dispatch and nothing else, whatever changed.
                     self.assertEqual(gate[1], tail_gate)
                     continue
-                if name in ('core', 'test-apple-mobile', 'test-android', 'lint-go-full', 'core-checks', 'build-android', 'pack-c',
+                if name in ('core', 'core-proofs', 'test-apple-mobile', 'test-android', 'lint-go-full', 'core-checks', 'build-android', 'pack-c',
                             'build-wasm', 'build-wheels', 'test-nuget-package', 'test-npm-package'):
                     continue
                 on = {key for key in outputs() if pr_board.gates(outputs(**{key: True}), 'pull_request', 'refs/pull/1/merge')[name]}

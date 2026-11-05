@@ -11,13 +11,14 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('CI purpose={0}
 # docs_only false — so the release-mode board is the whole board, and pr-board, the one
 # status to read, is red when any needed job failed or was skipped while its gate said run.
 #
-# A pull request asks whether the code broke: the core compiled and its suite run, then the corpus
+# A pull request asks whether the code broke: the core compiled, its suite run and its thesis
+# proven (no_std, no allocator, no panic path), then the corpus
 # through the bindings it can reach, each on one leg (linux-x64; Swift on xcode-27, PHP on ZTS).
 # A core change lints Rust and runs every binding's suite, linting none of them but Go's regeneration
 # proof, without which test-go would pass on a stale committed core. A binding change builds the
 # core and lints and runs that binding, linting no Rust. Everything else (the other platforms, musl,
 # floors, static targets beyond Swift's one, wheels, wasm, Android, iOS, the packed-package jobs,
-# the core's source checks) runs on the board and a release, a cost paid by dispatching it.
+# the core's other source checks) runs on the board and a release, a cost paid by dispatching it.
 #
 # CI's job is build, test, and upload reusable artifacts. Every native leg builds+tests
 # fresh, and the raw outputs (the plain FFI libhyperuuid.so/.dylib/.dll, the compiled Ruby
@@ -199,6 +200,19 @@ jobs:
       contents: read
     with:
       extra_features: uuid1
+
+  # The thesis, on every pull request that builds the core: no_std, no allocator and no panic path,
+  # with the canary that shows the no-panic proof can reject. A binding relies on all three, so a
+  # commit that breaks one must not reach master. Off a pull request core-checks runs them.
+  core-proofs:
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
+    uses: SkunkWerkx/.github/.github/workflows/hyper-core-proofs.yml@master
+    permissions:
+      contents: read
+    with:
+      no_std_rustflags: --cfg getrandom_backend="custom"
+      no_panic_command: cargo build --release --example no_panic --features no-panic,uuid1 && RUSTFLAGS="--cfg hyperuuid_words_walk" cargo build --release --example no_panic --features no-panic,uuid1
 
   # Every static check on the core, in one Forge job on three hosts (hyper-core-checks.yml):
   # rustfmt and clippy, the C ABI held to rust/src/ffi.rs by .github/scripts/check_exports.py,
@@ -1656,7 +1670,7 @@ jobs:
   # cancelled, or was skipped while `changes` said it should run (a too-narrow classifier
   # would otherwise be invisible); .github/scripts/pr_board.py has the gates, one per job.
   pr-board:
-    needs: [changes, core, build-static, build-android, core-checks, lint-rust, lint-csharp, lint-java,
+    needs: [changes, core, build-static, build-android, core-checks, core-proofs, lint-rust, lint-csharp, lint-java,
             lint-python, lint-ruby, lint-php, lint-swift, lint-typescript, lint-r, lint-go,
             lint-go-full, test-csharp, test-java, test-python, test-ruby, test-php, test-swift,
             test-typescript, test-r, test-go, pack-c, build-wasm, build-wheels,
