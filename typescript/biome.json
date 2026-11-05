@@ -9,7 +9,8 @@
       "browser-smoke/*.js",
       "browser-smoke/*.mjs",
       "consumer-tests/**/*.cjs",
-      "consumer-tests/**/*.mjs"
+      "consumer-tests/**/*.mjs",
+      "!consumer-tests/work"
     ]
   },
   "formatter": {
