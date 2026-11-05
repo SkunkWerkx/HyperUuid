@@ -51,13 +51,13 @@ class GateTests(unittest.TestCase):
             with self.subTest(binding=binding):
                 gates = pr_board.gates(outputs(**{binding: True, f'lint_{binding}': True}), 'pull_request')
                 on = {name for name, gate in gates.items() if gate}
-                self.assertEqual(on, {'changes', 'core', f'lint-{binding}', f'test-{binding}'} | extra)
+                self.assertEqual(on, {'changes', 'core', 'core-proofs', f'lint-{binding}', f'test-{binding}'} | extra)
 
     def test_a_core_change_lints_rust_and_runs_every_suite(self):
         gates = pr_board.gates(outputs(core=True, lint_rust=True, **{b: True for b in BINDINGS}), 'pull_request',
                                'refs/pull/1/merge')
         on = {name for name, gate in gates.items() if gate}
-        self.assertEqual(on, {'changes', 'core', 'lint-rust', 'build-static', 'lint-go',
+        self.assertEqual(on, {'changes', 'core', 'core-proofs', 'lint-rust', 'build-static', 'lint-go',
                               *(f'test-{b}' for b in BINDINGS)})
 
     def test_the_proofs_gate_every_pull_request_that_builds_the_core(self):
@@ -79,9 +79,9 @@ class GateTests(unittest.TestCase):
         self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-apple-mobile'])
         self.assertFalse(pr_board.gates(everything, 'pull_request', 'refs/pull/1/merge')['test-android'])
         gates = pr_board.gates(everything, 'workflow_dispatch', 'refs/heads/master', 'release')
-        self.assertTrue(all(gate for name, gate in gates.items() if name != 'lint-rust'))
+        self.assertTrue(all(gate for name, gate in gates.items() if name not in ('lint-rust', 'core-proofs')))
         gates = pr_board.gates(everything, 'schedule', 'refs/heads/master')
-        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL and name != 'lint-rust'))
+        self.assertTrue(all(gate for name, gate in gates.items() if name not in pr_board.TAIL and name not in ('lint-rust', 'core-proofs')))
 
     def test_the_tail_is_gated_on_a_release_dispatch_at_master_only(self):
         on = pr_board.gates(outputs(core=True), 'workflow_dispatch', 'refs/heads/master', 'release')
@@ -145,13 +145,13 @@ class VerdictTests(unittest.TestCase):
 
     def test_skipped_but_gated_on_is_red(self):
         gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
-        ok, why = pr_board.verdict(results(**{name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'lint-java')}), gates)
+        ok, why = pr_board.verdict(results(**{name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'core-proofs', 'lint-java')}), gates)
         self.assertFalse(ok)
         self.assertEqual(why, 'test-java skipped but gated on')
 
     def test_skipped_and_gated_off_is_green(self):
         gates = pr_board.gates(outputs(java=True, lint_java=True), 'pull_request')
-        skipped = {name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'lint-java', 'test-java')}
+        skipped = {name: 'skipped' for name in pr_board.JOBS if name not in ('changes', 'core', 'core-proofs', 'lint-java', 'test-java')}
         self.assertEqual(pr_board.verdict(results(**skipped), gates), (True, 'ok'))
 
     def test_docs_only_board_is_green_with_everything_skipped(self):

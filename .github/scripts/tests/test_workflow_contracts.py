@@ -37,7 +37,7 @@ def header(job):
 
 
 def with_lines(job):
-    return [line for line in job.split('    with:\n', 1)[1].splitlines() if line.strip()]
+    return [line for line in job.split('    with:\n', 1)[1].splitlines() if line.startswith('      ')]
 
 
 def with_block(text):
