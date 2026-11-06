@@ -103,7 +103,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "wasm2go:", err)
 		return 1
 	}
-	translate := exec.Command("go", "tool", "wasm2go", "-pkg", "core", "-o", *out, wasm)
+	// -unsafe replaces the bodies of the load and store helpers with unsafe.Add access behind a
+	// check of the access's last byte, so a read or write past the end still panics. wasm2go
+	// keeps the encoding/binary path for CPUs that do not allow unaligned access, chosen at
+	// compile time. internal/core/bounds_test.go pins those checks.
+	translate := exec.Command("go", "tool", "wasm2go", "-unsafe", "-pkg", "core", "-o", *out, wasm)
 	translate.Dir = toolDir
 	if msg, err := translate.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "wasm2go: translation failed: %v\n%s", err, msg)

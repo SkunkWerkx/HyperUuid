@@ -14,7 +14,7 @@ HyperUuid now ships nine bindings over one Rust core, with TypeScript and R land
 | Ruby | Magnus, Fiddle fallback | RubyGems | 3.3 (on Fiddle) | 2.1-5.5x faster than `SecureRandom.uuid` |
 | PHP | ext-php-rs extension | PIE: Packagist, 36 zips (NTS and ZTS) on the GitHub Release | 8.3 | 1.2-1.4x faster than a naive inline v4 (1.0's FFI package; the extension not yet measured) |
 | Swift | static library | git tag; core zips on the GitHub Release | 6.2 | 11-16x faster than `Foundation.UUID()` |
-| Go | the core as Go source (wasm2go) | git tag, no binaries | 1.26 | 4.5-5.4x faster than `google/uuid`; batch 1.5x slower than the cgo binding it replaced |
+| Go | the core as Go source (wasm2go) | git tag, no binaries | 1.26 | 4.7-5.8x faster than `google/uuid`; batch 1.6x slower than the cgo binding it replaced |
 | TypeScript (new) | napi-rs addon | npm: root package + 8 platform packages + the WebAssembly fallback package | Node 22.13, Bun | v4 4.1-6.4x slower than `crypto.randomUUID()`; v7 2.3x faster than `uuid` `v7()` on Node, 1.2x slower on Bun |
 | R (new) | `.Call` into a vendored static library | CRAN source package | R 4.2 | v4 12.7-29x faster than `uuid`; time-based 1.2-1.3x slower |
 | C, C++ (new) | the C ABI: a generated C header, a C++23 header over it | GitHub Release: one archive per platform (CMake, pkg-config) | C99; C++23 | not measured |

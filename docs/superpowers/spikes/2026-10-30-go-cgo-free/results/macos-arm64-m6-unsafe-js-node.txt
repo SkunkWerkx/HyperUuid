@@ -1,0 +1,48 @@
+# GOOS=js GOARCH=wasm, node v26.13.0, the core translated with wasm2go -unsafe, 2026-11-05, -count 3
+goos: js
+goarch: wasm
+pkg: github.com/SkunkWerkx/HyperUuid/go
+BenchmarkNewV4                      	 3605546	       332.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4                      	 3711486	       337.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4                      	 3716278	       328.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String                	 7739770	       156.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String                	 8157337	       153.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String                	 7585933	       154.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At                    	 3645260	       338.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At                    	 3679066	       325.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At                    	 3657610	       326.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000          	    3612	    335526 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000          	    3511	    335365 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000          	    3640	    337830 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7BatchAt1000           	  189540	      5456 ns/op	   16384 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000           	  226036	      5281 ns/op	   16384 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000           	  226908	      5287 ns/op	   16384 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom        	 4322216	       277.7 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom        	 4397700	       272.3 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom        	 4407122	       271.6 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7            	 3097129	       390.9 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7            	 3127300	       384.4 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7            	 3091184	       394.4 ns/op	      16 B/op	       1 allocs/op
+BenchmarkV7TimestampExtraction      	30239984	        40.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction      	32189946	        37.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction      	31263963	        37.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction 	225072202	         5.263 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction 	306610822	         3.906 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction 	304508281	         3.915 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000               	  320234	      3813 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000               	  302744	      3774 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000               	  319609	      3766 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000          	  315910	      3782 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000          	  316540	      3803 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000          	  316838	      3748 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4              	 3689364	       321.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4              	 3705756	       324.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4              	 3672043	       325.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7              	 3605222	       325.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7              	 3703539	       325.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7              	 3677832	       326.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed              	 5454284	       219.9 ns/op	         0 gcs	    638976 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed              	 5114605	       218.4 ns/op	         0 gcs	    638976 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed              	 5481884	       218.9 ns/op	         0 gcs	    638976 heap-inuse-B	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/SkunkWerkx/HyperUuid/go	52.965s

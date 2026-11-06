@@ -23,6 +23,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Go — the core is translated with wasm2go's `-unsafe`,** the same as HyperCast and HyperTabular.
+  Against the same wasm translated without it, `NewV5String` is 15% faster, the other single calls
+  are level, and **the batches lose about 3%** (`NewV7BatchAt(1000)` 2.92 against 2.83 µs, each
+  fill 2.15 against 2.10), a loss taken so the three libraries translate their cores the same way.
+  Every memory access is still bounds-checked, which `go/internal/core/bounds_test.go` now pins, and
+  the whole suite runs on s390x under QEMU to prove the big-endian path. *(Go)*
 - **The JavaScript toolchain is Bun.** Every dependency tree here (`typescript/`, its browser
   smoke and consumer-test harness, `ruby/wasm-smoke/`) is locked by `bun.lock` and installed with
   `bun install --frozen-lockfile`, and CI, the local loop and Dependabot follow. npm keeps what

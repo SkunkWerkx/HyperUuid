@@ -15,7 +15,7 @@ The Go, R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS
 - **[Python](../python/)** — every call ahead of stdlib's own C-accelerated ones through the PyO3 native extension: 3.4x faster than `uuid.uuid4()`, 4.2x faster than `uuid.uuid5()`, 3.8x faster than 3.14's own `uuid.uuid7()`, and timestamp extraction 1.6x faster than `UUID.time` as a `datetime`, 2.4x as a plain integer. On 3.11-3.13, where stdlib has no v7 at all, it's not even a comparison. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
 - **[Ruby](../ruby/)** — the same mechanism swap as Python, same result: **5.5x faster than `SecureRandom.uuid`** for v4, 3.8-4.0x for v7, 2.1x for v5 — and `SecureRandom.uuid` only ever does random v4 anyway. (v7 figures measured before the per-millisecond re-seed, core change, 2026-10-27.)
 - **[PHP](../php/)** — a v4 costs less than a *naive inline pure-PHP v4* (three lines of `random_bytes` + bit twiddling, no RFC validation), by 1.4x, and a v7 by 1.2x — the whole native round trip for less than the price of PHP-level byte fiddling — and timestamp extraction beats `ramsey/uuid` by 45x. Installed by PIE, with no Composer dependency at all. (Measured before the extension, on 1.0's FFI package; v7 figures before the per-millisecond re-seed, core change, 2026-10-27.)
-- **[Go](../go/)** — on the Apple M6, `NewV4` is 4.5x faster than `google/uuid`'s `NewRandom()` and `NewV7At` 5.4x faster than its `NewV7()`, allocation-free where `google/uuid` allocates 16 bytes a call, and the core is compiled as Go source rather than crossed into, the one binding here with no boundary at all. The batch is the loss: 1.5x slower than the cgo binding it replaced, on the same machine. And `google/uuid`'s `id.Time()` beats `V7Timestamp` 4.8x; use it.
+- **[Go](../go/)** — on the Apple M6, `NewV4` is 4.7x faster than `google/uuid`'s `NewRandom()` and `NewV7At` 5.8x faster than its `NewV7()`, allocation-free where `google/uuid` allocates 16 bytes a call, and the core is compiled as Go source rather than crossed into, the one binding here with no boundary at all. The batch is the loss: 1.5x slower than the cgo binding it replaced, on the same machine. And `google/uuid`'s `id.Time()` beats `V7Timestamp` 4.8x; use it.
 - **[R](../r/)** — on the Apple M6, `uuid_v4()` is 12.7x faster than the `uuid` package's `UUIDgenerate()` for one id and 29x for 1000, and `uuid_v7()` is 1.3x slower than its `UUIDgenerate(use.time = TRUE)` for one id and 1.2x for 1000. That comparison is different work: `uuid` makes a version 1 (a clock sequence and a fixed node, no random bits) and has no version 7, but it is the time-based call an R user has today, and it is faster. Every function is vectorised and propagates `NA` element-wise.
 - **[TypeScript](../typescript/)** — on the Apple M6, `newV4()` is 4.1x slower than `crypto.randomUUID()` on Node and 6.4x on Bun, and `newV7()` is 2.3x faster than the `uuid` package's `v7()` on Node and 1.2x slower on Bun. The losses are the random source: on Apple platforms the core asks the operating system's generator for every id, where `crypto.randomUUID()` draws from a buffer it refills in bulk. A batch pays for it once, so `newV7Batch(1000)` is 3.5x faster than 1000 `newV7()` calls on Node and 6.2x on Bun. What the binding gives is the same engine as every other binding, under Node and Bun, with the SQL Server order.
 
@@ -72,11 +72,11 @@ The zero-compile `Fiddle` fallback (`HYPERUUID_PURE=1`, and automatic on any pla
 | --- | ---: | ---: | ---: |
 | Rust — v7 † | 25.2 µs | 4.40 µs | **5.7x** |
 | C# — v7 † | 37.5 µs | 6.06 µs | **6.2x** |
-| Go — v7, on the Apple M6 | 37.3 µs | 2.84 µs | **13.1x** |
+| Go — v7, on the Apple M6 | 37.1 µs | 2.91 µs | **12.8x** |
 
 † Measured before the per-millisecond re-seed (core change, 2026-10-27).
 
-Go's row is from the Apple M6 (2026-10-31), not comparable to the two above it. Its batch win is the largest of the three because a single call pays for its own random draw and the stream's accounting in the translated core, where a batch draws 6 KB of keystream once and walks the items; the individual calls allocate nothing, so the win is time alone. The batch is also Go's one loss: the cgo binding it replaced did the same 1000 in 1.84 µs on the same machine, since the walk now runs as bounds-checked Go rather than native Rust ([go/README.md](../go/README.md#benchmarks)).
+Go's row is from the Apple M6 (2026-11-05), not comparable to the two above it. Its batch win is the largest of the three because a single call pays for its own random draw and the stream's accounting in the translated core, where a batch draws 6 KB of keystream once and walks the items; the individual calls allocate nothing, so the win is time alone. The batch is also Go's one loss: the cgo binding it replaced did the same 1000 in 1.84 µs on the same machine, since the walk now runs as bounds-checked Go rather than native Rust ([go/README.md](../go/README.md#benchmarks)).
 
 Rust's own allocation-free claim isn't just asserted either — `rust/tests/allocation_free.rs` wraps a counting `#[global_allocator]` around 1000 calls to each of v4/v5/v7 and around the batch function, and asserts zero allocations for all of them. Batches draw their entropy through the caller's own buffer, which is what lets the crate build without `alloc` at all.
 
@@ -90,7 +90,7 @@ The batch doors above still hand back a collection of the language's own UUID ty
 | Python † | 132 µs | **3.7 µs** | **36x** | `fill_v7(bytearray)` |
 | PHP † ‡ | 67.1 µs | **4.2 µs** | **16x** | `newV7BatchBytes` |
 | Java † | 9.3 µs | **3.6 µs** | 2.6x | `fillV7(byte[])` |
-| Go, on the Apple M6 | 2.84 µs | **2.07 µs** | 1.37x, and 0 allocs | `FillV7BytesAt` |
+| Go, on the Apple M6 | 2.91 µs | **2.14 µs** | 1.36x, and 0 allocs | `FillV7BytesAt` |
 | C# † | 6.1 µs | **3.8 µs** | 1.6x, and 0 allocs | `FillV7(Span<byte>)` |
 | Swift † | 3.7 µs | **3.8 µs** | level | `fillV7(into: raw bytes)` |
 
@@ -107,22 +107,22 @@ That also explains why Go, C# and Swift barely move: they are already at or near
 
 ## Go, TypeScript and R, on an Apple M6
 
-These three were measured on an Apple M6 (Mac18,5) under macOS, TypeScript and R on 2026-10-30 and Go on 2026-10-31, a different machine and OS from every table above, so they are not comparable to the linux-x64 numbers.
+These three were measured on an Apple M6 (Mac18,5) under macOS, TypeScript and R on 2026-10-30 and Go on 2026-11-05, a different machine and OS from every table above, so they are not comparable to the linux-x64 numbers.
 
-Go 1.27.3, `go test -bench=. -benchmem -count 6` from `go/`, benchstat medians, the shipped binding (the core translated to Go, AES-256-CTR selected on this CPU, the primary and the pool), against `google/uuid` 1.6.0 in the same run; the raw output is committed as the receipt ([`results/macos-arm64-m6-shipped-host.txt`](superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-shipped-host.txt)); the cgo column is the 1.0 binding on the same machine, measured by the spike's harness ([the spike](superpowers/spikes/2026-10-30-go-cgo-free/)) the day before, so it is a different harness and read as such:
+Go 1.27.3, `go test -bench=. -benchmem -count 6` from `go/`, benchstat medians, the shipped binding (the core translated to Go, AES-256-CTR selected on this CPU, the primary and the pool), against `google/uuid` 1.6.0 in the same run; the raw output is committed as the receipt ([`results/macos-arm64-m6-unsafe-host.txt`](superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-unsafe-host.txt)); the cgo column is the 1.0 binding on the same machine, measured by the spike's harness ([the spike](superpowers/spikes/2026-10-30-go-cgo-free/)) on 2026-10-30, so it is a different harness and read as such:
 
 | Call | hyperuuid | `google/uuid` | the cgo binding (1.0) |
 | --- | ---: | ---: | ---: |
-| `NewV4` | 37.0 ns, 0 allocs | `NewRandom()` 167 ns, 1 alloc: **4.5x faster** | 184 ns |
-| `NewV5String` | 101 ns, 0 allocs | | |
-| `NewV7At` (explicit timestamp) | 37.3 ns, 0 allocs | `NewV7()` 202 ns, 1 alloc: **5.4x faster** | 72 ns |
-| `NewV7BatchAt(1000)` | 2.84 µs, 1 alloc | 1000 `NewV7At`: 37.3 µs, 13.1x faster | 1.84 µs: **1.5x slower** |
-| `FillV7At`, `FillV7BytesAt` (1000) | 2.07 µs, 0 allocs | | |
-| `V7Timestamp` | 6.6 ns | `id.Time()` 1.4 ns: **4.8x slower** | |
-| `NewV4`, 12 goroutines | 56.8 ns a call aggregate (±45%; an earlier run gave 16.7 ±74%), 0 allocs | | 459 ns |
-| `NewV7At`, 12 goroutines | 141 ns (one stream, one lock) | | 207 ns |
+| `NewV4` | 37.5 ns, 0 allocs | `NewRandom()` 177 ns, 1 alloc: **4.7x faster** | 184 ns |
+| `NewV5String` | 87.8 ns, 0 allocs | | |
+| `NewV7At` (explicit timestamp) | 37.2 ns, 0 allocs | `NewV7()` 214 ns, 1 alloc: **5.8x faster** | 72 ns |
+| `NewV7BatchAt(1000)` | 2.91 µs, 1 alloc | 1000 `NewV7At`: 37.1 µs, 12.8x faster | 1.84 µs: **1.6x slower** |
+| `FillV7At`, `FillV7BytesAt` (1000) | 2.14 µs, 0 allocs | | |
+| `V7Timestamp` | 7.0 ns | `id.Time()` 1.4 ns: **5.0x slower** | |
+| `NewV4`, 12 goroutines | 24.7 ns a call aggregate (±33%; earlier runs gave 56.8 and 16.7), 0 allocs | | 459 ns |
+| `NewV7At`, 12 goroutines | 144 ns (one stream, one lock) | | 207 ns |
 
-The same binding on Linux arm64, in Docker on the same Mac (`golang:1.27`, 3 runs, medians; the spike put this leg's noise at up to ±26%): `NewV4` 55.1 ns against `NewRandom()` 57.8 ns, level; `NewV7At` 54.9 ns against `NewV7()` 98.6 ns, 1.8x faster, both 1.3-1.4x behind the cgo binding's own 41 and 40 ns there; the batch 3.3 µs against the cgo binding's 3.46 µs, level in this run and 5.0 µs in an earlier one of the same count; and 12 goroutines minting v4s at 10.2 ns a call aggregate, where the cgo binding's archive, drawing from the core's ChaCha20 pool, ran at 4.9 ns: **2x slower** under contention on Linux, the pool having closed most of the gap from the 130 ns one mutexed instance measured in the spike. The x64 columns await the owner's XPS run ([go/README.md](../go/README.md#benchmarks) has the WebAssembly numbers, where `google/uuid` is level or ahead per single call and the binding wins only the batch, and the memory receipts; the raw outputs are committed beside the spike's results as `*-shipped-*.txt`).
+The same binding on Linux arm64, in Docker on the same Mac (`golang:1.27`, 3 runs, medians; the spike put this leg's noise at up to ±26%): `NewV4` 54.5 ns against `NewRandom()` 58.1 ns, level; `NewV7At` 54.1 ns against `NewV7()` 98.8 ns, 1.8x faster, both 1.3-1.4x behind the cgo binding's own 41 and 40 ns there; the batch 3.4 µs against the cgo binding's 3.46 µs, level in this run and 5.0 µs in an earlier one of the same count; and 12 goroutines minting v4s at 9.3 ns a call aggregate, where the cgo binding's archive, drawing from the core's ChaCha20 pool, ran at 4.9 ns: **1.9x slower** under contention on Linux, the pool having closed most of the gap from the 130 ns one mutexed instance measured in the spike. The x64 columns await the owner's XPS run ([go/README.md](../go/README.md#benchmarks) has the WebAssembly numbers, where `google/uuid` is level or ahead per single call and the binding wins only the batch, and the memory receipts; the raw outputs are committed beside the spike's results as `*-shipped-*.txt`).
 
 TypeScript, Node 26.13.0 and Bun 1.4.4, with [mitata](https://github.com/evanwashere/mitata) (`bun run bench` and `bun run bench:bun`, from `typescript/`), averages per call; Bun's `uuid` `v7()` is the noisiest baseline here, so read its ratio with that spread:
 

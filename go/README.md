@@ -117,7 +117,7 @@ in and results copied out. Every public function is an ordinary Go call into tha
 nothing crosses a foreign boundary, which is why a call costs what the core's own work costs
 and nothing more.
 
-wasm2go's generated code bounds-checks every memory access and keeps the call stack in Go,
+wasm2go's generated code bounds-checks every memory access ([`internal/core/bounds_test.go`](internal/core/bounds_test.go) pins the checks) and keeps the call stack in Go,
 so a core bug, a guest stack overflow included, is a Go panic and never a corrupted heap.
 The guest's stack is 64 KiB: regenerating the core at halving stack sizes and running the
 whole suite, the memory receipts below and the exhaustion package at each, 256 bytes is the
@@ -179,22 +179,22 @@ an instance returns to the pool only while its scratch is still the base page, a
 instances never run a v7 call, so their counters are never used. The primary is created on
 first use; importing the package costs nothing.
 
-Measured on the Apple M6 (Mac18,5, 12 cores, Go 1.27.3, `-count 6`, benchstat medians) with
+Measured on the Apple M6 (Mac18,5, 12 cores, Go 1.27.3, `-count 6`, benchstat medians, 2026-11-05) with
 `go test -bench 'Parallel' -benchmem`, `GOMAXPROCS` goroutines each:
 
 | Benchmark | ns per call, aggregate | allocs | |
 | --- | ---: | ---: | --- |
-| `NewV4` on 12 goroutines | 56.8 (±45% within the run; an earlier `-count 6` run gave 16.7 ±74%: the spread is the number) | 0 | the cgo binding this replaced: 459 |
-| `NewV7At` on 12 goroutines | 141 | 0 | one stream, one lock; cgo: 207 |
-| v4, v5, v7 and `Version` round-robin on 12 goroutines | 113 | 0, 0 GCs, 4 MiB heap in use | |
+| `NewV4` on 12 goroutines | 24.7 (±33% within the run; earlier `-count 6` runs gave 56.8 and 16.7: the spread is the number) | 0 | the cgo binding this replaced: 459 |
+| `NewV7At` on 12 goroutines | 144 | 0 | one stream, one lock; cgo: 207 |
+| v4, v5, v7 and `Version` round-robin on 12 goroutines | 109 | 0, 0 GCs, 4 MiB heap in use | |
 
 The same on Linux arm64, in Docker on the same Mac (3 runs, medians, a leg the spike put at
-up to ±26% noise): `NewV4` on 12 goroutines 10.2 ns a call aggregate, where the cgo binding's
+up to ±26% noise): `NewV4` on 12 goroutines 9.3 ns a call aggregate, where the cgo binding's
 archive, drawing from the core's native ChaCha20 pool, ran at 4.9 ns there. **That is a loss
-under contention on Linux, 2x**, down from the 130 ns a single mutexed instance measured in
+under contention on Linux, 1.9x**, down from the 130 ns a single mutexed instance measured in
 the spike; the pool closes most of the gap, not all of it. `NewV7At` 152 ns, the mixed
-round-robin 111 ns, 0 allocations and 0 GCs in both
-([`linux-arm64-docker-m6-shipped.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/linux-arm64-docker-m6-shipped.txt)).
+round-robin 107 ns, 0 allocations and 0 GCs in both
+([`linux-arm64-docker-m6-unsafe.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/linux-arm64-docker-m6-unsafe.txt)).
 
 Under TinyGo everything serializes on the primary: its scheduler is single-threaded and its
 `sync.Mutex` has no `TryLock`, and a second instance would buy nothing.
@@ -374,14 +374,14 @@ Go gets the best version of this API in the whole project. `uuid.UUID` is `[16]b
 
 `go test -bench=. -benchmem ./...` from `go/`, Apple M6 (Mac18,5), Go 1.27.3, `-count 6`,
 medians, 1000 UUIDs per op, from the same run as the [Benchmarks](#benchmarks) below
-([`results/macos-arm64-m6-shipped-host.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-shipped-host.txt)):
+([`results/macos-arm64-m6-unsafe-host.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-unsafe-host.txt)):
 
 | method | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
-| `NewV7At` x1000 individually | 37,320 | 0 | 0 |
-| `NewV7BatchAt(1000)` | 2,842 | 16,390 | 1 |
-| `FillV7At` into an existing slice | 2,072 | 5 | **0** |
-| `FillV7BytesAt` into an existing buffer | 2,074 | 5 | **0** |
+| `NewV7At` x1000 individually | 37,130 | 0 | 0 |
+| `NewV7BatchAt(1000)` | 2,908 | 16,390 | 1 |
+| `FillV7At` into an existing slice | 2,141 | 5 | **0** |
+| `FillV7BytesAt` into an existing buffer | 2,136 | 5 | **0** |
 
 `FillV7Bytes`/`FillV7BytesAt` take a `[]byte` for callers who want raw RFC-ordered bytes rather than `uuid.UUID` values — a wire buffer or a database parameter. In Go the two forms cost the same, since neither converts; the byte form exists for convenience, not speed.
 
@@ -516,25 +516,25 @@ CI runs the whole suite three ways on the same gate, under TinyGo on wasip1 unde
 (with the checkout mounted and the corpus found through `HYPERUUID_CORPUS`), under stock Go on
 `js/wasm` under Node and on `wasip1/wasm` under wasmtime, and builds
 [`internal/tinygosmoke`](internal/tinygosmoke) with TinyGo and runs it in headless Chrome.
-Measured on the Apple M6, `-count 3` medians, 2026-10-31, 0 allocations per call in every
+Measured on the Apple M6, `-count 3` medians, 2026-11-05, 0 allocations per call in every
 row; `google/uuid` 1.6.0 in the same runs; the raw output is committed
-([`macos-arm64-m6-shipped-tinygo-wasmtime.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-shipped-tinygo-wasmtime.txt),
-[`-shipped-js-node.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-shipped-js-node.txt)):
+([`macos-arm64-m6-unsafe-tinygo-wasmtime.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-unsafe-tinygo-wasmtime.txt),
+[`-unsafe-js-node.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-unsafe-js-node.txt)):
 
-| Call | TinyGo 0.44 on wasip1, wasmtime 50 | stock Go `js/wasm`, Node 24 |
+| Call | TinyGo 0.44 on wasip1, wasmtime 50 | stock Go `js/wasm`, Node 26 |
 | --- | ---: | ---: |
-| `NewV4` | 154 ns (`NewRandom()` 60 ns: **2.6x slower**) | 537 ns (`NewRandom()` 491 ns: **1.1x slower**) |
-| `NewV5String` | 258 ns | 282 ns |
-| `NewV7At` | 161 ns (`NewV7()` 152 ns: level) | 559 ns (`NewV7()` 605 ns: 1.1x faster) |
-| `NewV7BatchAt(1000)` | 17.7 µs | 13.0 µs |
-| `FillV7At` (1000) | 13.9 µs | 11.2 µs |
-| `V7Timestamp` | 97 ns (`id.Time()`: 2.4 ns) | 35 ns (`id.Time()`: 4.0 ns) |
+| `NewV4` | 154 ns (`NewRandom()` 60 ns: **2.6x slower**) | 333 ns (`NewRandom()` 272 ns: **1.2x slower**) |
+| `NewV5String` | 249 ns | 154 ns |
+| `NewV7At` | 158 ns (`NewV7()` 156 ns: level) | 327 ns (`NewV7()` 391 ns: 1.2x faster) |
+| `NewV7BatchAt(1000)` | 17.1 µs | 5.3 µs |
+| `FillV7At` (1000) | 13.6 µs | 3.8 µs |
+| `V7Timestamp` | 96 ns (`id.Time()`: 2.5 ns) | 38 ns (`id.Time()`: 3.9 ns) |
 
-On both hosts `google/uuid` is level or ahead per single call, and the table says so. Each
+On both hosts `google/uuid` is ahead on a v4, and level or behind on a v7, and the table says so. Each
 of its ids is one `crypto/rand` read, which is exactly what the binding's OS source does for
 the core's `random_get`; the translated core's own work sits on top of that read, and under
 TinyGo that work is most of the call. A batch pays the read once, which is where the binding
-wins on wasm: 1000 v7s for 13 to 18 µs against 540 to 560 µs of single calls.
+wins on wasm: 1000 v7s for 5 to 17 µs against 156 to 336 µs of single calls.
 
 ## Building and regenerating
 
@@ -548,7 +548,8 @@ go generate     # in go/: builds rust/ for wasm32-wasip1 and rewrites internal/c
 
 [`internal/wasm2go`](internal/wasm2go) is the generator: it builds the crate with the rustc
 named in its `rust-toolchain.toml` (1.99.1) and a 64 KiB guest stack
-(`-C link-arg=-zstack-size=65536`), then runs the wasm2go pinned in its own `go.mod`. The
+(`-C link-arg=-zstack-size=65536`), then runs the wasm2go pinned in its own `go.mod` with `-unsafe`, which replaces the memory helpers with `unsafe.Add` access behind a check of
+the access's last byte (CPUs without unaligned access keep the `encoding/binary` path). The
 rustc is pinned as a reproducibility constraint, not a floor: the wasm's bytes follow rustc's
 codegen, so one named toolchain makes the committed file reproducible, and a bump is a
 deliberate regenerate-and-commit. `HYPERUUID_CHECK_CORE=1 go test -run
@@ -569,7 +570,7 @@ here — `NewV7At`, `NewV7BatchAt` and the `FillV7At` family — takes `unixMill
 parameter, so tests can assert against a fixed RFC test vector instead of the wall clock. And
 **the same engine as every other binding**: if your other services are in a different
 language, the one generator that's byte-for-byte identical everywhere, SQL Server order
-included. On the machine below it is also faster per call, by 4.5-5.4x, which is the random
+included. On the machine below it is also faster per call, by 4.7-5.8x, which is the random
 source: `google/uuid` asks the operating system for every id (the v7 half compares `NewV7At`,
 handed its timestamp, with `NewV7()`, which reads the clock, so part of that gap is the clock). Both libraries produce
 spec-valid, mutually interoperable UUIDs.
@@ -578,21 +579,21 @@ spec-valid, mutually interoperable UUIDs.
 
 `go test -bench=. -benchmem ./...` from `go/` — allocation tracking is built into `testing.B`,
 no extra tooling needed. Apple M6 (Mac18,5), macOS, Go 1.27.3, `-count 6`, benchstat medians,
-2026-10-31, the raw output committed as the receipt
-([`results/macos-arm64-m6-shipped-host.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-shipped-host.txt));
+2026-11-05, the raw output committed as the receipt
+([`results/macos-arm64-m6-unsafe-host.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/macos-arm64-m6-unsafe-host.txt));
 `google/uuid` 1.6.0 in the same run. The cgo column is the 1.0 binding, measured
-on the same machine the day before by the spike's harness, a different harness, read as such
+on the same machine on 2026-10-30 by the spike's harness, a different harness, read as such
 ([the spike](../docs/superpowers/spikes/2026-10-30-go-cgo-free/)); the x64 columns await the
 owner's XPS run and are not printed here.
 
 | Call | hyperuuid | `google/uuid` | the cgo binding (1.0) |
 | --- | ---: | ---: | ---: |
-| `NewV4` | 37.0 ns, 0 allocs | `NewRandom()` 167 ns, 1 alloc: **4.5x faster** | 184 ns |
-| `NewV5String` | 101 ns, 0 allocs | | |
-| `NewV7At` | 37.3 ns, 0 allocs | `NewV7()` 202 ns, 1 alloc: **5.4x faster** | 72 ns |
-| `NewV7BatchAt(1000)` | 2.84 µs, 1 alloc | 1000 `NewV7At`: 37.3 µs, 13.1x faster | 1.84 µs: **1.5x slower** |
-| `FillV7At`, `FillV7BytesAt` (1000) | 2.07 µs, 0 allocs | | |
-| `V7Timestamp` | 6.6 ns | `id.Time()` 1.4 ns: **4.8x slower** | |
+| `NewV4` | 37.5 ns, 0 allocs | `NewRandom()` 177 ns, 1 alloc: **4.7x faster** | 184 ns |
+| `NewV5String` | 87.8 ns, 0 allocs | | |
+| `NewV7At` | 37.2 ns, 0 allocs | `NewV7()` 214 ns, 1 alloc: **5.8x faster** | 72 ns |
+| `NewV7BatchAt(1000)` | 2.91 µs, 1 alloc | 1000 `NewV7At`: 37.1 µs, 12.8x faster | 1.84 µs: **1.6x slower** |
+| `FillV7At`, `FillV7BytesAt` (1000) | 2.14 µs, 0 allocs | | |
+| `V7Timestamp` | 7.0 ns | `id.Time()` 1.4 ns: **5.0x slower** | |
 
 No call allocates; `NewV5String`'s `[]byte(name)` conversion stays on the stack. Where the
 v4 went, by the spike's receipts on this machine: the crossing was 9 ns (`version`, a call
@@ -602,17 +603,21 @@ as `google/uuid` asks the operating system; the translated core measured 164 ns 
 `crypto/rand` per call and 30 ns with the AES stream. On Linux the native core already drew
 from its own ChaCha20 pool, which is why single calls there are level with `google/uuid` and
 1.4x behind the cgo binding rather than ahead of it. What costs more is the batch: the core walks 1000 items as bounds-checked Go rather than
-native Rust, so a batch of 1000 is **1.5x behind the cgo binding** on this machine, the one
-loss printed above, and still 13x ahead of 1000 single calls. If your workload can batch,
+native Rust, so a batch of 1000 is **1.6x behind the cgo binding** on this machine, the one
+loss printed above, and still 13x ahead of 1000 single calls. `-unsafe` costs the batch about 3%:
+the same wasm translated with and without it, six interleaved runs in one session and again in
+ten, gives `NewV7BatchAt(1000)` 2.92 µs against 2.83 µs and each fill 2.15 µs against 2.10 µs.
+`NewV5String` gains 15% (88.6 ns against 105) and the other single calls are level. HyperUuid
+takes that loss so all three Hyper libraries translate their cores the same way. If your workload can batch,
 batch. Contention has its own table under [One primary and a pool](#one-primary-and-a-pool),
 with a 2x loss under contention on Linux, and the browser and WASI numbers are under
 [WebAssembly](#webassembly).
 
 Linux arm64, in Docker on the same Mac (`golang:1.27`, 3 runs, medians; the spike put this
 leg's noise at up to ±26%; the receipt is
-[`linux-arm64-docker-m6-shipped.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/linux-arm64-docker-m6-shipped.txt)): `NewV4` 55.1 ns
-against `NewRandom()` 57.8 ns, level; `NewV7At` 54.9 ns against `NewV7()` 98.6 ns, 1.8x
-faster; `NewV7BatchAt(1000)` 3.3 µs against the cgo binding's 3.46 µs there, level in this run
+[`linux-arm64-docker-m6-unsafe.txt`](../docs/superpowers/spikes/2026-10-30-go-cgo-free/results/linux-arm64-docker-m6-unsafe.txt)): `NewV4` 54.5 ns
+against `NewRandom()` 58.1 ns, level; `NewV7At` 54.1 ns against `NewV7()` 98.8 ns, 1.8x
+faster; `NewV7BatchAt(1000)` 3.4 µs against the cgo binding's 3.46 µs there, level in this run
 (an earlier run of the same count gave 5.0 µs: the spread is this leg's). Against the cgo
 binding's own single calls there (41 and 40 ns) both are **1.3-1.4x behind**: on Linux the native core already drew from its ChaCha20 pool, so there was
 no per-call syscall for the stream to remove.
@@ -621,8 +626,8 @@ no per-call syscall for the stream to remove.
 
 `google/uuid` isn't just a source type here — it has real extraction logic of its
 own (`UUID.Time()`, documented as defined for versions 1, 2, 6, and 7), so it's a
-genuine head-to-head, not a strawman. Same machine, same run: `V7Timestamp` 6.6 ns against
-`id.Time()` 1.4 ns, 0 allocations either way. `google/uuid`'s `Time()` wins, by 4.8x — it's
+genuine head-to-head, not a strawman. Same machine, same run: `V7Timestamp` 7.0 ns against
+`id.Time()` 1.4 ns, 0 allocations either way. `google/uuid`'s `Time()` wins, by 5.0x — it's
 pure Go bit-shifting over bytes already in hand, where this binding copies the UUID into the
 guest and calls the core. `google/uuid.UUID.Time()` works on *any* RFC-conformant v7 value
 regardless of where it came from, so there's no provenance argument for reaching past it
