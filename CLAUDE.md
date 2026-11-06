@@ -388,7 +388,7 @@ stays recorded, never gating. `bun run test` is the package script; `bun test` i
 
 - Benchmark tables (`docs/benchmarks.md` and each binding's README) were measured on the WSL2
   i9-11900H box, except TypeScript's and R's (Apple M6, Mac18,5, 2026-10-30) and Go's (the
-  M6 on 2026-10-31, natively and in Docker for Linux arm64; its x64 columns await the XPS
+  M6 on 2026-11-05, natively and in Docker for Linux arm64; its x64 columns await the XPS
   run), which are labelled so. PHP's predate the extension (they measured 1.0's
   FFI package) and are marked so until `composer bench` runs on that box. When the dev machine
   changes, re-measure every harness there before relabelling a table; never mix machines, and

@@ -78,7 +78,9 @@ func TestAccessPastTheEndPanics(t *testing.T) {
 	}
 }
 
-// An address must not wrap to a small one: each of these is a valid offset modulo 2^32.
+// An address near 2^32 must not wrap to a small one: each of these is a valid offset modulo 2^32.
+// Generated code forms an address as a 32-bit pointer plus a small offset, so it never comes near
+// 2^64, where the helpers' own check would wrap.
 func TestAddressNearFourGiBPanics(t *testing.T) {
 	cases := []struct {
 		name  string

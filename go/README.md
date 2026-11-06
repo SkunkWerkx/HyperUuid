@@ -610,7 +610,7 @@ ten, gives `NewV7BatchAt(1000)` 2.92 µs against 2.83 µs and each fill 2.15 µs
 `NewV5String` gains 15% (88.6 ns against 105) and the other single calls are level. HyperUuid
 takes that loss so all three Hyper libraries translate their cores the same way. If your workload can batch,
 batch. Contention has its own table under [One primary and a pool](#one-primary-and-a-pool),
-with a 2x loss under contention on Linux, and the browser and WASI numbers are under
+with a 1.9x loss under contention on Linux, and the browser and WASI numbers are under
 [WebAssembly](#webassembly).
 
 Linux arm64, in Docker on the same Mac (`golang:1.27`, 3 runs, medians; the spike put this
