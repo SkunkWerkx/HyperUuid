@@ -1,0 +1,96 @@
+# darwin/arm64 Apple M6, the core translated with wasm2go -unsafe, 2026-11-05, go test -run '^$' -bench=. -benchmem -count 6 ./...
+goos: darwin
+goarch: arm64
+pkg: github.com/SkunkWerkx/HyperUuid/go
+cpu: Apple M6
+BenchmarkNewV4-12                         	30225969	        39.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	31752436	        37.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	32176936	        37.37 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	31926037	        37.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	31994631	        37.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4-12                         	32014370	        37.76 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	13738137	        87.62 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	13742798	        87.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	13573725	        87.71 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	13799011	        88.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	13545590	        88.13 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String-12                   	13834546	        87.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	32322543	        37.05 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	32444452	        37.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	31936516	        37.33 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	32269304	        37.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	32144614	        37.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At-12                       	32278165	        37.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   32092	     37212 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   32389	     37116 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   32284	     37096 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   32413	     37011 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   32313	     37141 ns/op	      10 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000-12             	   32120	     37372 ns/op	      10 B/op	       0 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  424671	      2892 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  418316	      2871 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  405008	      2866 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  403988	      2945 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  404206	      2923 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000-12              	  410827	      2927 ns/op	   16390 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	 6834846	       176.5 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	 6831950	       176.8 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	 6712734	       177.4 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	 6801489	       176.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	 6753303	       177.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom-12           	 6801324	       175.9 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	 5671371	       214.8 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	 5647608	       212.7 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	 5638597	       213.6 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	 5660515	       213.4 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	 5554981	       214.7 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7-12               	 5681035	       215.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkV7TimestampExtraction-12         	173477088	         6.924 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	172391851	         6.987 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	173968364	         6.858 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	168643898	         7.072 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	175030394	         6.936 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction-12         	170559842	         7.040 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	874253769	         1.377 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	873818751	         1.377 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	874228828	         1.377 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	873378602	         1.381 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	868948924	         1.383 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction-12    	867912987	         1.381 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  560971	      2139 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  564314	      2142 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  560992	      2139 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  558001	      2177 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  561463	      2140 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7At1000-12                  	  559885	      2192 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  562926	      2150 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  562334	      2135 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  558553	      2133 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  564547	      2172 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  558939	      2136 ns/op	       5 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000-12             	  560794	      2137 ns/op	       5 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	61567689	        27.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	40723027	        29.68 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	100000000	        16.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	100000000	        30.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	95120763	        18.48 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4-12                 	100000000	        21.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8270322	       145.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8458017	       143.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8344939	       143.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8355452	       144.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8372971	       143.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7-12                 	 8263046	       143.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10962820	       108.9 ns/op	         0 gcs	   4046848 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10967580	       110.1 ns/op	         0 gcs	   4112384 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	11063811	       109.4 ns/op	         0 gcs	   4079616 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10964490	       109.6 ns/op	         0 gcs	   4251648 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	10963375	       109.0 ns/op	         0 gcs	   4096000 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed-12                 	11054214	       108.9 ns/op	         0 gcs	   4268032 heap-inuse-B	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/SkunkWerkx/HyperUuid/go	108.421s
+PASS
+ok  	github.com/SkunkWerkx/HyperUuid/go/internal/core	0.158s
+PASS
+ok  	github.com/SkunkWerkx/HyperUuid/go/internal/exhaustiontest	0.107s
+?   	github.com/SkunkWerkx/HyperUuid/go/internal/tinygosmoke	[no test files]

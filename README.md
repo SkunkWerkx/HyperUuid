@@ -129,7 +129,7 @@ By language — real numbers, no adjustment for story, the receipts in [docs/ben
 | [PHP](php/) | **1.2-1.4x faster** | a naive inline v4 (PHP core has no UUID call at all) |
 | [R](r/) | **12.7-29x faster** for v4; **1.2-1.3x slower** for time-based ids, a v7 against a v1 | the `uuid` package's `UUIDgenerate()` |
 | [TypeScript](typescript/) | **1.2-6.4x slower** per call, except v7 on Node: 2.3x faster | `crypto.randomUUID()`, the `uuid` package's `v7()` |
-| [Go](go/) | **4.5-5.4x faster**; the batch 1.5x slower than the cgo binding it replaced | `google/uuid`'s `NewRandom()` and `NewV7()` |
+| [Go](go/) | **4.7-5.8x faster**; the batch 1.6x slower than the cgo binding it replaced | `google/uuid`'s `NewRandom()` and `NewV7()` |
 
 The Go, R and TypeScript rows were measured on an Apple M6 (Mac18,5) under macOS, every other row on linux-x64 on an Intel Core i9-11900H, so the two groups are not comparable with each other. The PHP row predates the extension: it measured 1.0's FFI package. The linux-x64 rows' v7 figures were measured before the per-millisecond re-seed (core change, 2026-10-27); the Apple M6 rows after it, and after the switch to `CCRandomGenerateBytes` on Apple platforms (2026-10-28).
 
@@ -143,11 +143,11 @@ Measured on the Apple M6 (Go 1.27.3), the shipped binding against `google/uuid`,
 
 | Call | hyperuuid | `google/uuid` | |
 | --- | ---: | ---: | --- |
-| v4 | 37.0 ns, 0 allocs | `NewRandom()` 167 ns, 1 alloc | **4.5x faster** |
-| v7 | 37.3 ns, 0 allocs (`NewV7At`, explicit timestamp) | `NewV7()` 202 ns, 1 alloc | **5.4x faster** |
-| v7 timestamp read-back | `V7Timestamp` 6.6 ns | `id.Time()` 1.4 ns | **4.8x slower**: prefer `id.Time()` in Go |
+| v4 | 37.5 ns, 0 allocs | `NewRandom()` 177 ns, 1 alloc | **4.7x faster** |
+| v7 | 37.2 ns, 0 allocs (`NewV7At`, explicit timestamp) | `NewV7()` 214 ns, 1 alloc | **5.8x faster** |
+| v7 timestamp read-back | `V7Timestamp` 7.0 ns | `id.Time()` 1.4 ns | **5.0x slower**: prefer `id.Time()` in Go |
 
-The losses, beside them. **The batch**: 1000 v7s in one call cost 2.84 µs here, where the cgo binding this replaced did it in 1.84 µs on the same machine, because the translated core walks each item in bounds-checked Go rather than native Rust; it is still 13x faster than 1000 single calls. **Linux arm64** (Docker on the same Mac): v4 level with `google/uuid` and v7 1.8x faster, both 1.3-1.4x behind the cgo binding's own single calls there; twelve goroutines minting v4s run at 10.2 ns a call aggregate, where the cgo binding's archive ran at 4.9 ns there. **The browser and WASI**: 537 ns a v4 under stock Go's `js/wasm` in Node and 154 ns under TinyGo on wasip1, the operating system's source each time since no wasm host has hardware AES to establish, and `google/uuid` is level or ahead per single call on both (2.6x ahead on v4 under TinyGo); the batch is where the binding wins there. Every number, the memory the guest holds, the per-architecture randomness rule and what the sandbox buys: [go/README.md](go/).
+The losses, beside them. **The batch**: 1000 v7s in one call cost 2.91 µs here, where the cgo binding this replaced did it in 1.84 µs on the same machine, because the translated core walks each item in bounds-checked Go rather than native Rust; it is still 13x faster than 1000 single calls. **Linux arm64** (Docker on the same Mac): v4 level with `google/uuid` and v7 1.8x faster, both 1.3-1.4x behind the cgo binding's own single calls there; twelve goroutines minting v4s run at 9.3 ns a call aggregate, where the cgo binding's archive ran at 4.9 ns there. **The browser and WASI**: 333 ns a v4 under stock Go's `js/wasm` in Node and 154 ns under TinyGo on wasip1, the operating system's source each time since no wasm host has hardware AES to establish, and `google/uuid` is ahead on a v4 on both (2.6x under TinyGo) and level or behind on a v7; the batch is where the binding wins there. Every number, the memory the guest holds, the per-architecture randomness rule and what the sandbox buys: [go/README.md](go/).
 
 ## Platform support
 

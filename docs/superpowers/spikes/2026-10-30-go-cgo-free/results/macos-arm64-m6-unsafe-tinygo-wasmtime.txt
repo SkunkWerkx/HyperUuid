@@ -1,0 +1,44 @@
+# TinyGo 0.44.0 -target=wasip1 under wasmtime 50.0.1, the core translated with wasm2go -unsafe, 2026-11-05, -count 3
+BenchmarkNewV4                     	 7755093	       153.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4                     	 7858030	       154.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV4                     	 7798030	       154.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String               	 4825458	       248.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String               	 4812030	       249.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV5String               	 4817496	       248.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At                   	 7607551	       157.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At                   	 7586101	       158.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7At                   	 7660046	       158.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000         	    7730	    156571 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000         	    7676	    156316 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7IndividualX1000         	    7738	    154832 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNewV7BatchAt1000          	   70185	     17101 ns/op	   16000 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000          	   70186	     17100 ns/op	   16000 B/op	       1 allocs/op
+BenchmarkNewV7BatchAt1000          	   70159	     17106 ns/op	   16000 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom       	20060180	        60.01 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom       	20298729	        59.92 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewRandom       	20235746	        59.41 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7           	 7696796	       156.6 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7           	 7696747	       156.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkGoogleUuidNewV7           	 7616386	       156.2 ns/op	      16 B/op	       1 allocs/op
+BenchmarkV7TimestampExtraction     	12507946	        95.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction     	12535778	        96.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkV7TimestampExtraction     	12529234	        95.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction	486997174	         2.463 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction	488870058	         2.523 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGoogleUuidV7TimeExtraction	478894710	         2.460 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000              	   88646	     13589 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000              	   89054	     13591 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7At1000              	   89425	     13470 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000         	   89443	     13491 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000         	   83235	     13840 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFillV7BytesAt1000         	   88932	     13507 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4             	1000000000	         0.0000080 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV4             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7             	1000000000	         0.0000080 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelNewV7             	1000000000	         0.0000070 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed             	1000000000	         0.0000210 ns/op	         0 gcs	    438672 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed             	1000000000	         0.0000210 ns/op	         0 gcs	    438768 heap-inuse-B	       0 B/op	       0 allocs/op
+BenchmarkParallelMixed             	1000000000	         0.0000220 ns/op	         0 gcs	    438768 heap-inuse-B	       0 B/op	       0 allocs/op
+PASS
