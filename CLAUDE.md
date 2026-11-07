@@ -341,10 +341,14 @@ it, and `local-core.sh` restages the host's archive.
 
 ## Bun and npm
 
-Bun is the package manager and script runner for every JavaScript tree here, locked by `bun.lock`.
-npm is confined to the published packages: the Forge's `npm pkg set` and `npm pack`, `npm publish`,
-and the consumer scenarios that install as an npm user does (`bun-install` is the Bun user's; Bun
-has no s390x build, so the `s390x` scenario could not move in any case). Don't add another npm call.
+Bun is the package manager, script runner and packer for every JavaScript tree here, locked by
+`bun.lock`, with `typescript/bunfig.toml` turning off its auto-install so nothing runs that the lock
+never saw. CI's native addon builds run the napi CLI on Bun's runtime (`bun run --bun build`), and Bun
+packs the release's tarballs (the Forge's `npm_package.py`) with no Node set up. npm is confined to `npm publish`, since Bun has no OIDC trusted
+publishing or provenance (oven-sh/bun#15601, oven-sh/bun#22423), and the consumer scenarios that
+install as an npm user does (`bun-install` is the Bun user's; Bun has no s390x build, so the `s390x`
+scenario could not move in any case). Don't add another npm call. Node also runs the suites, since it
+is the runtime the packages ship for.
 Bun's own runtime still can't load the WASI module, so `test:bun` under `NAPI_RS_FORCE_WASI=error`
 stays recorded, never gating. `bun run test` is the package script; `bun test` is Bun's runner.
 

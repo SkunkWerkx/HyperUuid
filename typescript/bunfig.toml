@@ -1,0 +1,3 @@
+[install]
+# Never fetch a missing package at runtime: a build resolves from the bun.lock install or fails.
+auto = "disable"

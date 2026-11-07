@@ -31,9 +31,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the whole suite runs on s390x under QEMU to prove the big-endian path. *(Go)*
 - **The JavaScript toolchain is Bun.** Every dependency tree here (`typescript/`, its browser
   smoke and consumer-test harness, `ruby/wasm-smoke/`) is locked by `bun.lock` and installed with
-  `bun install --frozen-lockfile`, and CI, the local loop and Dependabot follow. npm keeps what
-  publishing needs: `npm pack` and `npm publish`, and the consumer scenarios that install as an
-  npm user does. Node still runs the suite, and the packages install from npm with either tool.
+  `bun install --frozen-lockfile`, and CI, the local loop and Dependabot follow. Bun packs the
+  npm tarballs too, with no Node set up, and CI's native addon builds run the napi CLI on it. npm keeps `npm publish`, the path to OIDC trusted
+  publishing and provenance that Bun lacks, and the consumer scenarios that install as an npm
+  user does. Node still runs the suite, and the packages install from npm with either tool.
 - **TypeScript — the Node floor is 22.14 (`^22.14.0 || >=23.6.0`), up from 22.13.** The
   addon now builds against Node-API 10, the first releases with it, and so takes Node-API 8's
   type tags: a method called on another class's instance is refused by Node itself before the
