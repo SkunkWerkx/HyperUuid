@@ -4,7 +4,7 @@ version: 2
 # tooling alike, majors included. Each entry skips releases younger than a week, so a bad or
 # hijacked release has time to be pulled. Every third-party action is pinned to a commit with its
 # version in a trailing comment; Dependabot moves both together. C#'s package references float
-# (`*`, and `11.*-*` for the ASP.NET Core ones), so its only pin is the SDK in global.json, which
+# (`*`, and `10.*` and `11.*` for the ASP.NET Core ones), so its only pin is the SDK in global.json, which
 # every workflow installs from.
 multi-ecosystem-groups:
   dependencies:
