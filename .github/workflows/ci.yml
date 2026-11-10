@@ -62,9 +62,11 @@ on:
           - board
           - release
   # The whole release-mode board once a week, so arm64, musl, iOS, the wheels and the second
-  # Ruby ABI are exercised between releases instead of first on release day.
+  # Ruby ABI are exercised between releases instead of first on release day. Each Hyper* repo
+  # takes its own day (HyperCast Monday, HyperTabular Tuesday, HyperUuid Wednesday), off the
+  # hour: a board asks for about 100 runners, and three at once starve each other of them.
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "17 6 * * 3"  # Wednesday
 
 # Least privilege for the whole board: every job below reads the repository and nothing more.
 # The HyperForge jobs that attest, the pack jobs and release-prepare need id-token and
