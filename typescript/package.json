@@ -56,7 +56,7 @@
     "bench:bun": "bun bench/bench.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.5",
+    "@biomejs/biome": "2.6.6",
     "@emnapi/core": "2.0.0-beta.3",
     "@emnapi/runtime": "2.0.0-beta.3",
     "@napi-rs/cli": "3.10.12",
