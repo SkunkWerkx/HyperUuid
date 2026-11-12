@@ -516,15 +516,15 @@ jobs:
     # Starts as soon as the static archives exist and holds nothing back: only forge and
     # pr-board wait on it. Release board only.
     if: github.event_name != 'pull_request'
-    # The .NET 11 RC2 ios and maccatalyst workloads (27.0.x) are built against Xcode 27.0 and
-    # refuse any other version; macos-latest (macOS 26) tops out at Xcode 26.6. The xcode-27
-    # image tracks the Xcode 27 major, not a point release: it ships 27.1 as its default and
-    # does not carry 27.0, so the three dotnet builds below pass
-    # ValidateXcodeVersion=false (dotnet/macios, docs/building-apps/build-properties.md) and
-    # the smoke tests themselves prove the 27.0 to 27.1 skip is harmless. Drop the property
-    # once a .NET 11 workload accepts the image's Xcode.
+    # The .NET 11 ios and maccatalyst workloads pin one Xcode: SDK 11.0.100's (27.2.11039)
+    # declares [27.2,), and only that Xcode's macOS SDK maps Mac Catalyst 27.2 to a macOS
+    # version, so the whole job runs on the xcode-27 image's Xcode 27.2 (its default is 27.1;
+    # macos-latest, macOS 26, tops out at Xcode 26.6). On an older Xcode the workload refuses
+    # the iOS build too (MT180, the iOS 27.2 SDK's headers), so no property stands in for it.
+    # Move DEVELOPER_DIR with the workload's Xcode.
     runs-on: xcode-27
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       APP_ID: io.github.skunkwerkx.hyperuuid.applesmoketest
       SMOKE_PROJECT: csharp/HyperUuid.AppleSmokeTest/HyperUuid.AppleSmokeTest.csproj
       SMOKE_BIN: csharp/HyperUuid.AppleSmokeTest/bin/Release
@@ -624,7 +624,91 @@ jobs:
           VERSION: ${{ steps.unpack.outputs.version }}
         run: c/smoke/apple-mobile.sh unpacked "$VERSION"
 
+      # The SDK global.json names, as the Forge's C# legs take it.
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        if: ${{ !cancelled() }}
+        with:
+          global-json-file: global.json
+
+      - name: Install the .NET iOS and Mac Catalyst workloads
+        if: ${{ !cancelled() }}
+        run: dotnet workload install ios maccatalyst
+
+      - name: C# — a Mac Catalyst app, built and run
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-maccatalyst -r maccatalyst-arm64
+          app=$(find "$SMOKE_BIN/net11.0-maccatalyst/maccatalyst-arm64" -maxdepth 1 -name '*.app')
+          log="$TMPDIR/hyperuuid-smoke.log"
+          rm -f "$log"
+          "$app/Contents/MacOS/HyperUuid.AppleSmokeTest"
+          cat "$log"
+          grep -q "native: available=True version=$want" "$log"
+          grep -q "ALL NATIVE AOT CHECKS PASSED" "$log"
+
+      - name: C# — an iOS app, installed and launched in the simulator
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          udid="${{ steps.sim.outputs.udid }}"
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r iossimulator-arm64
+          app=$(find "$SMOKE_BIN/net11.0-ios/iossimulator-arm64" -maxdepth 1 -name '*.app')
+          xcrun simctl install "$udid" "$app"
+          xcrun simctl launch "$udid" "$APP_ID"
+          log="$(xcrun simctl get_app_container "$udid" "$APP_ID" data)/tmp/hyperuuid-smoke.log"
+          # The app exits when Program.cs returns; its last line, pass or fail, ends the wait.
+          for _ in $(seq 1 60); do
+            grep -q -E "ALL NATIVE AOT CHECKS PASSED|^FAIL" "$log" 2>/dev/null && break
+            sleep 2
+          done
+          cat "$log"
+          grep -q "native: available=True version=$want" "$log"
+          grep -q "ALL NATIVE AOT CHECKS PASSED" "$log"
+
+      - name: C# — an iOS device app links the core in
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r ios-arm64 -p:EnableCodeSigning=false
+          app=$(find "$SMOKE_BIN/net11.0-ios/ios-arm64" -maxdepth 1 -name '*.app')
+          nm -g "$app/HyperUuid.AppleSmokeTest" > device-symbols.txt
+          for symbol in hyperuuid_version uuid_new_v4 uuid_new_v7 uuid_new_v7_batch; do
+            grep -q " T _$symbol\$" device-symbols.txt \
+              || { echo "::error::the iOS device app does not define $symbol; the core was not linked in"; exit 1; }
+          done
+          echo "the iOS device app defines the core's exports"
+
+      # The net10.0 apps the targets file refuses; the three net11.0 builds above are the
+      # control, since they import the same file and build. The probe builds an Exe because
+      # the Apple SDK's Xcode check (_ValidateXcodeVersion) runs only for one: a class library
+      # builds on any Xcode, so without OutputType=Exe the probe would pass with the gate gone,
+      # while with it the gate must win over the Xcode error (proven both ways locally on
+      # Xcode 27.1, where a gate-less net10.0-ios Exe fails "requires Xcode 26.0").
+      - name: C# — net10.0-ios and net10.0-maccatalyst stop with HYPERUUID003
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          gate=csharp/HyperUuid.PlatformGateTest/HyperUuid.PlatformGateTest.csproj
+          gate_dir=csharp/HyperUuid.PlatformGateTest
+          for probe in "net10.0-ios|iOS" "net10.0-maccatalyst|Mac Catalyst"; do
+            tfm="${probe%%|*}"
+            platform="${probe#*|}"
+            rm -rf "${gate_dir:?}/bin" "${gate_dir:?}/obj"
+            if dotnet build "$gate" -p:GateFramework="$tfm" -p:OutputType=Exe -tl:off > "gate-$tfm.log" 2>&1; then
+              echo "::error::$tfm built; the gate did not stop it"; cat "gate-$tfm.log"; exit 1
+            fi
+            grep -qF "error HYPERUUID003" "gate-$tfm.log" \
+              || { echo "::error::$tfm failed, but not with HYPERUUID003"; cat "gate-$tfm.log"; exit 1; }
+            grep -qF "$platform needs .NET 11 or later: target ${tfm/net10.0/net11.0}." "gate-$tfm.log" \
+              || { echo "::error::$tfm: the HYPERUUID003 text does not name $platform"; cat "gate-$tfm.log"; exit 1; }
+            echo "$tfm stops with HYPERUUID003"
+          done
+
       - name: Swift — macOS, with the XCFramework declared
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           described=$(cd swift && swift package describe)
@@ -690,89 +774,6 @@ jobs:
           [ -s "$RUNNER_TEMP/go-ios/hyperuuid-device.test" ] \
             || { echo "::error::the iOS device build of the Go suite produced no binary"; exit 1; }
           echo "the Go suite builds for an iOS device"
-
-      # The SDK global.json names, as the Forge's C# legs take it.
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        if: ${{ !cancelled() }}
-        with:
-          global-json-file: global.json
-
-      - name: Install the .NET iOS and Mac Catalyst workloads
-        if: ${{ !cancelled() }}
-        run: dotnet workload install ios maccatalyst
-
-      - name: C# — a Mac Catalyst app, built and run
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-maccatalyst -r maccatalyst-arm64 -p:ValidateXcodeVersion=false
-          app=$(find "$SMOKE_BIN/net11.0-maccatalyst/maccatalyst-arm64" -maxdepth 1 -name '*.app')
-          log="$TMPDIR/hyperuuid-smoke.log"
-          rm -f "$log"
-          "$app/Contents/MacOS/HyperUuid.AppleSmokeTest"
-          cat "$log"
-          grep -q "native: available=True version=$want" "$log"
-          grep -q "ALL NATIVE AOT CHECKS PASSED" "$log"
-
-      - name: C# — an iOS app, installed and launched in the simulator
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          want=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
-          udid="${{ steps.sim.outputs.udid }}"
-          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r iossimulator-arm64 -p:ValidateXcodeVersion=false
-          app=$(find "$SMOKE_BIN/net11.0-ios/iossimulator-arm64" -maxdepth 1 -name '*.app')
-          xcrun simctl install "$udid" "$app"
-          xcrun simctl launch "$udid" "$APP_ID"
-          log="$(xcrun simctl get_app_container "$udid" "$APP_ID" data)/tmp/hyperuuid-smoke.log"
-          # The app exits when Program.cs returns; its last line, pass or fail, ends the wait.
-          for _ in $(seq 1 60); do
-            grep -q -E "ALL NATIVE AOT CHECKS PASSED|^FAIL" "$log" 2>/dev/null && break
-            sleep 2
-          done
-          cat "$log"
-          grep -q "native: available=True version=$want" "$log"
-          grep -q "ALL NATIVE AOT CHECKS PASSED" "$log"
-
-      - name: C# — an iOS device app links the core in
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          dotnet build "$SMOKE_PROJECT" -c Release -f net11.0-ios -r ios-arm64 -p:EnableCodeSigning=false -p:ValidateXcodeVersion=false
-          app=$(find "$SMOKE_BIN/net11.0-ios/ios-arm64" -maxdepth 1 -name '*.app')
-          nm -g "$app/HyperUuid.AppleSmokeTest" > device-symbols.txt
-          for symbol in hyperuuid_version uuid_new_v4 uuid_new_v7 uuid_new_v7_batch; do
-            grep -q " T _$symbol\$" device-symbols.txt \
-              || { echo "::error::the iOS device app does not define $symbol; the core was not linked in"; exit 1; }
-          done
-          echo "the iOS device app defines the core's exports"
-
-      # The net10.0 apps the targets file refuses; the three net11.0 builds above are the
-      # control, since they import the same file and build. The probe builds an Exe because
-      # the Apple SDK's Xcode check (_ValidateXcodeVersion) runs only for one: a class library
-      # builds on any Xcode, so without OutputType=Exe the probe would pass with the gate gone,
-      # while with it the gate must win over the Xcode error (proven both ways locally on
-      # Xcode 27.1, where a gate-less net10.0-ios Exe fails "requires Xcode 26.0").
-      - name: C# — net10.0-ios and net10.0-maccatalyst stop with HYPERUUID003
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          gate=csharp/HyperUuid.PlatformGateTest/HyperUuid.PlatformGateTest.csproj
-          gate_dir=csharp/HyperUuid.PlatformGateTest
-          for probe in "net10.0-ios|iOS" "net10.0-maccatalyst|Mac Catalyst"; do
-            tfm="${probe%%|*}"
-            platform="${probe#*|}"
-            rm -rf "${gate_dir:?}/bin" "${gate_dir:?}/obj"
-            if dotnet build "$gate" -p:GateFramework="$tfm" -p:OutputType=Exe -tl:off > "gate-$tfm.log" 2>&1; then
-              echo "::error::$tfm built; the gate did not stop it"; cat "gate-$tfm.log"; exit 1
-            fi
-            grep -qF "error HYPERUUID003" "gate-$tfm.log" \
-              || { echo "::error::$tfm failed, but not with HYPERUUID003"; cat "gate-$tfm.log"; exit 1; }
-            grep -qF "$platform needs .NET 11 or later: target ${tfm/net10.0/net11.0}." "gate-$tfm.log" \
-              || { echo "::error::$tfm: the HYPERUUID003 text does not name $platform"; cat "gate-$tfm.log"; exit 1; }
-            echo "$tfm stops with HYPERUUID003"
-          done
 
   # Android, in an emulator, for the three bindings that reach it: C#, Go and Swift.
   #

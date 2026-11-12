@@ -17,6 +17,10 @@
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- In the csproj rather than on CI's command line, so a local build takes CI's path. The
+         UIKit scene lifecycle MT7199 asks for (the check SDK 11.0.100's workloads added) is one
+         this app never enters: Program.cs returns from Main without calling UIApplication.Main. -->
+    <ValidateSceneManifest>false</ValidateSceneManifest>
   </PropertyGroup>
 
   <ItemGroup>
