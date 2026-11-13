@@ -117,10 +117,14 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       # From the root Package.swift, the one consumers resolve; its HyperUuid target is the
-      # same sources as swift/Package.swift's, now linking the core built above.
+      # same sources as swift/Package.swift's, now linking the core built above. The include path
+      # is spelled out because under CodeQL's tracer on this image SwiftPM took no variant from
+      # the one-triple bundle local-core.sh builds ("no such module 'HyperCastCore'" in HyperCast's
+      # 1.1.0 preparation, 2026-11-13; the all-triple bundle of a CI run it did take). Compiling
+      # the target links nothing, so the path is enough.
       - name: Build the Swift library
         if: matrix.build-mode == 'manual'
-        run: swift build --target HyperUuid
+        run: swift build --target HyperUuid -Xswiftc -I"$PWD/swift/HyperUuidCore.artifactbundle/include"
 
       # Builds the autobuild languages and uploads every language's SARIF, once each, under the
       # same `/language:<lang>` category default setup used.
