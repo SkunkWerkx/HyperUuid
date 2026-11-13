@@ -49,9 +49,16 @@ remove "./gradlew test (after cargo cdylib and cargo build --release --locked --
 # Python: the extension maturin develop places beside the package.
 remove "maturin develop --release in python/" \
   python/src/hyperuuid/_native*.so python/src/hyperuuid/_native*.pyd
-# Ruby: the bundles rake native:dev stages per Ruby minor.
+# Ruby: the bundles rake native:dev stages per Ruby minor, and the flat pair beside them.
 remove "bundle exec rake native:dev in ruby/" \
-  ruby/lib/hyperuuid/[0-9]*/
+  ruby/lib/hyperuuid/[0-9]*/ ruby/lib/hyperuuid_native.so ruby/lib/hyperuuid_native.bundle
+# Ruby's Fiddle backend: a cdylib staged per platform, which Fiddle loads ahead of
+# rust/target/release, so a stale one runs an old core under a current suite.
+remove "nothing to stage: Fiddle then loads rust/target/release (cargo cdylib)" \
+  ruby/lib/hyperuuid/native/*/
+# Ruby's wasm32-wasip1 archives, staged for rake wasm:gem.
+remove "rake wasm:gem stages them from CI's ruby-wasm artifacts" \
+  ruby/ext/hyperuuid_native/*/
 # R: the vendor tarball and lockfile, the staged corpus, and the compiled objects.
 remove "r/tools/vendor.sh" \
   r/src/rust/vendor.tar.xz r/src/rust/Cargo.lock r/tests/testthat/corpus r/src/*.o r/src/*.so r/src/*.dll

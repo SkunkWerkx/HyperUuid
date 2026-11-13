@@ -1,11 +1,21 @@
 # The smoke consumer, through find_package: run.sh points CMAKE_PREFIX_PATH at an unpacked
 # release archive and builds it once against each library the archive has.
+#
+# Every program with warnings as errors (-Wall -Wextra -Wpedantic -Wshadow -Werror; /W4 /WX on
+# MSVC), which reach the headers too: an imported target's includes are system headers, whose
+# warnings a compiler keeps to itself, so NO_SYSTEM_FROM_IMPORTED takes that away.
 cmake_minimum_required(VERSION 3.21)
 project(hyperuuid_smoke C)
 
 option(HYPERUUID_SMOKE_STATIC "Link hyperuuid::hyperuuid_static instead of hyperuuid::hyperuuid" OFF)
 
 find_package(hyperuuid REQUIRED CONFIG)
+
+if(MSVC)
+  set(_warnings /W4 /WX)
+else()
+  set(_warnings -Wall -Wextra -Wpedantic -Wshadow -Werror)
+endif()
 
 # The C++ header, built wherever there is a C++ compiler whose library has C++23's
 # <expected>; HYPERUUID_SMOKE_CXX=ON makes its absence an error.
@@ -32,6 +42,8 @@ endif()
 
 add_executable(smoke main.c)
 foreach(program IN LISTS _smoke_programs)
+  target_compile_options(${program} PRIVATE ${_warnings})
+  set_target_properties(${program} PROPERTIES NO_SYSTEM_FROM_IMPORTED ON)
   if(HYPERUUID_SMOKE_STATIC)
     target_link_libraries(${program} PRIVATE hyperuuid::hyperuuid_static)
   else()
