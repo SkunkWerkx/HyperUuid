@@ -4,6 +4,7 @@ import org.gradle.external.javadoc.StandardJavadocDocletOptions
 plugins {
     `java-library`
     `maven-publish`
+    eclipse
     id("com.vanniktech.maven.publish") version "0.37.0"
     id("com.diffplug.spotless") version "8.11.0"
 }
@@ -166,6 +167,16 @@ sourceSets.main {
 val java25 = sourceSets.create("java25") {
     java.setSrcDirs(listOf("src/main/java25"))
     compileClasspath += sourceSets.main.get().output
+}
+
+// The editor only: VS Code's Java support (Buildship) folds every source set into one project, where the
+// base tree's JNI NativeCore and java25's FFM one are two definitions of one class. It checks the FFM one,
+// which is what runs on JDK 25. The Gradle build itself never reads the Eclipse model.
+eclipse.classpath.file.whenMerged {
+    (this as org.gradle.plugins.ide.eclipse.model.Classpath).entries
+        .filterIsInstance<org.gradle.plugins.ide.eclipse.model.SourceFolder>()
+        .filter { it.path == "src/main/java" }
+        .forEach { it.excludes = it.excludes + "io/github/skunkwerkx/hyperuuid/NativeCore.java" }
 }
 
 tasks.processResources {

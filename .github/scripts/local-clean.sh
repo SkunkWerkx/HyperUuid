@@ -77,6 +77,7 @@ echo "local-clean: the checkout holds no staged binding artifact"
 purge="${FORGE:-}/.github/scripts/dev_purge.sh"
 [ -n "${FORGE:-}" ] || purge="$repo/../.github/.github/scripts/dev_purge.sh"
 [ -f "$purge" ] || purge="$repo/../HyperForge/.github/scripts/dev_purge.sh"
+[ -f "$purge" ] || purge="$repo/../../.github/scripts/dev_purge.sh"   # cloned under HyperForge/workspace/
 if [ -f "$purge" ]; then
   bash "$purge" --yes --only scratch,docker || echo "local-clean: dev_purge.sh failed; carrying on" >&2
 else

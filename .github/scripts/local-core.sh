@@ -24,7 +24,8 @@
 #
 # usage: .github/scripts/local-core.sh    (FORGE=<path> if the SkunkWerkx/.github checkout
 #                                          is not ../.github or ../HyperForge beside this
-#                                          repository)
+#                                          repository, or ../.. when this one is cloned
+#                                          under HyperForge/workspace/)
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,6 +34,8 @@ if [ -n "${FORGE:-}" ]; then
   forge="$FORGE/$build_static_libs"
 elif [ -f "$repo/../.github/$build_static_libs" ]; then
   forge="$repo/../.github/$build_static_libs"
+elif [ -f "$repo/../../$build_static_libs" ]; then
+  forge="$repo/../../$build_static_libs"   # cloned under HyperForge/workspace/
 else
   forge="$repo/../HyperForge/$build_static_libs"
 fi
